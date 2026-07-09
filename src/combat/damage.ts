@@ -1,4 +1,5 @@
 import { Vector3 } from "three";
+import { playExplosion } from "../audio/sound";
 import { gameEvents } from "../core/events";
 import { flashLight, spawnBurst } from "../fx/Particles";
 import { getPlayerBody, playerPosition } from "../game/player-state";
@@ -47,6 +48,7 @@ export function explode(opts: ExplosionOptions): void {
     size: 0.11,
   });
   flashLight([center.x, center.y, center.z], color, light);
+  playExplosion(radius);
 
   forEachHittable((h) => {
     const hurtEnemies = team === "player" || team === "neutral";

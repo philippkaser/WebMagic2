@@ -82,14 +82,21 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
   const treasureRoom = byDistance[1] ?? exitRoom;
 
   const spawn = tileToWorld(spawnTile, size, 1.1);
-  const exit = tileToWorld(center(exitRoom), size, 0);
+  const isBossFloor = floor % 10 === 0;
+  const exitCenter = center(exitRoom);
+  // On boss floors the boss holds the room center and the portal retreats to
+  // the room's edge.
+  const exitTile: [number, number] = isBossFloor
+    ? [exitCenter[0], Math.max(exitRoom.y + 1, exitCenter[1] - Math.floor(exitRoom.h / 2) + 1)]
+    : exitCenter;
+  const exit = tileToWorld(exitTile, size, 0);
+  const boss: Vec3 | null = isBossFloor ? tileToWorld(exitCenter, size, 1.8) : null;
   const treasure = tileToWorld(center(treasureRoom), size, 0);
   const isCheckpoint = floor % DUNGEON.checkpointInterval === 0;
   let leave: Vec3 | null = null;
   if (isCheckpoint) {
-    const c = center(exitRoom);
-    const lx = Math.min(c[0] + 2, exitRoom.x + exitRoom.w - 2);
-    leave = tileToWorld([lx, c[1]], size, 0);
+    const lx = Math.min(exitTile[0] + 2, exitRoom.x + exitRoom.w - 2);
+    leave = tileToWorld([lx, exitTile[1]], size, 0);
   }
 
   // ── Torches along room walls ───────────────────────────────────────────────
@@ -123,6 +130,8 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
       props.push({ kind: roll < 0.4 ? "pot" : roll < 0.75 ? "crate" : "barrel", pos });
     }
     if (isSpawnRoom || enemyBudget <= 0) continue;
+    // Boss floors keep the arena clear of regular enemies.
+    if (isBossFloor && room === exitRoom) continue;
     const share = Math.min(enemyBudget, rng.int(1, 3) + Math.floor(floor / 6));
     for (let i = 0; i < share; i++) {
       const pos = randomInRoom(rng, room, size, 1.6);
@@ -143,6 +152,7 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     exit,
     leave,
     treasure,
+    boss,
     torches,
     props,
     enemies,

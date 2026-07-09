@@ -9,6 +9,7 @@ import {
 } from "@react-three/rapier";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, MeshStandardMaterial, PointLight } from "three";
+import { playPortal } from "../audio/sound";
 import { GROUPS } from "../core/config";
 import { Rng, hashSeed } from "../core/rng";
 import { explode } from "../combat/damage";
@@ -216,17 +217,21 @@ export function Torch({ position }: { position: Vec3 }) {
   );
 }
 
-/** Interactive portal ring. */
+/** Interactive portal ring. While `locked`, it burns dim and refuses use. */
 export function Portal({
   position,
   color,
   prompt,
   onUse,
+  locked = false,
+  lockedPrompt = "The portal is sealed…",
 }: {
   position: Vec3;
   color: string;
   prompt: string;
   onUse: () => void;
+  locked?: boolean;
+  lockedPrompt?: string;
 }) {
   const disc = useRef<MeshStandardMaterial>(null);
   const group = useRef<Group>(null);
@@ -234,11 +239,13 @@ export function Portal({
 
   useFrame(({ clock }, dt) => {
     const t = clock.elapsedTime;
-    if (disc.current) disc.current.emissiveIntensity = 1.9 + Math.sin(t * 2.2) * 0.5;
-    if (group.current) group.current.rotation.z = t * 0.35;
+    if (disc.current) {
+      disc.current.emissiveIntensity = locked ? 0.35 : 1.9 + Math.sin(t * 2.2) * 0.5;
+    }
+    if (group.current) group.current.rotation.z = t * (locked ? 0.06 : 0.35);
 
     sparkClock.current -= dt;
-    if (sparkClock.current <= 0) {
+    if (sparkClock.current <= 0 && !locked) {
       sparkClock.current = 0.09;
       const a = Math.random() * Math.PI * 2;
       spawnBurst({
@@ -256,7 +263,16 @@ export function Portal({
 
     const d2 =
       (playerPosition.x - position[0]) ** 2 + (playerPosition.z - position[2]) ** 2;
-    if (d2 < 7) offerInteraction(prompt, d2, onUse);
+    if (d2 < 7) {
+      if (locked) {
+        offerInteraction(lockedPrompt, d2, () => {});
+      } else {
+        offerInteraction(prompt, d2, () => {
+          playPortal();
+          onUse();
+        });
+      }
+    }
   });
 
   return (
@@ -285,7 +301,13 @@ export function Portal({
           />
         </mesh>
       </group>
-      <pointLight position={[0, 1.6, 0.8]} color={color} intensity={9} distance={12} decay={1.9} />
+      <pointLight
+        position={[0, 1.6, 0.8]}
+        color={color}
+        intensity={locked ? 1.5 : 9}
+        distance={12}
+        decay={1.9}
+      />
     </group>
   );
 }

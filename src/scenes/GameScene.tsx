@@ -8,6 +8,7 @@ import { GRAVITY } from "../core/config";
 import { FxSystems } from "../fx/Particles";
 import { InteractionSystem } from "../game/interactions";
 import { LootOrbs } from "../items/LootOrbs";
+import { RemoteWizards } from "../net/RemoteWizards";
 import { StaffView } from "../player/StaffView";
 import { Effects } from "../render/Effects";
 import { useGame } from "../state/gameStore";
@@ -45,6 +46,7 @@ export function GameScene() {
           <Projectiles />
           <LootOrbs />
         </Physics>
+        <RemoteWizards />
         <FxSystems />
         <StaffView />
         <CombatSystem />

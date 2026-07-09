@@ -40,6 +40,9 @@ export interface FloorLayout {
   leave: Vec3 | null;
   /** Guaranteed loot pedestal. */
   treasure: Vec3;
+  /** Boss arena spawn — present every 10th floor. The floor's portals stay
+   * sealed until the boss dies. */
+  boss: Vec3 | null;
   torches: Vec3[];
   props: PropSpawn[];
   enemies: EnemySpawn[];

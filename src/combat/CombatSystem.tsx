@@ -1,6 +1,7 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import { Vector3 } from "three";
+import { playCast } from "../audio/sound";
 import { gameEvents } from "../core/events";
 import { getItemDef } from "../items/catalog";
 import { input } from "../player/input";
@@ -44,6 +45,7 @@ export function CombatSystem() {
         .addScaledVector(UP, -0.16);
       ability.cast({ origin, dir, stats: getStats(), staff });
       cd.current = ability.cooldown;
+      playCast();
       gameEvents.emit("staffKick", 0.9);
       gameEvents.emit("shake", 0.05);
     };

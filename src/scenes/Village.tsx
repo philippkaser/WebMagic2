@@ -3,6 +3,7 @@ import { useThree } from "@react-three/fiber";
 import { CuboidCollider, interactionGroups, RigidBody } from "@react-three/rapier";
 import { useEffect, useMemo } from "react";
 import { Color, Fog } from "three";
+import { startAmbient, stopAmbient } from "../audio/sound";
 import { GROUPS } from "../core/config";
 import { resetRegistries } from "../game/registry";
 import { PlayerController } from "../player/PlayerController";
@@ -39,8 +40,10 @@ export function Village() {
   useEffect(() => {
     scene.fog = new Fog("#0a0d18", 18, 70);
     scene.background = new Color("#0a0d18");
+    startAmbient("village");
     return () => {
       scene.fog = null;
+      stopAmbient();
       resetRegistries();
     };
   }, [scene]);

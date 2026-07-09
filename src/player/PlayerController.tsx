@@ -8,10 +8,12 @@ import {
 } from "@react-three/rapier";
 import { useEffect, useMemo, useRef } from "react";
 import { Vector3 } from "three";
+import { playDash, playJump } from "../audio/sound";
 import { EYE_HEIGHT, GROUPS, PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
 import { spawnBurst } from "../fx/Particles";
 import { playerPosition, playerVelocity, setPlayerBody } from "../game/player-state";
+import { session } from "../net/session";
 import { getStats, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
 import { input } from "./input";
@@ -37,6 +39,7 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
   const landDip = useRef(0);
   const trauma = useRef(0);
   const hoverClock = useRef(0);
+  const netClock = useRef(0);
 
   const fwd = useMemo(() => new Vector3(), []);
   const right = useMemo(() => new Vector3(), []);
@@ -122,11 +125,13 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
         vy = PLAYER.jumpVelocity;
         jumpBuffer.current = 0;
         coyote.current = 0;
+        playJump();
         dust(t, 6);
       } else if (stats.jump === "double" && !doubleJumpUsed.current) {
         vy = PLAYER.jumpVelocity * 0.92;
         doubleJumpUsed.current = true;
         jumpBuffer.current = 0;
+        playJump();
         spawnBurst({
           position: [t.x, t.y - 0.8, t.z],
           count: 10,
@@ -179,6 +184,7 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
       nvz = dir.z * PLAYER.dashSpeed;
       vy = Math.max(vy, 1.6);
       dashCooldown.current = PLAYER.dashCooldown;
+      playDash();
       trauma.current = Math.min(1, trauma.current + 0.14);
       spawnBurst({
         position: [t.x, t.y - 0.4, t.z],
@@ -222,6 +228,18 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
 
     playerPosition.set(t.x, t.y, t.z);
     playerVelocity.set(nvx, vy, nvz);
+
+    // ~10 Hz transform broadcast to floor-mates (no-op offline).
+    netClock.current -= dt;
+    if (playing && netClock.current <= 0) {
+      netClock.current = 0.1;
+      camera.getWorldDirection(fwd);
+      session.sendState(
+        { x: t.x, y: t.y, z: t.z },
+        Math.atan2(fwd.x, fwd.z),
+        state.equipment.staff.defId,
+      );
+    }
 
     // Fell out of the world.
     if (t.y < -30) {

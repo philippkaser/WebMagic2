@@ -1,4 +1,4 @@
-import type { FloorAssignment, PeerState, ServerMsg } from "./protocol";
+import type { FloorAssignment, PeerState, ServerMsg, Vec3Like } from "./protocol";
 import { LocalTransport, type Transport } from "./transport";
 
 /** Client-side session: owns the transport, tracks peers on the current floor
@@ -35,6 +35,12 @@ export class GameSession {
   leaveDungeon(): void {
     this.peers.clear();
     this.transport.send({ t: "leaveDungeon" });
+  }
+
+  /** Broadcast our transform to floor-mates. Callers throttle (~10 Hz). */
+  sendState(position: Vec3Like, yaw: number, staffId: string): void {
+    if (!this.connected) return;
+    this.transport.send({ t: "state", position, yaw, staffId });
   }
 
   private handle(msg: ServerMsg): void {

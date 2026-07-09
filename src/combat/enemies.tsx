@@ -9,6 +9,7 @@ import {
 } from "@react-three/rapier";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, MeshStandardMaterial, Vector3 } from "three";
+import { playHit } from "../audio/sound";
 import { floorScale, GROUPS, PLAYER } from "../core/config";
 import { Rng } from "../core/rng";
 import { flashLight, spawnBurst } from "../fx/Particles";
@@ -80,6 +81,7 @@ export function Wisp({ position, floor }: { position: Vec3; floor: number }) {
         hp.current -= damage;
         flash.current = 1;
         knockTimer.current = 0.4;
+        playHit();
         body.current?.applyImpulse(impulse, true);
         const t = body.current?.translation();
         if (t) {
@@ -230,6 +232,7 @@ export function Sentry({ position, floor }: { position: Vec3; floor: number }) {
         if (deadRef.current) return;
         hp.current -= damage;
         flash.current = 1;
+        playHit();
         if (hp.current <= 0) kill();
       },
     });

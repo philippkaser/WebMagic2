@@ -31,6 +31,8 @@ export interface GameEvents extends Record<string, unknown> {
   shake: number;
   /** Staff viewmodel recoil, strength 0..1. */
   staffKick: number;
+  /** Boss health fraction 0..1 for the HUD bar, or null to hide it. */
+  bossHp: { name: string; frac: number } | null;
 }
 
 export const gameEvents = new Emitter<GameEvents>();

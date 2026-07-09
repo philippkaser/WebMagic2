@@ -17,3 +17,15 @@ export function setPlayerBody(body: PhysBody | null): void {
 export function getPlayerBody(): PhysBody | null {
   return playerBody;
 }
+
+// Dev-only helper for debugging and end-to-end scripts.
+if (typeof window !== "undefined" && import.meta.env?.DEV) {
+  (window as unknown as Record<string, unknown>).__teleport = (x: number, y: number, z: number) => {
+    const body = playerBody as unknown as {
+      setTranslation(v: { x: number; y: number; z: number }, wake: boolean): void;
+      setLinvel(v: { x: number; y: number; z: number }, wake: boolean): void;
+    } | null;
+    body?.setTranslation({ x, y, z }, true);
+    body?.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  };
+}

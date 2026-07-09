@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { playHurt, playPickup } from "../audio/sound";
 import { DUNGEON, PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
 import { computeStats, getItemDef } from "../items/catalog";
@@ -118,6 +119,7 @@ export const useGame = create<GameState>((set, get) => ({
     equipment[def.slot] = { defId, runLoot: inDungeon };
     const stats = computeStats(equipment);
     set({ equipment, health: Math.min(get().health + (def.passives?.maxHealth ?? 0), stats.maxHealth) });
+    playPickup();
     gameEvents.emit(
       "message",
       previous ? `${def.name} (replaced ${getItemDef(previous.defId).name})` : `${def.name} equipped`,
@@ -130,6 +132,7 @@ export const useGame = create<GameState>((set, get) => ({
     const stats = getStats();
     const dealt = amount * stats.damageTakenMult;
     const health = Math.max(0, state.health - dealt);
+    playHurt();
     gameEvents.emit("playerHurt", { amount: dealt });
     gameEvents.emit("shake", Math.min(dealt / 40, 1));
     if (health <= 0) {

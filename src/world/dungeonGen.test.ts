@@ -51,6 +51,18 @@ describe("generateFloor", () => {
     }
   });
 
+  test("boss floors (every 10th) spawn a boss in a reachable arena", () => {
+    for (const floor of [10, 20, 30]) {
+      const layout = generateFloor(4242, floor);
+      expect(layout.boss).not.toBeNull();
+      expect(isReachable(layout, layout.spawn, layout.boss!)).toBe(true);
+      expect(isReachable(layout, layout.spawn, layout.exit)).toBe(true);
+    }
+    expect(generateFloor(4242, 9).boss).toBeNull();
+    expect(generateFloor(4242, 11).boss).toBeNull();
+    expect(generateFloor(4242, 5).boss).toBeNull();
+  });
+
   test("enemies scale with depth", () => {
     const shallow = generateFloor(42, 1);
     const deep = generateFloor(42, 15);

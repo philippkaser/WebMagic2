@@ -52,6 +52,7 @@ function PlayHud() {
       {/* Crosshair */}
       <div style={styles.crosshair} />
       <HurtFlash />
+      <BossBar />
 
       {/* Top-left: location */}
       <div style={{ ...styles.panel, top: 14, left: 14 }}>
@@ -152,6 +153,29 @@ function MessageFeed() {
           {m.text}
         </div>
       ))}
+    </div>
+  );
+}
+
+function BossBar() {
+  const [boss, setBoss] = useState<{ name: string; frac: number } | null>(null);
+  useEffect(() => gameEvents.on("bossHp", setBoss), []);
+  if (!boss) return null;
+  return (
+    <div style={styles.bossBar}>
+      <div style={{ fontSize: 13, letterSpacing: 4, color: "#ff6a52", marginBottom: 4 }}>
+        {boss.name}
+      </div>
+      <div style={{ height: 12, background: "#170a0a", border: "1px solid #5a2a24" }}>
+        <div
+          style={{
+            height: "100%",
+            width: `${Math.max(0, boss.frac * 100)}%`,
+            background: "linear-gradient(#ff5136, #8a1d10)",
+            transition: "width 150ms linear",
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -305,6 +329,14 @@ const styles: Record<string, CSSProperties> = {
     position: "absolute",
     inset: 0,
     boxShadow: "inset 0 0 120px 40px rgba(180,20,20,0.55)",
+  },
+  bossBar: {
+    position: "absolute",
+    top: 20,
+    left: "50%",
+    transform: "translateX(-50%)",
+    width: "min(46vw, 520px)",
+    textAlign: "center",
   },
   overlay: {
     position: "absolute",

@@ -41,6 +41,11 @@ bun run build    # typecheck + production build
   jump (double jump, hover).
 - **Everything is physical**: crates, barrels and pots tumble, shatter and
   explode; enemies get knocked around; force-blast at your feet to blast-jump.
+- **Bosses every 10th floor**: the Warden of the Deep holds the exit room and
+  seals the floor's portals until it falls — volleys, rings, charges and
+  slams, with guaranteed rich drops.
+- **Procedural audio**: every sound (casts, blasts, hits, pickups, portals,
+  ambient drones) is synthesized with WebAudio — still zero binary assets.
 
 ### Multiplayer model (shipped as testable logic + local loopback)
 
@@ -58,11 +63,12 @@ src/
   core/      config (tuning), seeded RNG, typed event bus
   items/     item catalog, loot tables, loot-orb pickups
   world/     dungeon generator (pure + tested), props, layout types
-  net/       protocol, floor-instance matchmaking, transport abstraction
+  net/       protocol, floor-instance matchmaking, transport, remote wizards
   state/     zustand game store, save persistence
   player/    input, first-person controller, staff viewmodel
-  combat/    abilities, projectiles, explosions, enemies
+  combat/    abilities, projectiles, explosions, enemies, floor bosses
   fx/        pooled particle system + flash lights
+  audio/     procedural WebAudio synth (sfx + ambient beds)
   render/    procedural pixel textures (+normal maps), post-processing
   scenes/    village, dungeon floor, canvas composition
   ui/        HUD and overlays
@@ -82,7 +88,7 @@ Design rules that keep it future-proof:
 
 ## Roadmap
 
-- Authoritative server (the protocol and matchmaking are ready for it)
-- Remote wizard rendering + shared floor events (`peerCast` is specced)
-- Audio (procedural WebAudio to keep the zero-asset pipeline)
-- More enemy archetypes, bosses every 10 floors, staff modifiers
+- Authoritative server (the protocol, matchmaking, state broadcasting and
+  remote-wizard rendering are all in place — implement a WebSocket `Transport`)
+- Shared floor combat events (`peerCast` replay is specced in the protocol)
+- More enemy archetypes, unique boss per depth tier, staff modifiers

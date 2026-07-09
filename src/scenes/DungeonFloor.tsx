@@ -1,7 +1,9 @@
 import { useThree } from "@react-three/fiber";
 import { CuboidCollider, interactionGroups, RigidBody } from "@react-three/rapier";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Color, Fog, InstancedMesh, Object3D } from "three";
+import { startAmbient, stopAmbient } from "../audio/sound";
+import { Boss } from "../combat/Boss";
 import { Sentry, Wisp } from "../combat/enemies";
 import { GROUPS, TILE, WALL_HEIGHT } from "../core/config";
 import { resetRegistries } from "../game/registry";
@@ -23,12 +25,15 @@ const WORLD_GROUPS = interactionGroups(GROUPS.WORLD, [
  * colliders, torches, physics props, enemies, treasure and portals. */
 export function DungeonFloor({ layout }: { layout: FloorLayout }) {
   const scene = useThree((s) => s.scene);
+  const [bossAlive, setBossAlive] = useState(layout.boss !== null);
 
   useEffect(() => {
     scene.fog = new Fog("#070409", 9, 50);
     scene.background = new Color("#070409");
+    startAmbient("dungeon");
     return () => {
       scene.fog = null;
+      stopAmbient();
       resetRegistries();
     };
   }, [scene]);
@@ -61,11 +66,17 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
 
       <TreasurePedestal position={layout.treasure} floor={layout.floor} seed={layout.seed} />
 
+      {layout.boss && bossAlive && (
+        <Boss position={layout.boss} floor={layout.floor} onDeath={() => setBossAlive(false)} />
+      )}
+
       <Portal
         position={layout.exit}
         color="#46ffd0"
         prompt={`E — Descend to floor ${layout.floor + 1}`}
         onUse={descend}
+        locked={bossAlive}
+        lockedPrompt="Sealed — the Warden of the Deep still lives"
       />
       {layout.leave && (
         <Portal
@@ -73,6 +84,8 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
           color="#ffd44f"
           prompt="E — Return to the village (bank your loot)"
           onUse={bankAndLeave}
+          locked={bossAlive}
+          lockedPrompt="Sealed — the Warden of the Deep still lives"
         />
       )}
 
