@@ -1,5 +1,13 @@
 import { gameEvents } from "../core/events";
-import type { FloorAssignment, PeerState, ServerMsg, Vec3Like } from "./protocol";
+import { useNet } from "./netStore";
+import type {
+  EntityEvent,
+  EntitySnap,
+  FloorAssignment,
+  PeerState,
+  ServerMsg,
+  Vec3Like,
+} from "./protocol";
 import { LocalTransport, WebSocketTransport, type Transport } from "./transport";
 
 export type SessionMode = "connecting" | "online" | "offline";
@@ -38,6 +46,7 @@ export class GameSession {
       this.mode = "offline";
       gameEvents.emit("message", "No server reachable — playing offline");
     }
+    useNet.setState({ mode: this.mode });
     this.transport!.send({ t: "hello", name });
   }
 
@@ -69,6 +78,26 @@ export class GameSession {
     this.transport?.send({ t: "castAbility", abilityId, origin, dir });
   }
 
+  /** Host → replicas: batched entity snapshots. */
+  sendEntitySnaps(ents: EntitySnap[]): void {
+    this.transport?.send({ t: "entity", ents });
+  }
+
+  /** Host → replicas: discrete world event. */
+  sendEntityEvent(ev: EntityEvent): void {
+    this.transport?.send({ t: "entityEvent", ev });
+  }
+
+  /** Replica → host: apply this damage to an entity. */
+  sendHit(targetId: string, damage: number, impulse: Vec3Like): void {
+    this.transport?.send({ t: "hit", targetId, damage, impulse });
+  }
+
+  /** Replica → host: request a loot pickup ("treasure" for the pedestal). */
+  sendTakeOrb(orbId: string): void {
+    this.transport?.send({ t: "takeOrb", orbId });
+  }
+
   private attach(transport: Transport): void {
     this.unsubscribe?.();
     this.transport?.close();
@@ -80,22 +109,35 @@ export class GameSession {
     switch (msg.t) {
       case "welcome":
         this.playerId = msg.playerId;
+        useNet.setState({ playerId: msg.playerId });
         break;
       case "floorAssigned":
         this.peers.clear();
+        useNet.setState({
+          hostId: msg.assignment.hostId,
+          floorPlayers: msg.assignment.playerCount,
+        });
         this.pendingAssignment?.(msg.assignment);
         this.pendingAssignment = null;
         break;
       case "peerJoined":
         this.peers.set(msg.peer.playerId, msg.peer);
+        useNet.setState({ floorPlayers: this.peers.size + 1 });
         gameEvents.emit("message", `${msg.peer.name} entered the floor`);
         break;
       case "peerLeft": {
         const peer = this.peers.get(msg.playerId);
         this.peers.delete(msg.playerId);
+        useNet.setState({ floorPlayers: this.peers.size + 1 });
         if (peer) gameEvents.emit("message", `${peer.name} left the floor`);
         break;
       }
+      case "hostChanged":
+        useNet.setState({ hostId: msg.hostId });
+        if (msg.hostId === this.playerId) {
+          gameEvents.emit("message", "You are now the floor host");
+        }
+        break;
       case "snapshot":
         for (const peer of msg.peers) this.peers.set(peer.playerId, peer);
         break;
@@ -107,13 +149,36 @@ export class GameSession {
           dir: msg.dir,
         });
         break;
+      case "entitySnap":
+        gameEvents.emit("entitySnaps", msg.ents);
+        break;
+      case "entityEvent":
+        gameEvents.emit("entityEvent", msg.ev);
+        break;
+      case "hitRequest":
+        gameEvents.emit("hitRequest", {
+          targetId: msg.targetId,
+          damage: msg.damage,
+          impulse: msg.impulse,
+        });
+        break;
+      case "orbRequest":
+        gameEvents.emit("orbRequest", { playerId: msg.playerId, orbId: msg.orbId });
+        break;
     }
   }
 }
 
 export const session = new GameSession();
 
-// Dev-only hook for debugging and end-to-end scripts.
+// Dev-only hooks for debugging and end-to-end scripts.
 if (typeof window !== "undefined" && import.meta.env?.DEV) {
-  (window as unknown as Record<string, unknown>).__session = session;
+  const w = window as unknown as Record<string, unknown>;
+  w.__session = session;
+  const log: string[] = [];
+  w.__netlog = log;
+  gameEvents.on("entityEvent", (ev) => {
+    log.push(`recv:${ev.k}${"id" in ev ? `:${ev.id}` : ""}`);
+    if (log.length > 60) log.shift();
+  });
 }

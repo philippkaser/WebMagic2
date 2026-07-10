@@ -9,8 +9,9 @@ import {
 } from "@react-three/rapier";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, MeshStandardMaterial, Vector3 } from "three";
-import { playPortal } from "../audio/sound";
+import { playHit, playPortal } from "../audio/sound";
 import { GROUPS } from "../core/config";
+import { gameEvents } from "../core/events";
 import { Rng, hashSeed } from "../core/rng";
 import { explode } from "../combat/damage";
 import {
@@ -24,7 +25,10 @@ import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { allocId, registerDynamicBody, registerHittable } from "../game/registry";
 import { rollLoot } from "../items/loot";
-import { spawnLootOrb } from "../items/LootOrbs";
+import { dropLoot } from "../items/LootOrbs";
+import { isHost, selectIsHost, useNet } from "../net/netStore";
+import { registerEntity } from "../net/replication";
+import { session } from "../net/session";
 import { useGame } from "../state/gameStore";
 import { getTextures } from "../render/textures";
 import type { PropKind, Vec3 } from "./types";
@@ -54,48 +58,78 @@ const SPECS: Record<PropKind, PropSpec> = {
 
 /** A physical, breakable prop. Every dungeon floor scatters these so rooms
  * double as a physics sandbox: they tumble when shoved, shatter under fire,
- * sometimes hide loot — and barrels go up violently. */
-export function Breakable({ kind, position, floor }: { kind: PropKind; position: Vec3; floor: number }) {
+ * sometimes hide loot — and barrels go up violently. The floor host owns
+ * their physics and health; replicas interpolate and mirror breaks. */
+export function Breakable({
+  kind,
+  position,
+  floor,
+  entityId,
+}: {
+  kind: PropKind;
+  position: Vec3;
+  floor: number;
+  entityId: string;
+}) {
   const body = useRef<RapierRigidBody>(null);
+  const host = useNet(selectIsHost);
   const spec = SPECS[kind];
   const hp = useRef(spec.hp);
   const deadRef = useRef(false);
   const [dead, setDead] = useState(false);
+  const target = useMemo(() => new Vector3(...position), [position]);
+  const hasSnap = useRef(false);
 
-  const kill = useCallback(() => {
-    if (deadRef.current) return;
-    deadRef.current = true;
-    const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
-    spawnBurst({
-      position: [t.x, t.y, t.z],
-      count: 22,
-      color: spec.shards,
-      speed: 5,
-      ttl: 0.9,
-      size: 0.09,
-    });
-    if (Math.random() < spec.lootChance) {
-      const def = rollLoot(new Rng((Math.random() * 0xffffffff) >>> 0), floor);
-      spawnLootOrb([t.x, Math.max(t.y, 0.5), t.z], def.id);
-    }
-    if (spec.explodes) {
-      // Defer so the chain reaction never re-enters this hit handler.
-      const at: Vec3 = [t.x, t.y, t.z];
-      queueMicrotask(() =>
-        explode({
-          position: at,
-          radius: 3.4,
-          damage: 26,
-          impulse: 28,
-          team: "neutral",
-          color: "#ff9a3c",
-          particles: 36,
-          light: 40,
-        }),
-      );
-    }
-    setDead(true);
-  }, [floor, position, spec]);
+  const kill = useCallback(
+    (remote: boolean) => {
+      if (deadRef.current) return;
+      deadRef.current = true;
+      const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
+      spawnBurst({
+        position: [t.x, t.y, t.z],
+        count: 22,
+        color: spec.shards,
+        speed: 5,
+        ttl: 0.9,
+        size: 0.09,
+      });
+      if (!remote && isHost()) {
+        dropLoot([t.x, Math.max(t.y, 0.5), t.z], floor, spec.lootChance);
+        session.sendEntityEvent({ k: "propBroken", id: entityId });
+      }
+      if (spec.explodes) {
+        // Defer so the chain reaction never re-enters this hit handler. A
+        // replicated break explodes cosmetically vs entities (the host's copy
+        // is authoritative) but still hurts and shoves the local player.
+        const at: Vec3 = [t.x, t.y, t.z];
+        queueMicrotask(() =>
+          explode({
+            position: at,
+            radius: 3.4,
+            damage: 26,
+            impulse: 28,
+            team: "neutral",
+            color: "#ff9a3c",
+            particles: 36,
+            light: 40,
+            remote,
+          }),
+        );
+      }
+      setDead(true);
+    },
+    [entityId, floor, position, spec],
+  );
+
+  const applyDamage = useCallback(
+    (damage: number, impulse: { x: number; y: number; z: number }) => {
+      if (deadRef.current) return;
+      hp.current -= damage;
+      body.current?.applyImpulse(impulse, true);
+      if (hp.current <= 0) kill(false);
+    },
+    [kill],
+  );
 
   useEffect(() => {
     if (dead) return;
@@ -106,21 +140,58 @@ export function Breakable({ kind, position, floor }: { kind: PropKind; position:
       getPosition: () => body.current?.translation() ?? { x: 0, y: -999, z: 0 },
       hit: (damage, impulse) => {
         if (deadRef.current) return;
-        hp.current -= damage;
-        body.current?.applyImpulse(impulse, true);
-        if (hp.current <= 0) kill();
+        playHit();
+        if (isHost()) applyDamage(damage, impulse);
+        else session.sendHit(entityId, damage, impulse);
+      },
+    });
+    const unregisterEntity = registerEntity({
+      id: entityId,
+      snap: () => {
+        if (deadRef.current) return null;
+        const t = body.current?.translation();
+        return t ? { id: entityId, p: [t.x, t.y, t.z] } : null;
+      },
+      applyHit: applyDamage,
+      applySnap: (s) => {
+        target.set(s.p[0], s.p[1], s.p[2]);
+        hasSnap.current = true;
+      },
+      onEvent: (ev) => {
+        if (ev.k === "propBroken") kill(true);
       },
     });
     const unregisterBody = b ? registerDynamicBody(b) : undefined;
     return () => {
       unregisterHit();
+      unregisterEntity();
       unregisterBody?.();
     };
-  }, [dead, kill]);
+  }, [dead, kill, applyDamage, entityId, target]);
+
+  // Replica: glide toward the host's authoritative position.
+  useFrame((_, dt) => {
+    const b = body.current;
+    if (host || !b || deadRef.current || !hasSnap.current) return;
+    const t = b.translation();
+    const k = Math.min(1, dt * 9);
+    b.setNextKinematicTranslation({
+      x: t.x + (target.x - t.x) * k,
+      y: t.y + (target.y - t.y) * k,
+      z: t.z + (target.z - t.z) * k,
+    });
+  });
 
   if (dead) return null;
   return (
-    <RigidBody ref={body} position={position} colliders={false} linearDamping={0.2} angularDamping={0.4}>
+    <RigidBody
+      ref={body}
+      position={position}
+      type={host ? "dynamic" : "kinematicPosition"}
+      colliders={false}
+      linearDamping={0.2}
+      angularDamping={0.4}
+    >
       {kind === "crate" && (
         <>
           <CuboidCollider args={[0.42, 0.42, 0.42]} mass={spec.mass} collisionGroups={PROP_GROUPS} />
@@ -358,7 +429,48 @@ export function Portal({
 export function TreasurePedestal({ position, floor, seed }: { position: Vec3; floor: number; seed: number }) {
   const def = useMemo(() => rollLoot(new Rng((seed ^ 0x9c67f3a1) >>> 0), floor), [seed, floor]);
   const [taken, setTaken] = useState(false);
+  const takenRef = useRef(false);
+  const requested = useRef(0);
   const orb = useRef<Group>(null);
+
+  const consume = useCallback(
+    (byMe: boolean) => {
+      if (takenRef.current) return;
+      takenRef.current = true;
+      setTaken(true);
+      if (byMe) useGame.getState().equipItem(def.id);
+      spawnBurst({
+        position: [position[0], position[1] + 1.5, position[2]],
+        count: 20,
+        color: [def.color, "#ffffff"],
+        speed: 4,
+        ttl: 0.7,
+        size: 0.08,
+      });
+      flashLight([position[0], position[1] + 1.5, position[2]], def.color, 18);
+    },
+    [def, position],
+  );
+
+  // Replica: the host announced who got it.
+  useEffect(
+    () =>
+      gameEvents.on("entityEvent", (ev) => {
+        if (ev.k === "treasureTaken") consume(ev.by === useNet.getState().playerId);
+      }),
+    [consume],
+  );
+
+  // Host: grant a replica's request — one treasure, first come first served.
+  useEffect(
+    () =>
+      gameEvents.on("orbRequest", ({ playerId, orbId }) => {
+        if (orbId !== "treasure" || !isHost() || takenRef.current) return;
+        session.sendEntityEvent({ k: "treasureTaken", by: playerId });
+        consume(false);
+      }),
+    [consume],
+  );
 
   useEffect(() => {
     if (taken) return;
@@ -372,28 +484,29 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
     return () => removeLightSource(src);
   }, [taken, def, position]);
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, dt) => {
     if (taken) return;
     const g = orb.current;
     if (g) {
       g.position.y = 1.45 + Math.sin(clock.elapsedTime * 2) * 0.09;
       g.rotation.y = clock.elapsedTime * 1.4;
     }
+    requested.current -= dt;
     const d2 =
       (playerPosition.x - position[0]) ** 2 + (playerPosition.z - position[2]) ** 2;
     if (d2 < 6) {
       offerInteraction(`E — Take ${def.name}  (${def.desc})`, d2, () => {
-        useGame.getState().equipItem(def.id);
-        spawnBurst({
-          position: [position[0], position[1] + 1.5, position[2]],
-          count: 20,
-          color: [def.color, "#ffffff"],
-          speed: 4,
-          ttl: 0.7,
-          size: 0.08,
-        });
-        flashLight([position[0], position[1] + 1.5, position[2]], def.color, 18);
-        setTaken(true);
+        if (takenRef.current) return;
+        if (isHost()) {
+          session.sendEntityEvent({
+            k: "treasureTaken",
+            by: useNet.getState().playerId || "self",
+          });
+          consume(true);
+        } else if (requested.current <= 0) {
+          requested.current = 0.6;
+          session.sendTakeOrb("treasure");
+        }
       });
     }
   });

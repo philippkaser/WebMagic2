@@ -8,6 +8,7 @@ import { Sentry, Wisp } from "../combat/enemies";
 import { GROUPS, TILE, WALL_HEIGHT } from "../core/config";
 import { resetRegistries } from "../game/registry";
 import { hashSeed } from "../core/rng";
+import { resetReplication } from "../net/replication";
 import { session } from "../net/session";
 import { PlayerController } from "../player/PlayerController";
 import { getTextures } from "../render/textures";
@@ -43,6 +44,7 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
       scene.fog = null;
       stopAmbient();
       resetRegistries();
+      resetReplication();
     };
   }, [scene, gl, camera]);
 
@@ -73,13 +75,19 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
         <Torch key={i} position={pos} />
       ))}
       {layout.props.map((prop, i) => (
-        <Breakable key={i} kind={prop.kind} position={prop.pos} floor={layout.floor} />
+        <Breakable
+          key={i}
+          kind={prop.kind}
+          position={prop.pos}
+          floor={layout.floor}
+          entityId={`p${i}`}
+        />
       ))}
       {layout.enemies.map((enemy, i) =>
         enemy.kind === "wisp" ? (
-          <Wisp key={i} position={enemy.pos} floor={layout.floor} />
+          <Wisp key={i} position={enemy.pos} floor={layout.floor} entityId={`e${i}`} />
         ) : (
-          <Sentry key={i} position={enemy.pos} floor={layout.floor} />
+          <Sentry key={i} position={enemy.pos} floor={layout.floor} entityId={`e${i}`} />
         ),
       )}
 

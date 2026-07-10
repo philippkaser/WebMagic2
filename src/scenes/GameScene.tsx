@@ -10,6 +10,7 @@ import { FxSystems } from "../fx/Particles";
 import { InteractionSystem } from "../game/interactions";
 import { LootOrbs } from "../items/LootOrbs";
 import { RemoteWizards } from "../net/RemoteWizards";
+import { ReplicationSystem } from "../net/replication";
 import { StaffView } from "../player/StaffView";
 import { Effects } from "../render/Effects";
 import { useGame } from "../state/gameStore";
@@ -42,9 +43,10 @@ export function GameScene() {
       camera={{ fov: 78, near: 0.08, far: 140 }}
     >
       <Suspense fallback={null}>
-        {/* timeStep="vary": a hitch frame advances physics once with the real
-            delta instead of stepping multiple times to catch up. */}
-        <Physics gravity={[0, GRAVITY, 0]} timeStep="vary">
+        {/* Fixed timestep: one 1/60 step per frame. NEVER use timeStep="vary"
+            here — a long frame (floor load, shader compile) integrates gravity
+            over the whole gap in one step and props tunnel through the floor. */}
+        <Physics gravity={[0, GRAVITY, 0]}>
           {inDungeon && layout ? (
             <DungeonFloor key={`${instanceId}:${floor}`} layout={layout} />
           ) : (
@@ -54,6 +56,7 @@ export function GameScene() {
           <LootOrbs />
         </Physics>
         <RemoteWizards />
+        <ReplicationSystem />
         <FxSystems />
         <DynamicLights />
         <StaffView />

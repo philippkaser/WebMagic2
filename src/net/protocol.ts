@@ -18,7 +18,45 @@ export interface FloorAssignment {
   /** Deterministic seed — every client in the instance generates the same floor. */
   seed: number;
   playerCount: number;
+  /** The instance's simulation host (first joiner; migrates on leave). The
+   * host's simulation of enemies/props/loot is authoritative; everyone else
+   * renders replicated state. */
+  hostId: string;
 }
+
+/** Position (+ optional health) of one replicated entity, host → replicas. */
+export interface EntitySnap {
+  id: string;
+  p: [number, number, number];
+  hp?: number;
+}
+
+/** Discrete world events, host → replicas (except pickup *requests*, which
+ * flow replica → host as takeOrb). */
+export type EntityEvent =
+  | { k: "death"; id: string }
+  | { k: "propBroken"; id: string }
+  | { k: "orbSpawn"; orbId: string; defId: string; pos: [number, number, number] }
+  | { k: "orbTaken"; orbId: string; by: string }
+  | { k: "treasureTaken"; by: string }
+  | {
+      k: "enemyCast";
+      origin: [number, number, number];
+      velocity: [number, number, number];
+      damage: number;
+      color: string;
+      size: number;
+      blastRadius: number;
+      blastImpulse: number;
+    }
+  | {
+      k: "boom";
+      pos: [number, number, number];
+      radius: number;
+      damage: number;
+      impulse: number;
+      color: string;
+    };
 
 export interface PeerState {
   playerId: string;
@@ -33,12 +71,23 @@ export type ClientMsg =
   | { t: "enterFloor"; floor: number }
   | { t: "leaveDungeon" }
   | { t: "state"; position: Vec3Like; yaw: number; staffId: string }
-  | { t: "castAbility"; abilityId: string; origin: Vec3Like; dir: Vec3Like };
+  | { t: "castAbility"; abilityId: string; origin: Vec3Like; dir: Vec3Like }
+  // Host only — dropped by the server if sent by anyone else:
+  | { t: "entity"; ents: EntitySnap[] }
+  | { t: "entityEvent"; ev: EntityEvent }
+  // Replica → host:
+  | { t: "hit"; targetId: string; damage: number; impulse: Vec3Like }
+  | { t: "takeOrb"; orbId: string };
 
 export type ServerMsg =
   | { t: "welcome"; playerId: string }
   | { t: "floorAssigned"; assignment: FloorAssignment }
   | { t: "peerJoined"; peer: PeerState }
   | { t: "peerLeft"; playerId: string }
+  | { t: "hostChanged"; hostId: string }
   | { t: "snapshot"; peers: PeerState[] }
-  | { t: "peerCast"; playerId: string; abilityId: string; origin: Vec3Like; dir: Vec3Like };
+  | { t: "peerCast"; playerId: string; abilityId: string; origin: Vec3Like; dir: Vec3Like }
+  | { t: "entitySnap"; ents: EntitySnap[] }
+  | { t: "entityEvent"; ev: EntityEvent }
+  | { t: "hitRequest"; playerId: string; targetId: string; damage: number; impulse: Vec3Like }
+  | { t: "orbRequest"; playerId: string; orbId: string };

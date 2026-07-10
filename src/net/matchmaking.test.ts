@@ -60,6 +60,19 @@ describe("FloorDirectory", () => {
     expect(rejoin.id).toBe(inst.id);
   });
 
+  test("host is the first joiner and migrates in join order", () => {
+    const dir = makeDirectory();
+    const inst = dir.join("p1", 3);
+    dir.join("p2", 3);
+    dir.join("p3", 3);
+    const first = () => inst.players.values().next().value;
+    expect(first()).toBe("p1");
+    dir.leave("p1"); // host leaves → next-oldest member becomes first
+    expect(first()).toBe("p2");
+    dir.leave("p3"); // non-host leaving doesn't change the head
+    expect(first()).toBe("p2");
+  });
+
   test("oldest instance with room fills first", () => {
     const dir = makeDirectory();
     const first = dir.join("p1", 7);

@@ -62,23 +62,39 @@ you're in. `server/server.ts` is a small Bun process that runs the real
 casts (`peerCast`) which clients replay through the identical ability code
 (with caster-only effects like blast recoil skipped).
 
-### What is and isn't synchronized (current state)
+### Host-authority replication
+
+Every floor instance has a **simulation host** — its first joiner, promoted
+in join order when the host leaves (`hostChanged`). The host's simulation of
+enemies, props, the boss and loot is the truth; the server stays a thin
+relay that also *enforces* authority (entity messages from non-hosts are
+dropped). Offline play is simply "always host", so single-player runs the
+exact same code path.
 
 | Synced | How |
 | --- | --- |
-| Floor layout, torches, props, enemies (initial) | deterministic from instance seed |
-| Player position/yaw/staff | 10 Hz state relay, client-side interpolation |
-| Ability casts (incl. explosion physics) | `castAbility` → `peerCast` replay |
-| Join/leave, instance assignment | server directory |
+| Floor layout, torches, spawn tables | deterministic from instance seed |
+| Player position/yaw/staff, names | 10 Hz state relay + interpolation |
+| Player ability casts | `peerCast` replay (cosmetic vs entities) |
+| Enemy/prop/boss positions & health | host `entity` snapshots at 10 Hz, delta-filtered, replicas glide kinematic bodies |
+| Deaths, prop breaks, boss slams, sentry/boss shots | discrete `entityEvent`s replayed locally |
+| Loot drops & pickups, floor treasure | host-granted (`orbSpawn`/`takeOrb`/`orbTaken`) — an orb can never be taken twice |
 
-**Not yet synced:** enemy AI decisions, enemy/prop health, and rigid-body
-motion after the first frame — each client simulates its own physics world,
-so crate positions and enemy state drift between players. The plan is
-server-authoritative simulation per instance (or a designated host client as
-an interim step): the server owns enemy/prop state and broadcasts dirty
-entities in the 10–20 Hz snapshot; clients render and predict. The `Hittable`
-registry is the seam — damage application moves behind a server round-trip
-without touching rendering code.
+**Damage authority rule:** exactly one simulation may damage an entity — the
+host's. A replica's own shots apply damage via `hit` requests to the host
+(shooter-favored, like most netcode); every *replayed* explosion is
+`remote: true` and skips entity damage entirely. Your own health is always
+local: contact burns and incoming blasts hurt each player on their own
+machine, so your survival never waits on a round trip.
+
+**Host migration:** entities carry the replicated hp/position state on every
+client, so when the host leaves, the promoted client's kinematic replicas
+flip to dynamic bodies and its AI resumes from the last snapshot —
+mid-fight, no reload.
+
+**Path to server authority:** move the host role into a headless process
+that speaks the same protocol (it's just another "client" the server always
+designates as host). Nothing else changes.
 
 ### Scaling plan (server-side, future work)
 

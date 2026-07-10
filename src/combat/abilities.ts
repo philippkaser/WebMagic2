@@ -56,6 +56,8 @@ function bolt(ctx: AbilityContext, opts: {
     gravityScale: opts.gravityScale ?? 0,
     blastRadius: opts.blastRadius,
     blastImpulse: opts.blastImpulse,
+    // A peer's replayed bolt is visual: their own client requests the damage.
+    cosmetic: ctx.remote ?? false,
   });
 }
 
@@ -122,6 +124,7 @@ const ABILITIES: Record<string, Ability> = {
         color: ctx.staff.color,
         particles: 40,
         light: 42,
+        remote: ctx.remote,
       });
       // Recoil: aim at the floor to blast-jump. Caster only — a peer's blast
       // still pushes us via the explosion itself, not via recoil.
@@ -148,6 +151,7 @@ const ABILITIES: Record<string, Ability> = {
         color: ctx.staff.color,
         particles: 54,
         light: 48,
+        remote: ctx.remote,
       });
     },
   },

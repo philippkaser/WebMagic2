@@ -20,6 +20,10 @@ export interface ExplosionOptions {
   color?: string;
   particles?: number;
   light?: number;
+  /** Replayed from another client: full VFX and local-player damage, but no
+   * entity damage — the authoritative copy of this explosion runs elsewhere.
+   * Prevents double damage in multiplayer. */
+  remote?: boolean;
 }
 
 const tmp = new Vector3();
@@ -51,18 +55,20 @@ export function explode(opts: ExplosionOptions): void {
   flashLight([center.x, center.y, center.z], color, light);
   playExplosion(radius);
 
-  forEachHittable((h) => {
-    const hurtEnemies = team === "player" || team === "neutral";
-    if (h.team === "enemy" && !hurtEnemies) return;
-    const p = h.getPosition();
-    tmp.set(p.x - center.x, p.y - center.y, p.z - center.z);
-    const dist = tmp.length();
-    if (dist > radius) return;
-    const falloff = 1 - dist / radius;
-    tmp.normalize().multiplyScalar(impulse * falloff);
-    tmp.y += impulse * falloff * 0.35; // lift things — more satisfying
-    h.hit(damage * falloff, { x: tmp.x, y: tmp.y, z: tmp.z });
-  });
+  if (!opts.remote) {
+    forEachHittable((h) => {
+      const hurtEnemies = team === "player" || team === "neutral";
+      if (h.team === "enemy" && !hurtEnemies) return;
+      const p = h.getPosition();
+      tmp.set(p.x - center.x, p.y - center.y, p.z - center.z);
+      const dist = tmp.length();
+      if (dist > radius) return;
+      const falloff = 1 - dist / radius;
+      tmp.normalize().multiplyScalar(impulse * falloff);
+      tmp.y += impulse * falloff * 0.35; // lift things — more satisfying
+      h.hit(damage * falloff, { x: tmp.x, y: tmp.y, z: tmp.z });
+    });
+  }
 
   // The player is also physical: enemy/neutral blasts damage them, and every
   // blast pushes them (friendly ones gently — that's the blast-jump).

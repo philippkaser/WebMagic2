@@ -3,6 +3,7 @@ import { PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
 import { computeStats, getItemDef } from "../items/catalog";
 import type { Slot } from "../items/types";
+import { selectIsHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
 import { entryFloors, useGame } from "../state/gameStore";
 
@@ -23,6 +24,7 @@ export function HUD() {
   // F-keys (Mission Control, Spotlight) so they often never reach the page.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return; // typing a name
       if (e.code === "KeyP" || e.code === "F3") {
         e.preventDefault();
         setShowPerf((v) => !v);
@@ -64,6 +66,8 @@ function PlayHud() {
   const mana = useGame((s) => s.mana);
   const equipment = useGame((s) => s.equipment);
   const prompt = useGame((s) => s.prompt);
+  const floorPlayers = useNet((s) => s.floorPlayers);
+  const amHost = useNet(selectIsHost);
   const stats = computeStats(equipment);
   const locked = usePointerLocked();
 
@@ -79,14 +83,22 @@ function PlayHud() {
         {phase === "dungeon" ? (
           <>
             <div style={{ fontSize: 18, color: "#e8dfc8" }}>FLOOR {floor}</div>
-            <div style={styles.dim}>instance {instanceId || "—"}</div>
+            <div style={styles.dim}>
+              instance {instanceId || "—"}
+              {session.mode === "online" &&
+                ` · ${floorPlayers} wizard${floorPlayers === 1 ? "" : "s"}`}
+            </div>
           </>
         ) : (
           <div style={{ fontSize: 18, color: "#e8dfc8" }}>THE VILLAGE</div>
         )}
         <div style={styles.dim}>checkpoint: floor {checkpoint}</div>
         <div style={{ ...styles.dim, color: session.mode === "online" ? "#4fd08a" : "#7d7566" }}>
-          {session.mode === "online" ? "◉ online" : session.mode === "offline" ? "○ offline" : "◌ connecting"}
+          {session.mode === "online"
+            ? `◉ online${amHost && phase === "dungeon" ? " · host" : ""}`
+            : session.mode === "offline"
+              ? "○ offline"
+              : "◌ connecting"}
         </div>
       </div>
 
@@ -267,6 +279,8 @@ function MenuOverlay() {
   const startGame = useGame((s) => s.startGame);
   const shadows = useGame((s) => s.shadows);
   const toggleShadows = useGame((s) => s.toggleShadows);
+  const playerName = useGame((s) => s.playerName);
+  const setPlayerName = useGame((s) => s.setPlayerName);
   return (
     <Overlay>
       <div style={styles.title}>WEBMAGIC</div>
@@ -276,6 +290,22 @@ function MenuOverlay() {
         of the village step through the portal. One hundred floors down. Leave
         only every fifth floor. Die, and everything you found goes with you.
       </p>
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 11, letterSpacing: 2, color: "#7d7566", marginBottom: 5 }}>
+          YOUR NAME
+        </div>
+        <input
+          style={styles.nameInput}
+          defaultValue={playerName}
+          maxLength={16}
+          spellCheck={false}
+          onBlur={(e) => setPlayerName(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation(); // typing must not trigger game hotkeys
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+        />
+      </div>
       <button style={styles.button} onClick={startGame}>
         ENTER THE VILLAGE
       </button>
@@ -443,6 +473,18 @@ const styles: Record<string, CSSProperties> = {
     color: "#e8dfc8",
     border: "1px solid #46ffd0",
     cursor: "pointer",
+  },
+  nameInput: {
+    fontFamily: "'Courier New', monospace",
+    fontSize: 16,
+    letterSpacing: 2,
+    padding: "9px 14px",
+    background: "#120e1a",
+    color: "#e8dfc8",
+    border: "1px solid #3f3946",
+    textAlign: "center",
+    outline: "none",
+    width: 220,
   },
   controls: { marginTop: 26, fontSize: 12, color: "#6d6478", letterSpacing: 1 },
 };

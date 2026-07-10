@@ -88,10 +88,10 @@ export function Village() {
       ))}
 
       {/* A few crates to kick around — the sandbox starts at home. */}
-      <Breakable kind="crate" position={[4, 1, 6]} floor={1} />
-      <Breakable kind="crate" position={[4.4, 2, 6.2]} floor={1} />
-      <Breakable kind="barrel" position={[-5, 1, 7]} floor={1} />
-      <Breakable kind="pot" position={[-4.2, 1, 6.2]} floor={1} />
+      <Breakable kind="crate" position={[4, 1, 6]} floor={1} entityId="v0" />
+      <Breakable kind="crate" position={[4.4, 2, 6.2]} floor={1} entityId="v1" />
+      <Breakable kind="barrel" position={[-5, 1, 7]} floor={1} entityId="v2" />
+      <Breakable kind="pot" position={[-4.2, 1, 6.2]} floor={1} entityId="v3" />
 
       {/* Torch posts flanking the portal */}
       {([[-2.6, 0, 2.8], [2.6, 0, 2.8]] as Vec3[]).map((p, i) => (

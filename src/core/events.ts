@@ -40,6 +40,18 @@ export interface GameEvents extends Record<string, unknown> {
     origin: { x: number; y: number; z: number };
     dir: { x: number; y: number; z: number };
   };
+  /** Host→replica entity snapshots arrived (routed by net/replication). */
+  entitySnaps: import("../net/protocol").EntitySnap[];
+  /** Host→replica discrete world event. */
+  entityEvent: import("../net/protocol").EntityEvent;
+  /** Replica asked us (the host) to apply damage. */
+  hitRequest: {
+    targetId: string;
+    damage: number;
+    impulse: { x: number; y: number; z: number };
+  };
+  /** Replica asked us (the host) to grant a pickup. */
+  orbRequest: { playerId: string; orbId: string };
 }
 
 export const gameEvents = new Emitter<GameEvents>();

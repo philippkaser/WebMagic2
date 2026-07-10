@@ -125,6 +125,7 @@ export class LocalTransport implements Transport {
             floor: inst.floor,
             seed: inst.seed,
             playerCount: inst.players.size,
+            hostId: this.playerId,
           },
         });
         break;
@@ -134,6 +135,10 @@ export class LocalTransport implements Transport {
         break;
       case "state":
       case "castAbility":
+      case "entity":
+      case "entityEvent":
+      case "hit":
+      case "takeOrb":
         // No peers in single-player.
         break;
     }

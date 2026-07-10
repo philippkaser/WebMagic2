@@ -11,13 +11,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, MeshStandardMaterial, Vector3 } from "three";
 import { playHit } from "../audio/sound";
 import { floorScale, GROUPS, PLAYER } from "../core/config";
-import { Rng } from "../core/rng";
 import { flashLight } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
 import { getPlayerBody, playerPosition, playerVelocity } from "../game/player-state";
 import { allocId, registerHittable } from "../game/registry";
-import { rollLoot } from "../items/loot";
-import { spawnLootOrb } from "../items/LootOrbs";
+import { dropLoot } from "../items/LootOrbs";
+import { isHost, selectIsHost, useNet } from "../net/netStore";
+import { registerEntity } from "../net/replication";
+import { session } from "../net/session";
 import { getStats, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
 import { fireProjectile } from "./projectiles";
@@ -32,17 +33,134 @@ const ENEMY_GROUPS = interactionGroups(GROUPS.ENEMY, [
 
 const LOOT_DROP_CHANCE = 0.24;
 
-function maybeDropLoot(pos: { x: number; y: number; z: number }, floor: number) {
-  if (Math.random() > LOOT_DROP_CHANCE) return;
-  const def = rollLoot(new Rng((Math.random() * 0xffffffff) >>> 0), floor);
-  spawnLootOrb([pos.x, Math.max(pos.y, 0.6), pos.z], def.id);
+/** Shared host/replica plumbing for one enemy: hittable registration with
+ * authority routing, replication registration, and kinematic interpolation
+ * for replicas. Keeps Wisp/Sentry/Boss focused on their behavior. */
+export function useEnemyNet(opts: {
+  entityId: string;
+  body: React.RefObject<RapierRigidBody | null>;
+  hp: React.MutableRefObject<number>;
+  deadRef: React.MutableRefObject<boolean>;
+  flash: React.MutableRefObject<number>;
+  dead: boolean;
+  knockTimer?: React.MutableRefObject<number>;
+  /** Fraction of knockback impulses that actually applies (bosses resist). */
+  knockbackScale?: number;
+  onKill: () => void;
+  hitFeedback?: () => void;
+  /** Replica: called after each authoritative snapshot (e.g. boss HP bar). */
+  onSnap?: (hp: number) => void;
+}) {
+  const {
+    entityId,
+    body,
+    hp,
+    deadRef,
+    flash,
+    dead,
+    knockTimer,
+    knockbackScale = 1,
+    onKill,
+    hitFeedback,
+    onSnap,
+  } = opts;
+  const target = useMemo(() => new Vector3(), []);
+  const hasSnap = useRef(false);
+
+  const applyDamage = useCallback(
+    (damage: number, impulse: { x: number; y: number; z: number }) => {
+      if (deadRef.current) return;
+      hp.current -= damage;
+      flash.current = 1;
+      if (knockTimer) knockTimer.current = 0.4;
+      body.current?.applyImpulse(
+        {
+          x: impulse.x * knockbackScale,
+          y: impulse.y * knockbackScale,
+          z: impulse.z * knockbackScale,
+        },
+        true,
+      );
+      onSnap?.(hp.current);
+      if (hp.current <= 0) onKill();
+    },
+    [body, deadRef, flash, hp, knockTimer, knockbackScale, onKill, onSnap],
+  );
+
+  useEffect(() => {
+    if (dead) return;
+    const unregisterHit = registerHittable({
+      id: allocId(),
+      team: "enemy",
+      getPosition: () => body.current?.translation() ?? { x: 0, y: -999, z: 0 },
+      hit: (damage, impulse) => {
+        if (deadRef.current) return;
+        flash.current = 1;
+        playHit();
+        hitFeedback?.();
+        if (isHost()) applyDamage(damage, impulse);
+        else session.sendHit(entityId, damage, impulse);
+      },
+    });
+    const unregisterEntity = registerEntity({
+      id: entityId,
+      snap: () => {
+        if (deadRef.current) return null;
+        const t = body.current?.translation();
+        return t ? { id: entityId, p: [t.x, t.y, t.z], hp: hp.current } : null;
+      },
+      applyHit: applyDamage,
+      applySnap: (s) => {
+        target.set(s.p[0], s.p[1], s.p[2]);
+        hasSnap.current = true;
+        if (s.hp !== undefined) {
+          hp.current = s.hp;
+          onSnap?.(s.hp);
+        }
+      },
+      onEvent: (ev) => {
+        if (ev.k === "death") onKill();
+      },
+    });
+    return () => {
+      unregisterHit();
+      unregisterEntity();
+    };
+  }, [dead, entityId, applyDamage, body, deadRef, flash, hp, target, onKill, hitFeedback]);
+
+  /** Replica movement: glide the kinematic body toward the latest snapshot. */
+  const interpolate = useCallback(
+    (dt: number) => {
+      const b = body.current;
+      if (!b || !hasSnap.current) return;
+      const t = b.translation();
+      const k = Math.min(1, dt * 9);
+      b.setNextKinematicTranslation({
+        x: t.x + (target.x - t.x) * k,
+        y: t.y + (target.y - t.y) * k,
+        z: t.z + (target.z - t.z) * k,
+      });
+    },
+    [body, target],
+  );
+
+  return { applyDamage, interpolate };
 }
 
 /** Wisp — a floating mote of hostile magic. Chases the player and burns on
- * contact. Fully physical: bolts and blasts send it tumbling. */
-export function Wisp({ position, floor }: { position: Vec3; floor: number }) {
+ * contact. The floor host runs its AI; replicas interpolate. */
+export function Wisp({
+  position,
+  floor,
+  entityId,
+}: {
+  position: Vec3;
+  floor: number;
+  entityId: string;
+}) {
   const body = useRef<RapierRigidBody>(null);
   const mat = useRef<MeshStandardMaterial>(null);
+  const host = useNet(selectIsHost);
   const scale = useMemo(() => floorScale(floor), [floor]);
   const hp = useRef(30 * scale.enemyHealth);
   const deadRef = useRef(false);
@@ -67,38 +185,37 @@ export function Wisp({ position, floor }: { position: Vec3; floor: number }) {
       size: 0.1,
     });
     flashLight([t.x, t.y, t.z], "#b46bff", 22);
-    maybeDropLoot(t, floor);
+    if (isHost()) {
+      dropLoot([t.x, Math.max(t.y, 0.6), t.z], floor, LOOT_DROP_CHANCE);
+      session.sendEntityEvent({ k: "death", id: entityId });
+    }
     setDead(true);
-  }, [floor, position]);
+  }, [entityId, floor, position]);
 
-  useEffect(() => {
-    if (dead) return;
-    return registerHittable({
-      id: allocId(),
-      team: "enemy",
-      getPosition: () => body.current?.translation() ?? { x: 0, y: -999, z: 0 },
-      hit: (damage, impulse) => {
-        if (deadRef.current) return;
-        hp.current -= damage;
-        flash.current = 1;
-        knockTimer.current = 0.4;
-        playHit();
-        body.current?.applyImpulse(impulse, true);
-        const t = body.current?.translation();
-        if (t) {
-          spawnBurst({
-            position: [t.x, t.y, t.z],
-            count: 6,
-            color: "#d9a9ff",
-            speed: 3,
-            ttl: 0.4,
-            size: 0.06,
-          });
-        }
-        if (hp.current <= 0) kill();
-      },
+  const hitFeedback = useCallback(() => {
+    const t = body.current?.translation();
+    if (!t) return;
+    spawnBurst({
+      position: [t.x, t.y, t.z],
+      count: 6,
+      color: "#d9a9ff",
+      speed: 3,
+      ttl: 0.4,
+      size: 0.06,
     });
-  }, [dead, kill]);
+  }, []);
+
+  const { interpolate } = useEnemyNet({
+    entityId,
+    body,
+    hp,
+    deadRef,
+    flash,
+    dead,
+    knockTimer,
+    onKill: kill,
+    hitFeedback,
+  });
 
   useFrame(({ clock }, dt) => {
     const b = body.current;
@@ -107,7 +224,6 @@ export function Wisp({ position, floor }: { position: Vec3; floor: number }) {
 
     flash.current = Math.max(0, flash.current - dt * 5);
     if (mat.current) mat.current.emissiveIntensity = 1.7 + flash.current * 6;
-    knockTimer.current -= dt;
     contactTimer.current -= dt;
 
     const t = b.translation();
@@ -116,13 +232,34 @@ export function Wisp({ position, floor }: { position: Vec3; floor: number }) {
     const dz = playerPosition.z - t.z;
     const dist = Math.hypot(dx, dy, dz);
 
-    if (!aggro.current) {
-      if (dist < 15 * getStats().aggroMult) aggro.current = true;
-      // Idle drift.
-      b.setLinvel({ x: 0, y: Math.sin(clock.elapsedTime * 1.4 + phase) * 0.5, z: 0 }, true);
+    // Contact burn is local on every client — your health is yours.
+    if (dist < 1.45 && contactTimer.current <= 0) {
+      contactTimer.current = PLAYER.contactDamageCooldown;
+      useGame.getState().takeDamage(9 * scale.enemyDamage);
+      spawnBurst({
+        position: [playerPosition.x, playerPosition.y + 0.3, playerPosition.z],
+        count: 12,
+        color: ["#ff5d5d", "#b46bff"],
+        speed: 4,
+        ttl: 0.5,
+        size: 0.08,
+      });
+      const push = 5 / Math.max(dist, 0.4);
+      getPlayerBody()?.applyImpulse({ x: dx * push * 0.35, y: 2, z: dz * push * 0.35 }, true);
+    }
+
+    if (!host) {
+      interpolate(dt);
       return;
     }
 
+    // ── Host AI ──────────────────────────────────────────────────────────────
+    knockTimer.current -= dt;
+    if (!aggro.current) {
+      if (dist < 15 * getStats().aggroMult) aggro.current = true;
+      b.setLinvel({ x: 0, y: Math.sin(clock.elapsedTime * 1.4 + phase) * 0.5, z: 0 }, true);
+      return;
+    }
     if (knockTimer.current <= 0) {
       const targetY = playerPosition.y + 0.5 + Math.sin(clock.elapsedTime * 2.1 + phase) * 0.4;
       desired.set(dx, 0, dz);
@@ -140,22 +277,6 @@ export function Wisp({ position, floor }: { position: Vec3; floor: number }) {
         true,
       );
     }
-
-    // Contact burn.
-    if (dist < 1.45 && contactTimer.current <= 0) {
-      contactTimer.current = PLAYER.contactDamageCooldown;
-      useGame.getState().takeDamage(9 * scale.enemyDamage);
-      spawnBurst({
-        position: [playerPosition.x, playerPosition.y + 0.3, playerPosition.z],
-        count: 12,
-        color: ["#ff5d5d", "#b46bff"],
-        speed: 4,
-        ttl: 0.5,
-        size: 0.08,
-      });
-      const push = 5 / Math.max(dist, 0.4);
-      getPlayerBody()?.applyImpulse({ x: dx * push * 0.35, y: 2, z: dz * push * 0.35 }, true);
-    }
   });
 
   if (dead) return null;
@@ -163,6 +284,7 @@ export function Wisp({ position, floor }: { position: Vec3; floor: number }) {
     <RigidBody
       ref={body}
       position={position}
+      type={host ? "dynamic" : "kinematicPosition"}
       colliders={false}
       gravityScale={0}
       linearDamping={0.5}
@@ -189,12 +311,22 @@ export function Wisp({ position, floor }: { position: Vec3; floor: number }) {
 }
 
 /** Sentry — a fixed warding crystal that lobs slow, dodgeable fire bolts when
- * it has line of sight. Punishes standing still. */
-export function Sentry({ position, floor }: { position: Vec3; floor: number }) {
+ * it has line of sight. The host decides when it fires; replicas replay the
+ * bolt (which still hurts *their* player if it connects). */
+export function Sentry({
+  position,
+  floor,
+  entityId,
+}: {
+  position: Vec3;
+  floor: number;
+  entityId: string;
+}) {
   const body = useRef<RapierRigidBody>(null);
   const head = useRef<Group>(null);
   const mat = useRef<MeshStandardMaterial>(null);
   const { world, rapier } = useRapier();
+  const host = useNet(selectIsHost);
   const scale = useMemo(() => floorScale(floor), [floor]);
   const hp = useRef(60 * scale.enemyHealth);
   const deadRef = useRef(false);
@@ -220,28 +352,14 @@ export function Sentry({ position, floor }: { position: Vec3; floor: number }) {
       size: 0.11,
     });
     flashLight([t.x, t.y + 0.8, t.z], "#ff7a4d", 26);
-    maybeDropLoot({ x: t.x, y: t.y + 0.5, z: t.z }, floor);
+    if (isHost()) {
+      dropLoot([t.x, t.y + 0.5, t.z], floor, LOOT_DROP_CHANCE);
+      session.sendEntityEvent({ k: "death", id: entityId });
+    }
     setDead(true);
-  }, [floor, position]);
+  }, [entityId, floor, position]);
 
-  useEffect(() => {
-    if (dead) return;
-    return registerHittable({
-      id: allocId(),
-      team: "enemy",
-      getPosition: () => {
-        const t = body.current?.translation() ?? { x: 0, y: -999, z: 0 };
-        return { x: t.x, y: t.y + 0.8, z: t.z };
-      },
-      hit: (damage) => {
-        if (deadRef.current) return;
-        hp.current -= damage;
-        flash.current = 1;
-        playHit();
-        if (hp.current <= 0) kill();
-      },
-    });
-  }, [dead, kill]);
+  useEnemyNet({ entityId, body, hp, deadRef, flash, dead, onKill: kill });
 
   useFrame((_, dt) => {
     const b = body.current;
@@ -254,16 +372,22 @@ export function Sentry({ position, floor }: { position: Vec3; floor: number }) {
     aim.set(playerPosition.x - headPos.x, playerPosition.y - headPos.y, playerPosition.z - headPos.z);
     const dist = aim.length();
 
-    // Track the player.
+    // Head tracking is cosmetic — every client tracks its own player.
     if (head.current && dist < 30) {
       const targetYaw = Math.atan2(aim.x, aim.z);
       head.current.rotation.y += (targetYaw - head.current.rotation.y) * Math.min(1, dt * 4);
     }
 
+    if (!host) {
+      if (mat.current) mat.current.emissiveIntensity = 1.4 + flash.current * 6;
+      return;
+    }
+
     fireTimer.current -= dt;
     const charging = fireTimer.current < 0.55;
     if (mat.current) {
-      mat.current.emissiveIntensity = 1.4 + flash.current * 6 + (charging ? (0.55 - Math.max(fireTimer.current, 0)) * 7 : 0);
+      mat.current.emissiveIntensity =
+        1.4 + flash.current * 6 + (charging ? (0.55 - Math.max(fireTimer.current, 0)) * 7 : 0);
     }
 
     if (fireTimer.current <= 0) {
@@ -278,18 +402,34 @@ export function Sentry({ position, floor }: { position: Vec3; floor: number }) {
       losRay.dir.z = aim.z;
       const hit = world.castRay(losRay, dist - 0.6, true, undefined, undefined, undefined, b);
       if (hit !== null) return; // wall or prop in the way
-      // Lead the shot slightly so strafing matters.
       const speed = 15;
       aim
         .multiplyScalar(dist)
         .addScaledVector(playerVelocity, Math.min(dist / speed, 1.2) * 0.45)
         .normalize()
         .multiplyScalar(speed);
+      const origin: Vec3 = [
+        headPos.x + aim.x * 0.06,
+        headPos.y + aim.y * 0.06,
+        headPos.z + aim.z * 0.06,
+      ];
+      const velocity: Vec3 = [aim.x, aim.y, aim.z];
+      const damage = 11 * scale.enemyDamage;
       fireProjectile({
         team: "enemy",
-        position: [headPos.x + aim.x * 0.06, headPos.y + aim.y * 0.06, headPos.z + aim.z * 0.06],
-        velocity: [aim.x, aim.y, aim.z],
-        damage: 11 * scale.enemyDamage,
+        position: origin,
+        velocity,
+        damage,
+        color: "#ff5136",
+        size: 0.16,
+        blastRadius: 1.9,
+        blastImpulse: 11,
+      });
+      session.sendEntityEvent({
+        k: "enemyCast",
+        origin,
+        velocity,
+        damage,
         color: "#ff5136",
         size: 0.16,
         blastRadius: 1.9,

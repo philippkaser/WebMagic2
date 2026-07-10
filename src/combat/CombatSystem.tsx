@@ -9,6 +9,8 @@ import { input } from "../player/input";
 import { defaultEquipment } from "../state/persistence";
 import { getStats, useGame } from "../state/gameStore";
 import { getAbility } from "./abilities";
+import { explode } from "./damage";
+import { fireProjectile } from "./projectiles";
 
 const UP = new Vector3(0, 1, 0);
 
@@ -22,6 +24,40 @@ export function CombatSystem() {
   const dir = useMemo(() => new Vector3(), []);
   const right = useMemo(() => new Vector3(), []);
   const origin = useMemo(() => new Vector3(), []);
+
+  // Replicated enemy attacks: replay the host's projectiles/explosions. They
+  // hurt OUR player locally but never re-damage entities (host authority).
+  useEffect(
+    () =>
+      gameEvents.on("entityEvent", (ev) => {
+        if (ev.k === "enemyCast") {
+          fireProjectile({
+            team: "enemy",
+            position: ev.origin,
+            velocity: ev.velocity,
+            damage: ev.damage,
+            color: ev.color,
+            size: ev.size,
+            blastRadius: ev.blastRadius,
+            blastImpulse: ev.blastImpulse,
+            cosmetic: true,
+          });
+        } else if (ev.k === "boom") {
+          explode({
+            position: ev.pos,
+            radius: ev.radius,
+            damage: ev.damage,
+            impulse: ev.impulse,
+            team: "enemy",
+            color: ev.color,
+            particles: 50,
+            light: 50,
+            remote: true,
+          });
+        }
+      }),
+    [],
+  );
 
   // Replay floor-mates' casts locally (visuals + physics use identical code).
   useEffect(

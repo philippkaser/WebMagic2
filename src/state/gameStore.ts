@@ -25,6 +25,8 @@ export interface GameState {
   /** Quality toggle: the staff/moon shadow costs several extra scene renders
    * per frame, so it's opt-in. */
   shadows: boolean;
+  /** Display name shown to floor-mates. */
+  playerName: string;
 
   startGame(): void;
   openPortalSelect(): void;
@@ -40,15 +42,25 @@ export interface GameState {
   respawn(): void;
   setPrompt(prompt: string | null): void;
   toggleShadows(): void;
+  setPlayerName(name: string): void;
 }
 
 const SHADOWS_KEY = "webmagic.shadows.v1";
+const NAME_KEY = "webmagic.name.v1";
 
 function loadShadowSetting(): boolean {
   try {
     return localStorage.getItem(SHADOWS_KEY) === "1";
   } catch {
     return false;
+  }
+}
+
+function loadPlayerName(): string {
+  try {
+    return localStorage.getItem(NAME_KEY) ?? "Wizard";
+  } catch {
+    return "Wizard";
   }
 }
 
@@ -67,6 +79,7 @@ export const useGame = create<GameState>((set, get) => ({
   prompt: null,
   lastDeath: null,
   shadows: loadShadowSetting(),
+  playerName: loadPlayerName(),
 
   startGame: () => set({ phase: "village" }),
 
@@ -75,7 +88,7 @@ export const useGame = create<GameState>((set, get) => ({
 
   enterDungeon: async (entryFloor) => {
     set({ phase: "loading", prompt: null });
-    await session.ensureConnected();
+    await session.ensureConnected(get().playerName);
     const assignment = await session.requestFloor(entryFloor);
     const stats = getStats();
     set({
@@ -207,6 +220,16 @@ export const useGame = create<GameState>((set, get) => ({
       // Setting is session-only without storage.
     }
     gameEvents.emit("message", `Shadows ${shadows ? "on" : "off"}`);
+  },
+
+  setPlayerName: (name) => {
+    const clean = name.replace(/[^\w \-']/g, "").slice(0, 16).trim() || "Wizard";
+    set({ playerName: clean });
+    try {
+      localStorage.setItem(NAME_KEY, clean);
+    } catch {
+      // Session-only without storage.
+    }
   },
 }));
 

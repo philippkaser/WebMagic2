@@ -50,6 +50,8 @@ export interface ProjectileSpec {
   color: string;
   size: number;
   gravityScale: number;
+  /** Replayed peer/replicated projectile: explosion skips entity damage. */
+  cosmetic: boolean;
 }
 
 export interface FireOptions {
@@ -62,6 +64,7 @@ export interface FireOptions {
   color?: string;
   size?: number;
   gravityScale?: number;
+  cosmetic?: boolean;
 }
 
 const MAX_LIVE = 80;
@@ -80,6 +83,7 @@ export function fireProjectile(opts: FireOptions): void {
     color: opts.color ?? "#7fd4ff",
     size: opts.size ?? 0.13,
     gravityScale: opts.gravityScale ?? 0,
+    cosmetic: opts.cosmetic ?? false,
   });
 }
 
@@ -129,6 +133,7 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
       color: spec.color,
       particles: 14,
       light: 14,
+      remote: spec.cosmetic,
     });
     remove(spec.id);
   }, [remove, spec]);

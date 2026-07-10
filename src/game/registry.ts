@@ -56,3 +56,9 @@ export function resetRegistries(): void {
   hittables.clear();
   dynamicBodies.clear();
 }
+
+// Dev-only inspection for end-to-end tests.
+if (typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__hittables = () =>
+    [...hittables.values()].map((h) => ({ team: h.team, p: h.getPosition() }));
+}

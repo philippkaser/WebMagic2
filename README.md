@@ -67,12 +67,14 @@ instance generates the identical floor from the shared seed, sees each other
 as animated wizards, and sees each other's spellcasts replayed (bolts, blasts
 and their physics knockback included).
 
-**What syncs today:** floor layout, player positions/staffs, ability casts,
-join/leave. **What doesn't yet:** enemy AI, enemy/prop damage and physics
-motion are simulated per-client, so crate positions and enemy health drift
-apart between players. Making the server (or a host client) authoritative
-over those is the next milestone — see
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the plan.
+Shared floors are truly shared: each instance has a **simulation host**
+(first joiner, migrates seamlessly if they leave) whose enemies, props, boss
+and loot are authoritative. Replicas interpolate entity snapshots at 10 Hz,
+replay deaths/breaks/boss attacks as events, and request damage/pickups from
+the host — so everyone fights the same wisps, sees the same crates fly, and
+an orb can never be looted twice. Your own health is always decided locally.
+Set your name on the title screen; floor-mates see it over your head. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
 ## Project layout
 

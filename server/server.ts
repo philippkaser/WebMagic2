@@ -45,9 +45,24 @@ function mates(id: string): Client[] {
   return result;
 }
 
+/** Simulation host = first (oldest) member of the instance's player set. */
+function hostOf(playerId: string): string {
+  const inst = directory.instanceOf(playerId);
+  if (!inst) return "";
+  return inst.players.values().next().value ?? "";
+}
+
 function leaveCurrentInstance(client: Client): void {
-  for (const m of mates(client.id)) send(m, { t: "peerLeft", playerId: client.id });
+  const wasHost = hostOf(client.id) === client.id;
+  const remaining = mates(client.id);
+  for (const m of remaining) send(m, { t: "peerLeft", playerId: client.id });
   directory.leave(client.id);
+  // Host migration: promote the next-oldest member.
+  if (wasHost && remaining.length > 0) {
+    const newHost = hostOf(remaining[0].id);
+    for (const m of remaining) send(m, { t: "hostChanged", hostId: newHost });
+    log(`host of ${directory.instanceOf(remaining[0].id)?.id} -> ${newHost}`);
+  }
 }
 
 function handleMessage(client: Client, msg: ClientMsg): void {
@@ -68,6 +83,7 @@ function handleMessage(client: Client, msg: ClientMsg): void {
           floor: inst.floor,
           seed: inst.seed,
           playerCount: inst.players.size,
+          hostId: hostOf(client.id),
         },
       });
       const others = mates(client.id);
@@ -110,6 +126,40 @@ function handleMessage(client: Client, msg: ClientMsg): void {
     case "leaveDungeon":
       leaveCurrentInstance(client);
       break;
+
+    // ── Host-authority replication relays ─────────────────────────────────
+    case "entity": {
+      if (hostOf(client.id) !== client.id) return; // only the host may publish
+      const relay: ServerMsg = { t: "entitySnap", ents: msg.ents };
+      for (const m of mates(client.id)) send(m, relay);
+      break;
+    }
+    case "entityEvent": {
+      if (hostOf(client.id) !== client.id) return;
+      const relay: ServerMsg = { t: "entityEvent", ev: msg.ev };
+      for (const m of mates(client.id)) send(m, relay);
+      break;
+    }
+    case "hit": {
+      const host = clients.get(hostOf(client.id));
+      if (host && host.id !== client.id) {
+        send(host, {
+          t: "hitRequest",
+          playerId: client.id,
+          targetId: msg.targetId,
+          damage: msg.damage,
+          impulse: msg.impulse,
+        });
+      }
+      break;
+    }
+    case "takeOrb": {
+      const host = clients.get(hostOf(client.id));
+      if (host && host.id !== client.id) {
+        send(host, { t: "orbRequest", playerId: client.id, orbId: msg.orbId });
+      }
+      break;
+    }
   }
 }
 
