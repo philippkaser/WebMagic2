@@ -19,13 +19,14 @@ export function HUD() {
     }
   }, [phase]);
 
-  // Global quality/debug hotkeys.
+  // Global quality/debug hotkeys. Letter keys are primary — macOS reserves
+  // F-keys (Mission Control, Spotlight) so they often never reach the page.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === "F3") {
+      if (e.code === "KeyP" || e.code === "F3") {
         e.preventDefault();
         setShowPerf((v) => !v);
-      } else if (e.code === "F4") {
+      } else if (e.code === "KeyO" || e.code === "F4") {
         e.preventDefault();
         useGame.getState().toggleShadows();
       }
@@ -37,6 +38,7 @@ export function HUD() {
   return (
     <div style={styles.root}>
       <style>{css}</style>
+      <div style={styles.buildStamp}>{__BUILD_INFO__}</div>
       {showPerf && <PerfOverlay />}
       {(phase === "village" || phase === "dungeon") && <PlayHud />}
       {phase === "menu" && <MenuOverlay />}
@@ -286,7 +288,7 @@ function MenuOverlay() {
       <div style={styles.controls}>
         WASD move · Space jump · Left/Right click cast · Shift dash (cloak) · E interact
         <br />
-        F3 fps overlay · F4 shadows
+        P fps overlay · O shadows
       </div>
     </Overlay>
   );
@@ -402,6 +404,15 @@ const styles: Record<string, CSSProperties> = {
     transform: "translateX(-50%)",
     width: "min(46vw, 520px)",
     textAlign: "center",
+  },
+  buildStamp: {
+    position: "absolute",
+    bottom: 2,
+    right: 8,
+    fontSize: 10,
+    letterSpacing: 1,
+    color: "#4d4756",
+    textShadow: "1px 1px 0 #000",
   },
   overlay: {
     position: "absolute",
