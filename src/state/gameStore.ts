@@ -7,7 +7,7 @@ import type { DerivedStats, Equipment } from "../items/types";
 import { session } from "../net/session";
 import { defaultEquipment, loadSave, persistSave } from "./persistence";
 
-export type Phase = "menu" | "village" | "select" | "loading" | "dungeon" | "dead";
+export type Phase = "menu" | "village" | "loading" | "dungeon" | "dead";
 
 export interface GameState {
   phase: Phase;
@@ -16,6 +16,8 @@ export interface GameState {
   instanceId: string;
   /** Highest unlocked entry floor (1 or a checkpoint multiple). */
   checkpoint: number;
+  /** Where the village rift currently leads — attuned at the waystone slab. */
+  entryFloor: number;
   health: number;
   mana: number;
   equipment: Equipment;
@@ -27,13 +29,16 @@ export interface GameState {
   shadows: boolean;
   /** Display name shown to floor-mates. */
   playerName: string;
+  /** Bumped each time the splash screen is left — plays the mind-dive. */
+  mindDiveId: number;
+  /** Tint of the warp tunnel shown while phase === "loading". */
+  warpTint: string;
 
   startGame(): void;
-  openPortalSelect(): void;
-  closePortalSelect(): void;
+  cycleEntryFloor(): void;
   enterDungeon(entryFloor: number): Promise<void>;
   descend(): Promise<void>;
-  bankAndLeave(): void;
+  bankAndLeave(): Promise<void>;
   equipItem(defId: string): void;
   takeDamage(amount: number): void;
   heal(amount: number): void;
@@ -67,12 +72,19 @@ function loadPlayerName(): string {
 const saved = loadSave();
 let manaAccumulator = 0;
 
+/** Portal travel always takes at least this long, so the warp tunnel reads as
+ * a journey through space and time rather than a loading flicker. */
+const WARP_MS = 1400;
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export const useGame = create<GameState>((set, get) => ({
   phase: "menu",
   floor: 0,
   floorSeed: 0,
   instanceId: "",
   checkpoint: saved.checkpoint,
+  entryFloor: 1,
   health: computeStats(saved.equipment).maxHealth,
   mana: PLAYER.maxMana,
   equipment: saved.equipment,
@@ -80,16 +92,24 @@ export const useGame = create<GameState>((set, get) => ({
   lastDeath: null,
   shadows: loadShadowSetting(),
   playerName: loadPlayerName(),
+  mindDiveId: 0,
+  warpTint: "#46ffd0",
 
-  startGame: () => set({ phase: "village" }),
+  startGame: () => set({ phase: "village", mindDiveId: get().mindDiveId + 1 }),
 
-  openPortalSelect: () => set({ phase: "select", prompt: null }),
-  closePortalSelect: () => set({ phase: "village" }),
+  cycleEntryFloor: () => {
+    const floors = entryFloors(get().checkpoint);
+    const next = floors[(floors.indexOf(get().entryFloor) + 1) % floors.length];
+    set({ entryFloor: next });
+    gameEvents.emit("message", `The waystone attunes — floor ${next}`);
+  },
 
   enterDungeon: async (entryFloor) => {
-    set({ phase: "loading", prompt: null });
+    set({ phase: "loading", warpTint: "#46ffd0", prompt: null });
+    const warp = wait(WARP_MS);
     await session.ensureConnected(get().playerName);
     const assignment = await session.requestFloor(entryFloor);
+    await warp;
     const stats = getStats();
     set({
       phase: "dungeon",
@@ -106,8 +126,10 @@ export const useGame = create<GameState>((set, get) => ({
   descend: async () => {
     const next = get().floor + 1;
     if (next > DUNGEON.maxFloor) return;
-    set({ phase: "loading", prompt: null });
+    set({ phase: "loading", warpTint: "#46ffd0", prompt: null });
+    const warp = wait(WARP_MS);
     const assignment = await session.requestFloor(next);
+    await warp;
     set({
       phase: "dungeon",
       floor: assignment.floor,
@@ -117,7 +139,7 @@ export const useGame = create<GameState>((set, get) => ({
     gameEvents.emit("message", `Floor ${assignment.floor}`);
   },
 
-  bankAndLeave: () => {
+  bankAndLeave: async () => {
     const { floor, checkpoint, equipment } = get();
     const banked: Equipment = {
       staff: { ...equipment.staff, runLoot: false },
@@ -128,10 +150,13 @@ export const useGame = create<GameState>((set, get) => ({
     const newCheckpoint = Math.max(checkpoint, floor);
     persistSave({ checkpoint: newCheckpoint, equipment: banked });
     session.leaveDungeon();
+    set({ phase: "loading", warpTint: "#ffd44f", prompt: null });
+    await wait(WARP_MS);
     set({
       phase: "village",
       equipment: banked,
       checkpoint: newCheckpoint,
+      entryFloor: newCheckpoint, // the rift stays attuned to where you left
       floor: 0,
       health: computeStats(banked).maxHealth,
       mana: PLAYER.maxMana,

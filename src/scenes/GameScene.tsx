@@ -29,7 +29,9 @@ export function GameScene() {
     () => (inDungeon && floorSeed ? generateFloor(floorSeed, floor) : null),
     [inDungeon, floorSeed, floor],
   );
-  const controlsEnabled = phase === "village" || phase === "dungeon";
+  // Keep pointer lock alive through portal warps: travel is seamless, the
+  // player never has to click back in on the other side.
+  const controlsEnabled = phase === "village" || phase === "dungeon" || phase === "loading";
 
   // dpr 0.35: the game IS pixelated, so rendering at native resolution was
   // pure waste — this one number cut measured frame time ~5x. The browser

@@ -67,10 +67,8 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
   }, [layout.spawn]);
 
   const descend = () => void useGame.getState().descend();
-  const bankAndLeave = () => {
-    document.exitPointerLock();
-    useGame.getState().bankAndLeave();
-  };
+  // Pointer lock survives the warp home — arrival in the village is seamless.
+  const bankAndLeave = () => void useGame.getState().bankAndLeave();
 
   return (
     <group>

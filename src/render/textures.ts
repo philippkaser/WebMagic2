@@ -17,7 +17,9 @@ export type TextureKind =
   | "planks" // crates
   | "barrel"
   | "ceramic" // pots
-  | "dirt"; // village ground
+  | "dirt" // village ground
+  | "cloth" // wizard robes — grayscale weave, tinted by material color
+  | "runestone"; // waystone / portal steps — dark basalt with carved grooves
 
 export interface TexturePair {
   map: CanvasTexture;
@@ -186,6 +188,43 @@ const PAINTERS: Record<TextureKind, Painter> = {
         const v = 44 + n * 22;
         if (grass) put(p, x, y, v * 0.7, v * 1.15, v * 0.5, 0.5 + n * 0.4);
         else put(p, x, y, v * 1.05, v * 0.82, v * 0.55, 0.4 + n * 0.4);
+      }
+    }
+    return p;
+  },
+
+  // Near-grayscale so the material `color` tints the same weave into any robe.
+  cloth: (rng) => {
+    const p = blank();
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        const n = rng.next();
+        const weave = (x % 4 < 2) !== (y % 4 < 2) ? 0.86 : 1;
+        const fold = Math.sin(x * 0.35 + Math.sin(y * 0.2) * 2.2) * 0.09 + 1;
+        const wear = n > 0.955 ? 0.62 : 1;
+        const v = 168 * weave * fold * wear + n * 22;
+        put(p, x, y, v, v * 0.99, v * 1.02, 0.45 + (weave < 1 ? 0 : 0.2) + n * 0.3);
+      }
+    }
+    return p;
+  },
+
+  runestone: (rng) => {
+    const p = blank();
+    // Carved groove pattern: broken horizontal channels, like weathered glyph rows.
+    const groove = (x: number, y: number) =>
+      y % 11 > 7 && Math.sin(x * 0.9 + y * 4.7) > -0.35 && x % 13 !== 0;
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        const n = rng.next();
+        if (groove(x, y)) {
+          const v = 14 + n * 8;
+          put(p, x, y, v, v * 1.05, v * 1.3, 0.12);
+        } else {
+          const fleck = n > 0.96 ? 1.9 : 1;
+          const v = (30 + n * 16) * fleck;
+          put(p, x, y, v * 0.95, v * 0.97, v * 1.12, 0.6 + n * 0.3);
+        }
       }
     }
     return p;

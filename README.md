@@ -31,7 +31,7 @@ processes in separate terminals: `bun run dev:server` and `bun dev`.
 | Left / Right click | Staff primary / secondary ability |
 | Space | Jump (double-jump / hover with the right boots) |
 | Shift | Blink-dash (requires Cloak of Blinking) |
-| E | Interact (portals, loot, treasure) |
+| E | Interact (rifts, waystone, loot, treasure) |
 | P (or F3) | FPS / frame-time overlay |
 | O (or F4) | Toggle shadows (quality option, off by default) |
 
@@ -40,10 +40,14 @@ corner — check it against the latest commit when testing.
 
 ## The game
 
-- **The village** sits above the dungeon. Step through the portal to descend.
+- **The village** sits above the dungeon. Portals are rips in the fabric of
+  space; attune the **waystone slab** beside the village rift to pick your
+  entry floor (1, 5, 10, … — any checkpoint you've banked), then step
+  through. Everything is in-world — no menus — and travel is a warp through
+  space and time that never drops pointer lock.
 - **Floors are seeded**: every floor is generated from an instance seed, so
   everyone sharing a floor instance sees the identical world.
-- **Leave only at checkpoints** (floors 5, 10, 15, …) via the golden portal —
+- **Leave only at checkpoints** (floors 5, 10, 15, …) via the golden rift —
   leaving banks your loot and unlocks that floor as a future entry point.
 - **Death loses the run**: anything you picked up since entering is gone.
 - **Loot** defines your kit: the staff sets both click abilities, amulets add

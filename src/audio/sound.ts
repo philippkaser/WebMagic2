@@ -137,6 +137,29 @@ export function playPortal(): void {
   noise({ dur: 0.8, vol: 0.05, filterFreq: 900, filterEnd: 2600, type: "bandpass", q: 3 });
 }
 
+/** Portal travel: a rising rush through space, with a deep sub underneath. */
+export function playWarp(): void {
+  noise({ dur: 1.4, vol: 0.14, filterFreq: 420, filterEnd: 4600, type: "bandpass", q: 2.1 });
+  tone({ type: "sine", freq: 110, freqEnd: 560, dur: 1.25, vol: 0.09 });
+  tone({ type: "sine", freq: 55, freqEnd: 38, dur: 1.4, vol: 0.14 });
+  tone({ type: "triangle", freq: 880, freqEnd: 2400, dur: 0.9, vol: 0.03, delay: 0.35 });
+}
+
+/** Splash → village: falling into the mind of the wizard. */
+export function playMindDive(): void {
+  tone({ type: "sine", freq: 240, freqEnd: 36, dur: 1.7, vol: 0.16 });
+  tone({ type: "triangle", freq: 420, freqEnd: 1600, dur: 1.3, vol: 0.045, delay: 0.15 });
+  noise({ dur: 1.7, vol: 0.09, filterFreq: 260, filterEnd: 2800, type: "bandpass", q: 1.3 });
+  tone({ type: "sine", freq: 1320, dur: 0.5, vol: 0.05, delay: 1.15 });
+}
+
+/** Waystone attune: a short stony hum settling on a pitch. */
+export function playAttune(): void {
+  tone({ type: "triangle", freq: 196, freqEnd: 294, dur: 0.3, vol: 0.1 });
+  tone({ type: "sine", freq: 588, dur: 0.35, vol: 0.06, delay: 0.08 });
+  noise({ dur: 0.18, vol: 0.05, filterFreq: 1400, filterEnd: 300, type: "bandpass", q: 1.5 });
+}
+
 export function playBossRoar(): void {
   tone({ type: "sawtooth", freq: 90, freqEnd: 42, dur: 0.9, vol: 0.22 });
   tone({ type: "square", freq: 61, freqEnd: 30, dur: 1.1, vol: 0.14, delay: 0.05 });

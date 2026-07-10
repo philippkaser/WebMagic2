@@ -8,8 +8,8 @@ import { GROUPS } from "../core/config";
 import { resetRegistries } from "../game/registry";
 import { PlayerController } from "../player/PlayerController";
 import { getTextures } from "../render/textures";
-import { useGame } from "../state/gameStore";
-import { Breakable, Portal, Torch } from "../world/props";
+import { entryFloors, useGame } from "../state/gameStore";
+import { Breakable, Portal, Torch, Waystone } from "../world/props";
 import type { Vec3 } from "../world/types";
 
 const WORLD_GROUPS = interactionGroups(GROUPS.WORLD, [
@@ -35,6 +35,8 @@ const SPAWN: Vec3 = [0, 1.2, 10];
 export function Village() {
   const scene = useThree((s) => s.scene);
   const shadows = useGame((s) => s.shadows);
+  const checkpoint = useGame((s) => s.checkpoint);
+  const entryFloor = useGame((s) => s.entryFloor);
   const groundTex = useMemo(() => getTextures("dirt", 22, 22), []);
   const wallTex = useMemo(() => getTextures("stone"), []);
 
@@ -49,10 +51,9 @@ export function Village() {
     };
   }, [scene]);
 
-  const openSelect = () => {
-    document.exitPointerLock();
-    useGame.getState().openPortalSelect();
-  };
+  // Stepping through is diegetic: the waystone slab picks the destination,
+  // the rift takes you there — no menu in between.
+  const stepThrough = () => void useGame.getState().enterDungeon(entryFloor);
 
   return (
     <group>
@@ -107,8 +108,17 @@ export function Village() {
       <Portal
         position={[0, 0, 0]}
         color="#46ffd0"
-        prompt="E — Enter the dungeon"
-        onUse={openSelect}
+        prompt={`E — Step through the rift (floor ${entryFloor})`}
+        onUse={stepThrough}
+      />
+
+      {/* The waystone slab attunes where the rift leads: floor 1, 5, 10… */}
+      <Waystone
+        position={[-4.2, 0, 1.8]}
+        rotation={0.7}
+        floors={entryFloors(checkpoint)}
+        selected={entryFloor}
+        onCycle={useGame.getState().cycleEntryFloor}
       />
 
       <PlayerController spawn={SPAWN} />
