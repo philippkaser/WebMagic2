@@ -9,18 +9,13 @@ import {
 } from "@react-three/rapier";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AdditiveBlending,
   CanvasTexture,
   Color,
   DoubleSide,
   Group,
   MeshBasicMaterial,
   NearestFilter,
-  Path,
   ShaderMaterial,
-  Shape,
-  ShapeGeometry,
-  Vector2,
   Vector3,
 } from "three";
 import { playAttune, playHit, playPortal } from "../audio/sound";
@@ -45,6 +40,7 @@ import { registerEntity, setTreasureProvider } from "../net/replication";
 import { session } from "../net/session";
 import { useGame } from "../state/gameStore";
 import { getTextures } from "../render/textures";
+import { GLSL_NOISE } from "../render/shaderLib";
 import type { PropKind, Vec3 } from "./types";
 
 const PROP_GROUPS = interactionGroups(GROUPS.PROP, [
@@ -337,72 +333,92 @@ export function Torch({ position }: { position: Vec3 }) {
 
 // ── Portal: a rip in the fabric of space ─────────────────────────────────────
 
-/** Half-extents of the tear in local units — the shader normalizes by these. */
-const TEAR_W = 0.8;
-const TEAR_H = 1.45;
-
-/** Jagged tear outline, seeded per portal so no two rips are identical. */
-function tearPoints(seedKey: string, scale: number, jitter: number): [number, number][] {
-  const rng = new Rng(hashSeed(`tear:${seedKey}`));
-  const n = 18;
-  const pts: [number, number][] = [];
-  for (let i = 0; i < n; i++) {
-    const a = (i / n) * Math.PI * 2;
-    // Alternating spikes read as torn cloth rather than a smooth oval.
-    const jag = 1 + (i % 2 === 0 ? jitter : -jitter * 0.6) + (rng.next() - 0.5) * jitter;
-    pts.push([Math.cos(a) * TEAR_W * jag * scale, Math.sin(a) * TEAR_H * jag * scale]);
-  }
-  return pts;
-}
-
-function shapeFrom(pts: [number, number][]): Shape {
-  const shape = new Shape();
-  shape.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; i++) shape.lineTo(pts[i][0], pts[i][1]);
-  shape.closePath();
-  return shape;
-}
-
 const RIP_VERT = /* glsl */ `
-varying vec2 vP;
+varying vec2 vUv;
 void main() {
-  vP = position.xy;
+  vUv = uv;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
-/** The void inside the tear: chunky-pixel starfield spiralling down into a
- * deep purple nothing, torn edges burning with the portal color. */
-const RIP_FRAG = /* glsl */ `
+/** A wound torn in space: a tall lens-shaped rip whose frayed edges writhe with
+ * animated fbm, opening onto a swirling vortex of stars and nebula being pulled
+ * into a deep-violet nothing, the torn edge burning with the rift's color.
+ * Everything is SDF + noise in one shader — no geometry to author, and the
+ * banded palette keeps the pixel-magic look. */
+const RIP_FRAG =
+  /* glsl */ `
+precision highp float;
 uniform float uTime;
 uniform vec3 uColor;
-uniform float uActive; // 1 open … ~0.1 sealed
-varying vec2 vP;
-
-float hash(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
-
+uniform float uActive; // 1 open … ~0.12 sealed
+uniform float uSeed;
+varying vec2 vUv;
+` +
+  GLSL_NOISE +
+  /* glsl */ `
 void main() {
-  vec2 p = vP / vec2(${TEAR_W.toFixed(2)}, ${TEAR_H.toFixed(2)});
-  p = floor(p * 30.0) / 30.0; // quantize: the void is pixelated too
-  float r = length(p);
-  float ang = atan(p.y, p.x);
+  // Plane-local coords: p.x in [-1.5,1.5], p.y in [-2,2].
+  vec2 p = (vUv - 0.5) * vec2(3.0, 4.0);
+  float sd = uSeed;
 
-  // Star streaks caught in the pull, spiralling toward the center.
-  float swirl = ang + (1.0 - r) * 3.5 - uTime * 0.3;
-  vec2 g = vec2(swirl * 2.4, pow(max(r, 0.02), 0.55) * 7.0 - uTime * (0.55 + 0.9 * uActive));
-  vec2 cell = floor(g * 3.0);
-  float h = hash(cell);
-  float star = step(0.84, h) * (0.3 + 0.7 * fract(h * 91.7 + uTime * (0.4 + h)));
+  // ---- Tear silhouette: a vertical lens tapering to points, spine wobbling,
+  //      width frayed by animated noise so the rip strains and flutters. ----
+  float y = p.y / 1.9;                        // -1..1
+  float taper = max(1.0 - y * y, 0.0);
+  float halfW = pow(taper, 0.7) * 0.95;
+  float fray = fbm(vec2(y * 3.4 + sd, uTime * 0.5 + sd));
+  halfW *= 0.55 + 0.55 * fray;
+  halfW *= mix(0.28, 1.0, uActive);           // sealed → a thin slit
+  float spine = 0.18 * (fbm(vec2(y * 2.3 - uTime * 0.25 + sd, sd)) - 0.5);
+  float d = abs(p.x - spine) - halfW;         // <0 inside the tear
 
-  vec3 col = mix(vec3(0.006, 0.004, 0.02), vec3(0.05, 0.02, 0.11), r); // deep void
-  col += uColor * star * (0.15 + 0.85 * uActive) * (0.35 + r * 0.8);
-  col += uColor * pow(smoothstep(0.45, 1.0, r), 3.0) * (0.5 + 2.4 * uActive); // burning edge
-  gl_FragColor = vec4(col, 1.0);
+  float inside = smoothstep(0.05, -0.05, d);
+  float edge = smoothstep(0.30, 0.0, abs(d)); // rim band around the tear
+
+  // ---- Void vortex: two star layers + nebula spiralling toward the center,
+  //      looking THROUGH the tear into another dimension. ----
+  vec2 c = vec2(p.x - spine, p.y * 0.55);
+  float rr = length(c);
+  float aa = atan(c.y, c.x);
+  float swirl = aa + (1.3 - rr) * 2.7 + uTime * (0.32 + 0.5 * uActive);
+
+  // near stars, streaking as they're pulled in
+  vec2 g0 = vec2(swirl * 2.2, pow(max(rr, 0.03), 0.5) * 6.0 - uTime * (0.7 + 0.8 * uActive));
+  float sh0 = hash21(floor(g0));
+  float star0 = step(0.88, sh0) * (0.4 + 0.6 * fract(sh0 * 71.3 + uTime));
+  // far, denser dust layer swirling the other cadence
+  vec2 g1 = vec2(swirl * 4.3 + 9.0, pow(max(rr, 0.03), 0.6) * 11.0 - uTime * 1.3);
+  float sh1 = hash21(floor(g1));
+  float star1 = step(0.93, sh1) * 0.5;
+
+  float neb = fbm(vec2(swirl * 1.2, rr * 2.4 - uTime * 0.5));
+  neb = pow(neb, 1.5);
+
+  // Deep center glows faintly with the rift color — a distant elsewhere.
+  vec3 deep = mix(uColor * 0.10, vec3(0.05, 0.02, 0.11), smoothstep(0.0, 0.9, rr));
+  vec3 voidCol = deep;
+  voidCol += uColor * neb * 0.55 * (1.0 - rr * 0.6);
+  voidCol += (vec3(0.85) + uColor * 0.6) * star0 * (0.5 + 0.8 * uActive);
+  voidCol += uColor * star1 * (0.4 + 0.6 * uActive);
+
+  // ---- Burning frayed edge ----
+  float flick = 0.82 + 0.18 * sin(uTime * 9.0 + p.y * 6.0);
+  vec3 edgeCol = uColor * edge * (1.2 + 1.4 * uActive) * flick;
+
+  vec3 col = voidCol * inside + edgeCol;
+
+  // Stepped palette → deliberate pixel-magic banding, not muddy gradients.
+  col = floor(col * 16.0) / 16.0;
+
+  // Opaque where the tear is; a soft glow halo just outside it.
+  float halo = smoothstep(0.44, 0.0, abs(d)) * edge * (0.4 + 0.6 * uActive);
+  float alpha = clamp(max(inside, halo), 0.0, 1.0);
+  if (alpha < 0.01) discard;
+  gl_FragColor = vec4(col, alpha);
 }`;
 
 /** Interactive portal — a tear ripped through the world. While `locked`, the
- * wound is barely open: dim, still, and it refuses use. */
+ * wound is barely open: a dim, near-shut slit that refuses use. */
 export function Portal({
   position,
   color,
@@ -419,40 +435,33 @@ export function Portal({
   lockedPrompt?: string;
 }) {
   const group = useRef<Group>(null);
-  const rim = useRef<MeshBasicMaterial>(null);
-  const shards = useRef<Group>(null);
   const light = useRef<DynamicLightSource | null>(null);
   const sparkClock = useRef(0);
-  const activity = useRef(locked ? 0.1 : 1);
+  const activity = useRef(locked ? 0.12 : 1);
 
   const seedKey = position.join(",");
-  const { voidGeo, rimGeo, material, stepTex } = useMemo(() => {
-    const inner = tearPoints(seedKey, 1, 0.14);
-    const outerShape = shapeFrom(tearPoints(seedKey, 1.07, 0.2));
-    outerShape.holes.push(new Path(inner.map(([x, y]) => new Vector2(x * 0.97, y * 0.97))));
+  const { material, stepTex } = useMemo(() => {
     const material = new ShaderMaterial({
       vertexShader: RIP_VERT,
       fragmentShader: RIP_FRAG,
       uniforms: {
         uTime: { value: 0 },
         uColor: { value: new Color(color) },
-        uActive: { value: locked ? 0.1 : 1 },
+        uActive: { value: locked ? 0.12 : 1 },
+        uSeed: { value: (hashSeed(seedKey) % 1000) / 100 },
       },
+      transparent: true,
+      depthWrite: false,
       side: DoubleSide,
     });
-    return {
-      voidGeo: new ShapeGeometry(shapeFrom(inner)),
-      rimGeo: new ShapeGeometry(outerShape),
-      material,
-      stepTex: getTextures("runestone"),
-    };
+    return { material, stepTex: getTextures("runestone") };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedKey]);
 
   useEffect(() => {
     material.uniforms.uColor.value.set(color);
     const src = addLightSource({
-      position: [position[0], position[1] + 1.6, position[2] + 0.8],
+      position: [position[0], position[1] + 1.7, position[2] + 0.8],
       color,
       intensity: 9,
       distance: 12,
@@ -468,22 +477,19 @@ export function Portal({
   useFrame(({ clock }, dt) => {
     const t = clock.elapsedTime;
     // The wound eases open / shut instead of snapping when the boss falls.
-    activity.current += ((locked ? 0.1 : 1) - activity.current) * Math.min(1, dt * 2.5);
+    activity.current += ((locked ? 0.12 : 1) - activity.current) * Math.min(1, dt * 2.5);
     const act = activity.current;
     material.uniforms.uTime.value = t;
     material.uniforms.uActive.value = act;
-    if (rim.current) {
-      // Unstable edge: flicker like the tear is straining to close.
-      const flicker = 0.75 + Math.sin(t * 7.3) * 0.12 + Math.sin(t * 23.1) * 0.08;
-      rim.current.opacity = act * flicker;
-    }
     if (light.current) light.current.intensity = act * (9 + Math.sin(t * 2.2) * 1.2);
     if (group.current) {
       // Breathe, don't spin — a rip is a wound, not a machine.
-      const s = 1 + Math.sin(t * 1.7) * 0.02 * act;
-      group.current.scale.set(s, 1 + Math.sin(t * 1.7 + 1.2) * 0.015 * act, 1);
+      group.current.scale.set(
+        1 + Math.sin(t * 1.7) * 0.02 * act,
+        1 + Math.sin(t * 1.7 + 1.2) * 0.015 * act,
+        1,
+      );
     }
-    if (shards.current) shards.current.rotation.z = t * 0.25 * act;
 
     sparkClock.current -= dt;
     if (sparkClock.current <= 0 && !locked) {
@@ -491,8 +497,8 @@ export function Portal({
       const a = Math.random() * Math.PI * 2;
       spawnBurst({
         position: [
-          position[0] + Math.cos(a) * TEAR_W * 1.1,
-          position[1] + 1.55 + Math.sin(a) * TEAR_H * 1.05,
+          position[0] + Math.cos(a) * 0.9,
+          position[1] + 1.7 + Math.sin(a) * 1.6,
           position[2],
         ],
         count: 1,
@@ -527,38 +533,11 @@ export function Portal({
         <boxGeometry args={[3.4, 0.24, 1.6]} />
         <meshStandardMaterial map={stepTex.map} normalMap={stepTex.normalMap} roughness={0.85} />
       </mesh>
-      <group ref={group} position={[0, 1.55, 0]}>
-        {/* The void beyond */}
-        <mesh geometry={voidGeo} material={material} />
-        {/* Torn, burning edge */}
-        <mesh geometry={rimGeo} position={[0, 0, 0.005]}>
-          <meshBasicMaterial
-            ref={rim}
-            color={color}
-            toneMapped={false}
-            transparent
-            blending={AdditiveBlending}
-            side={DoubleSide}
-            depthWrite={false}
-          />
+      {/* The rip itself — one shader plane */}
+      <group ref={group} position={[0, 1.8, 0]}>
+        <mesh material={material}>
+          <planeGeometry args={[3.0, 4.0]} />
         </mesh>
-        {/* Debris caught in the tear's pull */}
-        <group ref={shards}>
-          {[0, 1, 2, 3, 4].map((i) => {
-            const a = (i / 5) * Math.PI * 2 + i * 1.7;
-            return (
-              <mesh
-                key={i}
-                position={[Math.cos(a) * (TEAR_W + 0.45), Math.sin(a) * (TEAR_H + 0.3) * 0.8, 0.1]}
-                rotation={[i * 1.3, i * 0.7, i * 2.1]}
-                scale={0.5 + (i % 3) * 0.3}
-              >
-                <tetrahedronGeometry args={[0.09]} />
-                <meshStandardMaterial color="#1a1626" emissive={color} emissiveIntensity={0.35} roughness={0.6} />
-              </mesh>
-            );
-          })}
-        </group>
       </group>
     </group>
   );

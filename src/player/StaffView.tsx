@@ -1,10 +1,9 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Group, MeshStandardMaterial } from "three";
 import { gameEvents } from "../core/events";
 import { getItemDef } from "../items/catalog";
 import { playerVelocity } from "../game/player-state";
-import { getTextures } from "../render/textures";
 import { useGame } from "../state/gameStore";
 
 /** First-person staff viewmodel: follows the camera with sway, bob and recoil,
@@ -21,7 +20,6 @@ export function StaffView() {
   const staffDefId = useGame((s) => s.equipment.staff.defId);
   const shadows = useGame((s) => s.shadows);
   const staff = getItemDef(staffDefId);
-  const cloth = useMemo(() => getTextures("cloth"), []);
 
   useEffect(() => gameEvents.on("staffKick", (v) => {
     kick.current = Math.min(1, kick.current + v);
@@ -66,17 +64,6 @@ export function StaffView() {
       />
       <pointLight position={[0, 0.05, -0.3]} color={staff.color} intensity={1.6} distance={4} decay={2} />
       <group scale={0.5}>
-        {/* Your own robed arm: a hooded wizard's sleeve gripping the staff
-            at the ring, trailing down toward your shoulder off-screen */}
-        <mesh position={[0.17, -0.18, 0.26]} rotation={[0.95, 0.15, -0.75]}>
-          <coneGeometry args={[0.09, 0.42, 7]} />
-          <meshStandardMaterial map={cloth.map} normalMap={cloth.normalMap} color="#141020" roughness={0.98} />
-        </mesh>
-        {/* Gloved hand at the grip */}
-        <mesh position={[0.01, 0.06, 0.06]} scale={[1, 0.85, 1]}>
-          <sphereGeometry args={[0.045, 7, 6]} />
-          <meshStandardMaterial color="#0f0b18" roughness={0.95} />
-        </mesh>
         {/* Shaft */}
         <mesh position={[0, -0.12, 0.14]} rotation={[0.5, 0, 0]} castShadow>
           <cylinderGeometry args={[0.022, 0.03, 0.92, 6]} />

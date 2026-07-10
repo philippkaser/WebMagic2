@@ -43,6 +43,14 @@ resolves (or cwd into the repo) — plain `node` won't find playwright-core.
   `getState().phase/.prompt/.floor` to know where you are, `setState({checkpoint: 10})`
   to unlock waystone floors. Prefer real inputs for the flow under test; use the
   hook for assertions and setup.
+- **Capturing transitions mid-flight**: `enterDungeon`/`descend` return a
+  Promise that only resolves once the ~1.4s warp finishes. `await page.evaluate(
+  () => window.__game.getState().enterDungeon(1))` blocks for the whole warp, so
+  every screenshot after it shows the *destination*, never the tunnel. Fire and
+  forget instead — `page.evaluate(() => { window.__game.getState().enterDungeon(1); })`
+  (no return) — then sleep 400–900ms and screenshot to catch the warp shader.
+  The full-screen transitions (portal warp, mind-dive) render on their own
+  low-res WebGL canvas (`ui/shaderCanvas.ts`), a second GL context beside R3F.
 
 ## Flows worth driving
 
