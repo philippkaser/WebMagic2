@@ -1,7 +1,7 @@
 import { useFrame } from "@react-three/fiber";
 import { gameEvents } from "../core/events";
 import { isHost, useNet } from "./netStore";
-import type { EntityEvent, EntitySnap } from "./protocol";
+import type { EntityEvent, EntitySnap, FloorSyncState } from "./protocol";
 import { session } from "./session";
 
 /** Host-authority entity replication.
@@ -27,14 +27,80 @@ export interface ReplicatedEntity {
 
 const entities = new Map<string, ReplicatedEntity>();
 
+/** Every entity id the current floor layout spawns — set by DungeonFloor.
+ * (expected − registered) = the dead, which is what late joiners must learn. */
+let expectedIds: string[] = [];
+
+/** Dead ids from a stateSync that arrived before those entities mounted. */
+const pendingDead = new Set<string>();
+
+export function setExpectedEntities(ids: string[]): void {
+  expectedIds = ids;
+  pendingDead.clear();
+}
+
 export function registerEntity(entity: ReplicatedEntity): () => void {
   entities.set(entity.id, entity);
+  // This entity died before we finished loading the floor (late join).
+  if (pendingDead.has(entity.id)) {
+    pendingDead.delete(entity.id);
+    entity.onEvent?.({ k: "death", id: entity.id, silent: true });
+  }
   return () => {
     // Guard against a new floor's entity re-registering under the same id
     // before the old floor finished unmounting.
     if (entities.get(entity.id) === entity) entities.delete(entity.id);
   };
 }
+
+// ── Late-join state sync ─────────────────────────────────────────────────────
+
+/** LootOrbs/TreasurePedestal register providers so the host can gather the
+ * full floor state without import cycles. */
+let orbProvider: (() => FloorSyncState["orbs"]) | null = null;
+let treasureProvider: (() => boolean) | null = null;
+
+export function setOrbProvider(fn: (() => FloorSyncState["orbs"]) | null): void {
+  orbProvider = fn;
+}
+
+export function setTreasureProvider(fn: (() => boolean) | null): void {
+  treasureProvider = fn;
+}
+
+// Host: a late joiner needs the current floor.
+gameEvents.on("stateRequest", ({ playerId }) => {
+  if (!isHost()) return;
+  const ents: EntitySnap[] = [];
+  for (const entity of entities.values()) {
+    const snap = entity.snap();
+    if (snap) ents.push(snap);
+  }
+  const alive = new Set(entities.keys());
+  session.sendStateSync(playerId, {
+    deadIds: expectedIds.filter((id) => !alive.has(id)),
+    ents,
+    orbs: orbProvider?.() ?? [],
+    treasureTaken: treasureProvider?.() ?? false,
+  });
+});
+
+// Late joiner: apply the host's authoritative state.
+gameEvents.on("stateSync", (state) => {
+  if (isHost()) return;
+  for (const id of state.deadIds) {
+    const entity = entities.get(id);
+    if (entity) entity.onEvent?.({ k: "death", id, silent: true });
+    else pendingDead.add(id); // entity hasn't mounted yet — kill it when it does
+  }
+  for (const snap of state.ents) entities.get(snap.id)?.applySnap(snap);
+  for (const orb of state.orbs) {
+    gameEvents.emit("entityEvent", { k: "orbSpawn", orbId: orb.orbId, defId: orb.defId, pos: orb.pos });
+  }
+  if (state.treasureTaken) {
+    gameEvents.emit("entityEvent", { k: "treasureTaken", by: "", silent: true });
+  }
+});
 
 // ── Incoming routing (module-level: exactly one subscriber app-wide) ─────────
 
@@ -113,6 +179,8 @@ export function ReplicationSystem() {
 export function resetReplication(): void {
   entities.clear();
   lastSent.clear();
+  expectedIds = [];
+  pendingDead.clear();
 }
 
 // Dev-only inspection hook for end-to-end tests.
@@ -123,5 +191,6 @@ if (typeof window !== "undefined" && import.meta.env?.DEV) {
     appliedSnaps: () => appliedSnaps,
     isHost: () => isHost(),
     net: () => useNet.getState(),
+    snapOf: (id: string) => entities.get(id)?.snap() ?? null,
   };
 }

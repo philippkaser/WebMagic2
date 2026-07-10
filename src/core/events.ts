@@ -52,6 +52,10 @@ export interface GameEvents extends Record<string, unknown> {
   };
   /** Replica asked us (the host) to grant a pickup. */
   orbRequest: { playerId: string; orbId: string };
+  /** Server asked us (the host) to bring a late joiner up to date. */
+  stateRequest: { playerId: string };
+  /** The host sent us the authoritative floor state (we're a late joiner). */
+  stateSync: import("../net/protocol").FloorSyncState;
 }
 
 export const gameEvents = new Emitter<GameEvents>();

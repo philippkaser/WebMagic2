@@ -27,7 +27,7 @@ import { allocId, registerDynamicBody, registerHittable } from "../game/registry
 import { rollLoot } from "../items/loot";
 import { dropLoot } from "../items/LootOrbs";
 import { isHost, selectIsHost, useNet } from "../net/netStore";
-import { registerEntity } from "../net/replication";
+import { registerEntity, setTreasureProvider } from "../net/replication";
 import { session } from "../net/session";
 import { useGame } from "../state/gameStore";
 import { getTextures } from "../render/textures";
@@ -81,40 +81,42 @@ export function Breakable({
   const hasSnap = useRef(false);
 
   const kill = useCallback(
-    (remote: boolean) => {
+    (remote: boolean, silent = false) => {
       if (deadRef.current) return;
       deadRef.current = true;
       const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
-      spawnBurst({
-        position: [t.x, t.y, t.z],
-        count: 22,
-        color: spec.shards,
-        speed: 5,
-        ttl: 0.9,
-        size: 0.09,
-      });
-      if (!remote && isHost()) {
-        dropLoot([t.x, Math.max(t.y, 0.5), t.z], floor, spec.lootChance);
-        session.sendEntityEvent({ k: "propBroken", id: entityId });
-      }
-      if (spec.explodes) {
-        // Defer so the chain reaction never re-enters this hit handler. A
-        // replicated break explodes cosmetically vs entities (the host's copy
-        // is authoritative) but still hurts and shoves the local player.
-        const at: Vec3 = [t.x, t.y, t.z];
-        queueMicrotask(() =>
-          explode({
-            position: at,
-            radius: 3.4,
-            damage: 26,
-            impulse: 28,
-            team: "neutral",
-            color: "#ff9a3c",
-            particles: 36,
-            light: 40,
-            remote,
-          }),
-        );
+      if (!silent) {
+        spawnBurst({
+          position: [t.x, t.y, t.z],
+          count: 22,
+          color: spec.shards,
+          speed: 5,
+          ttl: 0.9,
+          size: 0.09,
+        });
+        if (!remote && isHost()) {
+          dropLoot([t.x, Math.max(t.y, 0.5), t.z], floor, spec.lootChance);
+          session.sendEntityEvent({ k: "propBroken", id: entityId });
+        }
+        if (spec.explodes) {
+          // Defer so the chain reaction never re-enters this hit handler. A
+          // replicated break explodes cosmetically vs entities (the host's
+          // copy is authoritative) but still hurts and shoves the local player.
+          const at: Vec3 = [t.x, t.y, t.z];
+          queueMicrotask(() =>
+            explode({
+              position: at,
+              radius: 3.4,
+              damage: 26,
+              impulse: 28,
+              team: "neutral",
+              color: "#ff9a3c",
+              particles: 36,
+              light: 40,
+              remote,
+            }),
+          );
+        }
       }
       setDead(true);
     },
@@ -150,15 +152,17 @@ export function Breakable({
       snap: () => {
         if (deadRef.current) return null;
         const t = body.current?.translation();
-        return t ? { id: entityId, p: [t.x, t.y, t.z] } : null;
+        return t ? { id: entityId, p: [t.x, t.y, t.z], hp: hp.current } : null;
       },
       applyHit: applyDamage,
       applySnap: (s) => {
         target.set(s.p[0], s.p[1], s.p[2]);
         hasSnap.current = true;
+        if (s.hp !== undefined) hp.current = s.hp;
       },
       onEvent: (ev) => {
-        if (ev.k === "propBroken") kill(true);
+        // "death" arrives via late-join stateSync; "propBroken" live.
+        if (ev.k === "propBroken" || ev.k === "death") kill(true, ev.silent);
       },
     });
     const unregisterBody = b ? registerDynamicBody(b) : undefined;
@@ -434,29 +438,39 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
   const orb = useRef<Group>(null);
 
   const consume = useCallback(
-    (byMe: boolean) => {
+    (byMe: boolean, silent = false) => {
       if (takenRef.current) return;
       takenRef.current = true;
       setTaken(true);
       if (byMe) useGame.getState().equipItem(def.id);
-      spawnBurst({
-        position: [position[0], position[1] + 1.5, position[2]],
-        count: 20,
-        color: [def.color, "#ffffff"],
-        speed: 4,
-        ttl: 0.7,
-        size: 0.08,
-      });
-      flashLight([position[0], position[1] + 1.5, position[2]], def.color, 18);
+      if (!silent) {
+        spawnBurst({
+          position: [position[0], position[1] + 1.5, position[2]],
+          count: 20,
+          color: [def.color, "#ffffff"],
+          speed: 4,
+          ttl: 0.7,
+          size: 0.08,
+        });
+        flashLight([position[0], position[1] + 1.5, position[2]], def.color, 18);
+      }
     },
     [def, position],
   );
+
+  // Late-join state sync: tell the host whether the treasure is gone.
+  useEffect(() => {
+    setTreasureProvider(() => takenRef.current);
+    return () => setTreasureProvider(null);
+  }, []);
 
   // Replica: the host announced who got it.
   useEffect(
     () =>
       gameEvents.on("entityEvent", (ev) => {
-        if (ev.k === "treasureTaken") consume(ev.by === useNet.getState().playerId);
+        if (ev.k === "treasureTaken") {
+          consume(ev.by !== "" && ev.by === useNet.getState().playerId, ev.silent);
+        }
       }),
     [consume],
   );

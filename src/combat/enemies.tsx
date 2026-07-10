@@ -15,6 +15,7 @@ import { flashLight } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
 import { getPlayerBody, playerPosition, playerVelocity } from "../game/player-state";
 import { allocId, registerHittable } from "../game/registry";
+import { nearestPlayerTo } from "../game/targets";
 import { dropLoot } from "../items/LootOrbs";
 import { isHost, selectIsHost, useNet } from "../net/netStore";
 import { registerEntity } from "../net/replication";
@@ -46,8 +47,11 @@ export function useEnemyNet(opts: {
   knockTimer?: React.MutableRefObject<number>;
   /** Fraction of knockback impulses that actually applies (bosses resist). */
   knockbackScale?: number;
-  onKill: () => void;
+  /** silent = late-join catch-up: apply the death without VFX. */
+  onKill: (silent?: boolean) => void;
   hitFeedback?: () => void;
+  /** Host: damage landed (from anyone) — wake up and fight back. */
+  onDamaged?: () => void;
   /** Replica: called after each authoritative snapshot (e.g. boss HP bar). */
   onSnap?: (hp: number) => void;
 }) {
@@ -62,6 +66,7 @@ export function useEnemyNet(opts: {
     knockbackScale = 1,
     onKill,
     hitFeedback,
+    onDamaged,
     onSnap,
   } = opts;
   const target = useMemo(() => new Vector3(), []);
@@ -82,9 +87,10 @@ export function useEnemyNet(opts: {
         true,
       );
       onSnap?.(hp.current);
+      onDamaged?.();
       if (hp.current <= 0) onKill();
     },
-    [body, deadRef, flash, hp, knockTimer, knockbackScale, onKill, onSnap],
+    [body, deadRef, flash, hp, knockTimer, knockbackScale, onKill, onDamaged, onSnap],
   );
 
   useEffect(() => {
@@ -119,7 +125,7 @@ export function useEnemyNet(opts: {
         }
       },
       onEvent: (ev) => {
-        if (ev.k === "death") onKill();
+        if (ev.k === "death") onKill(ev.silent);
       },
     });
     return () => {
@@ -172,25 +178,30 @@ export function Wisp({
   const phase = useMemo(() => Math.random() * Math.PI * 2, []);
   const desired = useMemo(() => new Vector3(), []);
 
-  const kill = useCallback(() => {
-    if (deadRef.current) return;
-    deadRef.current = true;
-    const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
-    spawnBurst({
-      position: [t.x, t.y, t.z],
-      count: 30,
-      color: ["#b46bff", "#ffffff", "#4a2a7a"],
-      speed: 7,
-      ttl: 0.8,
-      size: 0.1,
-    });
-    flashLight([t.x, t.y, t.z], "#b46bff", 22);
-    if (isHost()) {
-      dropLoot([t.x, Math.max(t.y, 0.6), t.z], floor, LOOT_DROP_CHANCE);
-      session.sendEntityEvent({ k: "death", id: entityId });
-    }
-    setDead(true);
-  }, [entityId, floor, position]);
+  const kill = useCallback(
+    (silent = false) => {
+      if (deadRef.current) return;
+      deadRef.current = true;
+      const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
+      if (!silent) {
+        spawnBurst({
+          position: [t.x, t.y, t.z],
+          count: 30,
+          color: ["#b46bff", "#ffffff", "#4a2a7a"],
+          speed: 7,
+          ttl: 0.8,
+          size: 0.1,
+        });
+        flashLight([t.x, t.y, t.z], "#b46bff", 22);
+        if (isHost()) {
+          dropLoot([t.x, Math.max(t.y, 0.6), t.z], floor, LOOT_DROP_CHANCE);
+          session.sendEntityEvent({ k: "death", id: entityId });
+        }
+      }
+      setDead(true);
+    },
+    [entityId, floor, position],
+  );
 
   const hitFeedback = useCallback(() => {
     const t = body.current?.translation();
@@ -205,6 +216,10 @@ export function Wisp({
     });
   }, []);
 
+  const onDamaged = useCallback(() => {
+    aggro.current = true; // getting shot wakes it, no matter who shot
+  }, []);
+
   const { interpolate } = useEnemyNet({
     entityId,
     body,
@@ -215,6 +230,7 @@ export function Wisp({
     knockTimer,
     onKill: kill,
     hitFeedback,
+    onDamaged,
   });
 
   useFrame(({ clock }, dt) => {
@@ -253,16 +269,17 @@ export function Wisp({
       return;
     }
 
-    // ── Host AI ──────────────────────────────────────────────────────────────
+    // ── Host AI: threaten the NEAREST wizard on the floor, not just ours ─────
+    const target = nearestPlayerTo(t.x, t.y, t.z);
     knockTimer.current -= dt;
     if (!aggro.current) {
-      if (dist < 15 * getStats().aggroMult) aggro.current = true;
+      if (target.dist < 15 * getStats().aggroMult) aggro.current = true;
       b.setLinvel({ x: 0, y: Math.sin(clock.elapsedTime * 1.4 + phase) * 0.5, z: 0 }, true);
       return;
     }
     if (knockTimer.current <= 0) {
-      const targetY = playerPosition.y + 0.5 + Math.sin(clock.elapsedTime * 2.1 + phase) * 0.4;
-      desired.set(dx, 0, dz);
+      const targetY = target.pos.y + 0.5 + Math.sin(clock.elapsedTime * 2.1 + phase) * 0.4;
+      desired.set(target.pos.x - t.x, 0, target.pos.z - t.z);
       if (desired.lengthSq() > 0.01) desired.normalize();
       desired.multiplyScalar(4.3 + floor * 0.07);
       desired.y = Math.max(-3.5, Math.min(3.5, (targetY - t.y) * 2.4));
@@ -339,25 +356,30 @@ export function Sentry({
     [rapier],
   );
 
-  const kill = useCallback(() => {
-    if (deadRef.current) return;
-    deadRef.current = true;
-    const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
-    spawnBurst({
-      position: [t.x, t.y + 0.8, t.z],
-      count: 36,
-      color: ["#ff7a4d", "#ffd9a8", "#3a2418"],
-      speed: 6.5,
-      ttl: 0.9,
-      size: 0.11,
-    });
-    flashLight([t.x, t.y + 0.8, t.z], "#ff7a4d", 26);
-    if (isHost()) {
-      dropLoot([t.x, t.y + 0.5, t.z], floor, LOOT_DROP_CHANCE);
-      session.sendEntityEvent({ k: "death", id: entityId });
-    }
-    setDead(true);
-  }, [entityId, floor, position]);
+  const kill = useCallback(
+    (silent = false) => {
+      if (deadRef.current) return;
+      deadRef.current = true;
+      const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
+      if (!silent) {
+        spawnBurst({
+          position: [t.x, t.y + 0.8, t.z],
+          count: 36,
+          color: ["#ff7a4d", "#ffd9a8", "#3a2418"],
+          speed: 6.5,
+          ttl: 0.9,
+          size: 0.11,
+        });
+        flashLight([t.x, t.y + 0.8, t.z], "#ff7a4d", 26);
+        if (isHost()) {
+          dropLoot([t.x, t.y + 0.5, t.z], floor, LOOT_DROP_CHANCE);
+          session.sendEntityEvent({ k: "death", id: entityId });
+        }
+      }
+      setDead(true);
+    },
+    [entityId, floor, position],
+  );
 
   useEnemyNet({ entityId, body, hp, deadRef, flash, dead, onKill: kill });
 
@@ -369,11 +391,10 @@ export function Sentry({
     flash.current = Math.max(0, flash.current - dt * 5);
     const t = b.translation();
     const headPos = { x: t.x, y: t.y + 1.05, z: t.z };
-    aim.set(playerPosition.x - headPos.x, playerPosition.y - headPos.y, playerPosition.z - headPos.z);
-    const dist = aim.length();
 
     // Head tracking is cosmetic — every client tracks its own player.
-    if (head.current && dist < 30) {
+    aim.set(playerPosition.x - headPos.x, playerPosition.y - headPos.y, playerPosition.z - headPos.z);
+    if (head.current && aim.length() < 30) {
       const targetYaw = Math.atan2(aim.x, aim.z);
       head.current.rotation.y += (targetYaw - head.current.rotation.y) * Math.min(1, dt * 4);
     }
@@ -392,8 +413,11 @@ export function Sentry({
 
     if (fireTimer.current <= 0) {
       fireTimer.current = Math.max(1.4, 2.5 - floor * 0.04);
+      // Fire at the nearest wizard on the floor, not just the host's.
+      const target = nearestPlayerTo(headPos.x, headPos.y, headPos.z);
+      const dist = target.dist;
       if (dist > 26) return;
-      aim.normalize();
+      aim.set(target.pos.x - headPos.x, target.pos.y - headPos.y, target.pos.z - headPos.z).normalize();
       losRay.origin.x = headPos.x;
       losRay.origin.y = headPos.y;
       losRay.origin.z = headPos.z;
@@ -403,11 +427,12 @@ export function Sentry({
       const hit = world.castRay(losRay, dist - 0.6, true, undefined, undefined, undefined, b);
       if (hit !== null) return; // wall or prop in the way
       const speed = 15;
-      aim
-        .multiplyScalar(dist)
-        .addScaledVector(playerVelocity, Math.min(dist / speed, 1.2) * 0.45)
-        .normalize()
-        .multiplyScalar(speed);
+      // Lead the shot only for our own player — peer velocities are unknown.
+      aim.multiplyScalar(dist);
+      if (target.isLocal) {
+        aim.addScaledVector(playerVelocity, Math.min(dist / speed, 1.2) * 0.45);
+      }
+      aim.normalize().multiplyScalar(speed);
       const origin: Vec3 = [
         headPos.x + aim.x * 0.06,
         headPos.y + aim.y * 0.06,

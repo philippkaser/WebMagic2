@@ -4,6 +4,7 @@ import type {
   EntityEvent,
   EntitySnap,
   FloorAssignment,
+  FloorSyncState,
   PeerState,
   ServerMsg,
   Vec3Like,
@@ -90,12 +91,18 @@ export class GameSession {
 
   /** Replica → host: apply this damage to an entity. */
   sendHit(targetId: string, damage: number, impulse: Vec3Like): void {
+    devlog(`sent:hit:${targetId}:${Math.round(damage)}`);
     this.transport?.send({ t: "hit", targetId, damage, impulse });
   }
 
   /** Replica → host: request a loot pickup ("treasure" for the pedestal). */
   sendTakeOrb(orbId: string): void {
     this.transport?.send({ t: "takeOrb", orbId });
+  }
+
+  /** Host → a specific late joiner: current floor state. */
+  sendStateSync(to: string, state: FloorSyncState): void {
+    this.transport?.send({ t: "stateSync", to, state });
   }
 
   private attach(transport: Transport): void {
@@ -165,6 +172,12 @@ export class GameSession {
       case "orbRequest":
         gameEvents.emit("orbRequest", { playerId: msg.playerId, orbId: msg.orbId });
         break;
+      case "stateRequest":
+        gameEvents.emit("stateRequest", { playerId: msg.playerId });
+        break;
+      case "stateSync":
+        gameEvents.emit("stateSync", msg.state);
+        break;
     }
   }
 }
@@ -172,13 +185,19 @@ export class GameSession {
 export const session = new GameSession();
 
 // Dev-only hooks for debugging and end-to-end scripts.
+let devlog: (entry: string) => void = () => {};
 if (typeof window !== "undefined" && import.meta.env?.DEV) {
   const w = window as unknown as Record<string, unknown>;
   w.__session = session;
   const log: string[] = [];
   w.__netlog = log;
-  gameEvents.on("entityEvent", (ev) => {
-    log.push(`recv:${ev.k}${"id" in ev ? `:${ev.id}` : ""}`);
-    if (log.length > 60) log.shift();
-  });
+  devlog = (entry) => {
+    log.push(entry);
+    if (log.length > 80) log.shift();
+  };
+  gameEvents.on("entityEvent", (ev) => devlog(`recv:${ev.k}${"id" in ev ? `:${ev.id}` : ""}`));
+  gameEvents.on("hitRequest", ({ targetId, damage }) =>
+    devlog(`recv:hit:${targetId}:${Math.round(damage)}`),
+  );
+  gameEvents.on("stateSync", (s) => devlog(`recv:stateSync:dead=${s.deadIds.length}:orbs=${s.orbs.length}`));
 }

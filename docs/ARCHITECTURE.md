@@ -87,6 +87,20 @@ host's. A replica's own shots apply damage via `hit` requests to the host
 local: contact burns and incoming blasts hurt each player on their own
 machine, so your survival never waits on a round trip.
 
+**Enemies threaten everyone:** host-side AI (wisp aggro/chase, sentry
+targeting, boss aim and wake) picks the **nearest wizard on the floor**
+(`game/targets.ts`), not the host's own player — and taking damage from
+anyone wakes an enemy immediately. Shot-leading applies only against the
+host's own player (peer velocities aren't tracked).
+
+**Late-join state sync:** joining a floor mid-fight would otherwise generate
+the pristine layout — immortal "ghost" enemies the host already killed. On
+every join the server asks the host for a `stateSync`: dead entity ids
+(computed as expected layout ids minus living registrations), current
+snapshots, live loot orbs, and treasure state. The joiner applies it
+silently (no death VFX), with a pending-dead buffer for entities that
+haven't finished mounting.
+
 **Host migration:** entities carry the replicated hp/position state on every
 client, so when the host leaves, the promoted client's kinematic replicas
 flip to dynamic bodies and its AI resumes from the last snapshot —

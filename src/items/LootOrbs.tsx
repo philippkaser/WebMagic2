@@ -12,6 +12,7 @@ import { spawnBurst } from "../fx/Particles";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { isHost, useNet } from "../net/netStore";
+import { setOrbProvider } from "../net/replication";
 import { session } from "../net/session";
 import { getItemDef } from "./catalog";
 import { rollLoot } from "./loot";
@@ -49,7 +50,17 @@ export function dropLoot(position: Vec3, floor: number, chance = 1): void {
 
 export function LootOrbs() {
   const [orbs, setOrbs] = useState<Orb[]>([]);
+  const orbsRef = useRef<Orb[]>([]);
+  orbsRef.current = orbs;
   const floorSeed = useGame((s) => s.floorSeed);
+
+  // Late-join state sync: give the host access to the live orb list.
+  useEffect(() => {
+    setOrbProvider(() =>
+      orbsRef.current.map((o) => ({ orbId: o.id, defId: o.defId, pos: o.position })),
+    );
+    return () => setOrbProvider(null);
+  }, []);
 
   useEffect(() => {
     pushOrb = (orb) => setOrbs((prev) => [...prev, orb]);

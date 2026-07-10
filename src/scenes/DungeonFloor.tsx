@@ -8,7 +8,7 @@ import { Sentry, Wisp } from "../combat/enemies";
 import { GROUPS, TILE, WALL_HEIGHT } from "../core/config";
 import { resetRegistries } from "../game/registry";
 import { hashSeed } from "../core/rng";
-import { resetReplication } from "../net/replication";
+import { resetReplication, setExpectedEntities } from "../net/replication";
 import { session } from "../net/session";
 import { PlayerController } from "../player/PlayerController";
 import { getTextures } from "../render/textures";
@@ -36,6 +36,13 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
     scene.fog = new Fog("#070409", 9, 50);
     scene.background = new Color("#070409");
     startAmbient("dungeon");
+    // Tell replication which entity ids this floor spawns, so the host can
+    // compute the dead set for late joiners.
+    setExpectedEntities([
+      ...layout.enemies.map((_, i) => `e${i}`),
+      ...layout.props.map((_, i) => `p${i}`),
+      ...(layout.boss ? ["boss"] : []),
+    ]);
     // Pre-compile every material against the floor's final light count now,
     // during the load moment, instead of stuttering on the first explosion.
     const warmup = requestAnimationFrame(() => gl.compile(scene, camera));

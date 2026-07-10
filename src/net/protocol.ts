@@ -32,13 +32,14 @@ export interface EntitySnap {
 }
 
 /** Discrete world events, host → replicas (except pickup *requests*, which
- * flow replica → host as takeOrb). */
+ * flow replica → host as takeOrb). `silent` marks late-join catch-up: apply
+ * the state change without death/break VFX. */
 export type EntityEvent =
-  | { k: "death"; id: string }
-  | { k: "propBroken"; id: string }
+  | { k: "death"; id: string; silent?: boolean }
+  | { k: "propBroken"; id: string; silent?: boolean }
   | { k: "orbSpawn"; orbId: string; defId: string; pos: [number, number, number] }
   | { k: "orbTaken"; orbId: string; by: string }
-  | { k: "treasureTaken"; by: string }
+  | { k: "treasureTaken"; by: string; silent?: boolean }
   | {
       k: "enemyCast";
       origin: [number, number, number];
@@ -66,6 +67,15 @@ export interface PeerState {
   staffId: string;
 }
 
+/** Authoritative floor state the host sends to a late joiner so they don't
+ * see a pristine "ghost" floor where the host already fought. */
+export interface FloorSyncState {
+  deadIds: string[];
+  ents: EntitySnap[];
+  orbs: { orbId: string; defId: string; pos: [number, number, number] }[];
+  treasureTaken: boolean;
+}
+
 export type ClientMsg =
   | { t: "hello"; name: string }
   | { t: "enterFloor"; floor: number }
@@ -75,6 +85,7 @@ export type ClientMsg =
   // Host only — dropped by the server if sent by anyone else:
   | { t: "entity"; ents: EntitySnap[] }
   | { t: "entityEvent"; ev: EntityEvent }
+  | { t: "stateSync"; to: string; state: FloorSyncState }
   // Replica → host:
   | { t: "hit"; targetId: string; damage: number; impulse: Vec3Like }
   | { t: "takeOrb"; orbId: string };
@@ -90,4 +101,8 @@ export type ServerMsg =
   | { t: "entitySnap"; ents: EntitySnap[] }
   | { t: "entityEvent"; ev: EntityEvent }
   | { t: "hitRequest"; playerId: string; targetId: string; damage: number; impulse: Vec3Like }
-  | { t: "orbRequest"; playerId: string; orbId: string };
+  | { t: "orbRequest"; playerId: string; orbId: string }
+  /** Host: a late joiner needs the current floor state. */
+  | { t: "stateRequest"; playerId: string }
+  /** Late joiner: authoritative floor state from the host. */
+  | { t: "stateSync"; state: FloorSyncState };

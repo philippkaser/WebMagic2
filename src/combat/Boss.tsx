@@ -18,6 +18,7 @@ import {
 } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
 import { playerPosition, playerVelocity } from "../game/player-state";
+import { nearestPlayerTo } from "../game/targets";
 import { dropLoot } from "../items/LootOrbs";
 import { isHost, selectIsHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
@@ -87,34 +88,39 @@ export function Boss({
     };
   }, [position]);
 
-  const kill = useCallback(() => {
-    if (deadRef.current) return;
-    deadRef.current = true;
-    const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
-    for (let i = 0; i < 3; i++) {
-      spawnBurst({
-        position: [t.x + (Math.random() - 0.5), t.y + (Math.random() - 0.5), t.z + (Math.random() - 0.5)],
-        count: 40,
-        color: [COLOR, "#ffd9a8", "#2a0d0a"],
-        speed: 8,
-        ttl: 1.1,
-        size: 0.13,
-      });
-    }
-    flashLight([t.x, t.y, t.z], COLOR, 60);
-    playBossRoar();
-    if (isHost()) {
-      // Guaranteed rich drops for the whole party.
-      dropLoot([t.x - 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
-      dropLoot([t.x + 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
-      session.sendEntityEvent({ k: "death", id: BOSS_ID });
-    }
-    gameEvents.emit("message", "The Warden falls. The seal breaks.");
-    gameEvents.emit("bossHp", null);
-    gameEvents.emit("shake", 0.8);
-    setDead(true);
-    onDeath();
-  }, [floor, onDeath, position]);
+  const kill = useCallback(
+    (silent = false) => {
+      if (deadRef.current) return;
+      deadRef.current = true;
+      const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
+      if (!silent) {
+        for (let i = 0; i < 3; i++) {
+          spawnBurst({
+            position: [t.x + (Math.random() - 0.5), t.y + (Math.random() - 0.5), t.z + (Math.random() - 0.5)],
+            count: 40,
+            color: [COLOR, "#ffd9a8", "#2a0d0a"],
+            speed: 8,
+            ttl: 1.1,
+            size: 0.13,
+          });
+        }
+        flashLight([t.x, t.y, t.z], COLOR, 60);
+        playBossRoar();
+        if (isHost()) {
+          // Guaranteed rich drops for the whole party.
+          dropLoot([t.x - 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
+          dropLoot([t.x + 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
+          session.sendEntityEvent({ k: "death", id: BOSS_ID });
+        }
+        gameEvents.emit("message", "The Warden falls. The seal breaks.");
+        gameEvents.emit("shake", 0.8);
+      }
+      gameEvents.emit("bossHp", null);
+      setDead(true);
+      onDeath(); // unseal the portals either way
+    },
+    [floor, onDeath, position],
+  );
 
   const announceHp = useCallback(
     (current: number) => {
@@ -163,12 +169,14 @@ export function Boss({
         8 + flash.current * 10 + (enraged ? 2 + Math.sin(clock.elapsedTime * 8) * 1.5 : 0);
     }
 
-    aim.set(playerPosition.x - t.x, playerPosition.y + 0.4 - t.y, playerPosition.z - t.z);
-    const dist = aim.length();
-
-    // Contact damage is local on every client.
+    // Contact damage is local on every client (distance to OUR player).
+    const localDist = Math.hypot(
+      playerPosition.x - t.x,
+      playerPosition.y + 0.4 - t.y,
+      playerPosition.z - t.z,
+    );
     contactTimer.current -= dt;
-    if (awake.current && dist < 2.3 && contactTimer.current <= 0) {
+    if (awake.current && localDist < 2.3 && contactTimer.current <= 0) {
       contactTimer.current = 0.9;
       useGame.getState().takeDamage(16 * scale.enemyDamage);
     }
@@ -177,6 +185,11 @@ export function Boss({
       interpolate(dt);
       return;
     }
+
+    // Host brain: fight the nearest wizard on the floor.
+    const target = nearestPlayerTo(t.x, t.y + 0.4, t.z);
+    aim.set(target.pos.x - t.x, target.pos.y + 0.4 - t.y, target.pos.z - t.z);
+    const dist = target.dist;
 
     if (!awake.current) {
       if (dist < 13) {
@@ -266,7 +279,10 @@ export function Boss({
       case "volley": {
         aim.normalize();
         const projSpeed = 14;
-        aim.multiplyScalar(dist).addScaledVector(playerVelocity, 0.4).normalize();
+        aim.multiplyScalar(dist);
+        // Lead the shot only against our own player — peer velocity unknown.
+        if (target.isLocal) aim.addScaledVector(playerVelocity, 0.4);
+        aim.normalize();
         for (let i = 0; i < (enraged ? 6 : 4); i++) {
           cast(
             [

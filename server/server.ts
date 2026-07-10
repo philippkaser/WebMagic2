@@ -94,6 +94,12 @@ function handleMessage(client: Client, msg: ClientMsg): void {
       // broadcast a position yet (placeholder below the world until they do).
       const peers = others.map((m) => m.state ?? placeholderState(m));
       if (peers.length > 0) send(client, { t: "snapshot", peers });
+      // Late join: ask the host to bring this player up to date (dead
+      // entities, live positions, loot) so they don't see a ghost floor.
+      const host = clients.get(hostOf(client.id));
+      if (host && host.id !== client.id) {
+        send(host, { t: "stateRequest", playerId: client.id });
+      }
       log(`${client.id} -> floor ${floor} (${inst.id}, ${inst.players.size} player(s))`);
       break;
     }
@@ -157,6 +163,15 @@ function handleMessage(client: Client, msg: ClientMsg): void {
       const host = clients.get(hostOf(client.id));
       if (host && host.id !== client.id) {
         send(host, { t: "orbRequest", playerId: client.id, orbId: msg.orbId });
+      }
+      break;
+    }
+    case "stateSync": {
+      if (hostOf(client.id) !== client.id) return; // only the host syncs state
+      const target = clients.get(msg.to);
+      // Deliver only if the target is still in the same instance.
+      if (target && directory.instanceOf(msg.to)?.id === directory.instanceOf(client.id)?.id) {
+        send(target, { t: "stateSync", state: msg.state });
       }
       break;
     }
