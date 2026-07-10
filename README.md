@@ -8,6 +8,11 @@ Built with **Bun + Vite + React Three Fiber + drei + Rapier physics**.
 
 ![stack](https://img.shields.io/badge/bun-%E2%9C%93-black) ![stack](https://img.shields.io/badge/react--three--fiber-9-blue) ![stack](https://img.shields.io/badge/rapier-physics-orange)
 
+> **New here? Read [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md) first** — the
+> full vision: the idea, art style, gameplay feel, world/lore, future content,
+> and the technical philosophy. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+> has the deep implementation detail.
+
 ## Quickstart
 
 ```sh
