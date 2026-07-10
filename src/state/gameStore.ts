@@ -22,6 +22,9 @@ export interface GameState {
   /** Contextual interaction prompt shown by the HUD ("E — Descend…"). */
   prompt: string | null;
   lastDeath: { floor: number; lostItems: string[] } | null;
+  /** Quality toggle: the staff/moon shadow costs several extra scene renders
+   * per frame, so it's opt-in. */
+  shadows: boolean;
 
   startGame(): void;
   openPortalSelect(): void;
@@ -36,6 +39,17 @@ export interface GameState {
   regenMana(dt: number): void;
   respawn(): void;
   setPrompt(prompt: string | null): void;
+  toggleShadows(): void;
+}
+
+const SHADOWS_KEY = "webmagic.shadows.v1";
+
+function loadShadowSetting(): boolean {
+  try {
+    return localStorage.getItem(SHADOWS_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
 const saved = loadSave();
@@ -52,6 +66,7 @@ export const useGame = create<GameState>((set, get) => ({
   equipment: saved.equipment,
   prompt: null,
   lastDeath: null,
+  shadows: loadShadowSetting(),
 
   startGame: () => set({ phase: "village" }),
 
@@ -181,6 +196,17 @@ export const useGame = create<GameState>((set, get) => ({
 
   setPrompt: (prompt) => {
     if (get().prompt !== prompt) set({ prompt });
+  },
+
+  toggleShadows: () => {
+    const shadows = !get().shadows;
+    set({ shadows });
+    try {
+      localStorage.setItem(SHADOWS_KEY, shadows ? "1" : "0");
+    } catch {
+      // Setting is session-only without storage.
+    }
+    gameEvents.emit("message", `Shadows ${shadows ? "on" : "off"}`);
   },
 }));
 

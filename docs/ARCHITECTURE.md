@@ -131,8 +131,15 @@ without touching rendering code.
   naive approach could afford, with a *lower* and perfectly stable light
   count and zero mid-game shader recompiles. The only real lights outside
   the pool are the player's shadow-casting staff light and the village moon.
-- **Post chain**: bloom → pixelation → film grain → vignette
-  (`render/Effects.tsx`).
+- **Resolution IS the pixelation**: the canvas renders at dpr 0.35 and the
+  browser upscales it with `image-rendering: pixelated`. That one decision
+  cut measured frame time ~5× — every light, normal map and post pass pays
+  ~1/8th the fragments — and replaced the pixelation post-pass outright.
+- **Post chain**: bloom → film grain → vignette (`render/Effects.tsx`).
+- **Shadows are a quality toggle** (F4 / main menu, persisted, default off):
+  a shadow-casting point light re-renders the scene six times per frame,
+  measured at roughly +50% frame time even at low resolution.
+- **F3 overlay** shows fps / p95 / worst frame for perf reports.
 
 ## Extending
 

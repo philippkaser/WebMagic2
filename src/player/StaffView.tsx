@@ -18,6 +18,7 @@ export function StaffView() {
   const bobT = useRef(0);
 
   const staffDefId = useGame((s) => s.equipment.staff.defId);
+  const shadows = useGame((s) => s.shadows);
   const staff = getItemDef(staffDefId);
 
   useEffect(() => gameEvents.on("staffKick", (v) => {
@@ -57,7 +58,7 @@ export function StaffView() {
         intensity={26}
         distance={17}
         decay={1.7}
-        castShadow
+        castShadow={shadows}
         shadow-mapSize={[512, 512]}
         shadow-bias={-0.02}
       />

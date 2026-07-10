@@ -32,6 +32,8 @@ processes in separate terminals: `bun run dev:server` and `bun dev`.
 | Space | Jump (double-jump / hover with the right boots) |
 | Shift | Blink-dash (requires Cloak of Blinking) |
 | E | Interact (portals, loot, treasure) |
+| F3 | FPS / frame-time overlay |
+| F4 | Toggle shadows (quality option, off by default) |
 
 ## The game
 

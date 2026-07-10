@@ -10,6 +10,7 @@ import { entryFloors, useGame } from "../state/gameStore";
  * overlays for menu / portal select / death. */
 export function HUD() {
   const phase = useGame((s) => s.phase);
+  const [showPerf, setShowPerf] = useState(false);
 
   // Leaving gameplay always releases the pointer.
   useEffect(() => {
@@ -18,9 +19,25 @@ export function HUD() {
     }
   }, [phase]);
 
+  // Global quality/debug hotkeys.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "F3") {
+        e.preventDefault();
+        setShowPerf((v) => !v);
+      } else if (e.code === "F4") {
+        e.preventDefault();
+        useGame.getState().toggleShadows();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <div style={styles.root}>
       <style>{css}</style>
+      {showPerf && <PerfOverlay />}
       {(phase === "village" || phase === "dungeon") && <PlayHud />}
       {phase === "menu" && <MenuOverlay />}
       {phase === "select" && <SelectOverlay />}
@@ -194,6 +211,40 @@ function HurtFlash() {
   return <div key={flashId} className="wm-hurt" style={styles.hurt} />;
 }
 
+/** F3: rolling frame-time stats so perf reports are numbers, not vibes. */
+function PerfOverlay() {
+  const [stats, setStats] = useState({ fps: 0, p95: 0, worst: 0 });
+  useEffect(() => {
+    let deltas: number[] = [];
+    let last = performance.now();
+    let lastFlush = last;
+    let raf = 0;
+    const tick = (now: number) => {
+      deltas.push(now - last);
+      last = now;
+      if (now - lastFlush > 500) {
+        const sorted = [...deltas].sort((a, b) => a - b);
+        const sum = sorted.reduce((a, b) => a + b, 0);
+        setStats({
+          fps: Math.round((sorted.length / sum) * 1000),
+          p95: Math.round(sorted[Math.floor(sorted.length * 0.95)] ?? 0),
+          worst: Math.round(sorted[sorted.length - 1] ?? 0),
+        });
+        deltas = [];
+        lastFlush = now;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <div style={{ ...styles.panel, top: 110, left: 14, fontSize: 12, color: "#8fe3a0" }}>
+      {stats.fps} fps · p95 {stats.p95}ms · worst {stats.worst}ms
+    </div>
+  );
+}
+
 function usePointerLocked(): boolean {
   const [locked, setLocked] = useState(!!document.pointerLockElement);
   useEffect(() => {
@@ -212,6 +263,8 @@ function Overlay({ children }: { children: ReactNode }) {
 
 function MenuOverlay() {
   const startGame = useGame((s) => s.startGame);
+  const shadows = useGame((s) => s.shadows);
+  const toggleShadows = useGame((s) => s.toggleShadows);
   return (
     <Overlay>
       <div style={styles.title}>WEBMAGIC</div>
@@ -224,8 +277,16 @@ function MenuOverlay() {
       <button style={styles.button} onClick={startGame}>
         ENTER THE VILLAGE
       </button>
+      <button
+        style={{ ...styles.button, marginTop: 14, fontSize: 13, borderColor: "#5a5560", color: "#b8afa0" }}
+        onClick={toggleShadows}
+      >
+        SHADOWS: {shadows ? "ON" : "OFF"}
+      </button>
       <div style={styles.controls}>
         WASD move · Space jump · Left/Right click cast · Shift dash (cloak) · E interact
+        <br />
+        F3 fps overlay · F4 shadows
       </div>
     </Overlay>
   );

@@ -34,6 +34,7 @@ const SPAWN: Vec3 = [0, 1.2, 10];
  * at its center is the way down. */
 export function Village() {
   const scene = useThree((s) => s.scene);
+  const shadows = useGame((s) => s.shadows);
   const groundTex = useMemo(() => getTextures("dirt", 22, 22), []);
   const wallTex = useMemo(() => getTextures("stone"), []);
 
@@ -60,7 +61,7 @@ export function Village() {
         position={[14, 22, 8]}
         intensity={0.5}
         color="#9fb0e8"
-        castShadow
+        castShadow={shadows}
         shadow-mapSize={[1024, 1024]}
         shadow-camera-left={-28}
         shadow-camera-right={28}
