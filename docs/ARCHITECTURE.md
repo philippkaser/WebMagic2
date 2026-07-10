@@ -49,14 +49,36 @@ This is a plain class with injected seed/clock functions — the unit tests in
 
 ```
 game code ──► GameSession ──► Transport (interface)
-                                 ├── LocalTransport   (today: in-process server sim)
-                                 └── WebSocketTransport (future)
+                                 ├── WebSocketTransport → server/server.ts (default)
+                                 └── LocalTransport       (offline fallback)
 ```
 
 `net/protocol.ts` defines the full client/server message set (hello,
-enterFloor, state snapshots, peer join/leave, ability casts). The loopback
-transport already speaks it and reuses the real `FloorDirectory`, so
-single-player is literally the online game with a one-player server.
+enterFloor, state snapshots, peer join/leave, ability casts). The session
+tries the WebSocket server first (two attempts) and falls back to the
+in-process loopback, so the game is always playable; the HUD shows which mode
+you're in. `server/server.ts` is a small Bun process that runs the real
+`FloorDirectory`, relays 10 Hz peer state within each instance, and relays
+casts (`peerCast`) which clients replay through the identical ability code
+(with caster-only effects like blast recoil skipped).
+
+### What is and isn't synchronized (current state)
+
+| Synced | How |
+| --- | --- |
+| Floor layout, torches, props, enemies (initial) | deterministic from instance seed |
+| Player position/yaw/staff | 10 Hz state relay, client-side interpolation |
+| Ability casts (incl. explosion physics) | `castAbility` → `peerCast` replay |
+| Join/leave, instance assignment | server directory |
+
+**Not yet synced:** enemy AI decisions, enemy/prop health, and rigid-body
+motion after the first frame — each client simulates its own physics world,
+so crate positions and enemy state drift between players. The plan is
+server-authoritative simulation per instance (or a designated host client as
+an interim step): the server owns enemy/prop state and broadcasts dirty
+entities in the 10–20 Hz snapshot; clients render and predict. The `Hittable`
+registry is the seam — damage application moves behind a server round-trip
+without touching rendering code.
 
 ### Scaling plan (server-side, future work)
 

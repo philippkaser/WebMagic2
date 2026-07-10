@@ -39,6 +39,7 @@ export interface GameState {
 }
 
 const saved = loadSave();
+let manaAccumulator = 0;
 
 export const useGame = create<GameState>((set, get) => ({
   phase: "menu",
@@ -155,9 +156,17 @@ export const useGame = create<GameState>((set, get) => ({
 
   regenMana: (dt) => {
     const { mana } = get();
-    if (mana >= PLAYER.maxMana) return;
-    const rate = PLAYER.manaRegen * getStats().manaRegenMult;
-    set({ mana: Math.min(PLAYER.maxMana, mana + rate * dt) });
+    if (mana >= PLAYER.maxMana) {
+      manaAccumulator = 0;
+      return;
+    }
+    // Accumulate and flush in chunks: writing the store at 60 Hz re-renders
+    // the HUD every frame for no visible benefit.
+    manaAccumulator += PLAYER.manaRegen * getStats().manaRegenMult * dt;
+    if (manaAccumulator >= 1.25) {
+      set({ mana: Math.min(PLAYER.maxMana, mana + manaAccumulator) });
+      manaAccumulator = 0;
+    }
   },
 
   respawn: () => {

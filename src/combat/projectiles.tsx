@@ -6,9 +6,29 @@ import {
   type RapierRigidBody,
 } from "@react-three/rapier";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { MeshStandardMaterial, SphereGeometry } from "three";
 import { GROUPS } from "../core/config";
 import { spawnBurst } from "../fx/Particles";
 import { explode, type DamageTeam } from "./damage";
+
+// Shared across all bolts: allocating geometry/material per shot causes GC
+// churn and a shader compile on the first use of each new material instance.
+const boltGeometry = new SphereGeometry(1, 8, 8);
+const boltMaterials = new Map<string, MeshStandardMaterial>();
+
+function boltMaterial(color: string): MeshStandardMaterial {
+  let mat = boltMaterials.get(color);
+  if (!mat) {
+    mat = new MeshStandardMaterial({
+      color: "#000000",
+      emissive: color,
+      emissiveIntensity: 4,
+      toneMapped: false,
+    });
+    boltMaterials.set(color, mat);
+  }
+  return mat;
+}
 
 /** Pooled magic projectiles. Real dynamic bodies (they arc, bounce off props
  * and shove things via their explosion) with CCD so fast bolts never tunnel
@@ -159,15 +179,7 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
         collisionGroups={interactionGroups(membership, collidesWith)}
         mass={0.05}
       />
-      <mesh>
-        <sphereGeometry args={[spec.size, 8, 8]} />
-        <meshStandardMaterial
-          color="#000000"
-          emissive={spec.color}
-          emissiveIntensity={4}
-          toneMapped={false}
-        />
-      </mesh>
+      <mesh geometry={boltGeometry} material={boltMaterial(spec.color)} scale={spec.size} />
     </RigidBody>
   );
 }

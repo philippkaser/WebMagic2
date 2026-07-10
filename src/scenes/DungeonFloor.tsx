@@ -7,6 +7,8 @@ import { Boss } from "../combat/Boss";
 import { Sentry, Wisp } from "../combat/enemies";
 import { GROUPS, TILE, WALL_HEIGHT } from "../core/config";
 import { resetRegistries } from "../game/registry";
+import { hashSeed } from "../core/rng";
+import { session } from "../net/session";
 import { PlayerController } from "../player/PlayerController";
 import { getTextures } from "../render/textures";
 import { useGame } from "../state/gameStore";
@@ -25,18 +27,35 @@ const WORLD_GROUPS = interactionGroups(GROUPS.WORLD, [
  * colliders, torches, physics props, enemies, treasure and portals. */
 export function DungeonFloor({ layout }: { layout: FloorLayout }) {
   const scene = useThree((s) => s.scene);
+  const gl = useThree((s) => s.gl);
+  const camera = useThree((s) => s.camera);
   const [bossAlive, setBossAlive] = useState(layout.boss !== null);
 
   useEffect(() => {
     scene.fog = new Fog("#070409", 9, 50);
     scene.background = new Color("#070409");
     startAmbient("dungeon");
+    // Pre-compile every material against the floor's final light count now,
+    // during the load moment, instead of stuttering on the first explosion.
+    const warmup = requestAnimationFrame(() => gl.compile(scene, camera));
     return () => {
+      cancelAnimationFrame(warmup);
       scene.fog = null;
       stopAmbient();
       resetRegistries();
     };
-  }, [scene]);
+  }, [scene, gl, camera]);
+
+  // Fan players out around the spawn tile so floor-mates don't materialize
+  // inside each other.
+  const spawnPoint = useMemo<typeof layout.spawn>(() => {
+    const angle = (hashSeed(session.playerId || "solo") % 6283) / 1000;
+    return [
+      layout.spawn[0] + Math.cos(angle) * 1.1,
+      layout.spawn[1],
+      layout.spawn[2] + Math.sin(angle) * 1.1,
+    ];
+  }, [layout.spawn]);
 
   const descend = () => void useGame.getState().descend();
   const bankAndLeave = () => {
@@ -89,7 +108,7 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
         />
       )}
 
-      <PlayerController spawn={layout.spawn} />
+      <PlayerController spawn={spawnPoint} />
     </group>
   );
 }

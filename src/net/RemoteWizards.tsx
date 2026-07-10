@@ -36,6 +36,7 @@ const ROBE_COLORS = ["#3d5a8a", "#6a3d8a", "#8a3d50", "#3d8a5f"];
 
 function RemoteWizard({ playerId }: { playerId: string }) {
   const group = useRef<Group>(null);
+  const initialized = useRef(false);
   const robeColor = ROBE_COLORS[hashSeed(playerId) % ROBE_COLORS.length];
   const staffColor = () => {
     const peer = session.peers.get(playerId);
@@ -50,6 +51,17 @@ function RemoteWizard({ playerId }: { playerId: string }) {
     const g = group.current;
     const peer = session.peers.get(playerId);
     if (!g || !peer) return;
+    // Placeholder until their first broadcast: keep them hidden below the
+    // world instead of interpolating up from the void.
+    const known = peer.position.y > -100;
+    g.visible = known;
+    if (!known) return;
+    if (!initialized.current) {
+      initialized.current = true;
+      g.position.set(peer.position.x, peer.position.y, peer.position.z);
+      g.rotation.y = peer.yaw;
+      return;
+    }
     const k = Math.min(1, dt * 12);
     g.position.x += (peer.position.x - g.position.x) * k;
     g.position.y += (peer.position.y - g.position.y) * k;

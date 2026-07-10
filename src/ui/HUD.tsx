@@ -3,6 +3,7 @@ import { PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
 import { computeStats, getItemDef } from "../items/catalog";
 import type { Slot } from "../items/types";
+import { session } from "../net/session";
 import { entryFloors, useGame } from "../state/gameStore";
 
 /** All DOM UI: crosshair, bars, prompts, message feed, and the fullscreen
@@ -65,6 +66,9 @@ function PlayHud() {
           <div style={{ fontSize: 18, color: "#e8dfc8" }}>THE VILLAGE</div>
         )}
         <div style={styles.dim}>checkpoint: floor {checkpoint}</div>
+        <div style={{ ...styles.dim, color: session.mode === "online" ? "#4fd08a" : "#7d7566" }}>
+          {session.mode === "online" ? "◉ online" : session.mode === "offline" ? "○ offline" : "◌ connecting"}
+        </div>
       </div>
 
       <MessageFeed />

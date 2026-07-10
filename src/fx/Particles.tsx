@@ -122,7 +122,6 @@ export function flashLight(
   flash.light.color.set(color);
   flash.intensity = intensity;
   flash.light.intensity = intensity;
-  flash.light.visible = true;
 }
 
 export function FxSystems() {
@@ -201,10 +200,10 @@ export function FxSystems() {
     mesh.instanceMatrix.needsUpdate = true;
 
     for (const flash of flashes) {
-      if (!flash.light.visible) continue;
+      if (flash.intensity <= 0) continue;
       flash.intensity *= Math.max(0, 1 - dt * 9);
+      if (flash.intensity < 0.15) flash.intensity = 0;
       flash.light.intensity = flash.intensity;
-      if (flash.intensity < 0.15) flash.light.visible = false;
     }
   });
 
@@ -215,13 +214,18 @@ export function FxSystems() {
         args={[geometry, material, MAX_PARTICLES]}
         frustumCulled={false}
       />
+      {/* Always mounted AND always visible (intensity 0 when idle): toggling
+          light visibility changes three.js' light count, which forces every
+          material in the scene to recompile its shader — a huge frame spike
+          exactly when something explodes. Intensity changes are just uniform
+          updates. */}
       {Array.from({ length: MAX_LIGHTS }, (_, i) => (
         <pointLight
           key={i}
           ref={(l) => {
             lightsRef.current[i] = l;
           }}
-          visible={false}
+          intensity={0}
           distance={11}
           decay={2}
         />

@@ -12,10 +12,15 @@ Built with **Bun + Vite + React Three Fiber + drei + Rapier physics**.
 
 ```sh
 bun install
-bun dev          # http://localhost:3000
-bun test         # deterministic logic tests (worldgen, matchmaking, rng)
-bun run build    # typecheck + production build
+bun run dev:full   # game server + vite → http://localhost:3000 (multiplayer)
+bun test           # deterministic logic tests (worldgen, matchmaking, rng)
+bun run build      # typecheck + production build
+bun run start      # production: serves dist/ and the websocket from one process
 ```
+
+`bun dev` alone also works — without the game server the client detects it and
+plays offline (the HUD shows ○ offline instead of ◉ online). To run the two
+processes in separate terminals: `bun run dev:server` and `bun dev`.
 
 ## Controls
 
@@ -47,14 +52,22 @@ bun run build    # typecheck + production build
 - **Procedural audio**: every sound (casts, blasts, hits, pickups, portals,
   ambient drones) is synthesized with WebAudio — still zero binary assets.
 
-### Multiplayer model (shipped as testable logic + local loopback)
+### Multiplayer
 
-Entering floor *N* joins an existing instance of that floor if one has room
-(max **4 wizards per floor**); otherwise a fresh instance with a fresh seed is
-created — and the next entrant joins *that* one, and so on. This exact logic
-(`src/net/matchmaking.ts`) runs today inside the single-player loopback
-transport and is designed to move server-side unchanged. See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full online scaling plan.
+A real Bun WebSocket server (`server/server.ts`) owns matchmaking: entering
+floor *N* joins an existing instance of that floor if one has room (max
+**4 wizards per floor**); otherwise a fresh instance with a fresh seed is
+created — and the next entrant joins *that* one, and so on. Everyone in an
+instance generates the identical floor from the shared seed, sees each other
+as animated wizards, and sees each other's spellcasts replayed (bolts, blasts
+and their physics knockback included).
+
+**What syncs today:** floor layout, player positions/staffs, ability casts,
+join/leave. **What doesn't yet:** enemy AI, enemy/prop damage and physics
+motion are simulated per-client, so crate positions and enemy health drift
+apart between players. Making the server (or a host client) authoritative
+over those is the next milestone — see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the plan.
 
 ## Project layout
 

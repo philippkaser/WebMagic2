@@ -44,6 +44,11 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
   const fwd = useMemo(() => new Vector3(), []);
   const right = useMemo(() => new Vector3(), []);
   const wish = useMemo(() => new Vector3(), []);
+  // Reused every frame — allocating a Ray per frame is pointless GC pressure.
+  const groundRay = useMemo(
+    () => new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 }),
+    [rapier],
+  );
 
   useEffect(() => {
     setPlayerBody(body.current);
@@ -68,10 +73,12 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
     const locked = !!document.pointerLockElement;
 
     // Ground probe (short ray from capsule center, ignoring our own body).
-    const ray = new rapier.Ray({ x: t.x, y: t.y, z: t.z }, { x: 0, y: -1, z: 0 });
+    groundRay.origin.x = t.x;
+    groundRay.origin.y = t.y;
+    groundRay.origin.z = t.z;
     const grounded =
       world.castRay(
-        ray,
+        groundRay,
         PLAYER.halfHeight + PLAYER.radius + 0.14,
         true,
         undefined,

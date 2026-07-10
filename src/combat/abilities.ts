@@ -11,6 +11,8 @@ export interface AbilityContext {
   dir: Vector3;
   stats: DerivedStats;
   staff: ItemDef;
+  /** True when replaying a floor-mate's cast — skip caster-only effects. */
+  remote?: boolean;
 }
 
 export interface Ability {
@@ -121,11 +123,14 @@ const ABILITIES: Record<string, Ability> = {
         particles: 40,
         light: 42,
       });
-      // Recoil: aim at the floor to blast-jump.
-      getPlayerBody()?.applyImpulse(
-        { x: -ctx.dir.x * 4.2, y: Math.max(-ctx.dir.y * 5.5, 0.8), z: -ctx.dir.z * 4.2 },
-        true,
-      );
+      // Recoil: aim at the floor to blast-jump. Caster only — a peer's blast
+      // still pushes us via the explosion itself, not via recoil.
+      if (!ctx.remote) {
+        getPlayerBody()?.applyImpulse(
+          { x: -ctx.dir.x * 4.2, y: Math.max(-ctx.dir.y * 5.5, 0.8), z: -ctx.dir.z * 4.2 },
+          true,
+        );
+      }
     },
   },
   shockwave: {

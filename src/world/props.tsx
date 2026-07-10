@@ -352,21 +352,27 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
         <meshStandardMaterial color="#4e4658" roughness={0.8} />
       </mesh>
       {!taken && (
-        <>
-          <group ref={orb} position={[0, 1.45, 0]}>
-            <mesh castShadow>
-              <octahedronGeometry args={[0.26]} />
-              <meshStandardMaterial
-                color="#0c0c14"
-                emissive={def.color}
-                emissiveIntensity={2.8}
-                toneMapped={false}
-              />
-            </mesh>
-          </group>
-          <pointLight position={[0, 1.6, 0]} color={def.color} intensity={4} distance={7} decay={2} />
-        </>
+        <group ref={orb} position={[0, 1.45, 0]}>
+          <mesh castShadow>
+            <octahedronGeometry args={[0.26]} />
+            <meshStandardMaterial
+              color="#0c0c14"
+              emissive={def.color}
+              emissiveIntensity={2.8}
+              toneMapped={false}
+            />
+          </mesh>
+        </group>
       )}
+      {/* Stays mounted after pickup (intensity 0) to keep the light count —
+          and therefore all compiled shaders — stable mid-floor. */}
+      <pointLight
+        position={[0, 1.6, 0]}
+        color={def.color}
+        intensity={taken ? 0 : 4}
+        distance={7}
+        decay={2}
+      />
     </group>
   );
 }

@@ -79,6 +79,9 @@ function LootOrb({ orb, onTaken }: { orb: Orb; onTaken: () => void }) {
     }
   });
 
+  // No pointLight here on purpose: orbs spawn mid-combat, and mounting a new
+  // light forces a scene-wide shader recompile (frame spike). Emissive + bloom
+  // reads just as well.
   return (
     <group ref={group} position={orb.position}>
       <mesh>
@@ -86,11 +89,10 @@ function LootOrb({ orb, onTaken }: { orb: Orb; onTaken: () => void }) {
         <meshStandardMaterial
           color="#0c0c14"
           emissive={def.color}
-          emissiveIntensity={2.6}
+          emissiveIntensity={3.4}
           toneMapped={false}
         />
       </mesh>
-      <pointLight color={def.color} intensity={1.6} distance={4} decay={2} />
     </group>
   );
 }

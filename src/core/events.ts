@@ -33,6 +33,13 @@ export interface GameEvents extends Record<string, unknown> {
   staffKick: number;
   /** Boss health fraction 0..1 for the HUD bar, or null to hide it. */
   bossHp: { name: string; frac: number } | null;
+  /** A floor-mate cast an ability — replay it locally. */
+  peerCast: {
+    playerId: string;
+    abilityId: string;
+    origin: { x: number; y: number; z: number };
+    dir: { x: number; y: number; z: number };
+  };
 }
 
 export const gameEvents = new Emitter<GameEvents>();

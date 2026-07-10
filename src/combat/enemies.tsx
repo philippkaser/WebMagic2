@@ -201,6 +201,10 @@ export function Sentry({ position, floor }: { position: Vec3; floor: number }) {
   const fireTimer = useRef(2 + Math.random() * 1.5);
   const flash = useRef(0);
   const aim = useMemo(() => new Vector3(), []);
+  const losRay = useMemo(
+    () => new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }),
+    [rapier],
+  );
 
   const kill = useCallback(() => {
     if (deadRef.current) return;
@@ -265,8 +269,13 @@ export function Sentry({ position, floor }: { position: Vec3; floor: number }) {
       fireTimer.current = Math.max(1.4, 2.5 - floor * 0.04);
       if (dist > 26) return;
       aim.normalize();
-      const ray = new rapier.Ray(headPos, { x: aim.x, y: aim.y, z: aim.z });
-      const hit = world.castRay(ray, dist - 0.6, true, undefined, undefined, undefined, b);
+      losRay.origin.x = headPos.x;
+      losRay.origin.y = headPos.y;
+      losRay.origin.z = headPos.z;
+      losRay.dir.x = aim.x;
+      losRay.dir.y = aim.y;
+      losRay.dir.z = aim.z;
+      const hit = world.castRay(losRay, dist - 0.6, true, undefined, undefined, undefined, b);
       if (hit !== null) return; // wall or prop in the way
       // Lead the shot slightly so strafing matters.
       const speed = 15;

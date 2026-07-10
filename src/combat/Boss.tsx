@@ -256,7 +256,9 @@ export function Boss({
     }
   });
 
-  if (dead) return null;
+  // Keep a zero-intensity light mounted after death so the scene's light
+  // count (and thus every compiled shader) stays stable mid-floor.
+  if (dead) return <pointLight position={position} intensity={0} distance={12} decay={2} />;
   return (
     <RigidBody
       ref={body}

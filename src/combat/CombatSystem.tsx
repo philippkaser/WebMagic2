@@ -1,10 +1,12 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Vector3 } from "three";
 import { playCast } from "../audio/sound";
 import { gameEvents } from "../core/events";
-import { getItemDef } from "../items/catalog";
+import { computeStats, getItemDef } from "../items/catalog";
+import { session } from "../net/session";
 import { input } from "../player/input";
+import { defaultEquipment } from "../state/persistence";
 import { getStats, useGame } from "../state/gameStore";
 import { getAbility } from "./abilities";
 
@@ -20,6 +22,27 @@ export function CombatSystem() {
   const dir = useMemo(() => new Vector3(), []);
   const right = useMemo(() => new Vector3(), []);
   const origin = useMemo(() => new Vector3(), []);
+
+  // Replay floor-mates' casts locally (visuals + physics use identical code).
+  useEffect(
+    () =>
+      gameEvents.on("peerCast", ({ abilityId, origin: o, dir: d, playerId }) => {
+        try {
+          const peer = session.peers.get(playerId);
+          const staff = getItemDef(peer?.staffId ?? "apprentice_staff");
+          getAbility(abilityId).cast({
+            origin: new Vector3(o.x, o.y, o.z),
+            dir: new Vector3(d.x, d.y, d.z),
+            stats: computeStats(defaultEquipment()),
+            staff,
+            remote: true,
+          });
+        } catch {
+          // Unknown ability/staff from a newer client — ignore.
+        }
+      }),
+    [],
+  );
 
   useFrame((_, dt) => {
     cooldownL.current -= dt;
@@ -44,6 +67,11 @@ export function CombatSystem() {
         .addScaledVector(right, 0.24)
         .addScaledVector(UP, -0.16);
       ability.cast({ origin, dir, stats: getStats(), staff });
+      session.sendCast(
+        ability.id,
+        { x: origin.x, y: origin.y, z: origin.z },
+        { x: dir.x, y: dir.y, z: dir.z },
+      );
       cd.current = ability.cooldown;
       playCast();
       gameEvents.emit("staffKick", 0.9);
