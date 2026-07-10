@@ -15,7 +15,7 @@ bun install
 bun run dev:full   # game server + vite → http://localhost:3000 (multiplayer)
 bun test           # deterministic logic tests (worldgen, matchmaking, rng)
 bun run build      # typecheck + production build
-bun run start      # production: serves dist/ and the websocket from one process
+bun run start      # production: serves dist/ + websocket on port 80 (PORT=… to override)
 ```
 
 `bun dev` alone also works — without the game server the client detects it and

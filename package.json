@@ -8,7 +8,7 @@
     "dev:server": "bun --watch server/server.ts",
     "dev:full": "bun server/server.ts & vite",
     "build": "tsc -b && vite build",
-    "start": "bun server/server.ts",
+    "start": "PORT=80 bun server/server.ts",
     "preview": "vite preview",
     "test": "bun test src",
     "typecheck": "tsc -b"
