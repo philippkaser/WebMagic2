@@ -5,6 +5,7 @@ import { Suspense, useMemo } from "react";
 import { CombatSystem } from "../combat/CombatSystem";
 import { Projectiles } from "../combat/projectiles";
 import { GRAVITY } from "../core/config";
+import { DynamicLights } from "../fx/DynamicLights";
 import { FxSystems } from "../fx/Particles";
 import { InteractionSystem } from "../game/interactions";
 import { LootOrbs } from "../items/LootOrbs";
@@ -37,7 +38,9 @@ export function GameScene() {
       camera={{ fov: 78, near: 0.08, far: 140 }}
     >
       <Suspense fallback={null}>
-        <Physics gravity={[0, GRAVITY, 0]}>
+        {/* timeStep="vary": a hitch frame advances physics once with the real
+            delta instead of stepping multiple times to catch up. */}
+        <Physics gravity={[0, GRAVITY, 0]} timeStep="vary">
           {inDungeon && layout ? (
             <DungeonFloor key={`${instanceId}:${floor}`} layout={layout} />
           ) : (
@@ -48,6 +51,7 @@ export function GameScene() {
         </Physics>
         <RemoteWizards />
         <FxSystems />
+        <DynamicLights />
         <StaffView />
         <CombatSystem />
         <InteractionSystem />

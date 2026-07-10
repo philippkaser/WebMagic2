@@ -8,6 +8,11 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MeshStandardMaterial, SphereGeometry } from "three";
 import { GROUPS } from "../core/config";
+import {
+  addLightSource,
+  removeLightSource,
+  type DynamicLightSource,
+} from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
 import { explode, type DamageTeam } from "./damage";
 
@@ -106,6 +111,7 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
   const body = useRef<RapierRigidBody>(null);
   const detonated = useRef(false);
   const trailClock = useRef(0);
+  const light = useRef<DynamicLightSource | null>(null);
 
   const detonate = useCallback(() => {
     if (detonated.current) return;
@@ -132,14 +138,30 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
       { x: spec.velocity[0], y: spec.velocity[1], z: spec.velocity[2] },
       true,
     );
+    // Bolts light the corridors they fly through — the pool assigns real
+    // lights to the ones nearest the camera.
+    const src = addLightSource({
+      position: spec.position,
+      color: spec.color,
+      intensity: 3.2,
+      distance: 8,
+      priority: 3,
+    });
+    light.current = src;
     const timeout = setTimeout(detonate, 3200);
-    return () => clearTimeout(timeout);
+    return () => {
+      clearTimeout(timeout);
+      removeLightSource(src);
+      light.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useFrame((_, dt) => {
     const b = body.current;
     if (!b || detonated.current) return;
+    const pos = b.translation();
+    light.current?.position.set(pos.x, pos.y, pos.z);
     trailClock.current -= dt;
     if (trailClock.current <= 0) {
       trailClock.current = 0.035;

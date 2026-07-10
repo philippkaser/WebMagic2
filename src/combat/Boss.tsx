@@ -11,7 +11,13 @@ import { playBossRoar, playHit } from "../audio/sound";
 import { floorScale, GROUPS } from "../core/config";
 import { gameEvents } from "../core/events";
 import { Rng } from "../core/rng";
-import { flashLight, spawnBurst } from "../fx/Particles";
+import {
+  addLightSource,
+  flashLight,
+  removeLightSource,
+  type DynamicLightSource,
+} from "../fx/DynamicLights";
+import { spawnBurst } from "../fx/Particles";
 import { playerPosition, playerVelocity } from "../game/player-state";
 import { allocId, registerHittable } from "../game/registry";
 import { rollLoot } from "../items/loot";
@@ -60,8 +66,24 @@ export function Boss({
   const slamTelegraph = useRef(0);
   const flash = useRef(0);
   const contactTimer = useRef(0);
+  const light = useRef<DynamicLightSource | null>(null);
   const desired = useMemo(() => new Vector3(), []);
   const aim = useMemo(() => new Vector3(), []);
+
+  useEffect(() => {
+    const src = addLightSource({
+      position,
+      color: COLOR,
+      intensity: 8,
+      distance: 13,
+      priority: 2,
+    });
+    light.current = src;
+    return () => {
+      removeLightSource(src);
+      light.current = null;
+    };
+  }, [position]);
 
   const kill = useCallback(() => {
     if (deadRef.current) return;
@@ -131,6 +153,11 @@ export function Boss({
     if (shell.current) shell.current.rotation.y += dt * (enraged ? 1.6 : 0.7);
 
     const t = b.translation();
+    if (light.current) {
+      light.current.position.set(t.x, t.y, t.z);
+      light.current.intensity =
+        8 + flash.current * 10 + (enraged ? 2 + Math.sin(clock.elapsedTime * 8) * 1.5 : 0);
+    }
     aim.set(playerPosition.x - t.x, playerPosition.y + 0.4 - t.y, playerPosition.z - t.z);
     const dist = aim.length();
 
@@ -256,9 +283,7 @@ export function Boss({
     }
   });
 
-  // Keep a zero-intensity light mounted after death so the scene's light
-  // count (and thus every compiled shader) stays stable mid-floor.
-  if (dead) return <pointLight position={position} intensity={0} distance={12} decay={2} />;
+  if (dead) return null;
   return (
     <RigidBody
       ref={body}
@@ -305,7 +330,6 @@ export function Boss({
         <sphereGeometry args={[0.42, 10, 10]} />
         <meshStandardMaterial color="#000" emissive="#ffd0b0" emissiveIntensity={3.4} toneMapped={false} />
       </mesh>
-      <pointLight color={COLOR} intensity={7} distance={12} decay={2} />
     </RigidBody>
   );
 }

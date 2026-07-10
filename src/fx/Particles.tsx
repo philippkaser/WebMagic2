@@ -3,19 +3,18 @@ import { useEffect, useMemo, useRef } from "react";
 import {
   BoxGeometry,
   Color,
+  DynamicDrawUsage,
   InstancedMesh,
   MeshBasicMaterial,
   Object3D,
-  PointLight,
   Vector3,
 } from "three";
 
-/** Pooled CPU particle system rendered as one instanced draw call, plus a
- * small pool of flash point-lights so explosions actually light the room.
- * Gameplay code calls spawnBurst()/flashLight() from anywhere. */
+/** Pooled CPU particle system rendered as one instanced draw call. Gameplay
+ * code calls spawnBurst() from anywhere. Light emission lives in
+ * DynamicLights (flashLight) — this module is purely the sparks/debris. */
 
 const MAX_PARTICLES = 3072;
-const MAX_LIGHTS = 6;
 
 interface Particle {
   alive: boolean;
@@ -99,31 +98,6 @@ export function spawnBurst(opts: BurstOptions): void {
   if (manager.mesh.instanceColor) manager.mesh.instanceColor.needsUpdate = true;
 }
 
-interface Flash {
-  light: PointLight;
-  intensity: number;
-}
-
-let flashes: Flash[] = [];
-let flashCursor = 0;
-
-export function flashLight(
-  position: Vector3 | [number, number, number],
-  color: string,
-  intensity = 26,
-): void {
-  if (flashes.length === 0) return;
-  const flash = flashes[flashCursor];
-  flashCursor = (flashCursor + 1) % flashes.length;
-  const [x, y, z] = Array.isArray(position)
-    ? position
-    : [position.x, position.y, position.z];
-  flash.light.position.set(x, y, z);
-  flash.light.color.set(color);
-  flash.intensity = intensity;
-  flash.light.intensity = intensity;
-}
-
 export function FxSystems() {
   const meshRef = useRef<InstancedMesh>(null!);
   const dummy = useMemo(() => new Object3D(), []);
@@ -132,7 +106,6 @@ export function FxSystems() {
     () => new MeshBasicMaterial({ toneMapped: false }),
     [],
   );
-  const lightsRef = useRef<(PointLight | null)[]>([]);
 
   useEffect(() => {
     const mesh = meshRef.current;
@@ -150,15 +123,15 @@ export function FxSystems() {
       gravity: 0,
       drag: 0,
     }));
-    // Initialize instance colors so the attribute exists before first burst.
+    // Initialize instance colors so the attribute exists before first burst,
+    // then mark both instance buffers as dynamic — they stream every frame,
+    // and static-usage uploads can stall some drivers.
     for (let i = 0; i < MAX_PARTICLES; i++) mesh.setColorAt(i, tmpColor.set("#ffffff"));
+    mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    mesh.instanceColor?.setUsage(DynamicDrawUsage);
     manager = { particles, mesh, cursor: 0, highWater: 0 };
-    flashes = lightsRef.current
-      .filter((l): l is PointLight => l !== null)
-      .map((light) => ({ light, intensity: 0 }));
     return () => {
       manager = null;
-      flashes = [];
     };
   }, []);
 
@@ -166,6 +139,7 @@ export function FxSystems() {
     const dt = Math.min(rawDt, 1 / 20);
     if (!manager) return;
     const { particles, mesh, highWater } = manager;
+    let alive = 0;
     for (let i = 0; i < highWater; i++) {
       const p = particles[i];
       if (!p.alive) {
@@ -177,6 +151,7 @@ export function FxSystems() {
           p.alive = false;
           dummy.scale.setScalar(0.0001);
         } else {
+          alive++;
           const damp = Math.max(0, 1 - p.drag * dt);
           p.vx *= damp;
           p.vz *= damp;
@@ -196,40 +171,21 @@ export function FxSystems() {
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
     }
-    mesh.count = highWater;
-    mesh.instanceMatrix.needsUpdate = true;
-
-    for (const flash of flashes) {
-      if (flash.intensity <= 0) continue;
-      flash.intensity *= Math.max(0, 1 - dt * 9);
-      if (flash.intensity < 0.15) flash.intensity = 0;
-      flash.light.intensity = flash.intensity;
+    // Compact when idle so quiet stretches stop paying for the biggest
+    // burst that ever happened.
+    if (alive === 0 && highWater > 0) {
+      manager.highWater = 0;
+      manager.cursor = 0;
     }
+    mesh.count = manager.highWater;
+    mesh.instanceMatrix.needsUpdate = true;
   });
 
   return (
-    <group>
-      <instancedMesh
-        ref={meshRef}
-        args={[geometry, material, MAX_PARTICLES]}
-        frustumCulled={false}
-      />
-      {/* Always mounted AND always visible (intensity 0 when idle): toggling
-          light visibility changes three.js' light count, which forces every
-          material in the scene to recompile its shader — a huge frame spike
-          exactly when something explodes. Intensity changes are just uniform
-          updates. */}
-      {Array.from({ length: MAX_LIGHTS }, (_, i) => (
-        <pointLight
-          key={i}
-          ref={(l) => {
-            lightsRef.current[i] = l;
-          }}
-          intensity={0}
-          distance={11}
-          decay={2}
-        />
-      ))}
-    </group>
+    <instancedMesh
+      ref={meshRef}
+      args={[geometry, material, MAX_PARTICLES]}
+      frustumCulled={false}
+    />
   );
 }

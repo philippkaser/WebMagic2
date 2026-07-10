@@ -8,12 +8,18 @@ import {
   type RapierRigidBody,
 } from "@react-three/rapier";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Group, MeshStandardMaterial, PointLight } from "three";
+import { Group, MeshStandardMaterial, Vector3 } from "three";
 import { playPortal } from "../audio/sound";
 import { GROUPS } from "../core/config";
 import { Rng, hashSeed } from "../core/rng";
 import { explode } from "../combat/damage";
-import { flashLight, spawnBurst } from "../fx/Particles";
+import {
+  addLightSource,
+  flashLight,
+  removeLightSource,
+  type DynamicLightSource,
+} from "../fx/DynamicLights";
+import { spawnBurst } from "../fx/Particles";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { allocId, registerDynamicBody, registerHittable } from "../game/registry";
@@ -173,11 +179,34 @@ function PotMesh() {
   );
 }
 
-/** Wall torch: flickering warm light, glowing ember head, drifting sparks. */
+/** Wall torch: flickering warm light (via the dynamic light pool), glowing
+ * ember head, drifting sparks. */
 export function Torch({ position }: { position: Vec3 }) {
-  const light = useRef<PointLight>(null);
+  const group = useRef<Group>(null);
+  const light = useRef<DynamicLightSource | null>(null);
+  const worldPos = useRef(new Vector3(...position));
   const emberClock = useRef(Math.random());
   const seed = useMemo(() => hashSeed(position.join(",")) % 100, [position]);
+
+  useEffect(() => {
+    // Torches can be nested (village posts) — register the light at the
+    // torch's *world* position.
+    const g = group.current!;
+    g.updateWorldMatrix(true, false);
+    g.getWorldPosition(worldPos.current);
+    const src = addLightSource({
+      position: [worldPos.current.x, worldPos.current.y + 0.25, worldPos.current.z + 0.2],
+      color: "#ff9a4d",
+      intensity: 7,
+      distance: 10,
+      priority: 1,
+    });
+    light.current = src;
+    return () => {
+      removeLightSource(src);
+      light.current = null;
+    };
+  }, [position]);
 
   useFrame(({ clock }, dt) => {
     const t = clock.elapsedTime + seed;
@@ -188,8 +217,9 @@ export function Torch({ position }: { position: Vec3 }) {
     emberClock.current -= dt;
     if (emberClock.current <= 0) {
       emberClock.current = 0.16 + Math.random() * 0.12;
+      const w = worldPos.current;
       spawnBurst({
-        position: [position[0], position[1] + 0.12, position[2]],
+        position: [w.x, w.y + 0.12, w.z],
         count: 1,
         color: ["#ffb257", "#ff6b2e"],
         speed: 0.5,
@@ -203,7 +233,7 @@ export function Torch({ position }: { position: Vec3 }) {
   });
 
   return (
-    <group position={position}>
+    <group ref={group} position={position}>
       <mesh position={[0, -0.22, 0]} rotation={[0.22, 0, 0]}>
         <cylinderGeometry args={[0.03, 0.045, 0.5, 6]} />
         <meshStandardMaterial color="#3d2c1c" roughness={0.9} />
@@ -212,7 +242,6 @@ export function Torch({ position }: { position: Vec3 }) {
         <sphereGeometry args={[0.09, 8, 6]} />
         <meshStandardMaterial color="#200" emissive="#ff8b3d" emissiveIntensity={4.5} toneMapped={false} />
       </mesh>
-      <pointLight ref={light} position={[0, 0.25, 0.2]} color="#ff9a4d" intensity={7} distance={10} decay={1.9} />
     </group>
   );
 }
@@ -235,12 +264,31 @@ export function Portal({
 }) {
   const disc = useRef<MeshStandardMaterial>(null);
   const group = useRef<Group>(null);
+  const light = useRef<DynamicLightSource | null>(null);
   const sparkClock = useRef(0);
+
+  useEffect(() => {
+    const src = addLightSource({
+      position: [position[0], position[1] + 1.6, position[2] + 0.8],
+      color,
+      intensity: 9,
+      distance: 12,
+      priority: 2,
+    });
+    light.current = src;
+    return () => {
+      removeLightSource(src);
+      light.current = null;
+    };
+  }, [position, color]);
 
   useFrame(({ clock }, dt) => {
     const t = clock.elapsedTime;
     if (disc.current) {
       disc.current.emissiveIntensity = locked ? 0.35 : 1.9 + Math.sin(t * 2.2) * 0.5;
+    }
+    if (light.current) {
+      light.current.intensity = locked ? 1.5 : 9 + Math.sin(t * 2.2) * 1.2;
     }
     if (group.current) group.current.rotation.z = t * (locked ? 0.06 : 0.35);
 
@@ -301,13 +349,6 @@ export function Portal({
           />
         </mesh>
       </group>
-      <pointLight
-        position={[0, 1.6, 0.8]}
-        color={color}
-        intensity={locked ? 1.5 : 9}
-        distance={12}
-        decay={1.9}
-      />
     </group>
   );
 }
@@ -318,6 +359,18 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
   const def = useMemo(() => rollLoot(new Rng((seed ^ 0x9c67f3a1) >>> 0), floor), [seed, floor]);
   const [taken, setTaken] = useState(false);
   const orb = useRef<Group>(null);
+
+  useEffect(() => {
+    if (taken) return;
+    const src = addLightSource({
+      position: [position[0], position[1] + 1.6, position[2]],
+      color: def.color,
+      intensity: 4,
+      distance: 7,
+      priority: 1,
+    });
+    return () => removeLightSource(src);
+  }, [taken, def, position]);
 
   useFrame(({ clock }) => {
     if (taken) return;
@@ -364,15 +417,6 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
           </mesh>
         </group>
       )}
-      {/* Stays mounted after pickup (intensity 0) to keep the light count —
-          and therefore all compiled shaders — stable mid-floor. */}
-      <pointLight
-        position={[0, 1.6, 0]}
-        color={def.color}
-        intensity={taken ? 0 : 4}
-        distance={7}
-        decay={2}
-      />
     </group>
   );
 }

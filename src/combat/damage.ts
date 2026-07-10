@@ -1,7 +1,8 @@
 import { Vector3 } from "three";
 import { playExplosion } from "../audio/sound";
 import { gameEvents } from "../core/events";
-import { flashLight, spawnBurst } from "../fx/Particles";
+import { flashLight } from "../fx/DynamicLights";
+import { spawnBurst } from "../fx/Particles";
 import { getPlayerBody, playerPosition } from "../game/player-state";
 import { forEachHittable } from "../game/registry";
 import { useGame } from "../state/gameStore";

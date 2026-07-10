@@ -1,6 +1,11 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
 import { Group } from "three";
+import {
+  addLightSource,
+  removeLightSource,
+  type DynamicLightSource,
+} from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
@@ -51,8 +56,25 @@ export function LootOrbs() {
 
 function LootOrb({ orb, onTaken }: { orb: Orb; onTaken: () => void }) {
   const group = useRef<Group>(null);
+  const light = useRef<DynamicLightSource | null>(null);
   const def = getItemDef(orb.defId);
   const [x, y, z] = orb.position;
+
+  useEffect(() => {
+    const src = addLightSource({
+      position: [x, y + 0.5, z],
+      color: def.color,
+      intensity: 2.4,
+      distance: 5,
+      priority: 1,
+    });
+    light.current = src;
+    return () => {
+      removeLightSource(src);
+      light.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useFrame(({ clock }) => {
     const g = group.current;
@@ -60,6 +82,7 @@ function LootOrb({ orb, onTaken }: { orb: Orb; onTaken: () => void }) {
     const t = clock.elapsedTime;
     g.position.set(x, y + 0.35 + Math.sin(t * 2.4 + orb.id) * 0.12, z);
     g.rotation.y = t * 1.6;
+    light.current?.position.copy(g.position);
 
     const d2 = playerPosition.distanceToSquared(g.position);
     if (d2 < 5.5) {
@@ -79,9 +102,6 @@ function LootOrb({ orb, onTaken }: { orb: Orb; onTaken: () => void }) {
     }
   });
 
-  // No pointLight here on purpose: orbs spawn mid-combat, and mounting a new
-  // light forces a scene-wide shader recompile (frame spike). Emissive + bloom
-  // reads just as well.
   return (
     <group ref={group} position={orb.position}>
       <mesh>

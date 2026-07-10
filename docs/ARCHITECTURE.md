@@ -119,10 +119,18 @@ without touching rendering code.
 - **Walls are one instanced draw call**; their physics colliders are
   greedy-merged rectangles (tested to cover every wall tile), so collider
   count stays low as floors grow.
-- **Lighting**: many cheap flickering torch lights (no shadows), one
-  shadow-casting point light carried by the player's staff, pooled explosion
-  flashes, and a small procedural environment map for reflections on wet
-  slabs and metal.
+- **Lighting — the dynamic light pool** (`fx/DynamicLights.tsx`): forward
+  rendering pays per-fragment cost per light, and *changing* the light count
+  recompiles every shader in the scene. So the game mounts exactly 14 pooled
+  point lights, once, forever. Everything that glows registers a light
+  *source* — torches, portals, loot orbs, the treasure pedestal, the boss,
+  flying projectiles, explosion flashes — and each frame the pool assigns its
+  lights to the best-scoring sources near the camera (priority class +
+  proximity + a stickiness bonus against slot flicker). Distant sources
+  degrade gracefully into the fog. Result: more things cast light than a
+  naive approach could afford, with a *lower* and perfectly stable light
+  count and zero mid-game shader recompiles. The only real lights outside
+  the pool are the player's shadow-casting staff light and the village moon.
 - **Post chain**: bloom → pixelation → film grain → vignette
   (`render/Effects.tsx`).
 
