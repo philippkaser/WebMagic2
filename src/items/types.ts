@@ -67,11 +67,13 @@ export interface ItemStack {
   runLoot: boolean;
 }
 
+/** The staff is the only mandatory piece — a wizard without a staff isn't a
+ * wizard. Everything else can be unequipped (bare feet = plain single jump). */
 export interface Equipment {
   staff: ItemInstance;
   amulet: ItemInstance | null;
   cloak: ItemInstance | null;
-  boots: ItemInstance;
+  boots: ItemInstance | null;
 }
 
 export interface DerivedStats extends Passives {

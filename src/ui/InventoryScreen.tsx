@@ -1,16 +1,27 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { useEffect, useRef, useState, type CSSProperties, type DragEvent } from "react";
+import { Group } from "three";
 import { getItemDef } from "../items/catalog";
 import { MERCHANT_STOCK } from "../items/economy";
-import type { ItemDef, ItemStack } from "../items/types";
+import {
+  moveItem as moveItemPure,
+  readSlot,
+  refsEqual,
+  type Carried,
+  type SlotRef,
+} from "../items/inventory";
+import type { GearSlot, ItemDef, ItemStack } from "../items/types";
+import { WizardModel } from "../render/WizardModel";
 import { useGame, type Overlay } from "../state/gameStore";
-import { statLines } from "./itemInfo";
+import { iconOf, statLines } from "./itemInfo";
 
 /** The inventory screen family. One layout, three flavors:
  *  - "inventory": the wizard, gear, belt and bag
  *  - "chest":     inventory + the 30-slot village chest below
  *  - "merchant":  inventory + Maro's ware list below
- * The screen only calls store actions — every rule about what may move where
- * lives in the game store (and is re-validated server-side). */
+ * Items move by DRAG & DROP between any cells (click still does the obvious
+ * quick-move). All rules live in items/inventory.ts#moveItem — this screen
+ * only proposes moves; the store (and the server) decide. */
 export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none"> }) {
   const equipment = useGame((s) => s.equipment);
   const bag = useGame((s) => s.bag);
@@ -20,6 +31,7 @@ export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none"> }) {
   const runGold = useGame((s) => s.runGold);
   const phase = useGame((s) => s.phase);
   const [inspected, setInspected] = useState<ItemDef | null>(null);
+  const [drag, setDrag] = useState<SlotRef | null>(null);
 
   // Escape (already unlocks the pointer) also closes the screen.
   useEffect(() => {
@@ -30,10 +42,53 @@ export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none"> }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const inspect = (defId: string | undefined) =>
-    setInspected(defId ? getItemDef(defId) : null);
   const act = useGame.getState();
+  const inv: Carried = { equipment, bag, belt, chest };
   const inVillage = phase === "village";
+
+  const cellProps = (ref: SlotRef, stack: ItemStack | null) => ({
+    stack,
+    dragRef: ref,
+    dragging: drag,
+    onBeginDrag: setDrag,
+    onEndDrag: () => setDrag(null),
+    canDrop: (from: SlotRef) =>
+      moveItemPure(inv, from, ref) !== null &&
+      // Chest moves only work in the village (the store enforces it too).
+      (inVillage || (from.container !== "chest" && ref.container !== "chest")),
+    onDropItem: (from: SlotRef) => act.moveItem(from, ref),
+    onHover: (defId: string | undefined) => setInspected(defId ? getItemDef(defId) : null),
+  });
+
+  const firstFree = (grid: (ItemStack | null)[]) => grid.indexOf(null);
+  /** Click = the obvious quick-move for that cell. */
+  const quickMove = (ref: SlotRef) => {
+    const stack = readSlot(inv, ref);
+    if (!stack) return;
+    const def = getItemDef(stack.defId);
+    if (ref.container === "bag" || ref.container === "chest") {
+      if (mode === "chest" && ref.container === "bag" && inVillage) {
+        const free = firstFree(chest);
+        if (free !== -1) act.moveItem(ref, { container: "chest", index: free });
+        return;
+      }
+      if (ref.container === "chest") {
+        const free = firstFree(bag);
+        if (free !== -1) act.moveItem(ref, { container: "bag", index: free });
+        return;
+      }
+      if (def.slot === "consumable") {
+        const free = firstFree(belt);
+        act.moveItem(ref, { container: "belt", index: free === -1 ? 0 : free });
+      } else {
+        act.moveItem(ref, { container: "equipment", slot: def.slot as GearSlot });
+      }
+      return;
+    }
+    // Equipment/belt → back to the bag.
+    const free = firstFree(bag);
+    if (free !== -1) act.moveItem(ref, { container: "bag", index: free });
+  };
 
   const title =
     mode === "chest" ? "YOUR CHEST" : mode === "merchant" ? "MARO THE PROVISIONER" : "INVENTORY";
@@ -58,91 +113,56 @@ export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none"> }) {
           <div style={styles.sideColumn}>
             <SlotCell
               label="staff"
-              stack={{ defId: equipment.staff.defId, qty: 1, runLoot: equipment.staff.runLoot }}
-              onHover={inspect}
+              {...cellProps({ container: "equipment", slot: "staff" }, toStack(equipment.staff))}
             />
-            <SlotCell
-              label="Q"
-              stack={belt[0]}
-              onHover={inspect}
-              onClick={() => act.moveBeltToBag(0)}
-              accent
-            />
-            <SlotCell
-              label="E"
-              stack={belt[1]}
-              onHover={inspect}
-              onClick={() => act.moveBeltToBag(1)}
-              accent
-            />
+            {[0, 1].map((i) => (
+              <SlotCell
+                key={i}
+                label={i === 0 ? "Q" : "E"}
+                accent
+                {...cellProps({ container: "belt", index: i }, belt[i])}
+                onClick={() => quickMove({ container: "belt", index: i })}
+              />
+            ))}
           </div>
 
-          <WizardPortrait />
+          <WizardViewer />
 
           {/* Right: gear */}
           <div style={styles.sideColumn}>
-            <SlotCell
-              label="amulet"
-              stack={toStack(equipment.amulet)}
-              onHover={inspect}
-              onClick={() => act.unequipToBag("amulet")}
-            />
-            <SlotCell
-              label="cloak"
-              stack={toStack(equipment.cloak)}
-              onHover={inspect}
-              onClick={() => act.unequipToBag("cloak")}
-            />
-            <SlotCell
-              label="boots"
-              stack={{ defId: equipment.boots.defId, qty: 1, runLoot: equipment.boots.runLoot }}
-              onHover={inspect}
-            />
+            {(["amulet", "cloak", "boots"] as const).map((slot) => (
+              <SlotCell
+                key={slot}
+                label={slot}
+                {...cellProps({ container: "equipment", slot }, toStack(equipment[slot]))}
+                onClick={() => quickMove({ container: "equipment", slot })}
+              />
+            ))}
           </div>
         </div>
 
-        {/* Bag */}
+        {/* Bag + the drop zone */}
         <div style={styles.bagRow}>
           {bag.map((stack, i) => (
             <SlotCell
               key={i}
               label={`${i + 1}`}
-              stack={stack}
-              onHover={inspect}
-              onClick={() =>
-                mode === "chest" && inVillage ? act.moveBagToChest(i) : act.equipFromBag(i)
-              }
+              {...cellProps({ container: "bag", index: i }, stack)}
+              onClick={() => quickMove({ container: "bag", index: i })}
             />
           ))}
+          <DropZone
+            drag={drag}
+            inDungeon={phase === "dungeon"}
+            onDropItem={(from) => {
+              act.dropStack(from);
+              setDrag(null);
+            }}
+          />
         </div>
 
-        {/* Detail strip: the stats of whatever the cursor is over. */}
-        <div style={styles.detail}>
-          {inspected ? (
-            <>
-              <div style={{ color: inspected.color, fontSize: 14 }}>
-                {inspected.name}
-                <span style={{ color: "#7d7566", fontSize: 11 }}>
-                  {"  ·  "}
-                  {"tier " + inspected.tier}
-                </span>
-              </div>
-              {statLines(inspected).map((line) => (
-                <div key={line} style={{ color: "#b9b0a0", fontSize: 12 }}>
-                  {line}
-                </div>
-              ))}
-            </>
-          ) : (
-            <div style={{ color: "#55505a", fontSize: 12 }}>
-              {mode === "chest"
-                ? "Click bag items to store them · click chest items to take them"
-                : mode === "merchant"
-                  ? "Everything is banked gold up front — Maro doesn't do credit"
-                  : "Click bag items to equip · click Q/E to unassign"}
-            </div>
-          )}
-        </div>
+        {/* Detail strip: whatever the cursor is over, compared to what's worn. */}
+        <DetailStrip inspected={inspected} inv={inv} mode={mode} />
 
         {mode === "chest" && (
           <div style={styles.chestGrid}>
@@ -150,9 +170,8 @@ export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none"> }) {
               <SlotCell
                 key={i}
                 small
-                stack={stack}
-                onHover={inspect}
-                onClick={() => act.moveChestToBag(i)}
+                {...cellProps({ container: "chest", index: i }, stack)}
+                onClick={() => quickMove({ container: "chest", index: i })}
               />
             ))}
           </div>
@@ -165,10 +184,12 @@ export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none"> }) {
               const affordable = gold >= price;
               return (
                 <div key={id} style={styles.wareRow}>
-                  <span style={{ color: def.color, width: 22, textAlign: "center" }}>◆</span>
+                  <span style={{ color: def.color, width: 22, textAlign: "center" }}>
+                    {iconOf(def)}
+                  </span>
                   <span
                     style={{ flex: 1, color: "#ded5c2", cursor: "default" }}
-                    onMouseEnter={() => inspect(id)}
+                    onMouseEnter={() => setInspected(def)}
                   >
                     {def.name}
                     <span style={{ color: "#7d7566", fontSize: 11 }}> — {def.desc}</span>
@@ -189,7 +210,10 @@ export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none"> }) {
           </div>
         )}
 
-        <div style={styles.footer}>Q / E use belt items · I closes</div>
+        <div style={styles.footer}>
+          drag items to move · drag onto ⤓ to {phase === "dungeon" ? "drop" : "discard"} · Q/E use
+          belt · I closes
+        </div>
       </div>
     </div>
   );
@@ -204,6 +228,12 @@ function toStack(inst: { defId: string; runLoot: boolean } | null): ItemStack | 
 function SlotCell({
   label,
   stack,
+  dragRef,
+  dragging,
+  canDrop,
+  onDropItem,
+  onBeginDrag,
+  onEndDrag,
   onClick,
   onHover,
   accent = false,
@@ -211,6 +241,12 @@ function SlotCell({
 }: {
   label?: string;
   stack: ItemStack | null;
+  dragRef: SlotRef;
+  dragging: SlotRef | null;
+  canDrop: (from: SlotRef) => boolean;
+  onDropItem: (from: SlotRef) => void;
+  onBeginDrag: (ref: SlotRef) => void;
+  onEndDrag: () => void;
   onClick?: () => void;
   onHover: (defId: string | undefined) => void;
   accent?: boolean;
@@ -218,15 +254,32 @@ function SlotCell({
 }) {
   const def = stack ? getItemDef(stack.defId) : null;
   const size = small ? 42 : 58;
+  const droppable = dragging !== null && !refsEqual(dragging, dragRef) && canDrop(dragging);
   return (
     <div style={{ textAlign: "center" }}>
       <button
+        draggable={!!def}
+        onDragStart={(e: DragEvent) => {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", def?.name ?? "");
+          onBeginDrag(dragRef);
+        }}
+        onDragEnd={onEndDrag}
+        onDragOver={(e: DragEvent) => {
+          if (droppable) e.preventDefault();
+        }}
+        onDrop={(e: DragEvent) => {
+          e.preventDefault();
+          if (dragging && droppable) onDropItem(dragging);
+          onEndDrag();
+        }}
         style={{
           ...styles.cell,
           width: size,
           height: size,
-          borderColor: accent ? "#4a4436" : "#2f2a36",
-          cursor: def && onClick ? "pointer" : "default",
+          borderColor: droppable ? "#46ffd0" : accent ? "#4a4436" : "#2f2a36",
+          background: droppable ? "#12241f" : "#151218",
+          cursor: def ? "grab" : "default",
         }}
         onClick={def && onClick ? onClick : undefined}
         onMouseEnter={() => onHover(def?.id)}
@@ -234,8 +287,8 @@ function SlotCell({
       >
         {def ? (
           <>
-            <span style={{ color: def.color, fontSize: small ? 16 : 22, textShadow: `0 0 8px ${def.color}` }}>
-              ◆
+            <span style={{ color: def.color, fontSize: small ? 15 : 20, textShadow: `0 0 8px ${def.color}` }}>
+              {iconOf(def)}
             </span>
             {stack!.qty > 1 && <span style={styles.qty}>{stack!.qty}</span>}
             {stack!.runLoot && (
@@ -253,70 +306,157 @@ function SlotCell({
   );
 }
 
-// ── The wizard portrait ──────────────────────────────────────────────────────
-// Pixel-art in code (the zero-asset rule): a char-map "sprite" rendered as
-// SVG rects. The palette is LIVE — robe, boots, crystal and amulet pixels
-// take the colors of what's actually equipped.
+/** Drag an item here to drop it: real orbs at your feet in the dungeon
+ * (floor-mates can grab them — gifting!), discarded in the village. */
+function DropZone({
+  drag,
+  inDungeon,
+  onDropItem,
+}: {
+  drag: SlotRef | null;
+  inDungeon: boolean;
+  onDropItem: (from: SlotRef) => void;
+}) {
+  const active =
+    drag !== null && !(drag.container === "equipment" && drag.slot === "staff");
+  return (
+    <div style={{ textAlign: "center" }}>
+      <div
+        onDragOver={(e: DragEvent) => {
+          if (active) e.preventDefault();
+        }}
+        onDrop={(e: DragEvent) => {
+          e.preventDefault();
+          if (drag && active) onDropItem(drag);
+        }}
+        style={{
+          ...styles.cell,
+          width: 58,
+          height: 58,
+          borderStyle: "dashed",
+          borderColor: active ? "#d84a4a" : "#3a3540",
+          background: active ? "#241214" : "#151218",
+          color: active ? "#d84a4a" : "#55505a",
+          fontSize: 20,
+        }}
+      >
+        ⤓
+      </div>
+      <div style={styles.cellLabel}>{inDungeon ? "drop" : "discard"}</div>
+    </div>
+  );
+}
 
-const SPRITE = [
-  "......HHH.......",
-  ".....HHHHH......",
-  "....HHHHHHH.....",
-  "...HHHHHHHHH....",
-  "..HHHHHHHHHHH...",
-  "......SSS.....CC",
-  ".....SESES....CC",
-  "......SSS......T",
-  ".....RRARR.....T",
-  "....RRRARRR....T",
-  "...RRRRRRRRR..GT",
-  "...RRRRRRRRR...T",
-  "..RRRRRRRRRRR..T",
-  "..RRRRRRRRRRR..T",
-  ".RRRRRRRRRRRRR.T",
-  ".RRRRRRRRRRRRR.T",
-  "..BB.......BB..T",
-  "..BB.......BB...",
-];
+// ── Detail strip with equipped-item comparison ───────────────────────────────
 
-function WizardPortrait() {
+function DetailStrip({
+  inspected,
+  inv,
+  mode,
+}: {
+  inspected: ItemDef | null;
+  inv: Carried;
+  mode: Exclude<Overlay, "none">;
+}) {
+  if (!inspected) {
+    return (
+      <div style={styles.detail}>
+        <div style={{ color: "#55505a", fontSize: 12 }}>
+          {mode === "chest"
+            ? "Drag between bag and chest · click for the quick move"
+            : mode === "merchant"
+              ? "Everything is banked gold up front — Maro doesn't do credit"
+              : "Drag items between slots · click for the quick move"}
+        </div>
+      </div>
+    );
+  }
+  // What would this replace? Show the worn counterpart for gear comparison.
+  const worn =
+    inspected.slot !== "consumable" ? inv.equipment[inspected.slot as GearSlot] : null;
+  const wornDef = worn && worn.defId !== inspected.id ? getItemDef(worn.defId) : null;
+  return (
+    <div style={styles.detail}>
+      <div style={{ display: "flex", gap: 24 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ color: inspected.color, fontSize: 14 }}>
+            {iconOf(inspected)} {inspected.name}
+            <span style={{ color: "#7d7566", fontSize: 11 }}>{`  ·  tier ${inspected.tier}`}</span>
+          </div>
+          {statLines(inspected).map((line) => (
+            <div key={line} style={{ color: "#b9b0a0", fontSize: 12 }}>
+              {line}
+            </div>
+          ))}
+        </div>
+        {wornDef && (
+          <div style={{ flex: 1, opacity: 0.62 }}>
+            <div style={{ color: "#7d7566", fontSize: 10, letterSpacing: 2 }}>WEARING</div>
+            <div style={{ color: wornDef.color, fontSize: 13 }}>
+              {iconOf(wornDef)} {wornDef.name}
+            </div>
+            {statLines(wornDef).map((line) => (
+              <div key={line} style={{ color: "#b9b0a0", fontSize: 11 }}>
+                {line}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── The wizard, in the flesh ─────────────────────────────────────────────────
+// A tiny second R3F canvas: the SAME WizardModel the multiplayer wizards use,
+// on a slow turntable, dressed in what's actually equipped. Rendered at low
+// dpr + pixelated upscale so it matches the game's look.
+
+function WizardViewer() {
   const equipment = useGame((s) => s.equipment);
   const staffColor = getItemDef(equipment.staff.defId).color;
-  const robe = equipment.cloak ? getItemDef(equipment.cloak.defId).color : "#4a4458";
-  const boots = getItemDef(equipment.boots.defId).color;
-  const amulet = equipment.amulet ? getItemDef(equipment.amulet.defId).color : null;
-
-  const palette: Record<string, string> = {
-    H: "#33284a",
-    S: "#d8b894",
-    E: "#7fd4ff",
-    R: robe,
-    A: amulet ?? robe,
-    B: boots,
-    T: "#4a3526",
-    G: "#d8b894",
-    C: staffColor,
-  };
+  const robeColor = equipment.cloak ? getItemDef(equipment.cloak.defId).color : "#4a4458";
+  const bootsColor = equipment.boots ? getItemDef(equipment.boots.defId).color : null;
+  const amuletColor = equipment.amulet ? getItemDef(equipment.amulet.defId).color : null;
 
   return (
-    <svg
-      viewBox="0 0 16 18"
-      width={170}
-      height={192}
-      style={{ imageRendering: "pixelated", flexShrink: 0 }}
-      shapeRendering="crispEdges"
-    >
-      {/* Crystal glow */}
-      <circle cx={15} cy={6} r={2.3} fill={staffColor} opacity={0.2} />
-      {amulet && <circle cx={7.5} cy={9} r={1.6} fill={amulet} opacity={0.3} />}
-      {SPRITE.flatMap((row, y) =>
-        [...row].map((ch, x) =>
-          ch === "." ? null : (
-            <rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} fill={palette[ch]} />
-          ),
-        ),
-      )}
-    </svg>
+    <div style={styles.viewer}>
+      <Canvas
+        dpr={0.5}
+        gl={{ antialias: false, alpha: true }}
+        camera={{ position: [0, 0.3, 3.6], fov: 44 }}
+        style={{ width: "100%", height: "100%", imageRendering: "pixelated" }}
+      >
+        {/* Dressing-room lighting: brighter than the dungeon so you can
+            actually admire the robe. */}
+        <ambientLight intensity={1.15} color="#9aa0c8" />
+        <directionalLight position={[2.5, 3, 2]} intensity={2.6} color="#ffd9a8" />
+        <directionalLight position={[-3, 1, -2]} intensity={1} color="#46ffd0" />
+        <Turntable>
+          <WizardModel
+            robeColor={robeColor}
+            staffColor={staffColor}
+            bootsColor={bootsColor}
+            amuletColor={amuletColor}
+          />
+        </Turntable>
+      </Canvas>
+    </div>
+  );
+}
+
+function Turntable({ children }: { children: React.ReactNode }) {
+  const group = useRef<Group>(null);
+  useFrame(({ clock }) => {
+    const g = group.current;
+    if (!g) return;
+    g.rotation.y = clock.elapsedTime * 0.6;
+    g.position.y = 0.06 + Math.sin(clock.elapsedTime * 1.7) * 0.03;
+  });
+  return (
+    <group ref={group} position={[0, 0.06, 0]}>
+      {children}
+    </group>
   );
 }
 
@@ -333,7 +473,7 @@ const styles: Record<string, CSSProperties> = {
     pointerEvents: "auto",
   },
   panel: {
-    width: "min(92vw, 620px)",
+    width: "min(92vw, 640px)",
     maxHeight: "92vh",
     overflowY: "auto",
     background: "rgba(12,9,18,0.96)",
@@ -367,6 +507,14 @@ const styles: Record<string, CSSProperties> = {
     gap: 26,
   },
   sideColumn: { display: "flex", flexDirection: "column", gap: 10 },
+  viewer: {
+    width: 190,
+    height: 210,
+    flexShrink: 0,
+    border: "1px solid #2f2a36",
+    background:
+      "radial-gradient(ellipse at 50% 62%, rgba(70,60,110,0.35), rgba(10,8,16,0.9) 70%)",
+  },
   bagRow: {
     display: "flex",
     justifyContent: "center",
@@ -394,7 +542,7 @@ const styles: Record<string, CSSProperties> = {
   },
   runLoot: { position: "absolute", left: 3, top: 0, fontSize: 12, color: "#c8a23c" },
   detail: {
-    minHeight: 52,
+    minHeight: 58,
     marginTop: 12,
     padding: "8px 12px",
     background: "#0d0a13",

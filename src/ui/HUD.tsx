@@ -6,6 +6,7 @@ import type { GearSlot, ItemStack } from "../items/types";
 import { floorPlayerCount, selectIsHost, useNet } from "../net/netStore";
 import { entryFloors, useGame } from "../state/gameStore";
 import { InventoryScreen } from "./InventoryScreen";
+import { ITEM_ICONS, iconOf } from "./itemInfo";
 
 /** All DOM UI: crosshair, bars, prompts, message feed, and the fullscreen
  * overlays for menu / portal select / death. */
@@ -148,7 +149,7 @@ function PlayHud() {
         <EquipRow slot="staff" defId={equipment.staff.defId} runLoot={equipment.staff.runLoot} />
         <EquipRow slot="amulet" defId={equipment.amulet?.defId} runLoot={equipment.amulet?.runLoot} />
         <EquipRow slot="cloak" defId={equipment.cloak?.defId} runLoot={equipment.cloak?.runLoot} />
-        <EquipRow slot="boots" defId={equipment.boots.defId} runLoot={equipment.boots.runLoot} />
+        <EquipRow slot="boots" defId={equipment.boots?.defId} runLoot={equipment.boots?.runLoot} />
         <div style={{ fontSize: 10, color: "#55505a", marginTop: 3 }}>I — inventory</div>
       </div>
 
@@ -184,8 +185,6 @@ function Bar({ label, value, max, color }: { label: string; value: number; max: 
   );
 }
 
-const SLOT_ICONS: Record<GearSlot, string> = { staff: "⚚", amulet: "◈", cloak: "▲", boots: "⬢" };
-
 function BeltSlot({ hotkey, stack }: { hotkey: string; stack: ItemStack | null }) {
   const def = stack ? getItemDef(stack.defId) : null;
   return (
@@ -205,7 +204,7 @@ function BeltSlot({ hotkey, stack }: { hotkey: string; stack: ItemStack | null }
       <span style={{ color: "#7d7566" }}>{hotkey}</span>
       {def ? (
         <>
-          <span style={{ color: def.color }}>◆</span>
+          <span style={{ color: def.color }}>{iconOf(def)}</span>
           {stack!.qty > 1 && <span>{stack!.qty}</span>}
         </>
       ) : (
@@ -223,11 +222,11 @@ function EquipRow({ slot, defId, runLoot }: { slot: GearSlot; defId?: string; ru
         <>
           {runLoot && <span style={{ color: "#c8a23c" }} title="Lost on death until banked">◦ </span>}
           <span>{def.name}</span>{" "}
-          <span style={{ color: def.color }}>{SLOT_ICONS[slot]}</span>
+          <span style={{ color: def.color }}>{ITEM_ICONS[slot]}</span>
         </>
       ) : (
         <>
-          <span>— no {slot} —</span> <span>{SLOT_ICONS[slot]}</span>
+          <span>— no {slot} —</span> <span>{ITEM_ICONS[slot]}</span>
         </>
       )}
     </div>

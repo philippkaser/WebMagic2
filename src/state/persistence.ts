@@ -98,7 +98,7 @@ export function toWireInventory(save: Omit<SaveData, "checkpoint">): WireInvento
       staff: save.equipment.staff.defId,
       amulet: save.equipment.amulet?.defId ?? null,
       cloak: save.equipment.cloak?.defId ?? null,
-      boots: save.equipment.boots.defId,
+      boots: save.equipment.boots?.defId ?? null,
     },
     bag: save.bag.map(stack),
     belt: save.belt.map(stack),
@@ -131,7 +131,7 @@ export function fromWireInventory(wire: WireInventory): Omit<SaveData, "checkpoi
       return { defId: s.id, qty, runLoot: false };
     });
   const staff = validGearId(wire.equipment.staff, "staff") ?? BASIC_STAFF_ID;
-  const boots = validGearId(wire.equipment.boots, "boots") ?? BASIC_BOOTS_ID;
+  const boots = validGearId(wire.equipment.boots, "boots");
   const amulet = validGearId(wire.equipment.amulet, "amulet");
   const cloak = validGearId(wire.equipment.cloak, "cloak");
   return {
@@ -139,7 +139,7 @@ export function fromWireInventory(wire: WireInventory): Omit<SaveData, "checkpoi
       staff: { defId: staff, runLoot: false },
       amulet: amulet ? { defId: amulet, runLoot: false } : null,
       cloak: cloak ? { defId: cloak, runLoot: false } : null,
-      boots: { defId: boots, runLoot: false },
+      boots: boots ? { defId: boots, runLoot: false } : null,
     },
     bag: grid(wire.bag, BAG_SLOTS),
     belt: grid(wire.belt, BELT_SLOTS),

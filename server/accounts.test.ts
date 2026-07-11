@@ -163,7 +163,12 @@ describe("AccountStore", () => {
       bag: "nope",
       gold: "lots",
     });
-    expect(save.inventory).toEqual(defaultWireInventory());
+    // Junk boots sanitize to "unequipped" (boots are optional; only the
+    // staff is mandatory and falls back to the previous bank).
+    expect(save.inventory).toEqual({ ...defaultWireInventory(), equipment: {
+      ...defaultWireInventory().equipment,
+      boots: null,
+    }});
   });
 
   test("rearrange moves owned items but admits nothing new", () => {

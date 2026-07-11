@@ -203,9 +203,12 @@ always known the starter-gear ids):
 Known limits, in honesty order: the floor host is still a client, so a
 cheating **host** can attest bogus grants for its floor-mates (fix: headless
 server-side hosts, the path above); item *stats* are client-computed (fix
-follows server hosts); device tokens are bearer secrets in localStorage
-(fine for a foundation, replaced by real auth). Rate limiting and hit/pickup
-sanitization already run server-/authority-side.
+follows server hosts); player-dropped items (`dropOrb` → pickup grant) leave
+the dropper's server-side ownership intact, so a hacked dropper could keep
+what an honest taker was granted — a small dupe window in the same trust
+class as host attestation (closed by the same fix); device tokens are bearer
+secrets in localStorage (fine for a foundation, replaced by real auth). Rate
+limiting and hit/pickup sanitization already run server-/authority-side.
 
 ### Scaling plan (server-side, future work)
 

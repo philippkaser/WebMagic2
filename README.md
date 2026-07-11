@@ -38,7 +38,7 @@ processes in separate terminals: `bun run dev:server` and `bun dev`.
 | Shift | Blink-dash (requires Cloak of Blinking) |
 | E | Interact (portals, loot, treasure); otherwise use belt slot 2 |
 | Q | Use belt slot 1 |
-| I (or Tab) | Inventory screen (gear, bag, belt — chest & merchant in the village) |
+| I (or Tab) | Inventory screen (drag & drop gear/bag/belt — chest & merchant in the village) |
 | P (or F3) | FPS / frame-time overlay |
 | O (or F4) | Toggle shadows (quality option, off by default) |
 

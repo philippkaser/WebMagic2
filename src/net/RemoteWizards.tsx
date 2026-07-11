@@ -3,6 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { CanvasTexture, Group, LinearFilter, Sprite, SpriteMaterial } from "three";
 import { hashSeed } from "../core/rng";
 import { getItemDef } from "../items/catalog";
+import { WizardModel } from "../render/WizardModel";
 import { netClock } from "./clock";
 import { INTERP_DELAY_MS } from "./entities";
 import { peerIds, peerName, peerStaffId, samplePeer } from "./players";
@@ -88,10 +89,10 @@ function RemoteWizard({ playerId }: { playerId: string }) {
     g.position.set(pose.p[0], pose.p[1], pose.p[2]);
     if (pose.a) g.rotation.y = pose.a[0];
 
-    // Little walk bob scaled by how fast they're moving.
+    // Little walk bob scaled by how fast they're moving (children[0] = body).
     const speed = Math.hypot(pose.v[0], pose.v[2]);
     bobT.t += dt * Math.min(speed, 10);
-    g.children[0].position.y = -0.1 + Math.abs(Math.sin(bobT.t * 1.4)) * Math.min(speed * 0.012, 0.06);
+    g.children[0].position.y = Math.abs(Math.sin(bobT.t * 1.4)) * Math.min(speed * 0.012, 0.06);
 
     // Keep the name tag fresh (peers can arrive before their hello lands).
     const name = peerName(playerId);
@@ -103,39 +104,10 @@ function RemoteWizard({ playerId }: { playerId: string }) {
 
   return (
     <group ref={group} visible={false}>
-      {/* Robe */}
-      <mesh position={[0, -0.1, 0]} castShadow>
-        <coneGeometry args={[0.45, 1.5, 8]} />
-        <meshStandardMaterial color={robeColor} roughness={0.85} />
-      </mesh>
-      {/* Head */}
-      <mesh position={[0, 0.8, 0]} castShadow>
-        <sphereGeometry args={[0.22, 10, 8]} />
-        <meshStandardMaterial color="#d8b894" roughness={0.8} />
-      </mesh>
-      {/* Hat */}
-      <mesh position={[0, 1.12, 0]} castShadow>
-        <coneGeometry args={[0.32, 0.62, 8]} />
-        <meshStandardMaterial color={robeColor} roughness={0.9} />
-      </mesh>
+      {/* Body first: the walk bob targets children[0]. */}
+      <WizardModel robeColor={robeColor} staffColor={staffColor()} castShadow />
       {/* Name tag */}
       <sprite ref={tag} position={[0, 1.85, 0]} scale={[1.6, 0.3, 1]} material={nameTagMaterial("…")} />
-      {/* Staff */}
-      <group position={[0.42, 0.1, 0.1]} rotation={[0, 0, -0.12]}>
-        <mesh>
-          <cylinderGeometry args={[0.03, 0.04, 1.5, 6]} />
-          <meshStandardMaterial color="#4a3526" roughness={0.85} />
-        </mesh>
-        <mesh position={[0, 0.85, 0]}>
-          <octahedronGeometry args={[0.09]} />
-          <meshStandardMaterial
-            color="#0a0a12"
-            emissive={staffColor()}
-            emissiveIntensity={2}
-            toneMapped={false}
-          />
-        </mesh>
-      </group>
     </group>
   );
 }

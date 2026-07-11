@@ -6,12 +6,16 @@ import { computeStats, getItemDef } from "../items/catalog";
 import { merchantPrice } from "../items/economy";
 import {
   addToGrid,
-  cloneGrid,
+  clearSlot,
   hasRoom,
   markBanked,
+  moveItem as moveItemPure,
+  readSlot,
   stripRunLoot,
   takeOneAt,
+  type Carried,
   type Grid,
+  type SlotRef,
 } from "../items/inventory";
 import type { DerivedStats, Equipment } from "../items/types";
 import { netBus } from "../net/bus";
@@ -72,14 +76,15 @@ export interface GameState {
    * then bag; gear with its slot taken → bag. Returns false if truly full. */
   acquireItem(defId: string): boolean;
   addGold(amount: number): void;
-  /** Swap a bag cell with the matching equipment slot. */
-  equipFromBag(bagIndex: number): void;
-  /** Unequip an optional slot into the bag (staff/boots only swap). */
-  unequipToBag(slot: "amulet" | "cloak"): void;
-  moveBagToBelt(bagIndex: number, beltIndex: number): void;
-  moveBeltToBag(beltIndex: number): void;
-  moveBagToChest(bagIndex: number): void;
-  moveChestToBag(chestIndex: number): void;
+  /** Move/swap/merge between any two cells (equipment/bag/belt/chest) —
+   * the one action behind every drag, drop and click in the inventory UI.
+   * All rules live in items/inventory.ts#moveItem; chest moves additionally
+   * require standing in the village. */
+  moveItem(from: SlotRef, to: SlotRef): void;
+  /** Drop a cell's contents: in the dungeon they spawn as real loot orbs at
+   * your feet (floor-mates can grab them!); in the village they're discarded.
+   * The staff can never be dropped. */
+  dropStack(from: SlotRef): void;
   /** Use the consumable in belt[index] (0 = Q, 1 = E). */
   useBelt(index: number): void;
   buyItem(defId: string): void;
@@ -262,107 +267,41 @@ export const useGame = create<GameState>((set, get) => ({
     gameEvents.emit("message", `+${amount} gold`);
   },
 
-  equipFromBag: (bagIndex) => {
+  moveItem: (from, to) => {
     const state = get();
-    const stack = state.bag[bagIndex];
+    if ((from.container === "chest" || to.container === "chest") && state.phase !== "village") {
+      gameEvents.emit("message", "Your chest is back in the village");
+      return;
+    }
+    const next = moveItemPure(carriedOf(state), from, to);
+    if (!next) return; // illegal move — the UI simply doesn't accept the drop
+    const equipmentChanged = from.container === "equipment" || to.container === "equipment";
+    set({ ...next, health: clampedHealth({ ...state, ...next }) });
+    if (equipmentChanged) playPickup();
+    syncVillage(get());
+  },
+
+  dropStack: (from) => {
+    const state = get();
+    const stack = readSlot(carriedOf(state), from);
     if (!stack) return;
+    if (from.container === "equipment" && from.slot === "staff") {
+      gameEvents.emit("message", "A wizard never drops their staff");
+      return;
+    }
+    if (from.container === "chest" && state.phase !== "village") return;
+    const next = clearSlot(carriedOf(state), from);
+    if (!next) return;
     const def = getItemDef(stack.defId);
-    if (def.slot === "consumable") {
-      // Convenience: clicking a bag consumable sends it to a free belt slot
-      // (or swaps with Q when the belt is full — moveBagToBelt swaps).
-      const free = state.belt.indexOf(null);
-      get().moveBagToBelt(bagIndex, free === -1 ? 0 : free);
-      return;
+    set({ ...next, health: clampedHealth({ ...state, ...next }) });
+    if (state.phase === "dungeon") {
+      // Real orbs at your feet — a floor-mate can pick them up (gifting!).
+      gameEvents.emit("dropItems", { defId: stack.defId, qty: stack.qty });
+      gameEvents.emit("message", `Dropped ${def.name}${stack.qty > 1 ? ` ×${stack.qty}` : ""}`);
+    } else {
+      gameEvents.emit("message", `Discarded ${def.name}${stack.qty > 1 ? ` ×${stack.qty}` : ""}`);
+      syncVillage(get());
     }
-    const previous = state.equipment[def.slot];
-    const bag = cloneGrid(state.bag);
-    bag[bagIndex] = previous ? { defId: previous.defId, qty: 1, runLoot: previous.runLoot } : null;
-    set({
-      equipment: { ...state.equipment, [def.slot]: { defId: stack.defId, runLoot: stack.runLoot } },
-      bag,
-      health: clampedHealth(get()),
-    });
-    playPickup();
-    gameEvents.emit(
-      "message",
-      previous ? `${def.name} (swapped ${getItemDef(previous.defId).name})` : `${def.name} equipped`,
-    );
-    syncVillage(get());
-  },
-
-  unequipToBag: (slot) => {
-    const state = get();
-    const item = state.equipment[slot];
-    if (!item) return;
-    const bag = addToGrid(state.bag, item.defId, item.runLoot);
-    if (!bag) {
-      gameEvents.emit("message", "Bag is full");
-      return;
-    }
-    set({
-      equipment: { ...state.equipment, [slot]: null },
-      bag,
-      health: clampedHealth(get()),
-    });
-    syncVillage(get());
-  },
-
-  moveBagToBelt: (bagIndex, beltIndex) => {
-    const state = get();
-    const stack = state.bag[bagIndex];
-    if (!stack || getItemDef(stack.defId).slot !== "consumable") return;
-    const bag = cloneGrid(state.bag);
-    const belt = cloneGrid(state.belt);
-    bag[bagIndex] = belt[beltIndex];
-    belt[beltIndex] = stack;
-    set({ bag, belt });
-    syncVillage(get());
-  },
-
-  moveBeltToBag: (beltIndex) => {
-    const state = get();
-    const stack = state.belt[beltIndex];
-    if (!stack) return;
-    const free = state.bag.indexOf(null);
-    if (free === -1) {
-      gameEvents.emit("message", "Bag is full");
-      return;
-    }
-    const bag = cloneGrid(state.bag);
-    const belt = cloneGrid(state.belt);
-    bag[free] = stack;
-    belt[beltIndex] = null;
-    set({ bag, belt });
-    syncVillage(get());
-  },
-
-  moveBagToChest: (bagIndex) => {
-    const state = get();
-    if (state.phase !== "village") return;
-    const stack = state.bag[bagIndex];
-    if (!stack) return;
-    const chest = addToGrid(state.chest, stack.defId, false);
-    if (!chest) {
-      gameEvents.emit("message", "The chest is full");
-      return;
-    }
-    // Chest deposits move one item at a time so stacks split cleanly.
-    set({ bag: takeOneAt(state.bag, bagIndex), chest });
-    syncVillage(get());
-  },
-
-  moveChestToBag: (chestIndex) => {
-    const state = get();
-    if (state.phase !== "village") return;
-    const stack = state.chest[chestIndex];
-    if (!stack) return;
-    const bag = addToGrid(state.bag, stack.defId, false);
-    if (!bag) {
-      gameEvents.emit("message", "Bag is full");
-      return;
-    }
-    set({ chest: takeOneAt(state.chest, chestIndex), bag });
-    syncVillage(get());
   },
 
   useBelt: (index) => {
@@ -518,8 +457,12 @@ function afterPickup(name: string, where: string): void {
 }
 
 /** Health never exceeds the (possibly just-changed) max. */
-function clampedHealth(state: GameState): number {
+function clampedHealth(state: Pick<GameState, "health" | "equipment">): number {
   return Math.min(state.health, computeStats(state.equipment).maxHealth);
+}
+
+function carriedOf(state: GameState): Carried {
+  return { equipment: state.equipment, bag: state.bag, belt: state.belt, chest: state.chest };
 }
 
 /** Everything carried becomes safe; run gold joins the purse. */
@@ -529,7 +472,7 @@ function bankCarried(state: GameState) {
       staff: { ...state.equipment.staff, runLoot: false },
       amulet: state.equipment.amulet && { ...state.equipment.amulet, runLoot: false },
       cloak: state.equipment.cloak && { ...state.equipment.cloak, runLoot: false },
-      boots: { ...state.equipment.boots, runLoot: false },
+      boots: state.equipment.boots && { ...state.equipment.boots, runLoot: false },
     },
     bag: markBanked(state.bag),
     belt: markBanked(state.belt),
@@ -596,7 +539,7 @@ function die(
 ) {
   const state = get();
   const lostItems: string[] = [];
-  const strip = (slot: "amulet" | "cloak") => {
+  const strip = (slot: "amulet" | "cloak" | "boots") => {
     const item = state.equipment[slot];
     if (item?.runLoot) {
       lostItems.push(getItemDef(item.defId).name);
@@ -604,16 +547,15 @@ function die(
     }
     return item;
   };
-  const fallback = defaultSave().equipment;
   const kept: Equipment = {
+    // The staff is mandatory — a lost run staff falls back to the starter.
     staff: state.equipment.staff.runLoot
-      ? (lostItems.push(getItemDef(state.equipment.staff.defId).name), fallback.staff)
+      ? (lostItems.push(getItemDef(state.equipment.staff.defId).name),
+        defaultSave().equipment.staff)
       : state.equipment.staff,
     amulet: strip("amulet"),
     cloak: strip("cloak"),
-    boots: state.equipment.boots.runLoot
-      ? (lostItems.push(getItemDef(state.equipment.boots.defId).name), fallback.boots)
-      : state.equipment.boots,
+    boots: strip("boots"),
   };
   const bagResult = stripRunLoot(state.bag);
   const beltResult = stripRunLoot(state.belt);

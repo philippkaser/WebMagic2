@@ -1,6 +1,7 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
 import { Group } from "three";
+import { gameEvents } from "../core/events";
 import { Rng } from "../core/rng";
 import {
   addLightSource,
@@ -67,6 +68,20 @@ const takeOrb = hostCommand<{ orbId: string }>("takeOrb", (d, meta) => {
   // Host attestation makes the pickup bankable server-side for that player.
   if (orb.defId) session.attestGrant(meta.from, orb.defId);
   else if (orb.gold > 0) session.attestGold(meta.from, orb.gold);
+});
+
+/** Player-dropped items become real orbs at the dropper's feet — anyone on
+ * the floor can take them, which makes dropping double as gifting. The host
+ * validates the position against the dropper like any pickup. */
+const dropOrb = hostCommand<{ defId: string; pos: Vec3 }>("dropOrb", (d, meta) => {
+  if (typeof d.defId !== "string" || !Array.isArray(d.pos)) return;
+  try {
+    getItemDef(d.defId);
+  } catch {
+    return; // unknown id from a hacked/newer client — refuse to spawn it
+  }
+  if (wizardDistSqTo(meta.from, d.pos[0], d.pos[1], d.pos[2]) > TAKE_RANGE_SQ) return;
+  announceOrb(d.defId, 0, d.pos);
 });
 
 function announceOrb(defId: string | null, gold: number, pos: Vec3): void {
@@ -150,11 +165,26 @@ export function LootOrbs() {
         for (const orb of (data as Orb[]) ?? []) pushOrb?.(orb);
       },
     });
+    // Inventory drops: scatter the stack around the player's feet.
+    const offDrop = gameEvents.on("dropItems", ({ defId, qty }) => {
+      for (let i = 0; i < Math.min(qty, 8); i++) {
+        const a = Math.random() * Math.PI * 2;
+        dropOrb.request({
+          defId,
+          pos: [
+            playerPosition.x + Math.cos(a) * (0.6 + Math.random() * 0.4),
+            Math.max(playerPosition.y - 0.5, 0.4),
+            playerPosition.z + Math.sin(a) * (0.6 + Math.random() * 0.4),
+          ],
+        });
+      }
+    });
     return () => {
       pushOrb = null;
       takeOrbLocal = null;
       liveOrbs = null;
       unregister();
+      offDrop();
     };
   }, []);
 

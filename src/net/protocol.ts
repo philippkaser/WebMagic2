@@ -47,7 +47,7 @@ export interface WireEquipment {
   staff: string;
   amulet: string | null;
   cloak: string | null;
-  boots: string;
+  boots: string | null;
 }
 
 /** One inventory cell on the wire (consumables stack). */

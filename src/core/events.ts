@@ -33,6 +33,9 @@ export interface GameEvents extends Record<string, unknown> {
   staffKick: number;
   /** Boss health fraction 0..1 for the HUD bar, or null to hide it. */
   bossHp: { name: string; frac: number } | null;
+  /** Player dropped items from the inventory — the loot system spawns real
+   * orbs at their feet (decoupled: the store can't import presentation). */
+  dropItems: { defId: string; qty: number };
 }
 
 export const gameEvents = new Emitter<GameEvents>();

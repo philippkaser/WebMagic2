@@ -1,5 +1,19 @@
 import { getAbility } from "../combat/abilities";
-import type { ItemDef, Passives } from "../items/types";
+import type { ItemDef, Passives, Slot } from "../items/types";
+
+/** One glyph per item family — the same everywhere an item appears (equipment
+ * HUD, inventory cells, merchant list), so items are recognizable at a glance. */
+export const ITEM_ICONS: Record<Slot, string> = {
+  staff: "⚚",
+  amulet: "◈",
+  cloak: "▲",
+  boots: "⬢",
+  consumable: "⚗",
+};
+
+export function iconOf(def: ItemDef): string {
+  return ITEM_ICONS[def.slot];
+}
 
 /** Human-readable stat lines for an item — what the inventory screen and
  * merchant list show. Lives in ui/ (not items/) because it reads ability

@@ -153,6 +153,8 @@ plus random drops from enemies and props.
 Picking up an item no longer replaces what you have. Every wizard carries:
 
 - **4 equipment slots** (above) — an empty slot auto-equips a pickup.
+  Everything except the staff can be unequipped (a wizard without a staff
+  isn't a wizard; bare feet just mean a plain single jump).
 - A **5-slot bag** — everything else you grab goes here; swap gear in and out
   on the inventory screen (**I**).
 - A **2-slot consumable belt** mapped to **Q and E** — potions and feathers
@@ -161,10 +163,20 @@ Picking up an item no longer replaces what you have. Every wizard carries:
 - A **30-slot chest at home** in the village — banked storage. It never
   travels, so it's never at risk.
 
-The inventory screen shows the wizard between the slot columns — and the
-portrait is live: robe, boots, staff crystal and amulet pixels take the
-colors of what's actually equipped. Items list their stats (staff ability
-damage/mana, passives, consumable effects).
+The inventory screen shows **your actual wizard in 3D** between the slot
+columns — the same `WizardModel` other players see on shared floors, on a
+slow turntable, dressed live in what's equipped (cloak color, boots, staff
+crystal, amulet gem). Items move by **drag & drop** between any cells (click
+still does the obvious quick-move); every item shows its stats (staff ability
+damage/mana, passives, consumable effects) plus a side-by-side comparison
+with what you're currently wearing. Item glyphs (⚚ ◈ ▲ ⬢ ⚗) are the same
+everywhere an item appears.
+
+**Dropping items:** drag anything onto the drop cell. In the dungeon it
+spawns **real loot orbs at your feet** — a floor-mate can pick them up, which
+makes dropping double as gifting (share a potion with the stranger you just
+met on floor 3). In the village it simply discards. The staff can never be
+dropped.
 
 ### Gold & the merchant (the economy)
 
