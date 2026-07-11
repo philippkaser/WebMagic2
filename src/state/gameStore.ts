@@ -72,9 +72,10 @@ function loadPlayerName(): string {
 const saved = loadSave();
 let manaAccumulator = 0;
 
-/** Portal travel always takes at least this long, so the warp tunnel reads as
- * a journey through space and time rather than a loading flicker. */
-const WARP_MS = 1400;
+/** Minimum time the floor spends "loading". Kept a touch shorter than the warp
+ * transition's descent (see ui/Transitions), so the destination has mounted
+ * and warmed up under cover before the "sucked out" reveal lands on it. */
+const WARP_MS = 1150;
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 

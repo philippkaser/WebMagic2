@@ -7,14 +7,16 @@ import {
   RigidBody,
   type RapierRigidBody,
 } from "@react-three/rapier";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import {
   CanvasTexture,
   Color,
   DoubleSide,
   Group,
+  InstancedMesh,
   MeshBasicMaterial,
   NearestFilter,
+  Object3D,
   ShaderMaterial,
   Vector3,
 } from "three";
@@ -340,11 +342,11 @@ void main() {
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
-/** A wound torn in space: a tall lens-shaped rip whose frayed edges writhe with
- * animated fbm, opening onto a swirling vortex of stars and nebula being pulled
- * into a deep-violet nothing, the torn edge burning with the rift's color.
- * Everything is SDF + noise in one shader — no geometry to author, and the
- * banded palette keeps the pixel-magic look. */
+/** A wound torn in space, rendered chunky and gritty: everything is computed on
+ * a coarse pixel grid so the rip reads as blocky torn pixels, not a smooth
+ * decal. A hard jagged silhouette (stepped, not anti-aliased), a raggedly
+ * torn burning edge, and a blocky star-vortex void seen THROUGH the tear.
+ * SDF + noise in one shader — no geometry to author. */
 const RIP_FRAG =
   /* glsl */ `
 precision highp float;
@@ -356,66 +358,127 @@ varying vec2 vUv;
 ` +
   GLSL_NOISE +
   /* glsl */ `
+// Snap to a coarse grid — the whole rip lives on chunky pixels.
+vec2 pix(vec2 v, float n) { return (floor(v * n) + 0.5) / n; }
+
 void main() {
   // Plane-local coords: p.x in [-1.5,1.5], p.y in [-2,2].
-  vec2 p = (vUv - 0.5) * vec2(3.0, 4.0);
+  vec2 raw = (vUv - 0.5) * vec2(3.0, 4.0);
   float sd = uSeed;
 
+  // Chunky grid: ~34 cells wide. Blocky silhouette AND blocky interior.
+  vec2 p = pix(raw, 11.0);
+
   // ---- Tear silhouette: a vertical lens tapering to points, spine wobbling,
-  //      width frayed by animated noise so the rip strains and flutters. ----
+  //      width raggedly frayed by two noise octaves so the rip looks torn. ----
   float y = p.y / 1.9;                        // -1..1
   float taper = max(1.0 - y * y, 0.0);
-  float halfW = pow(taper, 0.7) * 0.95;
-  float fray = fbm(vec2(y * 3.4 + sd, uTime * 0.5 + sd));
-  halfW *= 0.55 + 0.55 * fray;
-  halfW *= mix(0.28, 1.0, uActive);           // sealed → a thin slit
-  float spine = 0.18 * (fbm(vec2(y * 2.3 - uTime * 0.25 + sd, sd)) - 0.5);
+  float halfW = pow(taper, 0.62) * 1.0;
+  float fray = fbm(vec2(y * 5.0 + sd, uTime * 0.4 + sd));
+  float jag = fbm(vec2(y * 13.0 - sd, uTime * 0.7));   // fine ragged notches
+  halfW *= 0.5 + 0.5 * fray + 0.22 * (jag - 0.5);
+  halfW *= mix(0.24, 1.0, uActive);           // sealed → a thin slit
+  float spine = 0.20 * (fbm(vec2(y * 2.2 - uTime * 0.22 + sd, sd)) - 0.5);
   float d = abs(p.x - spine) - halfW;         // <0 inside the tear
 
-  float inside = smoothstep(0.05, -0.05, d);
-  float edge = smoothstep(0.30, 0.0, abs(d)); // rim band around the tear
+  float inside = step(d, 0.0);                 // hard, gritty edge (no AA)
+  float edge = smoothstep(0.24, 0.0, abs(d));  // ragged burning rim band
 
-  // ---- Void vortex: two star layers + nebula spiralling toward the center,
-  //      looking THROUGH the tear into another dimension. ----
+  // ---- Void vortex on the chunky grid: blocky stars + nebula spiralling in. ----
   vec2 c = vec2(p.x - spine, p.y * 0.55);
   float rr = length(c);
   float aa = atan(c.y, c.x);
-  float swirl = aa + (1.3 - rr) * 2.7 + uTime * (0.32 + 0.5 * uActive);
+  float swirl = aa + (1.3 - rr) * 2.8 + uTime * (0.30 + 0.5 * uActive);
 
-  // near stars, streaking as they're pulled in
-  vec2 g0 = vec2(swirl * 2.2, pow(max(rr, 0.03), 0.5) * 6.0 - uTime * (0.7 + 0.8 * uActive));
+  vec2 g0 = vec2(swirl * 2.3, pow(max(rr, 0.03), 0.5) * 6.0 - uTime * (0.8 + 0.8 * uActive));
   float sh0 = hash21(floor(g0));
-  float star0 = step(0.88, sh0) * (0.4 + 0.6 * fract(sh0 * 71.3 + uTime));
-  // far, denser dust layer swirling the other cadence
-  vec2 g1 = vec2(swirl * 4.3 + 9.0, pow(max(rr, 0.03), 0.6) * 11.0 - uTime * 1.3);
-  float sh1 = hash21(floor(g1));
-  float star1 = step(0.93, sh1) * 0.5;
+  float star0 = step(0.86, sh0) * (0.4 + 0.6 * fract(sh0 * 71.3 + uTime));
+  vec2 g1 = vec2(swirl * 4.6 + 9.0, pow(max(rr, 0.03), 0.6) * 11.0 - uTime * 1.4);
+  float star1 = step(0.90, hash21(floor(g1))) * 0.5;
 
-  float neb = fbm(vec2(swirl * 1.2, rr * 2.4 - uTime * 0.5));
-  neb = pow(neb, 1.5);
+  float neb = pow(fbm(vec2(swirl * 1.2, rr * 2.4 - uTime * 0.5)), 1.6);
 
-  // Deep center glows faintly with the rift color — a distant elsewhere.
-  vec3 deep = mix(uColor * 0.10, vec3(0.05, 0.02, 0.11), smoothstep(0.0, 0.9, rr));
+  vec3 deep = mix(uColor * 0.12, vec3(0.04, 0.015, 0.09), smoothstep(0.0, 0.9, rr));
   vec3 voidCol = deep;
-  voidCol += uColor * neb * 0.55 * (1.0 - rr * 0.6);
-  voidCol += (vec3(0.85) + uColor * 0.6) * star0 * (0.5 + 0.8 * uActive);
+  voidCol += uColor * neb * 0.6 * (1.0 - rr * 0.6);
+  voidCol += (vec3(0.9) + uColor * 0.6) * star0 * (0.5 + 0.8 * uActive);
   voidCol += uColor * star1 * (0.4 + 0.6 * uActive);
 
-  // ---- Burning frayed edge ----
-  float flick = 0.82 + 0.18 * sin(uTime * 9.0 + p.y * 6.0);
-  vec3 edgeCol = uColor * edge * (1.2 + 1.4 * uActive) * flick;
+  // ---- Ragged burning edge ----
+  float flick = 0.78 + 0.22 * sin(uTime * 11.0 + p.y * 7.0 + sd);
+  vec3 edgeCol = uColor * edge * (1.25 + 1.5 * uActive) * flick;
 
   vec3 col = voidCol * inside + edgeCol;
 
-  // Stepped palette → deliberate pixel-magic banding, not muddy gradients.
-  col = floor(col * 16.0) / 16.0;
+  // Hard stepped palette → deliberate pixel-magic banding, extra gritty.
+  col = floor(col * 11.0) / 11.0;
 
-  // Opaque where the tear is; a soft glow halo just outside it.
-  float halo = smoothstep(0.44, 0.0, abs(d)) * edge * (0.4 + 0.6 * uActive);
+  float halo = smoothstep(0.34, 0.0, abs(d)) * edge * (0.35 + 0.5 * uActive);
   float alpha = clamp(max(inside, halo), 0.0, 1.0);
-  if (alpha < 0.01) discard;
+  if (alpha < 0.02) discard;
   gl_FragColor = vec4(col, alpha);
 }`;
+
+/** Fancy motes swirling around the rip: a swarm of glowing shards that spiral
+ * inward as if pulled through the tear, respawning at the rim — pure eye-candy,
+ * one instanced draw call. Gated by the rift's `activity` so a sealed wound
+ * barely sparkles. */
+const MOTE_COUNT = 34;
+
+function RiftMotes({ color, activity }: { color: string; activity: MutableRefObject<number> }) {
+  const mesh = useRef<InstancedMesh>(null);
+  const dummy = useMemo(() => new Object3D(), []);
+  const motes = useMemo(
+    () =>
+      Array.from({ length: MOTE_COUNT }, () => ({
+        a0: Math.random() * Math.PI * 2,
+        spin: 1 + Math.random() * 2.2, // turns over one life
+        base: 0.55 + Math.random() * 0.6,
+        speed: 0.12 + Math.random() * 0.24, // life phases per second
+        ph: Math.random(),
+        z: (Math.random() - 0.5) * 0.6,
+        wob: Math.random() * Math.PI * 2,
+      })),
+    [],
+  );
+
+  useFrame(({ clock }, dt) => {
+    const m = mesh.current;
+    if (!m) return;
+    const t = clock.elapsedTime;
+    const act = activity.current;
+    for (let i = 0; i < MOTE_COUNT; i++) {
+      const p = motes[i];
+      p.ph += p.speed * dt;
+      if (p.ph >= 1) {
+        p.ph -= 1;
+        p.a0 = Math.random() * Math.PI * 2;
+        p.base = 0.55 + Math.random() * 0.6;
+      }
+      const ph = p.ph;
+      const R = (1.75 * (1 - ph) + 0.12) * p.base; // spiral from rim to center
+      const a = p.a0 + ph * p.spin * Math.PI * 2 + t * 0.3;
+      dummy.position.set(
+        Math.cos(a) * R * 0.7,
+        Math.sin(a) * R * 1.05,
+        Math.sin(ph * Math.PI) * p.z + Math.sin(t * 2 + p.wob) * 0.05,
+      );
+      const s = (0.018 + 0.05 * Math.sin(ph * Math.PI)) * act; // fade in/out over life
+      dummy.scale.setScalar(Math.max(s, 0.0001));
+      dummy.rotation.set(t + p.wob, t * 1.3, 0);
+      dummy.updateMatrix();
+      m.setMatrixAt(i, dummy.matrix);
+    }
+    m.instanceMatrix.needsUpdate = true;
+  });
+
+  return (
+    <instancedMesh ref={mesh} args={[undefined, undefined, MOTE_COUNT]} frustumCulled={false}>
+      <tetrahedronGeometry args={[1]} />
+      <meshBasicMaterial color={color} toneMapped={false} />
+    </instancedMesh>
+  );
+}
 
 /** Interactive portal — a tear ripped through the world. While `locked`, the
  * wound is barely open: a dim, near-shut slit that refuses use. */
@@ -533,11 +596,12 @@ export function Portal({
         <boxGeometry args={[3.4, 0.24, 1.6]} />
         <meshStandardMaterial map={stepTex.map} normalMap={stepTex.normalMap} roughness={0.85} />
       </mesh>
-      {/* The rip itself — one shader plane */}
+      {/* The rip itself — one shader plane — plus the mote swarm around it */}
       <group ref={group} position={[0, 1.8, 0]}>
         <mesh material={material}>
           <planeGeometry args={[3.0, 4.0]} />
         </mesh>
+        <RiftMotes color={color} activity={activity} />
       </group>
     </group>
   );

@@ -44,13 +44,19 @@ resolves (or cwd into the repo) — plain `node` won't find playwright-core.
   to unlock waystone floors. Prefer real inputs for the flow under test; use the
   hook for assertions and setup.
 - **Capturing transitions mid-flight**: `enterDungeon`/`descend` return a
-  Promise that only resolves once the ~1.4s warp finishes. `await page.evaluate(
+  Promise that only resolves once the warp finishes. `await page.evaluate(
   () => window.__game.getState().enterDungeon(1))` blocks for the whole warp, so
   every screenshot after it shows the *destination*, never the tunnel. Fire and
   forget instead — `page.evaluate(() => { window.__game.getState().enterDungeon(1); })`
-  (no return) — then sleep 400–900ms and screenshot to catch the warp shader.
-  The full-screen transitions (portal warp, mind-dive) render on their own
-  low-res WebGL canvas (`ui/shaderCanvas.ts`), a second GL context beside R3F.
+  (no return). But under swiftshader each `page.screenshot` costs ~500ms (two
+  WebGL contexts), so burst-capturing can't reliably sample a ~2s staged
+  transition. **Use the dev preview hook instead**:
+  `window.__previewTransition(mode, progress, tint)` — mode 0 = floor warp,
+  1 = mind-dive — freezes the transition shader at a fixed `progress` (0–1) so
+  you can screenshot each phase deterministically (suck-in ~0.1, descend ~0.5,
+  suck-out ~0.8; eye-hover ~0.3, punch ~0.6, mind ~0.8). The full-screen
+  transitions render on their own low-res WebGL canvas (`ui/shaderCanvas.ts`),
+  a second GL context beside R3F.
 
 ## Flows worth driving
 
