@@ -84,7 +84,11 @@ export function GameScene() {
         </Environment>
         <Effects />
       </Suspense>
-      {controlsEnabled && <PointerLockControls makeDefault />}
+      {/* selector="canvas" is load-bearing: without it drei binds its
+          click-to-lock handler to the whole DOCUMENT, so clicking inventory/
+          merchant buttons would instantly re-lock the pointer. Scoped to the
+          canvas, overlay clicks (which cover the canvas) can never lock. */}
+      {controlsEnabled && <PointerLockControls makeDefault selector="canvas" />}
     </Canvas>
   );
 }

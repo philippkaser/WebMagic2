@@ -14,12 +14,13 @@ export function HUD() {
   const overlay = useGame((s) => s.overlay);
   const [showPerf, setShowPerf] = useState(false);
 
-  // Leaving gameplay always releases the pointer.
+  // Leaving gameplay or opening an overlay always releases the pointer.
   useEffect(() => {
-    if (phase !== "village" && phase !== "dungeon" && document.pointerLockElement) {
+    const playing = phase === "village" || phase === "dungeon";
+    if ((!playing || overlay !== "none") && document.pointerLockElement) {
       document.exitPointerLock();
     }
-  }, [phase]);
+  }, [phase, overlay]);
 
   // Global quality/debug hotkeys. Letter keys are primary — macOS reserves
   // F-keys (Mission Control, Spotlight) so they often never reach the page.
