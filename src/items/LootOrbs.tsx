@@ -10,6 +10,7 @@ import {
 import { spawnBurst } from "../fx/Particles";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
+import { wizardDistSqTo } from "../game/targets";
 import { hostCommand, hostEvent } from "../net/channels";
 import { registerSyncProvider } from "../net/entities";
 import { isHost, useNet } from "../net/netStore";
@@ -43,9 +44,18 @@ const orbTaken = hostEvent<{ orbId: string; by: string }>("orbTaken", (d) =>
   takeOrbLocal?.(d.orbId, d.by),
 );
 
+/** Grant radius. Pickups are offered within ~2.3 m; the slack covers the
+ * requester's movement during one round trip. Anything farther is a client
+ * trying to vacuum loot across the map. */
+const TAKE_RANGE_SQ = 6 * 6;
+
 const takeOrb = hostCommand<{ orbId: string }>("takeOrb", (d, meta) => {
-  // First come, first served — grant only if the orb still exists.
-  if (!liveOrbs?.().some((o) => o.id === d.orbId)) return;
+  // First come, first served — grant only if the orb still exists and the
+  // requesting wizard is actually standing at it.
+  const orb = liveOrbs?.().find((o) => o.id === d.orbId);
+  if (!orb) return;
+  if (wizardDistSqTo(meta.from, orb.position[0], orb.position[1], orb.position[2]) > TAKE_RANGE_SQ)
+    return;
   orbTaken.announce({ orbId: d.orbId, by: meta.from });
 });
 

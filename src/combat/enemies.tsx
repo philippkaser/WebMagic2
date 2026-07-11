@@ -21,6 +21,7 @@ import { isHost } from "../net/netStore";
 import { useNetBody, type NetBody } from "../net/NetSystems";
 import { getStats, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
+import { sanitizeHit, type HitData } from "./damage";
 import { enemyCast } from "./remoteEffects";
 
 const ENEMY_GROUPS = interactionGroups(GROUPS.ENEMY, [
@@ -32,11 +33,6 @@ const ENEMY_GROUPS = interactionGroups(GROUPS.ENEMY, [
 ]);
 
 const LOOT_DROP_CHANCE = 0.24;
-
-interface HitData {
-  damage: number;
-  impulse: { x: number; y: number; z: number };
-}
 
 /** Shared enemy networking: registers the entity with the replication
  * framework (snapshots, interpolation, late-join and migration are all
@@ -118,8 +114,8 @@ export function useEnemyNet(opts: {
     },
     onCommand: (cmd, data) => {
       if (cmd === "hit") {
-        const d = data as HitData;
-        applyDamage(d.damage, d.impulse);
+        const d = sanitizeHit(data);
+        if (d) applyDamage(d.damage, d.impulse);
       }
     },
     onDespawn: (_data, catchup) => onKill(catchup),

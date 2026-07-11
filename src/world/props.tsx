@@ -12,7 +12,7 @@ import { Group, MeshStandardMaterial, Vector3 } from "three";
 import { playHit, playPortal } from "../audio/sound";
 import { GROUPS } from "../core/config";
 import { Rng, hashSeed } from "../core/rng";
-import { explode } from "../combat/damage";
+import { explode, sanitizeHit, type HitData } from "../combat/damage";
 import {
   addLightSource,
   flashLight,
@@ -23,6 +23,7 @@ import { spawnBurst } from "../fx/Particles";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { allocId, registerDynamicBody, registerHittable } from "../game/registry";
+import { wizardDistSqTo } from "../game/targets";
 import { rollLoot } from "../items/loot";
 import { dropLoot } from "../items/LootOrbs";
 import { hostCommand, hostEvent } from "../net/channels";
@@ -55,11 +56,6 @@ const SPECS: Record<PropKind, PropSpec> = {
   barrel: { hp: 42, mass: 2, shards: ["#8a5c2e", "#ff9a3c"], lootChance: 0.08, explodes: true },
   pot: { hp: 6, mass: 0.4, shards: ["#c98d5f", "#8a5a3a"], lootChance: 0.12, explodes: false },
 };
-
-interface HitData {
-  damage: number;
-  impulse: { x: number; y: number; z: number };
-}
 
 /** A physical, breakable prop. Every dungeon floor scatters these so rooms
  * double as a physics sandbox: they tumble when shoved, shatter under fire,
@@ -136,8 +132,8 @@ export function Breakable({
     },
     onCommand: (cmd, data) => {
       if (cmd === "hit") {
-        const d = data as HitData;
-        applyDamageRef.current(d.damage, d.impulse);
+        const d = sanitizeHit(data);
+        if (d) applyDamageRef.current(d.damage, d.impulse);
       }
     },
     onDespawn: (_data, catchup) => kill(true, catchup),
@@ -431,13 +427,20 @@ export function Portal({
 
 let consumeTreasure: ((by: string, silent: boolean) => void) | null = null;
 let treasureTakenNow: (() => boolean) | null = null;
+let treasurePos: Vec3 | null = null;
 
 const treasureTaken = hostEvent<{ by: string }>("treasureTaken", (d) => {
   consumeTreasure?.(d.by, false);
 });
 
+/** Grant radius — interaction is offered within ~2.5 m; the slack covers one
+ * round trip of movement. Farther requests are a client cheating. */
+const TREASURE_RANGE_SQ = 6 * 6;
+
 const takeTreasure = hostCommand<Record<string, never>>("takeTreasure", (_d, meta) => {
   if (treasureTakenNow?.()) return;
+  const p = treasurePos;
+  if (!p || wizardDistSqTo(meta.from, p[0], p[1], p[2]) > TREASURE_RANGE_SQ) return;
   treasureTaken.announce({ by: meta.from });
 });
 
@@ -476,6 +479,7 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
   useEffect(() => {
     consumeTreasure = consume;
     treasureTakenNow = () => takenRef.current;
+    treasurePos = position;
     const unregister = registerSyncProvider("treasure", {
       collect: () => takenRef.current,
       apply: (data) => {
@@ -485,9 +489,10 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
     return () => {
       consumeTreasure = null;
       treasureTakenNow = null;
+      treasurePos = null;
       unregister();
     };
-  }, [consume]);
+  }, [consume, position]);
 
   useEffect(() => {
     if (taken) return;

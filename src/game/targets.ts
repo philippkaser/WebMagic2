@@ -1,4 +1,5 @@
 import { Vector3 } from "three";
+import { useNet } from "../net/netStore";
 import { estimatePeer, peerIds } from "../net/players";
 import { playerPosition, playerVelocity } from "./player-state";
 
@@ -42,4 +43,19 @@ export function nearestWizardTo(x: number, y: number, z: number): EnemyTarget {
   }
   result.dist = Math.sqrt(bestD2);
   return result;
+}
+
+/** Squared distance from a wizard to a point — the local player for our own
+ * id (or the offline "self"), the freshest extrapolated pose for a peer.
+ * Infinity when the peer is unknown or hasn't broadcast a pose yet, so
+ * authority-side range checks fail closed. */
+export function wizardDistSqTo(playerId: string, x: number, y: number, z: number): number {
+  if (playerId === "self" || playerId === useNet.getState().playerId) {
+    return (
+      (playerPosition.x - x) ** 2 + (playerPosition.y - y) ** 2 + (playerPosition.z - z) ** 2
+    );
+  }
+  const est = estimatePeer(playerId);
+  if (!est) return Infinity;
+  return (est.p[0] - x) ** 2 + (est.p[1] - y) ** 2 + (est.p[2] - z) ** 2;
 }
