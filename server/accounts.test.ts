@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { SAVE_FEATHER_ID } from "../src/items/catalog";
 import { MERCHANT_STOCK } from "../src/items/economy";
 import type { WireInventory } from "../src/net/protocol";
+import { GAMBLE_PRICE, sellValue } from "../src/items/economy";
 import { AccountStore, defaultWireInventory, sanitizeInventory } from "./accounts";
 
 /** Convenience: a full inventory payload with overrides. */
@@ -209,18 +210,18 @@ describe("AccountStore", () => {
     store.grantGold(acc, 200);
     store.bank(acc, 5, inv({ gold: 200 }));
     // Not merchant stock → rejected.
-    expect(store.rearrange(acc, inv({ gold: 0 }), "void_staff")).toBeNull();
+    expect(store.rearrange(acc, inv({ gold: 0 }), { buyItemId: "void_staff" })).toBeNull();
     // Real purchase.
     const save = store.rearrange(
       acc,
       inv({ gold: 200 - FEATHER_PRICE, belt: pad([{ id: SAVE_FEATHER_ID, qty: 1 }], 2) }),
-      SAVE_FEATHER_ID,
+      { buyItemId: SAVE_FEATHER_ID },
     );
     expect(save!.inventory.gold).toBe(200 - FEATHER_PRICE);
     expect(save!.inventory.belt[0]).toEqual({ id: SAVE_FEATHER_ID, qty: 1 });
     // Can't afford a second one.
     expect(
-      store.rearrange(acc, inv({ gold: 0 }), SAVE_FEATHER_ID),
+      store.rearrange(acc, inv({ gold: 0 }), { buyItemId: SAVE_FEATHER_ID }),
     ).toBeNull();
   });
 
@@ -250,6 +251,58 @@ describe("AccountStore", () => {
     // Submitting the feather as still-owned means nothing was consumed.
     const kept = inv({ belt: pad([{ id: SAVE_FEATHER_ID, qty: 1 }], 2) });
     expect(store.escape(acc, kept)).toBeNull();
+  });
+
+  test("sell credits the shared value and requires the copies to be owned", () => {
+    const store = new AccountStore();
+    const acc = store.login(undefined, "Dana");
+    store.grant(acc, "amulet_vigor+keen"); // enchanted ids are opaque strings
+    store.bank(acc, 5, inv({ bag: pad([{ id: "amulet_vigor+keen", qty: 1 }], 5) }));
+    const value = sellValue("amulet_vigor+keen")!;
+    // Legit sale: the item is gone from the submitted inventory.
+    const save = store.rearrange(acc, inv({ gold: value }), {
+      sell: { itemId: "amulet_vigor+keen", qty: 1 },
+    });
+    expect(save!.inventory.gold).toBe(value);
+    expect(save!.inventory.bag[0]).toBeNull();
+    // Selling it AGAIN (no copy owned anymore) is refused.
+    expect(
+      store.rearrange(acc, inv({ gold: value * 2 }), {
+        sell: { itemId: "amulet_vigor+keen", qty: 1 },
+      }),
+    ).toBeNull();
+    // Unsellable junk ids are refused.
+    expect(
+      store.rearrange(acc, inv({ gold: value }), { sell: { itemId: "??", qty: 1 } }),
+    ).toBeNull();
+  });
+
+  test("gamble charges the price and places the rolled item in the bag", () => {
+    const store = new AccountStore();
+    const acc = store.login(undefined, "Dana");
+    expect(store.gamble(acc, "void_staff+keen")).toBeNull(); // broke → refused
+    store.grantGold(acc, 200);
+    store.bank(acc, 5, inv({ gold: 200 }));
+    const save = store.gamble(acc, "void_staff+keen");
+    expect(save!.inventory.gold).toBe(200 - GAMBLE_PRICE);
+    expect(save!.inventory.bag[0]).toEqual({ id: "void_staff+keen", qty: 1 });
+    // …and the won item is now bankable/sellable like anything owned.
+    expect(
+      store.rearrange(acc, inv({ gold: save!.inventory.gold + sellValue("void_staff+keen")! }), {
+        sell: { itemId: "void_staff+keen", qty: 1 },
+      }),
+    ).not.toBeNull();
+  });
+
+  test("gamble refuses when the bag is full (nothing charged)", () => {
+    const store = new AccountStore();
+    const acc = store.login(undefined, "Full");
+    store.grantGold(acc, 200);
+    const gear = ["ember_staff", "arc_staff", "void_staff", "amulet_fury", "amulet_swift"];
+    for (const id of gear) store.grant(acc, id);
+    store.bank(acc, 5, inv({ gold: 200, bag: pad(gear.map((id) => ({ id, qty: 1 })), 5) }));
+    expect(store.gamble(acc, "boots_hover")).toBeNull();
+    expect(store.get(acc.token)!.inventory.gold).toBe(200); // nothing charged
   });
 
   test("sanitizeInventory forces grid sizes and drops junk stacks", () => {

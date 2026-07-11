@@ -184,7 +184,9 @@ dropped.
 it. Coins vacuum up automatically — no E needed. Gold gathered in the dungeon
 is **run loot like everything else**: die and it's gone, bank it to keep it.
 
-**Maro the Provisioner** runs a stall in the village and sells, for
+**Maro the Provisioner** runs a stall in the village. He **buys anything**
+(drag an item onto the sell cell — stingy prices, roughly a quarter of worth,
+so selling clears clutter without becoming the main income) and sells, for
 deliberately steep prices (all numbers in `items/economy.ts`, the one balance
 sheet):
 
@@ -193,6 +195,11 @@ sheet):
 | Weak Healing Draught | +40 health | ~a third of an early banked run |
 | Weak Mana Draught | +60 mana | slightly cheaper than healing |
 | **Feather of Safe Passage** | exit the dungeon from ANY floor, banking your run loot — without advancing your checkpoint | ~two banked early runs; insurance you feel |
+| **Orb of Fortune** (65g) | random GEAR rolled a couple floors past your checkpoint, ~45% enchanted | the gold sink: gambling IS affix hunting |
+
+Online, every trade is server-validated: purchases against the shared price
+table, sales against provable ownership, and the Orb of Fortune is rolled BY
+the server so a client can't fish for outcomes.
 
 Potions also drop in the dungeon (uncommon); feathers essentially don't — the
 Warden sometimes drops one, and the balance intent is that they mostly come
@@ -200,6 +207,16 @@ from Maro. The feather is the economy's keystone: it converts gold into a
 softer answer to "one more floor?", without ever granting progress.
 Balance rule of thumb: if consumables ever feel routine, raise prices before
 lowering drops — finding gold should stay exciting.
+
+### Enchantments (rarity)
+
+Dropped gear can roll **enchanted** — one affix rider (Swift, Vigorous, Keen,
+Focused, Warded, Veiled) on top of its base stats, marked ✦ in violet
+everywhere. Enchant chance scales with depth (~14% on floor 1 up to 50%
+deep down); consumables never enchant. Technically an enchanted item is just
+an item id with a suffix (`"void_staff+keen"`), so the whole provenance /
+banking / trading stack handles rarities with zero server changes — see
+ARCHITECTURE.md. Adding an affix is one entry in `items/affixes.ts`.
 
 ### The run structure & the central risk
 
@@ -312,13 +329,13 @@ own boss, enemy mix, and environmental gimmick.
 
 - More staffs = more playstyles (channeled beams, lobbed grenades, melee
   staves, summons). Each is one catalog entry + optionally one ability entry.
-- Item **rarities / modifiers** (rolled affixes) for build depth. (The loot
-  roller already supports per-item `dropWeight` — feathers use it.)
+- Deeper rarities: multi-affix items, suffixes, cursed trade-offs — the
+  affix layer ships with single-affix "enchanted" items today.
 - Set bonuses across slots.
 - More consumables (scrolls, bombs, buffs) — each is one catalog entry; the
   belt/merchant/provenance plumbing is already generic.
-- A deeper economy: item selling, gold sinks (gambling? shrine offerings?),
-  richer merchant stock at higher checkpoints.
+- Richer merchant stock at higher checkpoints; more gold sinks beyond the
+  Orb of Fortune (shrine offerings? stash upgrades?).
 
 ### Systems
 
@@ -481,9 +498,11 @@ table, and the extension guide.
 - 100-floor procedural generation with difficulty scaling and boss floors.
 - Movement, all four equipment slots, the full ability/enemy/boss/prop set
   listed above, procedural audio, the dynamic-light look.
-- The full inventory & economy layer: bag + Q/E belt + village chest,
-  the inventory screen (live pixel-art portrait), gold drops with auto-pickup,
-  the village merchant, potions, and the Feather of Safe Passage.
+- The full inventory & economy layer: bag + Q/E belt + village chest, the
+  inventory screen (live 3D wizard, drag & drop, stat comparison arrows),
+  gold drops with auto-pickup, enchanted (affixed) gear, the village merchant
+  (buying AND selling), the Orb of Fortune gamble, potions, and the Feather
+  of Safe Passage.
 - Real online multiplayer: shared instances, matchmaking, remote wizards with
   name tags, host-authority replication of enemies/props/boss/loot, late-join
   sync, host migration.

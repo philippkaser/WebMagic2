@@ -1,8 +1,9 @@
 import { Canvas, useFrame } from "@react-three/fiber";
 import { useEffect, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import { Group } from "three";
-import { getItemDef } from "../items/catalog";
-import { MERCHANT_STOCK } from "../items/economy";
+import { getItemDef, resolveItem, type ResolvedItem } from "../items/catalog";
+import { ENCHANT_COLOR } from "../items/affixes";
+import { GAMBLE_PRICE, MERCHANT_STOCK, sellValue } from "../items/economy";
 import {
   moveItem as moveItemPure,
   readSlot,
@@ -10,7 +11,7 @@ import {
   type Carried,
   type SlotRef,
 } from "../items/inventory";
-import type { GearSlot, ItemDef, ItemStack } from "../items/types";
+import type { GearSlot, ItemStack } from "../items/types";
 import { WizardModel } from "../render/WizardModel";
 import { useGame, type Overlay } from "../state/gameStore";
 import { iconOf, statLines } from "./itemInfo";
@@ -30,7 +31,7 @@ export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none"> }) {
   const gold = useGame((s) => s.gold);
   const runGold = useGame((s) => s.runGold);
   const phase = useGame((s) => s.phase);
-  const [inspected, setInspected] = useState<ItemDef | null>(null);
+  const [inspected, setInspected] = useState<ResolvedItem | null>(null);
   const [drag, setDrag] = useState<SlotRef | null>(null);
 
   // Escape (already unlocks the pointer) also closes the screen.
@@ -57,7 +58,7 @@ export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none"> }) {
       // Chest moves only work in the village (the store enforces it too).
       (inVillage || (from.container !== "chest" && ref.container !== "chest")),
     onDropItem: (from: SlotRef) => act.moveItem(from, ref),
-    onHover: (defId: string | undefined) => setInspected(defId ? getItemDef(defId) : null),
+    onHover: (itemId: string | undefined) => setInspected(itemId ? resolveItem(itemId) : null),
   });
 
   const firstFree = (grid: (ItemStack | null)[]) => grid.indexOf(null);
@@ -153,9 +154,11 @@ export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none"> }) {
           ))}
           <DropZone
             drag={drag}
-            inDungeon={phase === "dungeon"}
+            inv={inv}
+            mode={mode === "merchant" ? "sell" : phase === "dungeon" ? "drop" : "discard"}
             onDropItem={(from) => {
-              act.dropStack(from);
+              if (mode === "merchant") act.sellStack(from);
+              else act.dropStack(from);
               setDrag(null);
             }}
           />
@@ -189,7 +192,7 @@ export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none"> }) {
                   </span>
                   <span
                     style={{ flex: 1, color: "#ded5c2", cursor: "default" }}
-                    onMouseEnter={() => setInspected(def)}
+                    onMouseEnter={() => setInspected(resolveItem(id))}
                   >
                     {def.name}
                     <span style={{ color: "#7d7566", fontSize: 11 }}> — {def.desc}</span>
@@ -207,12 +210,37 @@ export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none"> }) {
                 </div>
               );
             })}
+            {/* The gold sink: gear only, rolled past your checkpoint, juiced
+                enchant odds. The dungeon decides; Maro just takes the coin. */}
+            <div style={{ ...styles.wareRow, borderColor: "#4a3d5c" }}>
+              <span style={{ color: ENCHANT_COLOR, width: 22, textAlign: "center" }}>❖</span>
+              <span style={{ flex: 1, color: "#ded5c2" }}>
+                Orb of Fortune
+                <span style={{ color: "#7d7566", fontSize: 11 }}>
+                  {" "}— random gear, rolled beyond your checkpoint · often enchanted
+                </span>
+              </span>
+              <span style={{ color: gold >= GAMBLE_PRICE ? "#ffcf4d" : "#7d6a3a", width: 70, textAlign: "right" }}>
+                ◈ {GAMBLE_PRICE}
+              </span>
+              <button
+                style={{
+                  ...styles.buyButton,
+                  ...(gold >= GAMBLE_PRICE ? { borderColor: ENCHANT_COLOR } : styles.buyDisabled),
+                }}
+                disabled={gold < GAMBLE_PRICE}
+                onClick={() => act.gamble()}
+              >
+                TEMPT
+              </button>
+            </div>
           </div>
         )}
 
         <div style={styles.footer}>
-          drag items to move · drag onto ⤓ to {phase === "dungeon" ? "drop" : "discard"} · Q/E use
-          belt · I closes
+          drag items to move · drag onto ⤓ to{" "}
+          {mode === "merchant" ? "sell" : phase === "dungeon" ? "drop" : "discard"} · Q/E use belt ·
+          I closes
         </div>
       </div>
     </div>
@@ -248,11 +276,12 @@ function SlotCell({
   onBeginDrag: (ref: SlotRef) => void;
   onEndDrag: () => void;
   onClick?: () => void;
-  onHover: (defId: string | undefined) => void;
+  onHover: (itemId: string | undefined) => void;
   accent?: boolean;
   small?: boolean;
 }) {
-  const def = stack ? getItemDef(stack.defId) : null;
+  const item = stack ? resolveItem(stack.defId) : null;
+  const def = item?.def ?? null;
   const size = small ? 42 : 58;
   const droppable = dragging !== null && !refsEqual(dragging, dragRef) && canDrop(dragging);
   return (
@@ -261,7 +290,7 @@ function SlotCell({
         draggable={!!def}
         onDragStart={(e: DragEvent) => {
           e.dataTransfer.effectAllowed = "move";
-          e.dataTransfer.setData("text/plain", def?.name ?? "");
+          e.dataTransfer.setData("text/plain", item?.name ?? "");
           onBeginDrag(dragRef);
         }}
         onDragEnd={onEndDrag}
@@ -282,10 +311,10 @@ function SlotCell({
           cursor: def ? "grab" : "default",
         }}
         onClick={def && onClick ? onClick : undefined}
-        onMouseEnter={() => onHover(def?.id)}
+        onMouseEnter={() => onHover(stack?.defId)}
         onMouseLeave={() => onHover(undefined)}
       >
-        {def ? (
+        {item && def ? (
           <>
             <span style={{ color: def.color, fontSize: small ? 15 : 20, textShadow: `0 0 8px ${def.color}` }}>
               {iconOf(def)}
@@ -294,6 +323,11 @@ function SlotCell({
             {stack!.runLoot && (
               <span style={styles.runLoot} title="Lost on death until banked">
                 ◦
+              </span>
+            )}
+            {item.affix && (
+              <span style={styles.enchantMark} title={`Enchanted: ${item.affix.desc}`}>
+                ✦
               </span>
             )}
           </>
@@ -306,19 +340,26 @@ function SlotCell({
   );
 }
 
-/** Drag an item here to drop it: real orbs at your feet in the dungeon
- * (floor-mates can grab them — gifting!), discarded in the village. */
+/** Drag an item here to get rid of it. In the dungeon it drops as real orbs
+ * at your feet (floor-mates can grab them — gifting!); in the village it
+ * discards; at the merchant it SELLS, showing Maro's offer live. */
 function DropZone({
   drag,
-  inDungeon,
+  inv,
+  mode,
   onDropItem,
 }: {
   drag: SlotRef | null;
-  inDungeon: boolean;
+  inv: Carried;
+  mode: "drop" | "discard" | "sell";
   onDropItem: (from: SlotRef) => void;
 }) {
   const active =
     drag !== null && !(drag.container === "equipment" && drag.slot === "staff");
+  const stack = active && drag ? readSlot(inv, drag) : null;
+  const offer =
+    mode === "sell" && stack ? (sellValue(stack.defId) ?? 0) * stack.qty : null;
+  const hue = mode === "sell" ? "#ffcf4d" : "#d84a4a";
   return (
     <div style={{ textAlign: "center" }}>
       <div
@@ -334,15 +375,15 @@ function DropZone({
           width: 58,
           height: 58,
           borderStyle: "dashed",
-          borderColor: active ? "#d84a4a" : "#3a3540",
-          background: active ? "#241214" : "#151218",
-          color: active ? "#d84a4a" : "#55505a",
-          fontSize: 20,
+          borderColor: active ? hue : "#3a3540",
+          background: active ? (mode === "sell" ? "#241f10" : "#241214") : "#151218",
+          color: active ? hue : "#55505a",
+          fontSize: offer !== null ? 13 : 20,
         }}
       >
-        ⤓
+        {offer !== null ? `+${offer}◈` : "⤓"}
       </div>
-      <div style={styles.cellLabel}>{inDungeon ? "drop" : "discard"}</div>
+      <div style={styles.cellLabel}>{mode}</div>
     </div>
   );
 }
@@ -354,7 +395,7 @@ function DetailStrip({
   inv,
   mode,
 }: {
-  inspected: ItemDef | null;
+  inspected: ResolvedItem | null;
   inv: Carried;
   mode: Exclude<Overlay, "none">;
 }) {
@@ -371,33 +412,44 @@ function DetailStrip({
       </div>
     );
   }
-  // What would this replace? Show the worn counterpart for gear comparison.
+  // What would this replace? Compare against the worn counterpart, with
+  // per-stat arrows (▲ strictly better, ▼ worse — including what a swap
+  // would give up).
+  const def = inspected.def;
   const worn =
-    inspected.slot !== "consumable" ? inv.equipment[inspected.slot as GearSlot] : null;
-  const wornDef = worn && worn.defId !== inspected.id ? getItemDef(worn.defId) : null;
+    def.slot !== "consumable" ? inv.equipment[def.slot as GearSlot] : null;
+  const wornItem =
+    worn && worn.defId !== inspected.itemId ? resolveItem(worn.defId) : null;
   return (
     <div style={styles.detail}>
       <div style={{ display: "flex", gap: 24 }}>
         <div style={{ flex: 1 }}>
-          <div style={{ color: inspected.color, fontSize: 14 }}>
-            {iconOf(inspected)} {inspected.name}
-            <span style={{ color: "#7d7566", fontSize: 11 }}>{`  ·  tier ${inspected.tier}`}</span>
+          <div style={{ color: inspected.affix ? ENCHANT_COLOR : def.color, fontSize: 14 }}>
+            {inspected.affix && "✦ "}
+            {iconOf(def)} {inspected.name}
+            <span style={{ color: "#7d7566", fontSize: 11 }}>{`  ·  tier ${def.tier}`}</span>
           </div>
-          {statLines(inspected).map((line) => (
-            <div key={line} style={{ color: "#b9b0a0", fontSize: 12 }}>
-              {line}
+          {statLines(inspected, wornItem).map((line) => (
+            <div key={line.text} style={{ color: "#b9b0a0", fontSize: 12 }}>
+              {line.text}
+              {line.delta !== undefined && (
+                <span style={{ color: line.delta > 0 ? "#7fdc8a" : "#e06a6a" }}>
+                  {line.delta > 0 ? " ▲" : " ▼"}
+                </span>
+              )}
             </div>
           ))}
         </div>
-        {wornDef && (
+        {wornItem && (
           <div style={{ flex: 1, opacity: 0.62 }}>
             <div style={{ color: "#7d7566", fontSize: 10, letterSpacing: 2 }}>WEARING</div>
-            <div style={{ color: wornDef.color, fontSize: 13 }}>
-              {iconOf(wornDef)} {wornDef.name}
+            <div style={{ color: wornItem.affix ? ENCHANT_COLOR : wornItem.def.color, fontSize: 13 }}>
+              {wornItem.affix && "✦ "}
+              {iconOf(wornItem.def)} {wornItem.name}
             </div>
-            {statLines(wornDef).map((line) => (
-              <div key={line} style={{ color: "#b9b0a0", fontSize: 11 }}>
-                {line}
+            {statLines(wornItem).map((line) => (
+              <div key={line.text} style={{ color: "#b9b0a0", fontSize: 11 }}>
+                {line.text}
               </div>
             ))}
           </div>
@@ -541,6 +593,7 @@ const styles: Record<string, CSSProperties> = {
     textShadow: "1px 1px 0 #000",
   },
   runLoot: { position: "absolute", left: 3, top: 0, fontSize: 12, color: "#c8a23c" },
+  enchantMark: { position: "absolute", right: 3, top: 0, fontSize: 10, color: "#c9a5ff" },
   detail: {
     minHeight: 58,
     marginTop: 12,

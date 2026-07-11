@@ -25,7 +25,8 @@ import { playerPosition } from "../game/player-state";
 import { allocId, registerDynamicBody, registerHittable } from "../game/registry";
 import { wizardDistSqTo } from "../game/targets";
 import { GOLD_DROPS } from "../items/economy";
-import { rollLoot } from "../items/loot";
+import { rollDrop } from "../items/loot";
+import { resolveItem } from "../items/catalog";
 import { dropGold, dropLoot } from "../items/LootOrbs";
 import { hostCommand, hostEvent } from "../net/channels";
 import { registerSyncProvider } from "../net/entities";
@@ -458,7 +459,13 @@ const takeTreasure = hostCommand<Record<string, never>>("takeTreasure", (_d, met
 /** Guaranteed floor treasure — the item is rolled deterministically from the
  * floor seed, so everyone in a shared instance sees the same reward. */
 export function TreasurePedestal({ position, floor, seed }: { position: Vec3; floor: number; seed: number }) {
-  const def = useMemo(() => rollLoot(new Rng((seed ^ 0x9c67f3a1) >>> 0), floor), [seed, floor]);
+  // Deterministic full roll (base + possible enchantment) from the floor
+  // seed — everyone in the instance sees the same reward.
+  const item = useMemo(
+    () => resolveItem(rollDrop(new Rng((seed ^ 0x9c67f3a1) >>> 0), floor)),
+    [seed, floor],
+  );
+  const def = item.def;
   const [taken, setTaken] = useState(false);
   const takenRef = useRef(false);
   const requested = useRef(0);
@@ -470,7 +477,7 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
       takenRef.current = true;
       setTaken(true);
       const myId = useNet.getState().playerId;
-      if (by !== "" && (by === myId || by === "self")) useGame.getState().acquireItem(def.id);
+      if (by !== "" && (by === myId || by === "self")) useGame.getState().acquireItem(item.itemId);
       if (!silent) {
         spawnBurst({
           position: [position[0], position[1] + 1.5, position[2]],
@@ -483,7 +490,7 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
         flashLight([position[0], position[1] + 1.5, position[2]], def.color, 18);
       }
     },
-    [def, position],
+    [def, item.itemId, position],
   );
 
   // Wire the module-level handlers + late-join sync while mounted.
@@ -491,7 +498,7 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
     consumeTreasure = consume;
     treasureTakenNow = () => takenRef.current;
     treasurePos = position;
-    treasureDefId = def.id;
+    treasureDefId = item.itemId;
     const unregister = registerSyncProvider("treasure", {
       collect: () => takenRef.current,
       apply: (data) => {
@@ -505,7 +512,7 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
       treasureDefId = null;
       unregister();
     };
-  }, [consume, position, def.id]);
+  }, [consume, position, item.itemId]);
 
   useEffect(() => {
     if (taken) return;
@@ -532,11 +539,12 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
     if (d2 < 6) {
       // Gate on inventory space BEFORE requesting — a granted treasure that
       // can't be held would be lost.
-      if (!useGame.getState().canAcquire(def.id)) {
-        offerInteraction(`Inventory full — can't take ${def.name}`, d2, () => {});
+      if (!useGame.getState().canAcquire(item.itemId)) {
+        offerInteraction(`Inventory full — can't take ${item.name}`, d2, () => {});
         return;
       }
-      offerInteraction(`E — Take ${def.name}  (${def.desc})`, d2, () => {
+      const desc = item.affix ? `${item.affix.desc} · ${def.desc}` : def.desc;
+      offerInteraction(`E — Take ${item.name}  (${desc})`, d2, () => {
         if (takenRef.current || requested.current > 0) return;
         requested.current = 0.6; // throttle re-requests while awaiting grant
         takeTreasure.request({});

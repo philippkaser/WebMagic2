@@ -1,5 +1,7 @@
 import { PLAYER } from "../core/config";
-import type { DerivedStats, Equipment, ItemDef, Slot } from "./types";
+import { getAffixDef, type AffixDef } from "./affixes";
+import { splitItemId } from "./itemId";
+import type { DerivedStats, Equipment, ItemDef, Passives, Slot } from "./types";
 
 export const BASIC_STAFF_ID = "apprentice_staff";
 export const BASIC_BOOTS_ID = "worn_boots";
@@ -197,10 +199,38 @@ const defs: ItemDef[] = [
 
 const byId = new Map(defs.map((d) => [d.id, d]));
 
+/** Base definition for an item id. Accepts full owned-item ids — an affix
+ * suffix ("ember_staff+keen") is ignored here; use resolveItem() when the
+ * enchantment matters (names, stats, values). */
 export function getItemDef(id: string): ItemDef {
-  const def = byId.get(id);
+  const def = byId.get(splitItemId(id).baseId);
   if (!def) throw new Error(`Unknown item def: ${id}`);
   return def;
+}
+
+/** An owned item, fully understood: base def + optional affix + display name.
+ * Throws on unknown base OR affix, so it doubles as id validation. */
+export interface ResolvedItem {
+  itemId: string;
+  def: ItemDef;
+  affix: AffixDef | null;
+  name: string;
+}
+
+export function resolveItem(itemId: string): ResolvedItem {
+  const { baseId, affixId } = splitItemId(itemId);
+  const def = byId.get(baseId);
+  if (!def) throw new Error(`Unknown item def: ${itemId}`);
+  const affix = affixId ? getAffixDef(affixId) : null;
+  return { itemId, def, affix, name: affix ? `${affix.name} ${def.name}` : def.name };
+}
+
+/** Base + affix passives folded into one block (what the item contributes). */
+export function itemPassives(item: ResolvedItem): Partial<Passives>[] {
+  const blocks: Partial<Passives>[] = [];
+  if (item.def.passives) blocks.push(item.def.passives);
+  if (item.affix) blocks.push(item.affix.passives);
+  return blocks;
 }
 
 export function allItemDefs(): readonly ItemDef[] {
@@ -227,15 +257,14 @@ const BASE: DerivedStats = {
   dash: false,
 };
 
-/** Fold every equipped item's passives into a single stat block. */
+/** Fold every equipped item's passives (base AND affix) into one stat block. */
 export function computeStats(equipment: Equipment): DerivedStats {
   const stats: DerivedStats = { ...BASE };
   const items = [equipment.staff, equipment.amulet, equipment.cloak, equipment.boots];
   for (const inst of items) {
     if (!inst) continue;
-    const def = getItemDef(inst.defId);
-    const p = def.passives;
-    if (p) {
+    const item = resolveItem(inst.defId);
+    for (const p of itemPassives(item)) {
       stats.maxHealth += p.maxHealth ?? 0;
       stats.speedMult *= p.speedMult ?? 1;
       stats.manaRegenMult *= p.manaRegenMult ?? 1;
@@ -243,8 +272,8 @@ export function computeStats(equipment: Equipment): DerivedStats {
       stats.damageTakenMult *= p.damageTakenMult ?? 1;
       stats.aggroMult *= p.aggroMult ?? 1;
     }
-    if (def.jump) stats.jump = def.jump;
-    if (def.dash) stats.dash = true;
+    if (item.def.jump) stats.jump = item.def.jump;
+    if (item.def.dash) stats.dash = true;
   }
   return stats;
 }

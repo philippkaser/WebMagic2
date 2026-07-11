@@ -16,9 +16,9 @@ import { hostCommand, hostEvent } from "../net/channels";
 import { registerSyncProvider } from "../net/entities";
 import { isHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
-import { getItemDef } from "./catalog";
+import { getItemDef, resolveItem } from "./catalog";
 import { bossGoldAmount, enemyGoldAmount, propGoldAmount } from "./economy";
-import { rollLoot } from "./loot";
+import { rollDrop } from "./loot";
 import { useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
 
@@ -76,7 +76,7 @@ const takeOrb = hostCommand<{ orbId: string }>("takeOrb", (d, meta) => {
 const dropOrb = hostCommand<{ defId: string; pos: Vec3 }>("dropOrb", (d, meta) => {
   if (typeof d.defId !== "string" || !Array.isArray(d.pos)) return;
   try {
-    getItemDef(d.defId);
+    resolveItem(d.defId); // validates base AND affix
   } catch {
     return; // unknown id from a hacked/newer client — refuse to spawn it
   }
@@ -98,8 +98,9 @@ function announceOrb(defId: string | null, gold: number, pos: Vec3): void {
 export function dropLoot(position: Vec3, floor: number, chance = 1): void {
   if (!isHost()) return;
   if (Math.random() > chance) return;
-  const def = rollLoot(new Rng((Math.random() * 0xffffffff) >>> 0), floor);
-  announceOrb(def.id, 0, position);
+  // Full item roll: base + possible enchantment (rarity scales with depth).
+  const itemId = rollDrop(new Rng((Math.random() * 0xffffffff) >>> 0), floor);
+  announceOrb(itemId, 0, position);
 }
 
 /** Drop one SPECIFIC item (boss feathers, scripted rewards) — no roll. */
@@ -204,8 +205,11 @@ function ItemOrb({ orb }: { orb: Orb }) {
   const group = useRef<Group>(null);
   const light = useRef<DynamicLightSource | null>(null);
   const requested = useRef(0);
-  const def = getItemDef(orb.defId!);
+  const item = resolveItem(orb.defId!);
+  const def = item.def;
   const [x, y, z] = orb.position;
+  // Orbs hover gently DOWN to the floor — kills mid-air leave no sky loot.
+  const fallY = useRef(y);
 
   useEffect(() => {
     const src = addLightSource({
@@ -227,7 +231,8 @@ function ItemOrb({ orb }: { orb: Orb }) {
     const g = group.current;
     if (!g) return;
     const t = clock.elapsedTime;
-    g.position.set(x, y + 0.35 + Math.sin(t * 2.4) * 0.12, z);
+    fallY.current = Math.max(0, fallY.current - dt * 1.7);
+    g.position.set(x, fallY.current + 0.35 + Math.sin(t * 2.4) * 0.12, z);
     g.rotation.y = t * 1.6;
     light.current?.position.copy(g.position);
     requested.current -= dt;
@@ -236,11 +241,12 @@ function ItemOrb({ orb }: { orb: Orb }) {
     if (d2 < 5.5) {
       // A full inventory blocks the request client-side, BEFORE the grant —
       // a granted orb is gone forever, so never ask for what can't be held.
-      if (!useGame.getState().canAcquire(def.id)) {
-        offerInteraction(`Inventory full — can't take ${def.name}`, d2, () => {});
+      if (!useGame.getState().canAcquire(orb.defId!)) {
+        offerInteraction(`Inventory full — can't take ${item.name}`, d2, () => {});
         return;
       }
-      offerInteraction(`E — Take ${def.name}  (${def.desc})`, d2, () => {
+      const desc = item.affix ? `${item.affix.desc} · ${def.desc}` : def.desc;
+      offerInteraction(`E — Take ${item.name}  (${desc})`, d2, () => {
         if (requested.current > 0) return;
         requested.current = 0.6; // throttle re-requests while awaiting grant
         takeOrb.request({ orbId: orb.id });
@@ -272,6 +278,7 @@ function GoldOrb({ orb }: { orb: Orb }) {
   const light = useRef<DynamicLightSource | null>(null);
   const requested = useRef(0);
   const [x, y, z] = orb.position;
+  const fallY = useRef(y);
 
   useEffect(() => {
     const src = addLightSource({
@@ -293,7 +300,8 @@ function GoldOrb({ orb }: { orb: Orb }) {
     const g = group.current;
     if (!g) return;
     const t = clock.elapsedTime;
-    g.position.set(x, y + 0.22 + Math.sin(t * 3.1 + x) * 0.06, z);
+    fallY.current = Math.max(0, fallY.current - dt * 1.7);
+    g.position.set(x, fallY.current + 0.22 + Math.sin(t * 3.1 + x) * 0.06, z);
     g.rotation.y = t * 2.2;
     light.current?.position.copy(g.position);
     requested.current -= dt;

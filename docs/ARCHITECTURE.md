@@ -162,6 +162,13 @@ Nothing else changes.
 
 ### Accounts & server-side persistence (the anti-cheat foundation)
 
+**Rarities ride inside item ids.** An enchanted item is `"defId+affixId"` —
+one opaque string. Because every server-side rule (grants, provenance
+multisets, banking, selling) already operates on opaque id strings, the whole
+rarity system needed no protocol or server changes: the host attests the
+exact rolled id, and it banks/sells/trades like any other item.
+
+
 The server owns four things a client must never be trusted with — while
 staying gameplay-blind (item ids are opaque strings; it validates
 *provenance*, never meaning — the only "meaning" it borrows is the shared
@@ -191,6 +198,10 @@ always known the starter-gear ids):
    - `buy` — merchant purchase; the submitted inventory may contain exactly
      the bought ware on top of what's owned, paid at the shared economy
      price from banked gold.
+   - `sell` — merchant sale; the sold copies must be provably owned and the
+     credit comes from the shared `sellValue` table (no client-set prices).
+   - `gamble` — Orb of Fortune; the SERVER rolls the item with the shared
+     pure `rollGamble`, so outcomes can't be fished for client-side.
    - `escape` — feather exit from ANY dungeon floor; same provenance as
      `bank`, does not advance the checkpoint, and only succeeds if a Feather
      of Safe Passage was provably owned and is now spent.
@@ -277,6 +288,7 @@ limiting and hit/pickup sanitization already run server-/authority-side.
 | --- | --- |
 | New staff/amulet/cloak/boots | `items/catalog.ts` (data only) |
 | New consumable | `items/catalog.ts` (`consumable` effect + `maxStack`); add to `items/economy.ts#MERCHANT_STOCK` to sell it |
+| New enchantment affix | `items/affixes.ts` (data only — drops, display, banking, selling follow) |
 | Economy tuning (prices, gold drops) | `items/economy.ts` (the one balance sheet, shared client + server) |
 | New spell | `combat/abilities.ts` + reference it from a staff |
 | New enemy | component in `combat/enemies.tsx` + spawn kind in `world/dungeonGen.ts` |

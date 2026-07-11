@@ -2,8 +2,10 @@ import { create } from "zustand";
 import { playHurt, playPickup, playPortal } from "../audio/sound";
 import { DUNGEON, PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
-import { computeStats, getItemDef } from "../items/catalog";
-import { merchantPrice } from "../items/economy";
+import { computeStats, getItemDef, resolveItem } from "../items/catalog";
+import { GAMBLE_PRICE, merchantPrice, multisetOf, sellValue } from "../items/economy";
+import { rollGamble } from "../items/loot";
+import { Rng } from "../core/rng";
 import {
   addToGrid,
   clearSlot,
@@ -19,6 +21,7 @@ import {
 } from "../items/inventory";
 import type { DerivedStats, Equipment } from "../items/types";
 import { netBus } from "../net/bus";
+import { useNet } from "../net/netStore";
 import { session } from "../net/session";
 import {
   defaultSave,
@@ -85,6 +88,11 @@ export interface GameState {
    * your feet (floor-mates can grab them!); in the village they're discarded.
    * The staff can never be dropped. */
   dropStack(from: SlotRef): void;
+  /** Sell a cell's whole stack to Maro (village only, staff excluded). */
+  sellStack(from: SlotRef): void;
+  /** Buy an Orb of Fortune: gold in, random gear out (rolled server-side
+   * online; locally offline). Needs bag room. */
+  gamble(): void;
   /** Use the consumable in belt[index] (0 = Q, 1 = E). */
   useBelt(index: number): void;
   buyItem(defId: string): void;
@@ -120,6 +128,8 @@ function loadPlayerName(): string {
 
 const saved = loadSave();
 let manaAccumulator = 0;
+/** An Orb of Fortune is in the server's hands — reveal on the next save. */
+let pendingGamble = false;
 
 export const useGame = create<GameState>((set, get) => ({
   phase: "menu",
@@ -209,7 +219,8 @@ export const useGame = create<GameState>((set, get) => ({
   },
 
   acquireItem: (defId) => {
-    const def = getItemDef(defId);
+    const item = resolveItem(defId);
+    const def = item.def;
     const state = get();
     const runLoot = state.phase === "dungeon";
 
@@ -217,20 +228,20 @@ export const useGame = create<GameState>((set, get) => ({
       const toBelt = addToGrid(state.belt, defId, runLoot);
       if (toBelt) {
         set({ belt: toBelt });
-        afterPickup(def.name, "belt");
+        afterPickup(item.name, "belt");
         syncVillage(get());
         return true;
       }
       const toBag = addToGrid(state.bag, defId, runLoot);
       if (toBag) {
         set({ bag: toBag });
-        afterPickup(def.name, "bag");
+        afterPickup(item.name, "bag");
         syncVillage(get());
         return true;
       }
       // Pickups are gated on canAcquire before the grant, so this only
       // happens on a rare co-op race (bag filled while the request flew).
-      gameEvents.emit("message", `${def.name} slips away — inventory full`);
+      gameEvents.emit("message", `${item.name} slips away — inventory full`);
       return false;
     }
 
@@ -241,17 +252,17 @@ export const useGame = create<GameState>((set, get) => ({
         health: clampedHealth(get()),
       });
       playPickup();
-      gameEvents.emit("message", `${def.name} equipped`);
+      gameEvents.emit("message", `${item.name} equipped`);
       syncVillage(get());
       return true;
     }
     const toBag = addToGrid(state.bag, defId, runLoot);
     if (!toBag) {
-      gameEvents.emit("message", `${def.name} slips away — inventory full`);
+      gameEvents.emit("message", `${item.name} slips away — inventory full`);
       return false;
     }
     set({ bag: toBag });
-    afterPickup(def.name, "bag");
+    afterPickup(item.name, "bag");
     syncVillage(get());
     return true;
   },
@@ -292,16 +303,69 @@ export const useGame = create<GameState>((set, get) => ({
     if (from.container === "chest" && state.phase !== "village") return;
     const next = clearSlot(carriedOf(state), from);
     if (!next) return;
-    const def = getItemDef(stack.defId);
+    const name = resolveItem(stack.defId).name;
     set({ ...next, health: clampedHealth({ ...state, ...next }) });
     if (state.phase === "dungeon") {
       // Real orbs at your feet — a floor-mate can pick them up (gifting!).
       gameEvents.emit("dropItems", { defId: stack.defId, qty: stack.qty });
-      gameEvents.emit("message", `Dropped ${def.name}${stack.qty > 1 ? ` ×${stack.qty}` : ""}`);
+      gameEvents.emit("message", `Dropped ${name}${stack.qty > 1 ? ` ×${stack.qty}` : ""}`);
     } else {
-      gameEvents.emit("message", `Discarded ${def.name}${stack.qty > 1 ? ` ×${stack.qty}` : ""}`);
+      gameEvents.emit("message", `Discarded ${name}${stack.qty > 1 ? ` ×${stack.qty}` : ""}`);
       syncVillage(get());
     }
+  },
+
+  sellStack: (from) => {
+    const state = get();
+    if (state.phase !== "village") return;
+    const stack = readSlot(carriedOf(state), from);
+    if (!stack) return;
+    if (from.container === "equipment" && from.slot === "staff") {
+      gameEvents.emit("message", "A wizard never sells their staff");
+      return;
+    }
+    const value = sellValue(stack.defId);
+    if (value === null) return;
+    const next = clearSlot(carriedOf(state), from);
+    if (!next) return;
+    const total = value * stack.qty;
+    const name = resolveItem(stack.defId).name;
+    set({ ...next, gold: state.gold + total, health: clampedHealth({ ...state, ...next }) });
+    playPickup();
+    gameEvents.emit(
+      "message",
+      `Sold ${name}${stack.qty > 1 ? ` ×${stack.qty}` : ""} for ${total} gold`,
+    );
+    const s = get();
+    persistCurrent(s);
+    session.sendSell(stack.defId, stack.qty, toWireInventory(s));
+  },
+
+  gamble: () => {
+    const state = get();
+    if (state.phase !== "village") return;
+    if (state.gold < GAMBLE_PRICE) {
+      gameEvents.emit("message", "Not enough gold");
+      return;
+    }
+    if (!state.bag.includes(null)) {
+      gameEvents.emit("message", "No bag room for what fortune brings");
+      return;
+    }
+    if (useNet.getState().mode === "online") {
+      // The server rolls; the reveal comes from diffing the saved response.
+      pendingGamble = true;
+      session.sendGamble();
+      gameEvents.emit("message", "The orb swirls…");
+      return;
+    }
+    // Offline: the local save is the record — same shared roll, local dice.
+    const rolled = rollGamble(new Rng((Math.random() * 0xffffffff) >>> 0), state.checkpoint);
+    const bag = addToGrid(state.bag, rolled, false)!;
+    set({ gold: state.gold - GAMBLE_PRICE, bag });
+    playPickup();
+    gameEvents.emit("message", `The orb reveals: ${resolveItem(rolled).name}`);
+    persistCurrent(get());
   },
 
   useBelt: (index) => {
@@ -542,7 +606,7 @@ function die(
   const strip = (slot: "amulet" | "cloak" | "boots") => {
     const item = state.equipment[slot];
     if (item?.runLoot) {
-      lostItems.push(getItemDef(item.defId).name);
+      lostItems.push(resolveItem(item.defId).name);
       return null;
     }
     return item;
@@ -550,7 +614,7 @@ function die(
   const kept: Equipment = {
     // The staff is mandatory — a lost run staff falls back to the starter.
     staff: state.equipment.staff.runLoot
-      ? (lostItems.push(getItemDef(state.equipment.staff.defId).name),
+      ? (lostItems.push(resolveItem(state.equipment.staff.defId).name),
         defaultSave().equipment.staff)
       : state.equipment.staff,
     amulet: strip("amulet"),
@@ -560,7 +624,7 @@ function die(
   const bagResult = stripRunLoot(state.bag);
   const beltResult = stripRunLoot(state.belt);
   for (const s of [...bagResult.lost, ...beltResult.lost]) {
-    const name = getItemDef(s.defId).name;
+    const name = resolveItem(s.defId).name;
     lostItems.push(s.qty > 1 ? `${name} ×${s.qty}` : name);
   }
   persistCurrent({ ...state, equipment: kept, bag: bagResult.grid, belt: beltResult.grid });
@@ -585,6 +649,20 @@ function die(
 netBus.on("serverSave", (save) => {
   const state = useGame.getState();
   if (state.phase === "dungeon" || state.phase === "loading") return;
+  // Gamble reveal: whatever the authoritative save gained over local state
+  // is what the orb produced (nothing gained = the server refused).
+  if (pendingGamble) {
+    pendingGamble = false;
+    const before = multisetOf(toWireInventory(state));
+    const after = multisetOf(save.inventory);
+    let won: string | null = null;
+    for (const [id, qty] of after) if (qty > (before.get(id) ?? 0)) won = id;
+    gameEvents.emit(
+      "message",
+      won ? `The orb reveals: ${resolveItem(won).name}` : "The orb stays dark — nothing changes",
+    );
+    if (won) playPickup();
+  }
   const inv = fromWireInventory(save.inventory);
   useGame.setState({
     checkpoint: save.checkpoint,

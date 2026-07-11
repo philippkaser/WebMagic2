@@ -1,4 +1,10 @@
-import { BASIC_BOOTS_ID, BASIC_STAFF_ID, getItemDef, maxStackOf } from "../items/catalog";
+import {
+  BASIC_BOOTS_ID,
+  BASIC_STAFF_ID,
+  getItemDef,
+  maxStackOf,
+  resolveItem,
+} from "../items/catalog";
 import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS, emptyGrid, type Grid } from "../items/inventory";
 import type { Equipment, GearSlot, ItemStack } from "../items/types";
 import type { WireInventory, WireStack } from "../net/protocol";
@@ -109,7 +115,7 @@ export function toWireInventory(save: Omit<SaveData, "checkpoint">): WireInvento
 
 function validId(id: string): boolean {
   try {
-    getItemDef(id);
+    resolveItem(id); // validates the base def AND any affix suffix
     return true;
   } catch {
     return false; // unknown id (older/newer catalog) — drop it

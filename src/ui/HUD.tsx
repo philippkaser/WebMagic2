@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
-import { computeStats, getItemDef } from "../items/catalog";
+import { computeStats, resolveItem } from "../items/catalog";
 import type { GearSlot, ItemStack } from "../items/types";
 import { floorPlayerCount, selectIsHost, useNet } from "../net/netStore";
 import { entryFloors, useGame } from "../state/gameStore";
@@ -186,10 +186,11 @@ function Bar({ label, value, max, color }: { label: string; value: number; max: 
 }
 
 function BeltSlot({ hotkey, stack }: { hotkey: string; stack: ItemStack | null }) {
-  const def = stack ? getItemDef(stack.defId) : null;
+  const item = stack ? resolveItem(stack.defId) : null;
+  const def = item?.def ?? null;
   return (
     <span
-      title={def ? `${hotkey} — ${def.name}` : `${hotkey} — empty (assign in inventory)`}
+      title={item ? `${hotkey} — ${item.name}` : `${hotkey} — empty (assign in inventory)`}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -215,14 +216,15 @@ function BeltSlot({ hotkey, stack }: { hotkey: string; stack: ItemStack | null }
 }
 
 function EquipRow({ slot, defId, runLoot }: { slot: GearSlot; defId?: string; runLoot?: boolean }) {
-  const def = defId ? getItemDef(defId) : null;
+  const item = defId ? resolveItem(defId) : null;
   return (
-    <div style={{ fontSize: 12, marginBottom: 4, color: def ? "#ded5c2" : "#55505a" }}>
-      {def ? (
+    <div style={{ fontSize: 12, marginBottom: 4, color: item ? "#ded5c2" : "#55505a" }}>
+      {item ? (
         <>
           {runLoot && <span style={{ color: "#c8a23c" }} title="Lost on death until banked">◦ </span>}
-          <span>{def.name}</span>{" "}
-          <span style={{ color: def.color }}>{ITEM_ICONS[slot]}</span>
+          {item.affix && <span style={{ color: "#c9a5ff" }} title={item.affix.desc}>✦ </span>}
+          <span>{item.name}</span>{" "}
+          <span style={{ color: item.def.color }}>{ITEM_ICONS[slot]}</span>
         </>
       ) : (
         <>

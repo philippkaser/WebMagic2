@@ -1,5 +1,13 @@
-import { BASIC_BOOTS_ID, BASIC_STAFF_ID, SAVE_FEATHER_ID } from "../src/items/catalog";
-import { GOLD_RULES, isSubMultiset, merchantPrice, multisetOf } from "../src/items/economy";
+import { BASIC_BOOTS_ID, BASIC_STAFF_ID, maxStackOf, SAVE_FEATHER_ID } from "../src/items/catalog";
+import {
+  addToWireBag,
+  GAMBLE_PRICE,
+  GOLD_RULES,
+  isSubMultiset,
+  merchantPrice,
+  multisetOf,
+  sellValue,
+} from "../src/items/economy";
 import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS } from "../src/items/inventory";
 import type { ServerSave, WireEquipment, WireInventory, WireStack } from "../src/net/protocol";
 
@@ -203,24 +211,55 @@ export class AccountStore {
   }
 
   /** Village-only rearrangement (chest/bag/belt moves, discards) and merchant
-   * purchases. The submitted inventory may only contain what's already banked
-   * — plus exactly the purchased item when `buyItemId` is set, paid from
-   * banked gold at the shared economy price. Returns null on any violation
-   * (the caller answers with the unchanged authoritative save). */
-  rearrange(account: AccountRecord, submitted: unknown, buyItemId?: string): ServerSave | null {
+   * trades. The submitted inventory may only contain what's already banked —
+   * plus exactly the purchased item when `trade.buyItemId` is set (paid from
+   * banked gold at the shared economy price), minus exactly the sold copies
+   * when `trade.sell` is set (credited at the shared sell value). Returns
+   * null on any violation (the caller answers with the unchanged save). */
+  rearrange(
+    account: AccountRecord,
+    submitted: unknown,
+    trade?: { buyItemId?: string; sell?: { itemId: string; qty: number } },
+  ): ServerSave | null {
     const sub = sanitizeInventory(submitted);
     const owned = multisetOf(account.inventory);
+    const claimed = multisetOf(sub);
     let maxGold = account.inventory.gold;
-    if (buyItemId !== undefined) {
-      const price = merchantPrice(buyItemId);
+    if (trade?.buyItemId !== undefined) {
+      const price = merchantPrice(trade.buyItemId);
       if (price === null || account.inventory.gold < price) return null;
-      owned.set(buyItemId, (owned.get(buyItemId) ?? 0) + 1);
+      owned.set(trade.buyItemId, (owned.get(trade.buyItemId) ?? 0) + 1);
       maxGold -= price;
     }
-    if (!isSubMultiset(multisetOf(sub), owned)) return null;
+    if (trade?.sell !== undefined) {
+      const qty = Math.floor(trade.sell.qty);
+      const value = sellValue(trade.sell.itemId);
+      if (value === null || qty < 1 || qty > MAX_STACK) return null;
+      // The sold copies must be accounted for: submitted + sold ⊆ owned.
+      claimed.set(trade.sell.itemId, (claimed.get(trade.sell.itemId) ?? 0) + qty);
+      maxGold = clampGold(maxGold + value * qty, GOLD_RULES.accountCap);
+    }
+    if (!isSubMultiset(claimed, owned)) return null;
     if (sub.gold > maxGold) return null;
-    // (A staff/boots always exist: sanitizeInventory backfills starter gear.)
+    // (A staff always exists: sanitizeInventory backfills the starter one.)
     account.inventory = sub;
+    this.flush();
+    return this.saveOf(account);
+  }
+
+  /** Orb of Fortune: the caller rolls the item (shared pure logic + its own
+   * RNG) and the store validates gold and bag room. Null = refused, nothing
+   * charged. */
+  gamble(account: AccountRecord, rolledItemId: string): ServerSave | null {
+    if (!isItemId(rolledItemId)) return null;
+    if (account.inventory.gold < GAMBLE_PRICE) return null;
+    const bag = account.inventory.bag.map((s) => (s ? { ...s } : null));
+    if (!addToWireBag(bag, rolledItemId, safeMaxStack(rolledItemId))) return null;
+    account.inventory = {
+      ...account.inventory,
+      bag,
+      gold: account.inventory.gold - GAMBLE_PRICE,
+    };
     this.flush();
     return this.saveOf(account);
   }
@@ -283,6 +322,15 @@ function cleanName(name: unknown): string {
 
 function isItemId(id: unknown): id is string {
   return typeof id === "string" && id.length > 0 && id.length <= MAX_ITEM_ID;
+}
+
+/** Stack cap for gamble placement — item meaning stays optional here. */
+function safeMaxStack(itemId: string): number {
+  try {
+    return maxStackOf(itemId);
+  } catch {
+    return 1;
+  }
 }
 
 function clampGold(raw: unknown, cap: number): number {

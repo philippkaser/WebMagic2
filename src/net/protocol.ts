@@ -94,6 +94,14 @@ export type ClientMsg =
    * The server checks price and gold and that exactly the bought item was
    * added, then answers with `saved`. */
   | { t: "buy"; itemId: string; inventory: WireInventory }
+  /** Merchant sale: `inventory` is the post-sale arrangement (the sold copies
+   * gone). The server checks the copies were owned and credits the shared
+   * economy sell value. Answered with `saved`. */
+  | { t: "sell"; itemId: string; qty: number; inventory: WireInventory }
+  /** Orb of Fortune: the SERVER rolls the item (shared pure rollGamble),
+   * deducts the price, places it in the bag and answers with `saved` — the
+   * client learns what it won from the save diff. Village only. */
+  | { t: "gamble" }
   /** The run is lost — the server discards this run's grants. */
   | { t: "died" }
   /** HOST attestation: `playerId` legitimately picked up `itemId`. The only

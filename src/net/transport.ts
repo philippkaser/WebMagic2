@@ -139,6 +139,8 @@ export class LocalTransport implements Transport {
       case "escape":
       case "stash":
       case "buy":
+      case "sell":
+      case "gamble":
       case "died":
       case "grant":
       case "grantGold":

@@ -1,4 +1,6 @@
 import { DUNGEON } from "../src/core/config";
+import { Rng } from "../src/core/rng";
+import { rollGamble } from "../src/items/loot";
 import { FloorDirectory } from "../src/net/matchmaking";
 import {
   CHANNEL_AUTHORITY,
@@ -124,9 +126,34 @@ export class Relay {
         const account = this.accountOf(peer);
         if (this.directory.instanceOf(peer.id)) return; // village only
         if (typeof msg.itemId !== "string") return;
-        const save = this.accounts.rearrange(account, msg.inventory, msg.itemId);
+        const save = this.accounts.rearrange(account, msg.inventory, { buyItemId: msg.itemId });
         peer.send({ t: "saved", save: save ?? this.accounts.saveOf(account) });
         if (save) this.log(`${peer.id} bought ${msg.itemId}`);
+        break;
+      }
+      case "sell": {
+        // Merchant sale: the sold copies must be provably owned; the credit
+        // comes from the shared economy sell table.
+        const account = this.accountOf(peer);
+        if (this.directory.instanceOf(peer.id)) return; // village only
+        if (typeof msg.itemId !== "string" || typeof msg.qty !== "number") return;
+        const save = this.accounts.rearrange(account, msg.inventory, {
+          sell: { itemId: msg.itemId, qty: msg.qty },
+        });
+        peer.send({ t: "saved", save: save ?? this.accounts.saveOf(account) });
+        if (save) this.log(`${peer.id} sold ${msg.qty}× ${msg.itemId}`);
+        break;
+      }
+      case "gamble": {
+        // Orb of Fortune: the SERVER rolls (shared pure rollGamble) so a
+        // client can't fish for outcomes. Refusal answers with the unchanged
+        // save so the client's pending state resolves either way.
+        const account = this.accountOf(peer);
+        if (this.directory.instanceOf(peer.id)) return; // village only
+        const rolled = rollGamble(new Rng((Math.random() * 0xffffffff) >>> 0), account.checkpoint);
+        const save = this.accounts.gamble(account, rolled);
+        peer.send({ t: "saved", save: save ?? this.accounts.saveOf(account) });
+        if (save) this.log(`${peer.id} gambled and drew ${rolled}`);
         break;
       }
       case "died":

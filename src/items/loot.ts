@@ -1,5 +1,7 @@
 import type { Rng } from "../core/rng";
+import { allAffixDefs } from "./affixes";
 import { lootPool } from "./catalog";
+import { makeItemId } from "./itemId";
 import type { ItemDef, Slot } from "./types";
 
 const SLOT_WEIGHTS: [Slot, number][] = [
@@ -28,6 +30,10 @@ export function rollLoot(rng: Rng, floor: number): ItemDef {
     }
   }
   const pool = lootPool(slot, floor);
+  return pickWeighted(rng, pool, floor);
+}
+
+function pickWeighted(rng: Rng, pool: ItemDef[], floor: number): ItemDef {
   // Weight toward higher tiers as floors increase.
   const weights = pool.map((d) => (1 + d.tier * Math.min(floor / 6, 2.5)) * (d.dropWeight ?? 1));
   const sum = weights.reduce((a, b) => a + b, 0);
@@ -37,4 +43,37 @@ export function rollLoot(rng: Rng, floor: number): ItemDef {
     if (pick <= 0) return pool[i];
   }
   return pool[pool.length - 1];
+}
+
+// ── Enchantments (rarity) ────────────────────────────────────────────────────
+
+/** Chance a dropped piece of GEAR is enchanted, scaling with depth. */
+export function affixChance(floor: number): number {
+  return Math.min(0.12 + floor * 0.02, 0.5);
+}
+
+export function rollAffixId(rng: Rng): string {
+  const pool = allAffixDefs();
+  return pool[Math.floor(rng.next() * pool.length) % pool.length].id;
+}
+
+/** Roll a full droppable item id: base item + possible enchantment.
+ * Consumables never carry affixes. This is what drops and treasure use. */
+export function rollDrop(rng: Rng, floor: number): string {
+  const def = rollLoot(rng, floor);
+  if (def.slot !== "consumable" && rng.next() < affixChance(floor)) {
+    return makeItemId(def.id, rollAffixId(rng));
+  }
+  return def.id;
+}
+
+/** Maro's Orb of Fortune: always gear, rolled a couple of floors past your
+ * checkpoint, with a juiced enchant chance — gambling IS affix hunting.
+ * Shared pure logic: the server rolls with this exact function online. */
+export function rollGamble(rng: Rng, checkpoint: number): string {
+  const floor = Math.max(checkpoint, 1) + 2;
+  const gearSlots: Slot[] = ["staff", "amulet", "cloak", "boots"];
+  const slot = gearSlots[Math.floor(rng.next() * gearSlots.length) % gearSlots.length];
+  const def = pickWeighted(rng, lootPool(slot, floor), floor);
+  return rng.next() < 0.45 ? makeItemId(def.id, rollAffixId(rng)) : def.id;
 }

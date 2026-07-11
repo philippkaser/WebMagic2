@@ -1,5 +1,5 @@
 import type { Rng } from "../core/rng";
-import { SAVE_FEATHER_ID } from "./catalog";
+import { resolveItem, SAVE_FEATHER_ID } from "./catalog";
 import type { WireInventory, WireStack } from "../net/protocol";
 
 /** The economy balance sheet — every gold and price number lives here.
@@ -30,6 +30,30 @@ export const MERCHANT_STOCK: readonly MerchantWare[] = [
 export function merchantPrice(itemId: string): number | null {
   return MERCHANT_STOCK.find((w) => w.id === itemId)?.price ?? null;
 }
+
+/** What Maro pays for an item — deliberately stingy (roughly a quarter of
+ * worth) so selling clears clutter without becoming the main income. Gear by
+ * tier, +bonus if enchanted; consumables at a quarter of his own price.
+ * Returns null for ids he won't touch (unknown/corrupt). */
+const GEAR_SELL_BY_TIER = [0, 9, 21, 38] as const;
+const AFFIX_SELL_BONUS = 14;
+
+export function sellValue(itemId: string): number | null {
+  try {
+    const item = resolveItem(itemId);
+    if (item.def.slot === "consumable") {
+      const price = merchantPrice(item.def.id);
+      return price !== null ? Math.ceil(price / 4) : 4;
+    }
+    return GEAR_SELL_BY_TIER[item.def.tier] + (item.affix ? AFFIX_SELL_BONUS : 0);
+  } catch {
+    return null;
+  }
+}
+
+/** Maro's Orb of Fortune: pay up front, the dungeon decides what you get
+ * (items/loot.ts#rollGamble — always gear, boosted enchant odds). */
+export const GAMBLE_PRICE = 65;
 
 // ── Gold drops ───────────────────────────────────────────────────────────────
 

@@ -107,6 +107,17 @@ export class GameSession {
     this.transport?.send({ t: "buy", itemId, inventory });
   }
 
+  /** Merchant sale: post-sale arrangement; the server validates ownership of
+   * the sold copies and credits the shared sell value. */
+  sendSell(itemId: string, qty: number, inventory: WireInventory): void {
+    this.transport?.send({ t: "sell", itemId, qty, inventory });
+  }
+
+  /** Orb of Fortune — the server rolls and answers with the new save. */
+  sendGamble(): void {
+    this.transport?.send({ t: "gamble" });
+  }
+
   /** The run is lost — the server discards its grants. */
   sendDied(): void {
     this.transport?.send({ t: "died" });
