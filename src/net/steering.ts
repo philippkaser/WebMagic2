@@ -45,6 +45,14 @@ export const STEER = {
   snapAngle: 2.4,
   /** 1/s for rotational chasing. */
   rotGain: 8,
+  /** 1/s — how fast the body's velocity BLENDS toward the steering's desired
+   * velocity. Blending (instead of overwriting linvel) is what makes local
+   * contact pushes feel continuous: the shove's velocity survives and decays
+   * toward authority rather than being stomped every frame. */
+  blendRate: 25,
+  /** 1/s blend while interacting — local contact forces dominate for the
+   * round trip it takes the authority to see the same push. */
+  softBlendRate: 4,
   /** Body counts as settled within this of the target (m). */
   restPosEps: 0.05,
   /** …and the target itself is at most this fast (m/s). */
@@ -74,15 +82,31 @@ const angvelScratch: Vec3Like = { x: 0, y: 0, z: 0 };
 const REST: SteerCommand = { kind: "rest" };
 const SNAP: SteerCommand = { kind: "snap" };
 
-/** Decide this frame's reconciliation. NOTE: the returned drive command is
- * shared scratch — consume it before the next steer() call. */
+export interface SteerProfile {
+  /** Positional correction gain (1/s). */
+  gain: number;
+  /** Velocity blend rate (1/s) — how fast we approach the desired velocity.
+   * Low = local physics wins short-term; high = authority tracks tightly. */
+  blend: number;
+}
+
+export const HARD_PROFILE: SteerProfile = { gain: STEER.gain, blend: STEER.blendRate };
+export const SOFT_PROFILE: SteerProfile = { gain: STEER.softGain, blend: STEER.softBlendRate };
+
+/** Decide this frame's reconciliation. The drive velocity is a BLEND from the
+ * body's current velocity toward (target velocity + error × gain), so local
+ * contact forces are never stomped — pushing a replicated crate feels like
+ * pushing a crate. NOTE: the returned drive command is shared scratch —
+ * consume it before the next steer() call. */
 export function steer(
   currentPos: Vec3Like,
+  currentVel: Vec3Like,
   currentQuat: QuatLike | null,
   targetPos: Vec3Like,
   targetVel: Vec3Like,
   targetQuat: QuatLike | null,
-  gain: number,
+  profile: SteerProfile,
+  dt: number,
 ): SteerCommand {
   const ex = targetPos.x - currentPos.x;
   const ey = targetPos.y - currentPos.y;
@@ -105,9 +129,12 @@ export function steer(
 
   const targetSpeedSq =
     targetVel.x * targetVel.x + targetVel.y * targetVel.y + targetVel.z * targetVel.z;
+  const currentSpeedSq =
+    currentVel.x * currentVel.x + currentVel.y * currentVel.y + currentVel.z * currentVel.z;
   if (
     errSq < STEER.restPosEps * STEER.restPosEps &&
     targetSpeedSq < STEER.restVelEps * STEER.restVelEps &&
+    currentSpeedSq < STEER.restVelEps * STEER.restVelEps &&
     quatDot > STEER.restQuatDot
   ) {
     return REST;
@@ -115,9 +142,9 @@ export function steer(
 
   // Correction velocity toward the target, capped so a big (but sub-snap)
   // error never turns into a rocket.
-  let cx = ex * gain;
-  let cy = ey * gain;
-  let cz = ez * gain;
+  let cx = ex * profile.gain;
+  let cy = ey * profile.gain;
+  let cz = ez * profile.gain;
   const cLen = Math.hypot(cx, cy, cz);
   if (cLen > STEER.maxCorrection) {
     const k = STEER.maxCorrection / cLen;
@@ -125,9 +152,12 @@ export function steer(
     cy *= k;
     cz *= k;
   }
-  drive.linvel.x = targetVel.x + cx;
-  drive.linvel.y = targetVel.y + cy;
-  drive.linvel.z = targetVel.z + cz;
+  // Exponential approach from the body's own velocity toward the desired one
+  // — never a hard overwrite, so a local shove keeps its momentum.
+  const a = 1 - Math.exp(-profile.blend * dt);
+  drive.linvel.x = currentVel.x + (targetVel.x + cx - currentVel.x) * a;
+  drive.linvel.y = currentVel.y + (targetVel.y + cy - currentVel.y) * a;
+  drive.linvel.z = currentVel.z + (targetVel.z + cz - currentVel.z) * a;
 
   drive.angvel = null;
   if (currentQuat && targetQuat) {

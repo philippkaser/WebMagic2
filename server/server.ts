@@ -6,8 +6,10 @@
  * Prod: bun run start        (serves dist/ and /ws from one process)
  */
 import type { ServerWebSocket } from "bun";
+import { writeFileSync } from "node:fs";
 import { FloorDirectory } from "../src/net/matchmaking";
 import type { ClientMsg } from "../src/net/protocol";
+import { AccountStore } from "./accounts";
 import { Relay, type RelayPeer } from "./relay";
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -34,7 +36,39 @@ interface SocketData {
 }
 
 const log = (text: string) => console.log(`[webmagic] ${text}`);
-const relay = new Relay(new FloorDirectory(MAX_PLAYERS_PER_FLOOR), () => Date.now(), log);
+
+// Accounts persist to a JSON file (override with DATA_FILE), write-debounced.
+// Swapping this for a real database later means replacing only `persist`.
+const DATA_FILE = process.env.DATA_FILE ?? new URL("../server-data.json", import.meta.url).pathname;
+const dataFile = Bun.file(DATA_FILE);
+const initialAccounts = (await dataFile.exists()) ? await dataFile.text() : null;
+let writeTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingJson: string | null = null;
+const persistAccounts = (json: string) => {
+  pendingJson = json;
+  if (writeTimer !== null) clearTimeout(writeTimer);
+  writeTimer = setTimeout(() => {
+    pendingJson = null;
+    Bun.write(DATA_FILE, json).catch((err) => log(`save write failed: ${err}`));
+  }, 300);
+};
+// Debounced writes must not lose the last mutation on shutdown.
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    if (pendingJson !== null) {
+      try {
+        writeFileSync(DATA_FILE, pendingJson);
+      } catch (err) {
+        log(`final save write failed: ${err}`);
+      }
+    }
+    process.exit(0);
+  });
+}
+const accounts = new AccountStore(persistAccounts, initialAccounts);
+log(`accounts: ${accounts.size} loaded from ${DATA_FILE}`);
+
+const relay = new Relay(new FloorDirectory(MAX_PLAYERS_PER_FLOOR), accounts, () => Date.now(), log);
 const sockets = new Map<string, ServerWebSocket<SocketData>>();
 
 function peerFor(ws: ServerWebSocket<SocketData>): RelayPeer {

@@ -6,7 +6,13 @@ import { computeStats, getItemDef } from "../items/catalog";
 import type { DerivedStats, Equipment } from "../items/types";
 import { netBus } from "../net/bus";
 import { session } from "../net/session";
-import { defaultEquipment, loadSave, persistSave } from "./persistence";
+import {
+  defaultEquipment,
+  fromWireEquipment,
+  loadSave,
+  persistSave,
+  toWireEquipment,
+} from "./persistence";
 
 export type Phase = "menu" | "village" | "select" | "loading" | "dungeon" | "dead";
 
@@ -128,6 +134,9 @@ export const useGame = create<GameState>((set, get) => ({
     };
     const newCheckpoint = Math.max(checkpoint, floor);
     persistSave({ checkpoint: newCheckpoint, equipment: banked });
+    // Server-side bank: provenance-validated; the "saved" ack corrects us if
+    // anything didn't check out. Offline this is a no-op (local save rules).
+    session.sendBank(toWireEquipment(banked));
     session.leaveDungeon();
     set({
       phase: "village",
@@ -261,6 +270,7 @@ function die(
       : equipment.boots,
   };
   persistSave({ checkpoint, equipment: kept });
+  session.sendDied(); // the server discards this run's grants
   session.leaveDungeon();
   set({
     phase: "dead",
@@ -270,6 +280,21 @@ function die(
     prompt: null,
   });
 }
+
+// Server-authoritative save: applied on login and after each bank ack. The
+// local save becomes a cache of it. Never applied mid-run — a reconnecting
+// player keeps their in-run gear; the server still validates at the bank.
+netBus.on("serverSave", (save) => {
+  const state = useGame.getState();
+  if (state.phase === "dungeon" || state.phase === "loading") return;
+  const equipment = fromWireEquipment(save.equipment);
+  useGame.setState({
+    checkpoint: save.checkpoint,
+    equipment,
+    health: computeStats(equipment).maxHealth,
+  });
+  persistSave({ checkpoint: save.checkpoint, equipment });
+});
 
 // Reconnect resync: the session re-enters our floor after a dropped socket.
 // If the new assignment differs (fresh instance/seed), remount the floor so

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { FloorDirectory } from "../src/net/matchmaking";
 import type { ServerMsg } from "../src/net/protocol";
+import { AccountStore } from "./accounts";
 import { Relay, type RelayPeer } from "./relay";
 
 /** The relay IS the multiplayer authority model — these tests are its spec. */
@@ -27,6 +28,7 @@ function lastOf<T extends ServerMsg["t"]>(peer: TestPeer, t: T) {
 }
 
 let relay: Relay;
+let store: AccountStore;
 let a: TestPeer;
 let b: TestPeer;
 let c: TestPeer;
@@ -34,12 +36,25 @@ let now = 50_000;
 
 beforeEach(() => {
   now = 50_000;
-  relay = new Relay(new FloorDirectory(4, () => 1234, () => now), () => now);
+  store = new AccountStore();
+  relay = new Relay(new FloorDirectory(4, () => 1234, () => now), store, () => now);
   a = makePeer("A");
   b = makePeer("B");
   c = makePeer("C");
-  for (const p of [a, b, c]) relay.connect(p);
+  for (const p of [a, b, c]) {
+    relay.connect(p);
+    unlock(p); // most tests exercise routing, not progression — open all floors
+  }
 });
+
+/** Log the peer in and raise its checkpoint so floor validation lets it
+ * through (progression rules get their own dedicated tests). */
+function unlock(peer: TestPeer, checkpoint = 100): string {
+  relay.handle(peer.id, { t: "login", name: peer.name });
+  const token = lastOf(peer, "loggedIn")!.token;
+  store.get(token)!.checkpoint = checkpoint;
+  return token;
+}
 
 function join(peer: TestPeer, floor: number) {
   now += 10; // instances get distinct createdAt stamps
@@ -134,6 +149,7 @@ describe("channel authority rules", () => {
   test("messages never cross instances", () => {
     const d = makePeer("D");
     relay.connect(d);
+    unlock(d);
     join(d, 9); // different floor
     relay.handle(b.id, { t: "msg", ch: "p:pose", data: 1 });
     expect(d.inbox.some((m) => m.t === "msg")).toBe(false);
@@ -172,5 +188,121 @@ describe("host migration", () => {
     relay.handle(a.id, { t: "leaveDungeon" });
     join(b, 3); // fresh instance on the same floor
     expect(lastOf(b, "floorAssigned")!.assignment.epoch).toBe(1);
+  });
+});
+
+describe("accounts: identity", () => {
+  test("login mints a token; presenting it again resumes the same account", () => {
+    const d = makePeer("D");
+    relay.connect(d);
+    relay.handle(d.id, { t: "login", name: "Dana" });
+    const first = lastOf(d, "loggedIn")!;
+    expect(first.save.checkpoint).toBe(1);
+    store.get(first.token)!.checkpoint = 15;
+
+    // New connection (e.g. after a restart) with the same token.
+    const d2 = makePeer("D2");
+    relay.connect(d2);
+    relay.handle(d2.id, { t: "login", name: "Dana", token: first.token });
+    const second = lastOf(d2, "loggedIn")!;
+    expect(second.token).toBe(first.token);
+    expect(second.save.checkpoint).toBe(15);
+  });
+});
+
+describe("accounts: floor-entry validation", () => {
+  test("a fresh account cannot skip ahead — forged deep floors land on 1", () => {
+    const d = makePeer("D");
+    relay.connect(d);
+    relay.handle(d.id, { t: "login", name: "Dana" }); // checkpoint 1
+    join(d, 40);
+    expect(lastOf(d, "floorAssigned")!.assignment.floor).toBe(1);
+  });
+
+  test("descending one floor at a time is allowed; leaping is not", () => {
+    const d = makePeer("D");
+    relay.connect(d);
+    relay.handle(d.id, { t: "login", name: "Dana" });
+    join(d, 1);
+    join(d, 2); // descend — fine
+    expect(lastOf(d, "floorAssigned")!.assignment.floor).toBe(2);
+    join(d, 9); // leap — denied
+    expect(lastOf(d, "floorAssigned")!.assignment.floor).toBe(1);
+  });
+
+  test("a reconnecting account resumes its run floor", () => {
+    const d = makePeer("D");
+    relay.connect(d);
+    relay.handle(d.id, { t: "login", name: "Dana" });
+    const token = lastOf(d, "loggedIn")!.token;
+    join(d, 1);
+    join(d, 2);
+    join(d, 3);
+    relay.disconnect(d.id); // socket dropped mid-run
+
+    const d2 = makePeer("D2");
+    relay.connect(d2);
+    relay.handle(d2.id, { t: "login", name: "Dana", token });
+    join(d2, 3); // back to where we were
+    expect(lastOf(d2, "floorAssigned")!.assignment.floor).toBe(3);
+  });
+});
+
+describe("accounts: grants and banking", () => {
+  test("only the instance host's attestation records a grant", () => {
+    const tokenB = lastOf(b, "loggedIn")!.token;
+    join(a, 5); // host
+    join(b, 5);
+    relay.handle(b.id, { t: "grant", playerId: b.id, itemId: "ember_staff" }); // self-vouch
+    expect(store.get(tokenB)!.runGrants).toEqual([]);
+    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "ember_staff" }); // host
+    expect(store.get(tokenB)!.runGrants).toEqual(["ember_staff"]);
+  });
+
+  test("grants only apply to members of the host's instance", () => {
+    const tokenC = lastOf(c, "loggedIn")!.token;
+    join(a, 5);
+    join(c, 9); // elsewhere
+    relay.handle(a.id, { t: "grant", playerId: c.id, itemId: "ember_staff" });
+    expect(store.get(tokenC)!.runGrants).toEqual([]);
+  });
+
+  test("banking keeps granted items, strips forged ones, sets the checkpoint", () => {
+    const tokenB = lastOf(b, "loggedIn")!.token;
+    store.get(tokenB)!.checkpoint = 1; // fresh player
+    join(a, 5); // host (a has checkpoint 100)
+    relay.handle(b.id, { t: "enterFloor", floor: 5 });
+    // ...b can't enter 5 as a fresh account — walk down legitimately.
+    for (let f = 1; f <= 5; f++) relay.handle(b.id, { t: "enterFloor", floor: f });
+    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "ember_staff" });
+
+    relay.handle(b.id, {
+      t: "bank",
+      equipment: { staff: "ember_staff", amulet: "hacked_amulet", cloak: null, boots: "worn_boots" },
+    });
+    const saved = lastOf(b, "saved")!.save;
+    expect(saved.equipment.staff).toBe("ember_staff"); // granted → kept
+    expect(saved.equipment.amulet).toBeNull(); // never granted → stripped
+    expect(saved.checkpoint).toBe(5); // from the ACTUAL instance floor
+    expect(store.get(tokenB)!.runGrants).toEqual([]); // consumed
+  });
+
+  test("banking is refused off checkpoint floors", () => {
+    join(a, 3); // not a multiple of the checkpoint interval
+    relay.handle(a.id, {
+      t: "bank",
+      equipment: { staff: "apprentice_staff", amulet: null, cloak: null, boots: "worn_boots" },
+    });
+    expect(a.inbox.some((m) => m.t === "saved")).toBe(false);
+  });
+
+  test("dying forfeits the run's grants", () => {
+    const tokenB = lastOf(b, "loggedIn")!.token;
+    join(a, 5);
+    join(b, 5);
+    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "ember_staff" });
+    relay.handle(b.id, { t: "died" });
+    expect(store.get(tokenB)!.runGrants).toEqual([]);
+    expect(store.get(tokenB)!.runFloor).toBe(0);
   });
 });

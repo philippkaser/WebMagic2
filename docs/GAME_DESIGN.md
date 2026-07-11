@@ -440,7 +440,11 @@ table, and the extension guide.
 - Sparse content breadth: 4 staffs, ~a dozen items, 2 enemy types + 1 boss.
 - No persistent meta-progression beyond checkpoints and banked gear.
 - Lore is implied by mechanics but largely unwritten.
-- No anti-cheat (client-authoritative damage on your own hits).
+- Anti-cheat is foundation-level: server-side accounts/saves with
+  host-attested item provenance and floor-entry validation exist, but the
+  floor host is still a client (a cheating host can vouch for its
+  floor-mates) and item stats are client-computed. Full fix = headless
+  server-side hosts.
 
 ---
 

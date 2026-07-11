@@ -160,6 +160,41 @@ designates as host). The replication core (`entities.ts`, `snapshots.ts`,
 `clock.ts`) is pure logic with injected I/O precisely so it can run there.
 Nothing else changes.
 
+### Accounts & server-side persistence (the anti-cheat foundation)
+
+The server owns four things a client must never be trusted with — while
+staying gameplay-blind (item ids are opaque strings; it validates
+*provenance*, never meaning):
+
+1. **Identity** — `login` presents a device token (or none, minting a fresh
+   account). The token comes back with the save and is kept client-side
+   (`webmagic.token.v1`). Real auth (email/OAuth) later replaces only the
+   token-minting step. (`server/accounts.ts`)
+2. **Saves** — checkpoint + banked equipment live server-side; the client's
+   localStorage is a cache of the last `loggedIn`/`saved` payload (and the
+   full save of record when playing offline). Storage is a debounced JSON
+   file today (`DATA_FILE`), flushed on shutdown; swapping in a database
+   replaces one `persist` callback.
+3. **Item provenance** — the core rule: *an item may be banked ⇔ previously
+   banked ∪ starter gear ∪ granted this run by the floor HOST's attestation*
+   (`grant` messages; the beneficiary can never vouch for itself, mirroring
+   loot authority). Banking (`bank` → `saved`) strips anything else; death
+   (`died`) or quitting forfeits the run's grants. A hacked client can
+   repaint its own screen, but nothing survives a bank round trip the
+   floor's authority didn't hand out.
+4. **Progression** — floor entry is validated against the account: floor 1,
+   anything ≤ your banked checkpoint, one floor deeper than where you are
+   (descending), or your current run floor (reconnect resume). Banking only
+   counts on a checkpoint floor you are *actually matchmade into* — the
+   relay reads the floor from the directory, not from the client.
+
+Known limits, in honesty order: the floor host is still a client, so a
+cheating **host** can attest bogus grants for its floor-mates (fix: headless
+server-side hosts, the path above); item *stats* are client-computed (fix
+follows server hosts); device tokens are bearer secrets in localStorage
+(fine for a foundation, replaced by real auth). Rate limiting and hit/pickup
+sanitization already run server-/authority-side.
+
 ### Scaling plan (server-side, future work)
 
 - **Authoritative floor-instance processes**: each instance is an isolated

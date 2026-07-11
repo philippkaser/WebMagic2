@@ -41,16 +41,44 @@ export interface Envelope {
   to?: string;
 }
 
+/** Banked equipment on the wire. Item ids are OPAQUE STRINGS to the server —
+ * it validates provenance (was this granted?), never meaning. */
+export interface WireEquipment {
+  staff: string;
+  amulet: string | null;
+  cloak: string | null;
+  boots: string;
+}
+
+/** The server-authoritative save. What the client has locally is a cache. */
+export interface ServerSave {
+  checkpoint: number;
+  equipment: WireEquipment;
+}
+
 export type ClientMsg =
-  | { t: "hello"; name: string }
+  /** Device identity: no token = new account; the reply carries the token to
+   * keep. Also updates the display name. */
+  | { t: "login"; name: string; token?: string }
   | { t: "enterFloor"; floor: number }
   | { t: "leaveDungeon" }
+  /** Checkpoint banking. The server validates every item against what was
+   * actually granted this run (host-attested) and answers with `saved`. */
+  | { t: "bank"; equipment: WireEquipment }
+  /** The run is lost — the server discards this run's grants. */
+  | { t: "died" }
+  /** HOST attestation: `playerId` legitimately picked up `itemId`. The only
+   * path by which an item becomes bankable. Non-host senders are ignored. */
+  | { t: "grant"; playerId: string; itemId: string }
   /** Clock sync probe; `sent` is the sender's local monotonic time. */
   | { t: "ping"; sent: number }
   | ({ t: "msg" } & Envelope);
 
 export type ServerMsg =
   | { t: "welcome"; playerId: string }
+  | { t: "loggedIn"; token: string; save: ServerSave }
+  /** Authoritative save after a bank request (cheated items stripped). */
+  | { t: "saved"; save: ServerSave }
   | { t: "floorAssigned"; assignment: FloorAssignment }
   | { t: "peerJoined"; member: MemberInfo }
   | { t: "peerLeft"; playerId: string }

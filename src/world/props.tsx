@@ -29,6 +29,7 @@ import { dropLoot } from "../items/LootOrbs";
 import { hostCommand, hostEvent } from "../net/channels";
 import { registerSyncProvider } from "../net/entities";
 import { isHost, useNet } from "../net/netStore";
+import { session } from "../net/session";
 import { useNetBody } from "../net/NetSystems";
 import { useGame } from "../state/gameStore";
 import { getTextures } from "../render/textures";
@@ -433,6 +434,7 @@ export function Portal({
 let consumeTreasure: ((by: string, silent: boolean) => void) | null = null;
 let treasureTakenNow: (() => boolean) | null = null;
 let treasurePos: Vec3 | null = null;
+let treasureDefId: string | null = null;
 
 const treasureTaken = hostEvent<{ by: string }>("treasureTaken", (d) => {
   consumeTreasure?.(d.by, false);
@@ -447,6 +449,8 @@ const takeTreasure = hostCommand<Record<string, never>>("takeTreasure", (_d, met
   const p = treasurePos;
   if (!p || wizardDistSqTo(meta.from, p[0], p[1], p[2]) > TREASURE_RANGE_SQ) return;
   treasureTaken.announce({ by: meta.from });
+  // Host attestation makes the treasure bankable server-side for that player.
+  if (treasureDefId) session.attestGrant(meta.from, treasureDefId);
 });
 
 /** Guaranteed floor treasure — the item is rolled deterministically from the
@@ -485,6 +489,7 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
     consumeTreasure = consume;
     treasureTakenNow = () => takenRef.current;
     treasurePos = position;
+    treasureDefId = def.id;
     const unregister = registerSyncProvider("treasure", {
       collect: () => takenRef.current,
       apply: (data) => {
@@ -495,9 +500,10 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
       consumeTreasure = null;
       treasureTakenNow = null;
       treasurePos = null;
+      treasureDefId = null;
       unregister();
     };
-  }, [consume, position]);
+  }, [consume, position, def.id]);
 
   useEffect(() => {
     if (taken) return;

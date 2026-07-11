@@ -1,5 +1,5 @@
 import { Emitter } from "../core/events";
-import type { FloorAssignment, MemberInfo } from "./protocol";
+import type { FloorAssignment, MemberInfo, ServerSave } from "./protocol";
 
 /** Internal networking event hub. The session publishes connection/relay
  * events here; channels, entities and players subscribe. Keeping this
@@ -18,6 +18,8 @@ export interface NetBusEvents extends Record<string, unknown> {
   syncRequest: { playerId: string };
   /** We left the dungeon (banked, died, or quit) — floor peers are gone. */
   leftDungeon: undefined;
+  /** The server's authoritative save arrived (login or bank ack). */
+  serverSave: ServerSave;
   /** The connection dropped and was re-established with a fresh identity. */
   reconnected: undefined;
 }

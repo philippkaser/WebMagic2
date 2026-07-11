@@ -10,7 +10,7 @@ import {
   type SampledPose,
 } from "./snapshots";
 import { session } from "./session";
-import { steer, STEER } from "./steering";
+import { HARD_PROFILE, SOFT_PROFILE, steer, STEER } from "./steering";
 
 /** Host-authority entity replication — the declarative core.
  *
@@ -346,7 +346,10 @@ const ZERO_VEL = { x: 0, y: 0, z: 0 };
 /** Replica: steer every entity's PREDICTED dynamic body toward its buffered
  * authoritative stream. `localPlayer` (when given) softens the leash for
  * bodies the local player is close enough to be shoving. */
-export function replicaFrame(localPlayer?: { x: number; y: number; z: number }): void {
+export function replicaFrame(
+  dt: number,
+  localPlayer?: { x: number; y: number; z: number },
+): void {
   const now = netClock.serverNow();
   const renderTime = now - INTERP_DELAY_MS;
   for (const entry of entities.values()) {
@@ -372,22 +375,24 @@ export function replicaFrame(localPlayer?: { x: number; y: number; z: number }):
     const t = body.translation();
     // Leash tightness: soft while our prediction is in flight or the local
     // player is close enough to be physically interacting with this body.
-    let gain: number = STEER.gain;
+    let profile = HARD_PROFILE;
     if (entry.predictUntil > now) {
-      gain = STEER.softGain;
+      profile = SOFT_PROFILE;
     } else if (localPlayer) {
       const dSq =
         (localPlayer.x - t.x) ** 2 + (localPlayer.y - t.y) ** 2 + (localPlayer.z - t.z) ** 2;
-      if (dSq < STEER.interactRadius * STEER.interactRadius) gain = STEER.softGain;
+      if (dSq < STEER.interactRadius * STEER.interactRadius) profile = SOFT_PROFILE;
     }
 
     const cmd = steer(
       t,
+      body.linvel(),
       syncRot ? body.rotation() : null,
       targetPos,
       targetVel,
       syncRot ? targetQuat : null,
-      gain,
+      profile,
+      dt,
     );
     if (cmd.kind === "rest") continue;
     if (cmd.kind === "snap") {

@@ -162,7 +162,7 @@ describe("predicted replica steering", () => {
 
     // Target 1 m away moving at 2 m/s (sample clamps to this oldest snap).
     inject("a:snap", { ents: [{ id: "e1", p: [1, 0, 0], v: [2, 0, 0] }] });
-    replicaFrame();
+    replicaFrame(3); // dt long enough for the velocity blend to converge
 
     expect(body.teleports).toHaveLength(0);
     expect(body.driven).toHaveLength(1);
@@ -176,7 +176,7 @@ describe("predicted replica steering", () => {
     const body = fakeBody(0, 0, 0);
     registerNetEntity({ id: "e1", body: () => body });
     inject("a:snap", { ents: [{ id: "e1", p: [50, 0, 0], v: [0, 0, 0] }] });
-    replicaFrame();
+    replicaFrame(3); // dt long enough for the velocity blend to converge
     expect(body.teleports).toEqual([{ x: 50, y: 0, z: 0 }]);
   });
 
@@ -185,7 +185,7 @@ describe("predicted replica steering", () => {
     const body = fakeBody(3, 0, 0);
     registerNetEntity({ id: "e1", body: () => body });
     inject("a:snap", { ents: [{ id: "e1", p: [3, 0, 0], v: [0, 0, 0] }] });
-    replicaFrame();
+    replicaFrame(3); // dt long enough for the velocity blend to converge
     expect(body.driven).toHaveLength(0);
     expect(body.teleports).toHaveLength(0);
   });
@@ -195,7 +195,7 @@ describe("predicted replica steering", () => {
     const body = fakeBody(0, 0, 0);
     registerNetEntity({ id: "e1", body: () => body });
     inject("a:snap", { ents: [{ id: "e1", p: [1, 0, 0], v: [0, 0, 0] }] });
-    replicaFrame({ x: 0.5, y: 0, z: 0 }); // local player right next to the body
+    replicaFrame(3, { x: 0.5, y: 0, z: 0 }); // local player right next to the body
     expect(body.driven).toHaveLength(1);
     // softGain (2.5) instead of gain (10).
     expect(body.driven[0].x).toBeCloseTo(2.5, 1);
@@ -209,7 +209,7 @@ describe("predicted replica steering", () => {
     expect(body.impulses).toEqual([{ x: 4, y: 0, z: 0 }]);
 
     inject("a:snap", { ents: [{ id: "e1", p: [1, 0, 0], v: [0, 0, 0] }] });
-    replicaFrame();
+    replicaFrame(3); // dt long enough for the velocity blend to converge
     expect(body.driven[0].x).toBeCloseTo(2.5, 1); // soft gain during the window
   });
 

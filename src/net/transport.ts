@@ -130,8 +130,15 @@ export class LocalTransport implements Transport {
 
   send(msg: ClientMsg): void {
     switch (msg.t) {
-      case "hello":
+      case "login":
+        // Offline identity/saves stay in localStorage — no loggedIn reply,
+        // so the client keeps its local persistence path.
         this.name = msg.name;
+        break;
+      case "bank":
+      case "died":
+      case "grant":
+        // Offline progress is persisted client-side.
         break;
       case "enterFloor": {
         const inst = this.directory.join(this.playerId, msg.floor);

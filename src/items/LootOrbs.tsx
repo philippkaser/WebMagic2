@@ -14,6 +14,7 @@ import { wizardDistSqTo } from "../game/targets";
 import { hostCommand, hostEvent } from "../net/channels";
 import { registerSyncProvider } from "../net/entities";
 import { isHost, useNet } from "../net/netStore";
+import { session } from "../net/session";
 import { getItemDef } from "./catalog";
 import { rollLoot } from "./loot";
 import { useGame } from "../state/gameStore";
@@ -57,6 +58,8 @@ const takeOrb = hostCommand<{ orbId: string }>("takeOrb", (d, meta) => {
   if (wizardDistSqTo(meta.from, orb.position[0], orb.position[1], orb.position[2]) > TAKE_RANGE_SQ)
     return;
   orbTaken.announce({ orbId: d.orbId, by: meta.from });
+  // Host attestation makes the item bankable server-side for that player.
+  session.attestGrant(meta.from, orb.defId);
 });
 
 /** Roll & drop loot at a position. Authority-only — replicas receive the

@@ -109,7 +109,7 @@ export function NetSystems() {
       clock.current = SNAP_INTERVAL_S;
       authorityTick();
     } else {
-      replicaFrame(playerPosition);
+      replicaFrame(dt, playerPosition);
     }
   });
   return null;

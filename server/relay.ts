@@ -1,3 +1,4 @@
+import { DUNGEON } from "../src/core/config";
 import { FloorDirectory } from "../src/net/matchmaking";
 import {
   CHANNEL_AUTHORITY,
@@ -7,13 +8,16 @@ import {
   type MemberInfo,
   type ServerMsg,
 } from "../src/net/protocol";
+import type { AccountRecord, AccountStore } from "./accounts";
 
 /** The gameplay-blind relay core. Pure logic (I/O injected via `send`), so
  * the host-migration/authority/routing rules are unit-testable without a
  * socket in sight.
  *
  * Responsibilities — and the complete list, by design:
- *  - matchmaking via FloorDirectory (max 4 wizards per floor instance)
+ *  - identity: device-token login backed by the AccountStore
+ *  - matchmaking via FloorDirectory (max 4 wizards per floor instance),
+ *    with floor-entry validation against the account's actual progress
  *  - host designation + migration (epoch bumps on every change)
  *  - clock pongs (one shared timeline for interpolation)
  *  - relaying opaque envelopes by channel-prefix rule:
@@ -21,6 +25,7 @@ import {
  *      "h:" anyone → current host only
  *      "p:" anyone → the rest of the instance
  *  - asking the host to world-sync each late joiner
+ *  - saves: host-attested item grants, provenance-checked banking, run loss
  *
  * Everything else is client-side gameplay code. Adding a networked feature
  * never changes this file. */
@@ -36,9 +41,12 @@ const MAX_NAME = 24;
 export class Relay {
   private peers = new Map<string, RelayPeer>();
   private epochs = new Map<string, number>();
+  /** peerId → account token (bound at login / first floor entry). */
+  private tokens = new Map<string, string>();
 
   constructor(
     private directory: FloorDirectory,
+    private accounts: AccountStore,
     private now: () => number = () => Date.now(),
     private log: (text: string) => void = () => {},
   ) {}
@@ -51,37 +59,96 @@ export class Relay {
   disconnect(peerId: string): void {
     const peer = this.peers.get(peerId);
     if (!peer) return;
+    // runFloor/runGrants stay on the account so a reconnect resumes the run.
     this.leaveInstance(peer);
     this.peers.delete(peerId);
+    this.tokens.delete(peerId);
   }
 
   handle(peerId: string, msg: ClientMsg): void {
     const peer = this.peers.get(peerId);
     if (!peer) return;
     switch (msg.t) {
-      case "hello":
-        peer.name = String(msg.name).slice(0, MAX_NAME) || "Wizard";
+      case "login": {
+        const account = this.accounts.login(
+          typeof msg.token === "string" ? msg.token : undefined,
+          String(msg.name).slice(0, MAX_NAME),
+        );
+        peer.name = account.name;
+        this.tokens.set(peer.id, account.token);
+        peer.send({ t: "loggedIn", token: account.token, save: this.accounts.saveOf(account) });
         break;
+      }
       case "ping":
         peer.send({ t: "pong", sent: msg.sent, serverTime: this.now() });
         break;
       case "enterFloor":
-        this.enterFloor(peer, Math.max(1, Math.min(100, Math.floor(msg.floor))));
+        this.enterFloor(peer, Math.max(1, Math.min(DUNGEON.maxFloor, Math.floor(msg.floor))));
         break;
       case "leaveDungeon":
         this.leaveInstance(peer);
         break;
+      case "bank": {
+        const account = this.accountOf(peer);
+        const inst = this.directory.instanceOf(peer.id);
+        // Banking only counts where the portal exists: a checkpoint floor
+        // you are ACTUALLY matchmade into — the floor claim can't be faked.
+        if (!inst || inst.floor % DUNGEON.checkpointInterval !== 0) return;
+        const save = this.accounts.bank(account, inst.floor, msg.equipment);
+        peer.send({ t: "saved", save });
+        this.log(`${peer.id} banked at floor ${inst.floor}`);
+        break;
+      }
+      case "died":
+        this.accounts.endRun(this.accountOf(peer));
+        break;
+      case "grant": {
+        // Only the instance host may attest pickups, and only for members of
+        // its own instance — loot provenance mirrors loot authority.
+        if (this.hostOf(peer.id) !== peer.id) return;
+        if (typeof msg.playerId !== "string" || typeof msg.itemId !== "string") return;
+        const inst = this.directory.instanceOf(peer.id);
+        if (!inst || !inst.players.has(msg.playerId)) return;
+        const target = this.peers.get(msg.playerId);
+        if (!target) return;
+        this.accounts.grant(this.accountOf(target), msg.itemId);
+        break;
+      }
       case "msg":
         this.relay(peer, msg.ch, msg.data, msg.to);
         break;
     }
   }
 
+  /** Account bound to this connection — auto-minted for clients that never
+   * logged in, so every code path below has one. */
+  private accountOf(peer: RelayPeer): AccountRecord {
+    const token = this.tokens.get(peer.id);
+    const existing = token ? this.accounts.get(token) : null;
+    if (existing) return existing;
+    const account = this.accounts.login(undefined, peer.name);
+    this.tokens.set(peer.id, account.token);
+    return account;
+  }
+
   // ── Instances ──────────────────────────────────────────────────────────────
 
   private enterFloor(peer: RelayPeer, floor: number): void {
+    const account = this.accountOf(peer);
+    // Progress-validated entry: floor 1, anything you've banked past, one
+    // step deeper than the floor you're on (descending), or your current run
+    // floor again (reconnect resume). No floor-skipping by message forgery.
+    const allowed =
+      floor === 1 ||
+      floor <= account.checkpoint ||
+      (account.runFloor > 0 && floor >= account.runFloor && floor <= account.runFloor + 1);
+    if (!allowed) {
+      this.log(`${peer.id} denied floor ${floor} (checkpoint ${account.checkpoint}, run ${account.runFloor})`);
+      floor = 1;
+    }
     this.leaveInstance(peer);
     const inst = this.directory.join(peer.id, floor);
+    this.accounts.setRunFloor(account, floor);
     if (!this.epochs.has(inst.id)) this.epochs.set(inst.id, 1);
     const hostId = this.hostOf(peer.id);
     const members: MemberInfo[] = [...inst.players].map((id) => ({

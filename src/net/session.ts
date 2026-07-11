@@ -2,8 +2,26 @@ import { gameEvents } from "../core/events";
 import { netBus } from "./bus";
 import { netClock } from "./clock";
 import { useNet } from "./netStore";
-import type { FloorAssignment, ServerMsg } from "./protocol";
+import type { FloorAssignment, ServerMsg, WireEquipment } from "./protocol";
 import { LocalTransport, WebSocketTransport, type Transport } from "./transport";
+
+const TOKEN_KEY = "webmagic.token.v1";
+
+function loadToken(): string | undefined {
+  try {
+    return localStorage.getItem(TOKEN_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function storeToken(token: string): void {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    // Private mode etc. — a fresh account per session.
+  }
+}
 
 export type SessionMode = "connecting" | "online" | "offline";
 
@@ -29,11 +47,15 @@ export class GameSession {
   async ensureConnected(name = "Wizard"): Promise<void> {
     this.name = name;
     if (this.transport) {
-      this.transport.send({ t: "hello", name });
+      this.login();
       return;
     }
     await this.establish();
-    this.transport!.send({ t: "hello", name });
+    this.login();
+  }
+
+  private login(): void {
+    this.transport?.send({ t: "login", name: this.name, token: loadToken() });
   }
 
   /** Ask the server which instance of `floor` we belong to. Resolves with the
@@ -60,6 +82,23 @@ export class GameSession {
   /** Send a gameplay envelope. Channel semantics live in channels.ts. */
   sendEnvelope(ch: string, data: unknown, to?: string): void {
     this.transport?.send({ t: "msg", ch, data, to });
+  }
+
+  /** Bank at the current checkpoint floor — the server validates provenance
+   * and answers with the authoritative save (netBus "serverSave"). */
+  sendBank(equipment: WireEquipment): void {
+    this.transport?.send({ t: "bank", equipment });
+  }
+
+  /** The run is lost — the server discards its grants. */
+  sendDied(): void {
+    this.transport?.send({ t: "died" });
+  }
+
+  /** HOST only (the server ignores anyone else): attest that a player
+   * legitimately picked up an item, making it bankable for them. */
+  attestGrant(playerId: string, itemId: string): void {
+    this.transport?.send({ t: "grant", playerId, itemId });
   }
 
   // ── Connection plumbing ────────────────────────────────────────────────────
@@ -103,7 +142,7 @@ export class GameSession {
     gameEvents.emit("message", "Connection lost — reconnecting…");
     try {
       await this.establish();
-      this.transport!.send({ t: "hello", name: this.name });
+      this.login(); // same token → same account, run floor and grants intact
       netBus.emit("reconnected", undefined);
       if (this.currentFloor !== null) {
         this.transport!.send({ t: "enterFloor", floor: this.currentFloor });
@@ -141,6 +180,13 @@ export class GameSession {
       case "welcome":
         this.playerId = msg.playerId;
         useNet.setState({ playerId: msg.playerId });
+        break;
+      case "loggedIn":
+        storeToken(msg.token);
+        netBus.emit("serverSave", msg.save);
+        break;
+      case "saved":
+        netBus.emit("serverSave", msg.save);
         break;
       case "pong":
         netClock.onPong(msg.sent, msg.serverTime);
