@@ -11,7 +11,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, MeshStandardMaterial, Vector3 } from "three";
 import { playHit, playPortal } from "../audio/sound";
 import { GROUPS } from "../core/config";
-import { gameEvents } from "../core/events";
 import { Rng, hashSeed } from "../core/rng";
 import { explode } from "../combat/damage";
 import {
@@ -26,9 +25,10 @@ import { playerPosition } from "../game/player-state";
 import { allocId, registerDynamicBody, registerHittable } from "../game/registry";
 import { rollLoot } from "../items/loot";
 import { dropLoot } from "../items/LootOrbs";
-import { isHost, selectIsHost, useNet } from "../net/netStore";
-import { registerEntity, setTreasureProvider } from "../net/replication";
-import { session } from "../net/session";
+import { hostCommand, hostEvent } from "../net/channels";
+import { registerSyncProvider } from "../net/entities";
+import { isHost, useNet } from "../net/netStore";
+import { useNetBody } from "../net/NetSystems";
 import { useGame } from "../state/gameStore";
 import { getTextures } from "../render/textures";
 import type { PropKind, Vec3 } from "./types";
@@ -56,10 +56,16 @@ const SPECS: Record<PropKind, PropSpec> = {
   pot: { hp: 6, mass: 0.4, shards: ["#c98d5f", "#8a5a3a"], lootChance: 0.12, explodes: false },
 };
 
+interface HitData {
+  damage: number;
+  impulse: { x: number; y: number; z: number };
+}
+
 /** A physical, breakable prop. Every dungeon floor scatters these so rooms
  * double as a physics sandbox: they tumble when shoved, shatter under fire,
- * sometimes hide loot — and barrels go up violently. The floor host owns
- * their physics and health; replicas interpolate and mirror breaks. */
+ * sometimes hide loot — and barrels go up violently. The floor authority owns
+ * their physics and health; replicas mirror position AND rotation through the
+ * replication framework, so tumbling looks identical everywhere. */
 export function Breakable({
   kind,
   position,
@@ -72,13 +78,10 @@ export function Breakable({
   entityId: string;
 }) {
   const body = useRef<RapierRigidBody>(null);
-  const host = useNet(selectIsHost);
   const spec = SPECS[kind];
   const hp = useRef(spec.hp);
   const deadRef = useRef(false);
   const [dead, setDead] = useState(false);
-  const target = useMemo(() => new Vector3(...position), [position]);
-  const hasSnap = useRef(false);
 
   const kill = useCallback(
     (remote: boolean, silent = false) => {
@@ -94,9 +97,8 @@ export function Breakable({
           ttl: 0.9,
           size: 0.09,
         });
-        if (!remote && isHost()) {
+        if (!remote) {
           dropLoot([t.x, Math.max(t.y, 0.5), t.z], floor, spec.lootChance);
-          session.sendEntityEvent({ k: "propBroken", id: entityId });
         }
         if (spec.explodes) {
           // Defer so the chain reaction never re-enters this hit handler. A
@@ -120,18 +122,43 @@ export function Breakable({
       }
       setDead(true);
     },
-    [entityId, floor, position, spec],
+    [floor, position, spec],
   );
+
+  const net = useNetBody({
+    id: entityId,
+    body,
+    rotation: true,
+    enabled: !dead,
+    fields: () => ({ hp: hp.current }),
+    onFields: (f) => {
+      if (f.hp !== undefined) hp.current = f.hp;
+    },
+    onCommand: (cmd, data) => {
+      if (cmd === "hit") {
+        const d = data as HitData;
+        applyDamageRef.current(d.damage, d.impulse);
+      }
+    },
+    onDespawn: (_data, catchup) => kill(true, catchup),
+  });
+  const netRef = useRef(net);
+  netRef.current = net;
 
   const applyDamage = useCallback(
     (damage: number, impulse: { x: number; y: number; z: number }) => {
       if (deadRef.current) return;
       hp.current -= damage;
       body.current?.applyImpulse(impulse, true);
-      if (hp.current <= 0) kill(false);
+      if (hp.current <= 0) {
+        kill(false);
+        netRef.current.despawn();
+      }
     },
     [kill],
   );
+  const applyDamageRef = useRef(applyDamage);
+  applyDamageRef.current = applyDamage;
 
   useEffect(() => {
     if (dead) return;
@@ -143,55 +170,23 @@ export function Breakable({
       hit: (damage, impulse) => {
         if (deadRef.current) return;
         playHit();
-        if (isHost()) applyDamage(damage, impulse);
-        else session.sendHit(entityId, damage, impulse);
-      },
-    });
-    const unregisterEntity = registerEntity({
-      id: entityId,
-      snap: () => {
-        if (deadRef.current) return null;
-        const t = body.current?.translation();
-        return t ? { id: entityId, p: [t.x, t.y, t.z], hp: hp.current } : null;
-      },
-      applyHit: applyDamage,
-      applySnap: (s) => {
-        target.set(s.p[0], s.p[1], s.p[2]);
-        hasSnap.current = true;
-        if (s.hp !== undefined) hp.current = s.hp;
-      },
-      onEvent: (ev) => {
-        // "death" arrives via late-join stateSync; "propBroken" live.
-        if (ev.k === "propBroken" || ev.k === "death") kill(true, ev.silent);
+        if (isHost()) applyDamageRef.current(damage, impulse);
+        else netRef.current.command("hit", { damage, impulse } satisfies HitData);
       },
     });
     const unregisterBody = b ? registerDynamicBody(b) : undefined;
     return () => {
       unregisterHit();
-      unregisterEntity();
       unregisterBody?.();
     };
-  }, [dead, kill, applyDamage, entityId, target]);
-
-  // Replica: glide toward the host's authoritative position.
-  useFrame((_, dt) => {
-    const b = body.current;
-    if (host || !b || deadRef.current || !hasSnap.current) return;
-    const t = b.translation();
-    const k = Math.min(1, dt * 9);
-    b.setNextKinematicTranslation({
-      x: t.x + (target.x - t.x) * k,
-      y: t.y + (target.y - t.y) * k,
-      z: t.z + (target.z - t.z) * k,
-    });
-  });
+  }, [dead]);
 
   if (dead) return null;
   return (
     <RigidBody
       ref={body}
       position={position}
-      type={host ? "dynamic" : "kinematicPosition"}
+      type={net.bodyType}
       colliders={false}
       linearDamping={0.2}
       angularDamping={0.4}
@@ -428,6 +423,24 @@ export function Portal({
   );
 }
 
+// ── Floor treasure networking ────────────────────────────────────────────────
+// One treasure per floor, first come first served, granted by the authority.
+// The take request and the taken fact are plain typed net messages — no
+// isHost branching at the interaction site, and single-player is the same
+// code path (requests dispatch locally on the host).
+
+let consumeTreasure: ((by: string, silent: boolean) => void) | null = null;
+let treasureTakenNow: (() => boolean) | null = null;
+
+const treasureTaken = hostEvent<{ by: string }>("treasureTaken", (d) => {
+  consumeTreasure?.(d.by, false);
+});
+
+const takeTreasure = hostCommand<Record<string, never>>("takeTreasure", (_d, meta) => {
+  if (treasureTakenNow?.()) return;
+  treasureTaken.announce({ by: meta.from });
+});
+
 /** Guaranteed floor treasure — the item is rolled deterministically from the
  * floor seed, so everyone in a shared instance sees the same reward. */
 export function TreasurePedestal({ position, floor, seed }: { position: Vec3; floor: number; seed: number }) {
@@ -438,11 +451,12 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
   const orb = useRef<Group>(null);
 
   const consume = useCallback(
-    (byMe: boolean, silent = false) => {
+    (by: string, silent: boolean) => {
       if (takenRef.current) return;
       takenRef.current = true;
       setTaken(true);
-      if (byMe) useGame.getState().equipItem(def.id);
+      const myId = useNet.getState().playerId;
+      if (by !== "" && (by === myId || by === "self")) useGame.getState().equipItem(def.id);
       if (!silent) {
         spawnBurst({
           position: [position[0], position[1] + 1.5, position[2]],
@@ -458,33 +472,22 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
     [def, position],
   );
 
-  // Late-join state sync: tell the host whether the treasure is gone.
+  // Wire the module-level handlers + late-join sync while mounted.
   useEffect(() => {
-    setTreasureProvider(() => takenRef.current);
-    return () => setTreasureProvider(null);
-  }, []);
-
-  // Replica: the host announced who got it.
-  useEffect(
-    () =>
-      gameEvents.on("entityEvent", (ev) => {
-        if (ev.k === "treasureTaken") {
-          consume(ev.by !== "" && ev.by === useNet.getState().playerId, ev.silent);
-        }
-      }),
-    [consume],
-  );
-
-  // Host: grant a replica's request — one treasure, first come first served.
-  useEffect(
-    () =>
-      gameEvents.on("orbRequest", ({ playerId, orbId }) => {
-        if (orbId !== "treasure" || !isHost() || takenRef.current) return;
-        session.sendEntityEvent({ k: "treasureTaken", by: playerId });
-        consume(false);
-      }),
-    [consume],
-  );
+    consumeTreasure = consume;
+    treasureTakenNow = () => takenRef.current;
+    const unregister = registerSyncProvider("treasure", {
+      collect: () => takenRef.current,
+      apply: (data) => {
+        if (data === true) consume("", true);
+      },
+    });
+    return () => {
+      consumeTreasure = null;
+      treasureTakenNow = null;
+      unregister();
+    };
+  }, [consume]);
 
   useEffect(() => {
     if (taken) return;
@@ -510,17 +513,9 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
       (playerPosition.x - position[0]) ** 2 + (playerPosition.z - position[2]) ** 2;
     if (d2 < 6) {
       offerInteraction(`E — Take ${def.name}  (${def.desc})`, d2, () => {
-        if (takenRef.current) return;
-        if (isHost()) {
-          session.sendEntityEvent({
-            k: "treasureTaken",
-            by: useNet.getState().playerId || "self",
-          });
-          consume(true);
-        } else if (requested.current <= 0) {
-          requested.current = 0.6;
-          session.sendTakeOrb("treasure");
-        }
+        if (takenRef.current || requested.current > 0) return;
+        requested.current = 0.6; // throttle re-requests while awaiting grant
+        takeTreasure.request({});
       });
     }
   });

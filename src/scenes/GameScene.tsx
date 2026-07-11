@@ -9,8 +9,8 @@ import { DynamicLights } from "../fx/DynamicLights";
 import { FxSystems } from "../fx/Particles";
 import { InteractionSystem } from "../game/interactions";
 import { LootOrbs } from "../items/LootOrbs";
+import { NetSystems } from "../net/NetSystems";
 import { RemoteWizards } from "../net/RemoteWizards";
-import { ReplicationSystem } from "../net/replication";
 import { StaffView } from "../player/StaffView";
 import { Effects } from "../render/Effects";
 import { useGame } from "../state/gameStore";
@@ -56,7 +56,7 @@ export function GameScene() {
           <LootOrbs />
         </Physics>
         <RemoteWizards />
-        <ReplicationSystem />
+        <NetSystems />
         <FxSystems />
         <DynamicLights />
         <StaffView />

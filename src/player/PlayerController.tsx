@@ -13,7 +13,7 @@ import { EYE_HEIGHT, GROUPS, PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
 import { spawnBurst } from "../fx/Particles";
 import { playerPosition, playerVelocity, setPlayerBody } from "../game/player-state";
-import { session } from "../net/session";
+import { publishLocalPose } from "../net/players";
 import { getStats, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
 import { input } from "./input";
@@ -39,7 +39,6 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
   const landDip = useRef(0);
   const trauma = useRef(0);
   const hoverClock = useRef(0);
-  const netClock = useRef(0);
 
   const fwd = useMemo(() => new Vector3(), []);
   const right = useMemo(() => new Vector3(), []);
@@ -236,14 +235,15 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
     playerPosition.set(t.x, t.y, t.z);
     playerVelocity.set(nvx, vy, nvz);
 
-    // ~10 Hz transform broadcast to floor-mates (no-op offline).
-    netClock.current -= dt;
-    if (playing && netClock.current <= 0) {
-      netClock.current = 0.1;
+    // Pose broadcast to floor-mates (throttled inside; no-op offline).
+    if (playing) {
       camera.getWorldDirection(fwd);
-      session.sendState(
-        { x: t.x, y: t.y, z: t.z },
+      publishLocalPose(
+        dt,
+        t,
+        { x: nvx, y: vy, z: nvz },
         Math.atan2(fwd.x, fwd.z),
+        Math.asin(Math.max(-1, Math.min(1, fwd.y))),
         state.equipment.staff.defId,
       );
     }

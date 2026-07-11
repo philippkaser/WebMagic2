@@ -3,7 +3,10 @@ import { useMemo, useRef, useState } from "react";
 import { CanvasTexture, Group, LinearFilter, Sprite, SpriteMaterial } from "three";
 import { hashSeed } from "../core/rng";
 import { getItemDef } from "../items/catalog";
-import { session } from "./session";
+import { netClock } from "./clock";
+import { INTERP_DELAY_MS } from "./entities";
+import { peerIds, peerName, peerStaffId, samplePeer } from "./players";
+import { makeSampledPose } from "./snapshots";
 
 /** Name tags as canvas sprites — no font downloads, fits the pixel look. */
 const nameTagCache = new Map<string, SpriteMaterial>();
@@ -30,27 +33,27 @@ function nameTagMaterial(name: string): SpriteMaterial {
   return material;
 }
 
-/** Renders the other wizards sharing this floor instance. Membership comes
- * from the session peer map (kept fresh by server snapshots); positions are
- * smoothed toward the latest snapshot. With the loopback transport this
- * renders nothing — it lights up as soon as a real server is plugged in. */
+/** Renders the other wizards sharing this floor instance. Poses come from the
+ * net layer's timestamped buffers, sampled ~140 ms in the past — smooth
+ * motion at any packet jitter. With the loopback transport this renders
+ * nothing — it lights up as soon as a real server is plugged in. */
 export function RemoteWizards() {
-  const [peerIds, setPeerIds] = useState<string[]>([]);
+  const [ids, setIds] = useState<string[]>([]);
   const pollClock = useRef(0);
 
   useFrame((_, dt) => {
     pollClock.current -= dt;
     if (pollClock.current > 0) return;
     pollClock.current = 0.5;
-    const ids = [...session.peers.keys()].filter((id) => id !== session.playerId);
-    setPeerIds((prev) =>
-      prev.length === ids.length && prev.every((id, i) => id === ids[i]) ? prev : ids,
+    const fresh = peerIds();
+    setIds((prev) =>
+      prev.length === fresh.length && prev.every((id, i) => id === fresh[i]) ? prev : fresh,
     );
   });
 
   return (
     <>
-      {peerIds.map((id) => (
+      {ids.map((id) => (
         <RemoteWizard key={id} playerId={id} />
       ))}
     </>
@@ -62,14 +65,14 @@ const ROBE_COLORS = ["#3d5a8a", "#6a3d8a", "#8a3d50", "#3d8a5f"];
 function RemoteWizard({ playerId }: { playerId: string }) {
   const group = useRef<Group>(null);
   const tag = useRef<Sprite>(null);
-  const initialized = useRef(false);
   const lastName = useRef("");
   const robeColor = ROBE_COLORS[hashSeed(playerId) % ROBE_COLORS.length];
   const bobT = useMemo(() => ({ t: 0 }), []);
+  const pose = useMemo(() => makeSampledPose(), []);
   const staffColor = () => {
-    const peer = session.peers.get(playerId);
     try {
-      return peer ? getItemDef(peer.staffId).color : "#7fd4ff";
+      const staffId = peerStaffId(playerId);
+      return staffId ? getItemDef(staffId).color : "#7fd4ff";
     } catch {
       return "#7fd4ff";
     }
@@ -77,43 +80,29 @@ function RemoteWizard({ playerId }: { playerId: string }) {
 
   useFrame((_, dt) => {
     const g = group.current;
-    const peer = session.peers.get(playerId);
-    if (!g || !peer) return;
-    // Placeholder until their first broadcast: keep them hidden below the
-    // world instead of interpolating up from the void.
-    const known = peer.position.y > -100;
+    if (!g) return;
+    // Hidden until their first pose arrives — no interpolating up from the void.
+    const known = samplePeer(playerId, netClock.serverNow() - INTERP_DELAY_MS, pose);
     g.visible = known;
     if (!known) return;
-    if (!initialized.current) {
-      initialized.current = true;
-      g.position.set(peer.position.x, peer.position.y, peer.position.z);
-      g.rotation.y = peer.yaw;
-      return;
-    }
-    const k = Math.min(1, dt * 12);
-    const dx = peer.position.x - g.position.x;
-    const dz = peer.position.z - g.position.z;
-    g.position.x += dx * k;
-    g.position.y += (peer.position.y - g.position.y) * k;
-    g.position.z += dz * k;
-    let dyaw = peer.yaw - g.rotation.y;
-    dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
-    g.rotation.y += dyaw * k;
+    g.position.set(pose.p[0], pose.p[1], pose.p[2]);
+    if (pose.a) g.rotation.y = pose.a[0];
 
     // Little walk bob scaled by how fast they're moving.
-    const speed = Math.hypot(dx, dz) / Math.max(dt, 0.001);
+    const speed = Math.hypot(pose.v[0], pose.v[2]);
     bobT.t += dt * Math.min(speed, 10);
-    g.children[0].position.y = -0.1 + Math.abs(Math.sin(bobT.t * 1.4)) * Math.min(speed * 0.01, 0.06);
+    g.children[0].position.y = -0.1 + Math.abs(Math.sin(bobT.t * 1.4)) * Math.min(speed * 0.012, 0.06);
 
     // Keep the name tag fresh (peers can arrive before their hello lands).
-    if (tag.current && peer.name !== lastName.current) {
-      lastName.current = peer.name;
-      tag.current.material = nameTagMaterial(peer.name);
+    const name = peerName(playerId);
+    if (tag.current && name && name !== lastName.current) {
+      lastName.current = name;
+      tag.current.material = nameTagMaterial(name);
     }
   });
 
   return (
-    <group ref={group}>
+    <group ref={group} visible={false}>
       {/* Robe */}
       <mesh position={[0, -0.1, 0]} castShadow>
         <coneGeometry args={[0.45, 1.5, 8]} />

@@ -1,18 +1,41 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
 import { Vector3 } from "three";
 import { playCast } from "../audio/sound";
 import { gameEvents } from "../core/events";
 import { computeStats, getItemDef } from "../items/catalog";
-import { session } from "../net/session";
+import { peerMessage } from "../net/channels";
+import { peerStaffId } from "../net/players";
 import { input } from "../player/input";
 import { defaultEquipment } from "../state/persistence";
 import { getStats, useGame } from "../state/gameStore";
 import { getAbility } from "./abilities";
-import { explode } from "./damage";
-import { fireProjectile } from "./projectiles";
 
 const UP = new Vector3(0, 1, 0);
+
+interface CastMsg {
+  abilityId: string;
+  origin: [number, number, number];
+  dir: [number, number, number];
+}
+
+/** Floor-mates' casts replay through the identical ability code — the same
+ * visuals and physics, flagged remote so entity damage isn't double-counted
+ * (their own client requests the damage). */
+const peerCast = peerMessage<CastMsg>("cast", (msg, meta) => {
+  try {
+    const staff = getItemDef(peerStaffId(meta.from) || "apprentice_staff");
+    getAbility(msg.abilityId).cast({
+      origin: new Vector3(...msg.origin),
+      dir: new Vector3(...msg.dir),
+      stats: computeStats(defaultEquipment()),
+      staff,
+      remote: true,
+    });
+  } catch {
+    // Unknown ability/staff from a newer client — ignore.
+  }
+});
 
 /** Reads mouse buttons and casts the equipped staff's abilities. Holding a
  * button keeps casting on cooldown — minute-to-minute combat is about aim,
@@ -24,61 +47,6 @@ export function CombatSystem() {
   const dir = useMemo(() => new Vector3(), []);
   const right = useMemo(() => new Vector3(), []);
   const origin = useMemo(() => new Vector3(), []);
-
-  // Replicated enemy attacks: replay the host's projectiles/explosions. They
-  // hurt OUR player locally but never re-damage entities (host authority).
-  useEffect(
-    () =>
-      gameEvents.on("entityEvent", (ev) => {
-        if (ev.k === "enemyCast") {
-          fireProjectile({
-            team: "enemy",
-            position: ev.origin,
-            velocity: ev.velocity,
-            damage: ev.damage,
-            color: ev.color,
-            size: ev.size,
-            blastRadius: ev.blastRadius,
-            blastImpulse: ev.blastImpulse,
-            cosmetic: true,
-          });
-        } else if (ev.k === "boom") {
-          explode({
-            position: ev.pos,
-            radius: ev.radius,
-            damage: ev.damage,
-            impulse: ev.impulse,
-            team: "enemy",
-            color: ev.color,
-            particles: 50,
-            light: 50,
-            remote: true,
-          });
-        }
-      }),
-    [],
-  );
-
-  // Replay floor-mates' casts locally (visuals + physics use identical code).
-  useEffect(
-    () =>
-      gameEvents.on("peerCast", ({ abilityId, origin: o, dir: d, playerId }) => {
-        try {
-          const peer = session.peers.get(playerId);
-          const staff = getItemDef(peer?.staffId ?? "apprentice_staff");
-          getAbility(abilityId).cast({
-            origin: new Vector3(o.x, o.y, o.z),
-            dir: new Vector3(d.x, d.y, d.z),
-            stats: computeStats(defaultEquipment()),
-            staff,
-            remote: true,
-          });
-        } catch {
-          // Unknown ability/staff from a newer client — ignore.
-        }
-      }),
-    [],
-  );
 
   useFrame((_, dt) => {
     cooldownL.current -= dt;
@@ -103,11 +71,11 @@ export function CombatSystem() {
         .addScaledVector(right, 0.24)
         .addScaledVector(UP, -0.16);
       ability.cast({ origin, dir, stats: getStats(), staff });
-      session.sendCast(
-        ability.id,
-        { x: origin.x, y: origin.y, z: origin.z },
-        { x: dir.x, y: dir.y, z: dir.z },
-      );
+      peerCast.send({
+        abilityId: ability.id,
+        origin: [origin.x, origin.y, origin.z],
+        dir: [dir.x, dir.y, dir.z],
+      });
       cd.current = ability.cooldown;
       playCast();
       gameEvents.emit("staffKick", 0.9);

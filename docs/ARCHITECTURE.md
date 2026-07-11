@@ -45,44 +45,72 @@ personal loot drops) uses `Math.random`.
 This is a plain class with injected seed/clock functions — the unit tests in
 `matchmaking.test.ts` are the spec.
 
-### Transport abstraction
+### The networking stack (src/net/)
 
 ```
-game code ──► GameSession ──► Transport (interface)
-                                 ├── WebSocketTransport → server/server.ts (default)
-                                 └── LocalTransport       (offline fallback)
+game code ──► declarative APIs            framework internals
+              ├─ useNetBody(spec)          entities.ts   snapshot capture/apply,
+              │    (enemies, props, boss)                commands, despawns, world sync
+              ├─ hostEvent / hostCommand /  channels.ts  typed messages over opaque
+              │  peerMessage (loot, casts)               relay envelopes
+              └─ publishLocalPose /         players.ts   wizard pose buffers
+                 estimatePeer / samplePeer
+                       │
+                  session.ts  connection, reconnect, ping loop, netBus
+                       │
+                  Transport (interface)
+                    ├── WebSocketTransport → server/ (default)
+                    └── LocalTransport       (offline fallback)
 ```
 
-`net/protocol.ts` defines the full client/server message set (hello,
-enterFloor, state snapshots, peer join/leave, ability casts). The session
-tries the WebSocket server first (two attempts) and falls back to the
-in-process loopback, so the game is always playable; the HUD shows which mode
-you're in. `server/server.ts` is a small Bun process that runs the real
-`FloorDirectory`, relays 10 Hz peer state within each instance, and relays
-casts (`peerCast`) which clients replay through the identical ability code
-(with caster-only effects like blast recoil skipped).
+**The server is gameplay-blind.** `net/protocol.ts` defines only matchmaking,
+host designation, clock pongs and one opaque envelope type. The entire
+authorization model is a channel-name prefix, enforced by `server/relay.ts`:
+
+- `a:` **authority** — only the instance host may send (snapshots, despawns,
+  world sync); relayed to the instance or to one member via `to`.
+- `h:` **to-host** — anyone may send; delivered to the current host only
+  (hit requests, pickup requests).
+- `p:` **peer** — anyone may send; broadcast to the rest of the instance
+  (poses, ability casts).
+
+Adding a networked feature = declaring a typed message client-side
+(`hostEvent`/`hostCommand`/`peerMessage`) or registering a `useNetBody` /
+sync provider. **The server and protocol never change again for gameplay.**
+`relay.test.ts` is the spec for the relay rules.
+
+**One shared timeline.** The server stamps every relayed envelope with its
+clock; clients estimate the offset from ping/pongs (`net/clock.ts`, lowest-RTT
+samples win). Replicated motion renders ~140 ms in the past: snapshots land in
+timestamped buffers (`net/snapshots.ts`) and are sampled with cubic-hermite
+interpolation using the sender's velocities — arcs stay arcs at 15 Hz — with
+short capped extrapolation past the newest data. This is what makes replicas
+smooth regardless of packet jitter.
 
 ### Host-authority replication
 
 Every floor instance has a **simulation host** — its first joiner, promoted
-in join order when the host leaves (`hostChanged`). The host's simulation of
-enemies, props, the boss and loot is the truth; the server stays a thin
-relay that also *enforces* authority (entity messages from non-hosts are
-dropped). Offline play is simply "always host", so single-player runs the
-exact same code path.
+in join order when the host leaves (`hostChanged`, epoch-stamped). The host's
+simulation of enemies, props, the boss and loot is the truth; the relay
+*enforces* authority (`a:` traffic from non-hosts is dropped). Offline play is
+simply "always host", so single-player runs the exact same code path — and
+`hostCommand.request()` dispatches locally on the host, so gameplay call
+sites have **no host/replica branches at all**.
 
 | Synced | How |
 | --- | --- |
 | Floor layout, torches, spawn tables | deterministic from instance seed |
-| Player position/yaw/staff, names | 10 Hz state relay + interpolation |
-| Player ability casts | `peerCast` replay (cosmetic vs entities) |
-| Enemy/prop/boss positions & health | host `entity` snapshots at 10 Hz, delta-filtered, replicas glide kinematic bodies |
-| Deaths, prop breaks, boss slams, sentry/boss shots | discrete `entityEvent`s replayed locally |
-| Loot drops & pickups, floor treasure | host-granted (`orbSpawn`/`takeOrb`/`orbTaken`) — an orb can never be taken twice |
+| Player pose (pos/vel/yaw/pitch/staff), names | 20 Hz `p:pose` + buffered interpolation |
+| Player ability casts | `p:cast` replay (cosmetic vs entities) |
+| Enemy/boss position & velocity & hp | 15 Hz delta-filtered `a:snap`, hermite-interpolated replicas |
+| Prop position **and rotation** | same snapshots with quaternions — tumbling replicates; resting props go silent |
+| Deaths & prop breaks | `a:despawn` lifecycle events (silent replay for late joiners) |
+| Sentry/boss shots, boss slams | `hostEvent`s replayed everywhere (real on host, cosmetic elsewhere) |
+| Loot drops & pickups, floor treasure | host-granted `hostCommand`/`hostEvent` — an orb can never be taken twice |
 
 **Damage authority rule:** exactly one simulation may damage an entity — the
-host's. A replica's own shots apply damage via `hit` requests to the host
-(shooter-favored, like most netcode); every *replayed* explosion is
+host's. A replica's own shots apply damage via a `hit` command to the
+authority (shooter-favored, like most netcode); every *replayed* explosion is
 `remote: true` and skips entity damage entirely. Your own health is always
 local: contact burns and incoming blasts hurt each player on their own
 machine, so your survival never waits on a round trip.
@@ -90,25 +118,31 @@ machine, so your survival never waits on a round trip.
 **Enemies threaten everyone:** host-side AI (wisp aggro/chase, sentry
 targeting, boss aim and wake) picks the **nearest wizard on the floor**
 (`game/targets.ts`), not the host's own player — and taking damage from
-anyone wakes an enemy immediately. Shot-leading applies only against the
-host's own player (peer velocities aren't tracked).
+anyone wakes an enemy immediately. Peer poses carry velocity, so
+**shot-leading works against every wizard**, not just the local one.
 
-**Late-join state sync:** joining a floor mid-fight would otherwise generate
+**Late-join world sync:** joining a floor mid-fight would otherwise generate
 the pristine layout — immortal "ghost" enemies the host already killed. On
-every join the server asks the host for a `stateSync`: dead entity ids
-(computed as expected layout ids minus living registrations), current
-snapshots, live loot orbs, and treasure state. The joiner applies it
-silently (no death VFX), with a pending-dead buffer for entities that
-haven't finished mounting.
+every join the server asks the host for a world sync: dead entity ids
+(expected layout ids minus living registrations), current snapshots, plus
+whatever **sync providers** systems registered (live loot orbs, treasure
+state — new systems just register one and are covered). The joiner applies it
+silently, with a pending-despawn buffer for entities that haven't mounted yet.
 
-**Host migration:** entities carry the replicated hp/position state on every
-client, so when the host leaves, the promoted client's kinematic replicas
-flip to dynamic bodies and its AI resumes from the last snapshot —
-mid-fight, no reload.
+**Host migration:** every client's entity buffers already hold the last
+replicated pose+velocity, so when the host leaves, the promoted client's
+kinematic replicas flip to dynamic bodies seeded with that velocity and its
+AI resumes — mid-fight, no reload. Epochs identify stale-host traffic.
+
+**Reconnect:** a dropped socket triggers automatic reconnection and re-entry
+into the current floor; the normal join path resyncs the world. If the server
+stays unreachable the session falls back to offline seamlessly.
 
 **Path to server authority:** move the host role into a headless process
 that speaks the same protocol (it's just another "client" the server always
-designates as host). Nothing else changes.
+designates as host). The replication core (`entities.ts`, `snapshots.ts`,
+`clock.ts`) is pure logic with injected I/O precisely so it can run there.
+Nothing else changes.
 
 ### Scaling plan (server-side, future work)
 
@@ -180,4 +214,6 @@ designates as host). Nothing else changes.
 | New enemy | component in `combat/enemies.tsx` + spawn kind in `world/dungeonGen.ts` |
 | New prop | `world/props.tsx` SPECS + generator prop table |
 | New floor biome | new painters in `render/textures.ts`, swap by floor range in `DungeonFloor` |
-| Real networking | implement `Transport` over WebSocket; server reuses `FloorDirectory` + `protocol.ts` |
+| New networked entity | `useNetBody({ id, body, … })` — snapshots, interpolation, late-join, migration are automatic |
+| New networked message | `hostEvent` / `hostCommand` / `peerMessage` in the owning module — zero server changes |
+| New late-join state | `registerSyncProvider(key, { collect, apply })` |

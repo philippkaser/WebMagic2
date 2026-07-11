@@ -8,8 +8,8 @@ import { Sentry, Wisp } from "../combat/enemies";
 import { GROUPS, TILE, WALL_HEIGHT } from "../core/config";
 import { resetRegistries } from "../game/registry";
 import { hashSeed } from "../core/rng";
-import { resetReplication, setExpectedEntities } from "../net/replication";
-import { session } from "../net/session";
+import { resetNetEntities, setExpectedEntities } from "../net/entities";
+import { useNet } from "../net/netStore";
 import { PlayerController } from "../player/PlayerController";
 import { getTextures } from "../render/textures";
 import { useGame } from "../state/gameStore";
@@ -51,14 +51,14 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
       scene.fog = null;
       stopAmbient();
       resetRegistries();
-      resetReplication();
+      resetNetEntities();
     };
   }, [scene, gl, camera]);
 
   // Fan players out around the spawn tile so floor-mates don't materialize
   // inside each other.
   const spawnPoint = useMemo<typeof layout.spawn>(() => {
-    const angle = (hashSeed(session.playerId || "solo") % 6283) / 1000;
+    const angle = (hashSeed(useNet.getState().playerId || "solo") % 6283) / 1000;
     return [
       layout.spawn[0] + Math.cos(angle) * 1.1,
       layout.spawn[1],

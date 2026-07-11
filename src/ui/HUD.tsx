@@ -3,8 +3,7 @@ import { PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
 import { computeStats, getItemDef } from "../items/catalog";
 import type { Slot } from "../items/types";
-import { selectIsHost, useNet } from "../net/netStore";
-import { session } from "../net/session";
+import { floorPlayerCount, selectIsHost, useNet } from "../net/netStore";
 import { entryFloors, useGame } from "../state/gameStore";
 
 /** All DOM UI: crosshair, bars, prompts, message feed, and the fullscreen
@@ -66,8 +65,9 @@ function PlayHud() {
   const mana = useGame((s) => s.mana);
   const equipment = useGame((s) => s.equipment);
   const prompt = useGame((s) => s.prompt);
-  const floorPlayers = useNet((s) => s.floorPlayers);
+  const floorPlayers = useNet(floorPlayerCount);
   const amHost = useNet(selectIsHost);
+  const netMode = useNet((s) => s.mode);
   const stats = computeStats(equipment);
   const locked = usePointerLocked();
 
@@ -85,7 +85,7 @@ function PlayHud() {
             <div style={{ fontSize: 18, color: "#e8dfc8" }}>FLOOR {floor}</div>
             <div style={styles.dim}>
               instance {instanceId || "—"}
-              {session.mode === "online" &&
+              {netMode === "online" &&
                 ` · ${floorPlayers} wizard${floorPlayers === 1 ? "" : "s"}`}
             </div>
           </>
@@ -93,10 +93,10 @@ function PlayHud() {
           <div style={{ fontSize: 18, color: "#e8dfc8" }}>THE VILLAGE</div>
         )}
         <div style={styles.dim}>checkpoint: floor {checkpoint}</div>
-        <div style={{ ...styles.dim, color: session.mode === "online" ? "#4fd08a" : "#7d7566" }}>
-          {session.mode === "online"
+        <div style={{ ...styles.dim, color: netMode === "online" ? "#4fd08a" : "#7d7566" }}>
+          {netMode === "online"
             ? `◉ online${amHost && phase === "dungeon" ? " · host" : ""}`
-            : session.mode === "offline"
+            : netMode === "offline"
               ? "○ offline"
               : "◌ connecting"}
         </div>

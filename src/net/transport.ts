@@ -3,12 +3,14 @@ import { FloorDirectory } from "./matchmaking";
 import type { ClientMsg, ServerMsg } from "./protocol";
 
 /** Transport abstraction. The session prefers WebSocketTransport (real
- * multiplayer via server/server.ts) and falls back to LocalTransport
- * (single-player loopback) when no server is reachable. */
+ * multiplayer via server/) and falls back to LocalTransport (single-player
+ * loopback) when no server is reachable. */
 export interface Transport {
   connect(): Promise<void>;
   send(msg: ClientMsg): void;
   onMessage(cb: (msg: ServerMsg) => void): () => void;
+  /** Fires once if the connection drops after a successful connect. */
+  onClose(cb: () => void): void;
   close(): void;
 }
 
@@ -18,6 +20,8 @@ export class WebSocketTransport implements Transport {
   private ws: WebSocket | null = null;
   private listeners = new Set<(msg: ServerMsg) => void>();
   private queue: ServerMsg[] = [];
+  private closeCb: (() => void) | null = null;
+  private closedDeliberately = false;
 
   constructor(private url: string = defaultWsUrl()) {}
 
@@ -52,7 +56,11 @@ export class WebSocketTransport implements Transport {
       };
       ws.onclose = () => {
         clearTimeout(timeout);
-        fail("websocket closed");
+        if (!settled) {
+          fail("websocket closed");
+          return;
+        }
+        if (!this.closedDeliberately) this.closeCb?.();
       };
       ws.onmessage = (event) => {
         try {
@@ -81,7 +89,12 @@ export class WebSocketTransport implements Transport {
     return () => this.listeners.delete(cb);
   }
 
+  onClose(cb: () => void): void {
+    this.closeCb = cb;
+  }
+
   close(): void {
+    this.closedDeliberately = true;
     this.ws?.close();
     this.ws = null;
     this.listeners.clear();
@@ -102,11 +115,14 @@ function defaultWsUrl(): string {
 }
 
 /** Single-player loopback: a miniature in-process "server" that speaks the
- * real protocol and reuses the real matchmaking logic. */
+ * real protocol and reuses the real matchmaking logic. Gameplay envelopes
+ * have no other members to reach, so they vanish — the client-side authority
+ * code path (always host offline) is exactly the single-player game. */
 export class LocalTransport implements Transport {
   private listeners = new Set<(msg: ServerMsg) => void>();
   private directory = new FloorDirectory(DUNGEON.maxPlayersPerFloor);
   private playerId = "local_player";
+  private name = "Wizard";
 
   async connect(): Promise<void> {
     this.deliver({ t: "welcome", playerId: this.playerId });
@@ -115,6 +131,7 @@ export class LocalTransport implements Transport {
   send(msg: ClientMsg): void {
     switch (msg.t) {
       case "hello":
+        this.name = msg.name;
         break;
       case "enterFloor": {
         const inst = this.directory.join(this.playerId, msg.floor);
@@ -124,8 +141,9 @@ export class LocalTransport implements Transport {
             instanceId: inst.id,
             floor: inst.floor,
             seed: inst.seed,
-            playerCount: inst.players.size,
             hostId: this.playerId,
+            epoch: 1,
+            members: [{ id: this.playerId, name: this.name }],
           },
         });
         break;
@@ -133,12 +151,11 @@ export class LocalTransport implements Transport {
       case "leaveDungeon":
         this.directory.leave(this.playerId);
         break;
-      case "state":
-      case "castAbility":
-      case "entity":
-      case "entityEvent":
-      case "hit":
-      case "takeOrb":
+      case "ping":
+        // Zero-offset clock: local time IS server time offline.
+        this.deliver({ t: "pong", sent: msg.sent, serverTime: performance.now() });
+        break;
+      case "msg":
         // No peers in single-player.
         break;
     }
@@ -147,6 +164,10 @@ export class LocalTransport implements Transport {
   onMessage(cb: (msg: ServerMsg) => void): () => void {
     this.listeners.add(cb);
     return () => this.listeners.delete(cb);
+  }
+
+  onClose(): void {
+    // The loopback never drops.
   }
 
   close(): void {

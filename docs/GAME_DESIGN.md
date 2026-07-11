@@ -341,8 +341,10 @@ src/
   core/      config (all tuning numbers), seeded RNG, typed event bus
   world/     dungeon generator (pure + tested), props, layout types
   items/     item catalog, loot tables, loot-orb manager
-  net/       protocol, matchmaking, transport, session, host-authority
-             replication, remote-wizard rendering, reactive net store
+  net/       protocol, matchmaking, transport, session, synced clock,
+             snapshot buffers, typed channels, declarative entity
+             replication, wizard pose replication, remote-wizard
+             rendering, reactive net store
   state/     zustand game store, save persistence
   player/    input, first-person controller, staff viewmodel
   combat/    abilities, projectiles, explosions, enemies, boss, combat system
@@ -368,14 +370,23 @@ This is the most important networking decision, so it's worth stating plainly:
 
 - Each floor instance has a **simulation host** — its first joiner. The host's
   simulation of **enemies, props, the boss, and loot** is the authoritative
-  truth. Everyone else runs **replicas**: kinematic bodies gliding toward the
-  host's ~10 Hz snapshots, replaying discrete events (deaths, breaks, boss
+  truth. Everyone else runs **replicas**: kinematic bodies driven through
+  timestamped snapshot buffers on a server-synced clock, rendered ~140 ms in
+  the past with velocity-aware (hermite) interpolation — smooth under real
+  network jitter — and replaying discrete events (deaths, breaks, boss
   attacks) as they arrive.
-- The **server is a thin relay + matchmaker** that *enforces* authority
-  (entity messages from non-hosts are dropped). It does not simulate the world
-  (yet).
+- The **server is a gameplay-blind relay + matchmaker** that *enforces*
+  authority purely by channel-name prefix (`a:` host-only, `h:` to-host,
+  `p:` peer broadcast). It never learns what an enemy or an orb is, so new
+  gameplay features never touch it. It does not simulate the world (yet).
+- **Networking is declarative for game code.** A new entity calls
+  `useNetBody(…)` once and gets replication, interpolation, damage routing,
+  late-join and host migration for free; new messages are one
+  `hostEvent`/`hostCommand`/`peerMessage` declaration. Requests dispatch
+  locally on the host, so gameplay code has no host/replica branches.
 - **Enemies threaten every wizard**, not just the host's — host-side AI targets
-  the nearest player on the floor (local or peer), and any damage aggros.
+  the nearest player on the floor (local or peer), any damage aggros, and peer
+  poses carry velocity so enemies lead their shots against everyone.
 - **Your own health is always local.** Contact damage and incoming blasts hurt
   you on your own machine — survival never waits on a round trip. Damage to
   *entities* is shooter-favored: your shots apply where you saw them land, via
@@ -418,8 +429,9 @@ table, and the extension guide.
 
 **Not done yet / known gaps:**
 
-- No reconnect: a server restart or dropped socket drops you to offline until
-  you re-enter a floor.
+- Reconnect is basic: a dropped socket auto-reconnects and re-enters your
+  floor (resyncing state), but you may land in a fresh instance if the old
+  one emptied; no session resume tokens yet.
 - No full server authority (host is a client; a laggy/cheating host affects
   its instance).
 - Sparse content breadth: 4 staffs, ~a dozen items, 2 enemy types + 1 boss.

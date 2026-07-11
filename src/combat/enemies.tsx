@@ -13,16 +13,15 @@ import { playHit } from "../audio/sound";
 import { floorScale, GROUPS, PLAYER } from "../core/config";
 import { flashLight } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
-import { getPlayerBody, playerPosition, playerVelocity } from "../game/player-state";
+import { getPlayerBody, playerPosition } from "../game/player-state";
 import { allocId, registerHittable } from "../game/registry";
-import { nearestPlayerTo } from "../game/targets";
+import { nearestWizardTo } from "../game/targets";
 import { dropLoot } from "../items/LootOrbs";
-import { isHost, selectIsHost, useNet } from "../net/netStore";
-import { registerEntity } from "../net/replication";
-import { session } from "../net/session";
+import { isHost } from "../net/netStore";
+import { useNetBody, type NetBody } from "../net/NetSystems";
 import { getStats, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
-import { fireProjectile } from "./projectiles";
+import { enemyCast } from "./remoteEffects";
 
 const ENEMY_GROUPS = interactionGroups(GROUPS.ENEMY, [
   GROUPS.WORLD,
@@ -34,9 +33,15 @@ const ENEMY_GROUPS = interactionGroups(GROUPS.ENEMY, [
 
 const LOOT_DROP_CHANCE = 0.24;
 
-/** Shared host/replica plumbing for one enemy: hittable registration with
- * authority routing, replication registration, and kinematic interpolation
- * for replicas. Keeps Wisp/Sentry/Boss focused on their behavior. */
+interface HitData {
+  damage: number;
+  impulse: { x: number; y: number; z: number };
+}
+
+/** Shared enemy networking: registers the entity with the replication
+ * framework (snapshots, interpolation, late-join and migration are all
+ * automatic) and wires the hittable so damage routes to the authority.
+ * Keeps Wisp/Sentry/Boss focused on their behavior. */
 export function useEnemyNet(opts: {
   entityId: string;
   body: React.RefObject<RapierRigidBody | null>;
@@ -44,17 +49,19 @@ export function useEnemyNet(opts: {
   deadRef: React.MutableRefObject<boolean>;
   flash: React.MutableRefObject<number>;
   dead: boolean;
+  /** Sentries never move — replicate hp only. */
+  immobile?: boolean;
   knockTimer?: React.MutableRefObject<number>;
   /** Fraction of knockback impulses that actually applies (bosses resist). */
   knockbackScale?: number;
   /** silent = late-join catch-up: apply the death without VFX. */
   onKill: (silent?: boolean) => void;
   hitFeedback?: () => void;
-  /** Host: damage landed (from anyone) — wake up and fight back. */
+  /** Authority: damage landed (from anyone) — wake up and fight back. */
   onDamaged?: () => void;
-  /** Replica: called after each authoritative snapshot (e.g. boss HP bar). */
-  onSnap?: (hp: number) => void;
-}) {
+  /** Replica: authoritative hp arrived (e.g. boss HP bar). */
+  onHp?: (hp: number) => void;
+}): NetBody {
   const {
     entityId,
     body,
@@ -62,15 +69,16 @@ export function useEnemyNet(opts: {
     deadRef,
     flash,
     dead,
+    immobile,
     knockTimer,
     knockbackScale = 1,
     onKill,
     hitFeedback,
     onDamaged,
-    onSnap,
+    onHp,
   } = opts;
-  const target = useMemo(() => new Vector3(), []);
-  const hasSnap = useRef(false);
+
+  const netRef = useRef<NetBody | null>(null);
 
   const applyDamage = useCallback(
     (damage: number, impulse: { x: number; y: number; z: number }) => {
@@ -86,16 +94,41 @@ export function useEnemyNet(opts: {
         },
         true,
       );
-      onSnap?.(hp.current);
+      onHp?.(hp.current);
       onDamaged?.();
-      if (hp.current <= 0) onKill();
+      if (hp.current <= 0) {
+        onKill();
+        netRef.current?.despawn();
+      }
     },
-    [body, deadRef, flash, hp, knockTimer, knockbackScale, onKill, onDamaged, onSnap],
+    [body, deadRef, flash, hp, knockTimer, knockbackScale, onKill, onDamaged, onHp],
   );
+
+  const net = useNetBody({
+    id: entityId,
+    body,
+    immobile,
+    enabled: !dead,
+    fields: () => ({ hp: hp.current }),
+    onFields: (f) => {
+      if (f.hp !== undefined) {
+        hp.current = f.hp;
+        onHp?.(f.hp);
+      }
+    },
+    onCommand: (cmd, data) => {
+      if (cmd === "hit") {
+        const d = data as HitData;
+        applyDamage(d.damage, d.impulse);
+      }
+    },
+    onDespawn: (_data, catchup) => onKill(catchup),
+  });
+  netRef.current = net;
 
   useEffect(() => {
     if (dead) return;
-    const unregisterHit = registerHittable({
+    return registerHittable({
       id: allocId(),
       team: "enemy",
       getPosition: () => body.current?.translation() ?? { x: 0, y: -999, z: 0 },
@@ -104,57 +137,20 @@ export function useEnemyNet(opts: {
         flash.current = 1;
         playHit();
         hitFeedback?.();
+        // Shooter-favored: our shots apply where we saw them land — locally
+        // on the authority, via a command to it otherwise.
         if (isHost()) applyDamage(damage, impulse);
-        else session.sendHit(entityId, damage, impulse);
+        else netRef.current?.command("hit", { damage, impulse } satisfies HitData);
       },
     });
-    const unregisterEntity = registerEntity({
-      id: entityId,
-      snap: () => {
-        if (deadRef.current) return null;
-        const t = body.current?.translation();
-        return t ? { id: entityId, p: [t.x, t.y, t.z], hp: hp.current } : null;
-      },
-      applyHit: applyDamage,
-      applySnap: (s) => {
-        target.set(s.p[0], s.p[1], s.p[2]);
-        hasSnap.current = true;
-        if (s.hp !== undefined) {
-          hp.current = s.hp;
-          onSnap?.(s.hp);
-        }
-      },
-      onEvent: (ev) => {
-        if (ev.k === "death") onKill(ev.silent);
-      },
-    });
-    return () => {
-      unregisterHit();
-      unregisterEntity();
-    };
-  }, [dead, entityId, applyDamage, body, deadRef, flash, hp, target, onKill, hitFeedback]);
+  }, [dead, applyDamage, body, deadRef, flash, hitFeedback]);
 
-  /** Replica movement: glide the kinematic body toward the latest snapshot. */
-  const interpolate = useCallback(
-    (dt: number) => {
-      const b = body.current;
-      if (!b || !hasSnap.current) return;
-      const t = b.translation();
-      const k = Math.min(1, dt * 9);
-      b.setNextKinematicTranslation({
-        x: t.x + (target.x - t.x) * k,
-        y: t.y + (target.y - t.y) * k,
-        z: t.z + (target.z - t.z) * k,
-      });
-    },
-    [body, target],
-  );
-
-  return { applyDamage, interpolate };
+  return net;
 }
 
-/** Wisp — a floating mote of hostile magic. Chases the player and burns on
- * contact. The floor host runs its AI; replicas interpolate. */
+/** Wisp — a floating mote of hostile magic. Chases the nearest wizard and
+ * burns on contact. The floor authority runs its AI; replicas are driven by
+ * the replication framework. */
 export function Wisp({
   position,
   floor,
@@ -166,7 +162,6 @@ export function Wisp({
 }) {
   const body = useRef<RapierRigidBody>(null);
   const mat = useRef<MeshStandardMaterial>(null);
-  const host = useNet(selectIsHost);
   const scale = useMemo(() => floorScale(floor), [floor]);
   const hp = useRef(30 * scale.enemyHealth);
   const deadRef = useRef(false);
@@ -193,14 +188,11 @@ export function Wisp({
           size: 0.1,
         });
         flashLight([t.x, t.y, t.z], "#b46bff", 22);
-        if (isHost()) {
-          dropLoot([t.x, Math.max(t.y, 0.6), t.z], floor, LOOT_DROP_CHANCE);
-          session.sendEntityEvent({ k: "death", id: entityId });
-        }
+        dropLoot([t.x, Math.max(t.y, 0.6), t.z], floor, LOOT_DROP_CHANCE);
       }
       setDead(true);
     },
-    [entityId, floor, position],
+    [floor, position],
   );
 
   const hitFeedback = useCallback(() => {
@@ -220,7 +212,7 @@ export function Wisp({
     aggro.current = true; // getting shot wakes it, no matter who shot
   }, []);
 
-  const { interpolate } = useEnemyNet({
+  const net = useEnemyNet({
     entityId,
     body,
     hp,
@@ -264,13 +256,11 @@ export function Wisp({
       getPlayerBody()?.applyImpulse({ x: dx * push * 0.35, y: 2, z: dz * push * 0.35 }, true);
     }
 
-    if (!host) {
-      interpolate(dt);
-      return;
-    }
+    // Replicas are driven by the net layer; only the authority thinks.
+    if (!net.isAuthority) return;
 
-    // ── Host AI: threaten the NEAREST wizard on the floor, not just ours ─────
-    const target = nearestPlayerTo(t.x, t.y, t.z);
+    // ── Authority AI: threaten the NEAREST wizard on the floor ──────────────
+    const target = nearestWizardTo(t.x, t.y, t.z);
     knockTimer.current -= dt;
     if (!aggro.current) {
       if (target.dist < 15 * getStats().aggroMult) aggro.current = true;
@@ -301,7 +291,7 @@ export function Wisp({
     <RigidBody
       ref={body}
       position={position}
-      type={host ? "dynamic" : "kinematicPosition"}
+      type={net.bodyType}
       colliders={false}
       gravityScale={0}
       linearDamping={0.5}
@@ -328,8 +318,8 @@ export function Wisp({
 }
 
 /** Sentry — a fixed warding crystal that lobs slow, dodgeable fire bolts when
- * it has line of sight. The host decides when it fires; replicas replay the
- * bolt (which still hurts *their* player if it connects). */
+ * it has line of sight. The authority decides when it fires; the shot itself
+ * is an authoritative host event replayed everywhere. */
 export function Sentry({
   position,
   floor,
@@ -343,7 +333,6 @@ export function Sentry({
   const head = useRef<Group>(null);
   const mat = useRef<MeshStandardMaterial>(null);
   const { world, rapier } = useRapier();
-  const host = useNet(selectIsHost);
   const scale = useMemo(() => floorScale(floor), [floor]);
   const hp = useRef(60 * scale.enemyHealth);
   const deadRef = useRef(false);
@@ -371,17 +360,14 @@ export function Sentry({
           size: 0.11,
         });
         flashLight([t.x, t.y + 0.8, t.z], "#ff7a4d", 26);
-        if (isHost()) {
-          dropLoot([t.x, t.y + 0.5, t.z], floor, LOOT_DROP_CHANCE);
-          session.sendEntityEvent({ k: "death", id: entityId });
-        }
+        dropLoot([t.x, t.y + 0.5, t.z], floor, LOOT_DROP_CHANCE);
       }
       setDead(true);
     },
-    [entityId, floor, position],
+    [floor, position],
   );
 
-  useEnemyNet({ entityId, body, hp, deadRef, flash, dead, onKill: kill });
+  const net = useEnemyNet({ entityId, body, hp, deadRef, flash, dead, immobile: true, onKill: kill });
 
   useFrame((_, dt) => {
     const b = body.current;
@@ -399,7 +385,7 @@ export function Sentry({
       head.current.rotation.y += (targetYaw - head.current.rotation.y) * Math.min(1, dt * 4);
     }
 
-    if (!host) {
+    if (!net.isAuthority) {
       if (mat.current) mat.current.emissiveIntensity = 1.4 + flash.current * 6;
       return;
     }
@@ -413,8 +399,9 @@ export function Sentry({
 
     if (fireTimer.current <= 0) {
       fireTimer.current = Math.max(1.4, 2.5 - floor * 0.04);
-      // Fire at the nearest wizard on the floor, not just the host's.
-      const target = nearestPlayerTo(headPos.x, headPos.y, headPos.z);
+      // Fire at the nearest wizard on the floor, leading their motion —
+      // peer poses carry velocity, so everyone gets led equally.
+      const target = nearestWizardTo(headPos.x, headPos.y, headPos.z);
       const dist = target.dist;
       if (dist > 26) return;
       aim.set(target.pos.x - headPos.x, target.pos.y - headPos.y, target.pos.z - headPos.z).normalize();
@@ -427,34 +414,18 @@ export function Sentry({
       const hit = world.castRay(losRay, dist - 0.6, true, undefined, undefined, undefined, b);
       if (hit !== null) return; // wall or prop in the way
       const speed = 15;
-      // Lead the shot only for our own player — peer velocities are unknown.
       aim.multiplyScalar(dist);
-      if (target.isLocal) {
-        aim.addScaledVector(playerVelocity, Math.min(dist / speed, 1.2) * 0.45);
-      }
+      aim.addScaledVector(target.vel, Math.min(dist / speed, 1.2) * 0.45);
       aim.normalize().multiplyScalar(speed);
       const origin: Vec3 = [
         headPos.x + aim.x * 0.06,
         headPos.y + aim.y * 0.06,
         headPos.z + aim.z * 0.06,
       ];
-      const velocity: Vec3 = [aim.x, aim.y, aim.z];
-      const damage = 11 * scale.enemyDamage;
-      fireProjectile({
-        team: "enemy",
-        position: origin,
-        velocity,
-        damage,
-        color: "#ff5136",
-        size: 0.16,
-        blastRadius: 1.9,
-        blastImpulse: 11,
-      });
-      session.sendEntityEvent({
-        k: "enemyCast",
+      enemyCast.announce({
         origin,
-        velocity,
-        damage,
+        velocity: [aim.x, aim.y, aim.z],
+        damage: 11 * scale.enemyDamage,
         color: "#ff5136",
         size: 0.16,
         blastRadius: 1.9,

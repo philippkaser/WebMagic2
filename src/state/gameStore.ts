@@ -4,6 +4,7 @@ import { DUNGEON, PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
 import { computeStats, getItemDef } from "../items/catalog";
 import type { DerivedStats, Equipment } from "../items/types";
+import { netBus } from "../net/bus";
 import { session } from "../net/session";
 import { defaultEquipment, loadSave, persistSave } from "./persistence";
 
@@ -100,7 +101,7 @@ export const useGame = create<GameState>((set, get) => ({
       mana: PLAYER.maxMana,
       lastDeath: null,
     });
-    gameEvents.emit("message", `Floor ${assignment.floor} — ${assignment.playerCount} wizard(s) here`);
+    gameEvents.emit("message", `Floor ${assignment.floor} — ${assignment.members.length} wizard(s) here`);
   },
 
   descend: async () => {
@@ -269,6 +270,16 @@ function die(
     prompt: null,
   });
 }
+
+// Reconnect resync: the session re-enters our floor after a dropped socket.
+// If the new assignment differs (fresh instance/seed), remount the floor so
+// we land in a consistent world; the normal join path resyncs its state.
+netBus.on("assigned", (a) => {
+  const state = useGame.getState();
+  if (state.phase !== "dungeon") return;
+  if (state.floorSeed === a.seed && state.instanceId === a.instanceId) return;
+  useGame.setState({ floor: a.floor, floorSeed: a.seed, instanceId: a.instanceId });
+});
 
 // Dev-only hook for debugging and end-to-end scripts.
 if (typeof window !== "undefined" && import.meta.env?.DEV) {

@@ -10,7 +10,7 @@
     "build": "tsc -b && vite build",
     "start": "PORT=80 bun server/server.ts",
     "preview": "vite preview",
-    "test": "bun test src",
+    "test": "bun test src server",
     "typecheck": "tsc -b"
   },
   "dependencies": {

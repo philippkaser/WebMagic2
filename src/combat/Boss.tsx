@@ -17,16 +17,13 @@ import {
   type DynamicLightSource,
 } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
-import { playerPosition, playerVelocity } from "../game/player-state";
-import { nearestPlayerTo } from "../game/targets";
+import { playerPosition } from "../game/player-state";
+import { nearestWizardTo } from "../game/targets";
 import { dropLoot } from "../items/LootOrbs";
-import { isHost, selectIsHost, useNet } from "../net/netStore";
-import { session } from "../net/session";
 import { useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
-import { explode } from "./damage";
 import { useEnemyNet } from "./enemies";
-import { fireProjectile } from "./projectiles";
+import { enemyBoom, enemyCast } from "./remoteEffects";
 
 const BOSS_GROUPS = interactionGroups(GROUPS.ENEMY, [
   GROUPS.WORLD,
@@ -42,9 +39,10 @@ const COLOR = "#ff3d2e";
 
 type Attack = "volley" | "ring" | "charge" | "slam";
 
-/** Floor boss (every 10th floor). The floor host runs its brain; replicas
- * interpolate its body, replay its attacks, and mirror its health bar. The
- * floor's portals stay sealed until it falls. */
+/** Floor boss (every 10th floor). The floor authority runs its brain; the
+ * replication framework moves its body on replicas, its attacks are host
+ * events replayed everywhere, and its health mirrors via replicated fields.
+ * The floor's portals stay sealed until it falls. */
 export function Boss({
   position,
   floor,
@@ -57,7 +55,6 @@ export function Boss({
   const body = useRef<RapierRigidBody>(null);
   const shell = useRef<Group>(null);
   const mat = useRef<MeshStandardMaterial>(null);
-  const host = useNet(selectIsHost);
   const scale = useMemo(() => floorScale(floor), [floor]);
   const maxHp = useMemo(() => 420 * scale.enemyHealth, [scale]);
   const hp = useRef(maxHp);
@@ -106,12 +103,9 @@ export function Boss({
         }
         flashLight([t.x, t.y, t.z], COLOR, 60);
         playBossRoar();
-        if (isHost()) {
-          // Guaranteed rich drops for the whole party.
-          dropLoot([t.x - 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
-          dropLoot([t.x + 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
-          session.sendEntityEvent({ k: "death", id: BOSS_ID });
-        }
+        // Guaranteed rich drops for the whole party (host-rolled).
+        dropLoot([t.x - 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
+        dropLoot([t.x + 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
         gameEvents.emit("message", "The Warden falls. The seal breaks.");
         gameEvents.emit("shake", 0.8);
       }
@@ -134,7 +128,7 @@ export function Boss({
     [maxHp],
   );
 
-  const { interpolate } = useEnemyNet({
+  const net = useEnemyNet({
     entityId: BOSS_ID,
     body,
     hp,
@@ -143,7 +137,7 @@ export function Boss({
     dead,
     knockbackScale: 0.25,
     onKill: kill,
-    onSnap: announceHp,
+    onHp: announceHp,
   });
 
   // Hide the HUD bar if the floor unmounts mid-fight.
@@ -181,13 +175,11 @@ export function Boss({
       useGame.getState().takeDamage(16 * scale.enemyDamage);
     }
 
-    if (!host) {
-      interpolate(dt);
-      return;
-    }
+    // Replicas are moved by the net layer; only the authority thinks.
+    if (!net.isAuthority) return;
 
-    // Host brain: fight the nearest wizard on the floor.
-    const target = nearestPlayerTo(t.x, t.y + 0.4, t.z);
+    // Authority brain: fight the nearest wizard on the floor.
+    const target = nearestWizardTo(t.x, t.y + 0.4, t.z);
     aim.set(target.pos.x - t.x, target.pos.y + 0.4 - t.y, target.pos.z - t.z);
     const dist = target.dist;
 
@@ -228,19 +220,13 @@ export function Boss({
     if (slamTelegraph.current > 0) {
       slamTelegraph.current -= dt;
       if (slamTelegraph.current <= 0) {
-        const pos: Vec3 = [t.x, t.y, t.z];
-        const damage = 20 * scale.enemyDamage;
-        explode({
-          position: pos,
+        enemyBoom.announce({
+          pos: [t.x, t.y, t.z],
           radius: 5.2,
-          damage,
+          damage: 20 * scale.enemyDamage,
           impulse: 46,
-          team: "enemy",
           color: COLOR,
-          particles: 50,
-          light: 50,
         });
-        session.sendEntityEvent({ k: "boom", pos, radius: 5.2, damage, impulse: 46, color: COLOR });
       }
       return;
     }
@@ -252,27 +238,14 @@ export function Boss({
     const attack = pickAttack(dist);
     const origin: Vec3 = [t.x, t.y + 0.4, t.z];
     const cast = (velocity: Vec3, damage: number, color: string, size: number) => {
-      const blastRadius = size > 0.16 ? 1.9 : 1.5;
-      const blastImpulse = size > 0.16 ? 12 : 9;
-      fireProjectile({
-        team: "enemy",
-        position: origin,
-        velocity,
-        damage,
-        color,
-        size,
-        blastRadius,
-        blastImpulse,
-      });
-      session.sendEntityEvent({
-        k: "enemyCast",
+      enemyCast.announce({
         origin,
         velocity,
         damage,
         color,
         size,
-        blastRadius,
-        blastImpulse,
+        blastRadius: size > 0.16 ? 1.9 : 1.5,
+        blastImpulse: size > 0.16 ? 12 : 9,
       });
     };
     switch (attack) {
@@ -280,8 +253,8 @@ export function Boss({
         aim.normalize();
         const projSpeed = 14;
         aim.multiplyScalar(dist);
-        // Lead the shot only against our own player — peer velocity unknown.
-        if (target.isLocal) aim.addScaledVector(playerVelocity, 0.4);
+        // Lead the shot — peer poses carry velocity too.
+        aim.addScaledVector(target.vel, 0.4);
         aim.normalize();
         for (let i = 0; i < (enraged ? 6 : 4); i++) {
           cast(
@@ -327,7 +300,7 @@ export function Boss({
     <RigidBody
       ref={body}
       position={position}
-      type={host ? "dynamic" : "kinematicPosition"}
+      type={net.bodyType}
       colliders={false}
       gravityScale={0}
       linearDamping={0.8}

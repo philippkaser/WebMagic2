@@ -33,29 +33,6 @@ export interface GameEvents extends Record<string, unknown> {
   staffKick: number;
   /** Boss health fraction 0..1 for the HUD bar, or null to hide it. */
   bossHp: { name: string; frac: number } | null;
-  /** A floor-mate cast an ability — replay it locally. */
-  peerCast: {
-    playerId: string;
-    abilityId: string;
-    origin: { x: number; y: number; z: number };
-    dir: { x: number; y: number; z: number };
-  };
-  /** Host→replica entity snapshots arrived (routed by net/replication). */
-  entitySnaps: import("../net/protocol").EntitySnap[];
-  /** Host→replica discrete world event. */
-  entityEvent: import("../net/protocol").EntityEvent;
-  /** Replica asked us (the host) to apply damage. */
-  hitRequest: {
-    targetId: string;
-    damage: number;
-    impulse: { x: number; y: number; z: number };
-  };
-  /** Replica asked us (the host) to grant a pickup. */
-  orbRequest: { playerId: string; orbId: string };
-  /** Server asked us (the host) to bring a late joiner up to date. */
-  stateRequest: { playerId: string };
-  /** The host sent us the authoritative floor state (we're a late joiner). */
-  stateSync: import("../net/protocol").FloorSyncState;
 }
 
 export const gameEvents = new Emitter<GameEvents>();

@@ -1,15 +1,22 @@
-/** Wire protocol shared between client and (future) authoritative server.
+/** Wire protocol between client and the relay server.
  *
- * Designed for an authoritative-server model: clients send inputs, the server
- * simulates each floor instance and broadcasts snapshots. The local loopback
- * transport implements the same protocol so single-player and online play run
- * identical game code. See docs/ARCHITECTURE.md for the scaling plan.
+ * The server is deliberately GAMEPLAY-BLIND. It handles matchmaking, host
+ * designation, clock pongs and relaying of opaque channel envelopes — it
+ * never learns what an "enemy" or an "orb" is. All gameplay messages are
+ * defined client-side (net/channels.ts), so adding a networked feature never
+ * touches the server or this file.
+ *
+ * The entire authorization model is the channel-name prefix:
+ *
+ *   "a:"  authority — only the instance host may send; relayed to the rest
+ *         of the instance (or to one member via `to`, e.g. late-join sync).
+ *   "h:"  to-host   — anyone may send; delivered to the current host only.
+ *   "p:"  peer      — anyone may send; broadcast to the rest of the instance.
  */
 
-export interface Vec3Like {
-  x: number;
-  y: number;
-  z: number;
+export interface MemberInfo {
+  id: string;
+  name: string;
 }
 
 export interface FloorAssignment {
@@ -17,92 +24,50 @@ export interface FloorAssignment {
   floor: number;
   /** Deterministic seed — every client in the instance generates the same floor. */
   seed: number;
-  playerCount: number;
-  /** The instance's simulation host (first joiner; migrates on leave). The
-   * host's simulation of enemies/props/loot is authoritative; everyone else
-   * renders replicated state. */
+  /** The instance's simulation host (first joiner; migrates on leave). */
   hostId: string;
+  /** Host generation, bumped on every migration. Authority traffic is
+   * relay-stamped with it so stale-host packets are identifiable. */
+  epoch: number;
+  /** Everyone currently in the instance, including the recipient. */
+  members: MemberInfo[];
 }
 
-/** Position (+ optional health) of one replicated entity, host → replicas. */
-export interface EntitySnap {
-  id: string;
-  p: [number, number, number];
-  hp?: number;
-}
-
-/** Discrete world events, host → replicas (except pickup *requests*, which
- * flow replica → host as takeOrb). `silent` marks late-join catch-up: apply
- * the state change without death/break VFX. */
-export type EntityEvent =
-  | { k: "death"; id: string; silent?: boolean }
-  | { k: "propBroken"; id: string; silent?: boolean }
-  | { k: "orbSpawn"; orbId: string; defId: string; pos: [number, number, number] }
-  | { k: "orbTaken"; orbId: string; by: string }
-  | { k: "treasureTaken"; by: string; silent?: boolean }
-  | {
-      k: "enemyCast";
-      origin: [number, number, number];
-      velocity: [number, number, number];
-      damage: number;
-      color: string;
-      size: number;
-      blastRadius: number;
-      blastImpulse: number;
-    }
-  | {
-      k: "boom";
-      pos: [number, number, number];
-      radius: number;
-      damage: number;
-      impulse: number;
-      color: string;
-    };
-
-export interface PeerState {
-  playerId: string;
-  name: string;
-  position: Vec3Like;
-  yaw: number;
-  staffId: string;
-}
-
-/** Authoritative floor state the host sends to a late joiner so they don't
- * see a pristine "ghost" floor where the host already fought. */
-export interface FloorSyncState {
-  deadIds: string[];
-  ents: EntitySnap[];
-  orbs: { orbId: string; defId: string; pos: [number, number, number] }[];
-  treasureTaken: boolean;
+/** Opaque gameplay envelope, client → server. */
+export interface Envelope {
+  ch: string;
+  data: unknown;
+  /** Direct recipient (host → one member; only honored on "a:" channels). */
+  to?: string;
 }
 
 export type ClientMsg =
   | { t: "hello"; name: string }
   | { t: "enterFloor"; floor: number }
   | { t: "leaveDungeon" }
-  | { t: "state"; position: Vec3Like; yaw: number; staffId: string }
-  | { t: "castAbility"; abilityId: string; origin: Vec3Like; dir: Vec3Like }
-  // Host only — dropped by the server if sent by anyone else:
-  | { t: "entity"; ents: EntitySnap[] }
-  | { t: "entityEvent"; ev: EntityEvent }
-  | { t: "stateSync"; to: string; state: FloorSyncState }
-  // Replica → host:
-  | { t: "hit"; targetId: string; damage: number; impulse: Vec3Like }
-  | { t: "takeOrb"; orbId: string };
+  /** Clock sync probe; `sent` is the sender's local monotonic time. */
+  | { t: "ping"; sent: number }
+  | ({ t: "msg" } & Envelope);
 
 export type ServerMsg =
   | { t: "welcome"; playerId: string }
   | { t: "floorAssigned"; assignment: FloorAssignment }
-  | { t: "peerJoined"; peer: PeerState }
+  | { t: "peerJoined"; member: MemberInfo }
   | { t: "peerLeft"; playerId: string }
-  | { t: "hostChanged"; hostId: string }
-  | { t: "snapshot"; peers: PeerState[] }
-  | { t: "peerCast"; playerId: string; abilityId: string; origin: Vec3Like; dir: Vec3Like }
-  | { t: "entitySnap"; ents: EntitySnap[] }
-  | { t: "entityEvent"; ev: EntityEvent }
-  | { t: "hitRequest"; playerId: string; targetId: string; damage: number; impulse: Vec3Like }
-  | { t: "orbRequest"; playerId: string; orbId: string }
-  /** Host: a late joiner needs the current floor state. */
-  | { t: "stateRequest"; playerId: string }
-  /** Late joiner: authoritative floor state from the host. */
-  | { t: "stateSync"; state: FloorSyncState };
+  | { t: "hostChanged"; hostId: string; epoch: number }
+  | { t: "pong"; sent: number; serverTime: number }
+  /** Server → host: a joiner needs the current world state. The host answers
+   * on an "a:" channel with `to` = that player. */
+  | { t: "syncRequest"; playerId: string }
+  /** Relayed gameplay envelope. `serverTime` is stamped at relay time, which
+   * gives every receiver one consistent timeline for interpolation. */
+  | { t: "msg"; ch: string; from: string; epoch: number; serverTime: number; data: unknown };
+
+export const CHANNEL_AUTHORITY = "a:";
+export const CHANNEL_TO_HOST = "h:";
+export const CHANNEL_PEER = "p:";
+
+export type ChannelPrefix =
+  | typeof CHANNEL_AUTHORITY
+  | typeof CHANNEL_TO_HOST
+  | typeof CHANNEL_PEER;
