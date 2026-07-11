@@ -81,11 +81,27 @@ sync provider. **The server and protocol never change again for gameplay.**
 
 **One shared timeline.** The server stamps every relayed envelope with its
 clock; clients estimate the offset from ping/pongs (`net/clock.ts`, lowest-RTT
-samples win). Replicated motion renders ~140 ms in the past: snapshots land in
-timestamped buffers (`net/snapshots.ts`) and are sampled with cubic-hermite
-interpolation using the sender's velocities — arcs stay arcs at 15 Hz — with
-short capped extrapolation past the newest data. This is what makes replicas
-smooth regardless of packet jitter.
+samples win). Authoritative motion is targeted ~90 ms in the past: snapshots
+land in timestamped buffers (`net/snapshots.ts`) and are sampled with
+cubic-hermite interpolation using the sender's velocities — arcs stay arcs at
+20 Hz — with short capped extrapolation past the newest data.
+
+**Predicted replicas (the "pure client feel").** Replicated entities are NOT
+kinematic puppets — they stay **dynamic rigid bodies** on every machine, and
+each frame the framework *steers* them toward the buffered authoritative pose
+with corrective velocities (`net/steering.ts`: velocity = target velocity +
+error × gain, capped; hard-snap only past a 2.5 m error budget; bodies at a
+still target are left alone so they can sleep). Because replicas are real
+dynamic bodies, local physics acts on them instantly: your blasts shove them
+(`predictImpulse` applies the knockback the moment your shot lands, while the
+authoritative `hit` command travels), your capsule pushes crates like in
+single-player, and the steering leash goes *soft* for a round trip whenever a
+prediction is in flight or the local player is close enough to be interacting
+— so authority reconciles underneath instead of fighting you. Every other
+wizard also has a kinematic **collision capsule** (`net/PeerBodies.tsx`)
+driven by their extrapolated pose, which is what makes a replica's shove real
+in the host's authoritative simulation (and lets enemy bolts detonate on any
+wizard, not just the local one).
 
 ### Host-authority replication
 
@@ -100,9 +116,9 @@ sites have **no host/replica branches at all**.
 | Synced | How |
 | --- | --- |
 | Floor layout, torches, spawn tables | deterministic from instance seed |
-| Player pose (pos/vel/yaw/pitch/staff), names | 20 Hz `p:pose` + buffered interpolation |
+| Player pose (pos/vel/yaw/pitch/staff), names | 20 Hz `p:pose` + buffered interpolation, plus a collision capsule per peer |
 | Player ability casts | `p:cast` replay (cosmetic vs entities) |
-| Enemy/boss position & velocity & hp | 15 Hz delta-filtered `a:snap`, hermite-interpolated replicas |
+| Enemy/boss position & velocity & hp | 20 Hz delta-filtered `a:snap`; predicted dynamic replicas steered by corrective velocity |
 | Prop position **and rotation** | same snapshots with quaternions — tumbling replicates; resting props go silent |
 | Deaths & prop breaks | `a:despawn` lifecycle events (silent replay for late joiners) |
 | Sentry/boss shots, boss slams | `hostEvent`s replayed everywhere (real on host, cosmetic elsewhere) |
@@ -129,10 +145,10 @@ whatever **sync providers** systems registered (live loot orbs, treasure
 state — new systems just register one and are covered). The joiner applies it
 silently, with a pending-despawn buffer for entities that haven't mounted yet.
 
-**Host migration:** every client's entity buffers already hold the last
-replicated pose+velocity, so when the host leaves, the promoted client's
-kinematic replicas flip to dynamic bodies seeded with that velocity and its
-AI resumes — mid-fight, no reload. Epochs identify stale-host traffic.
+**Host migration:** replicas are already dynamic bodies carrying real
+velocities, so when the host leaves, the promoted client simply stops being
+steered and its AI resumes — mid-fight, no body flip, no reload. Epochs
+identify stale-host traffic.
 
 **Reconnect:** a dropped socket triggers automatic reconnection and re-entry
 into the current floor; the normal join path resyncs the world. If the server

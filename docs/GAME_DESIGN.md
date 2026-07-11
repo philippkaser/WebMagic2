@@ -370,11 +370,14 @@ This is the most important networking decision, so it's worth stating plainly:
 
 - Each floor instance has a **simulation host** — its first joiner. The host's
   simulation of **enemies, props, the boss, and loot** is the authoritative
-  truth. Everyone else runs **replicas**: kinematic bodies driven through
-  timestamped snapshot buffers on a server-synced clock, rendered ~140 ms in
-  the past with velocity-aware (hermite) interpolation — smooth under real
-  network jitter — and replaying discrete events (deaths, breaks, boss
-  attacks) as they arrive.
+  truth. Everyone else runs **predicted replicas**: real dynamic bodies that
+  the framework steers toward timestamped snapshot buffers on a server-synced
+  clock (velocity-aware hermite interpolation, ~90 ms behind) — so your
+  blasts knock things back and your body shoves crates *instantly*, while
+  authority reconciles underneath. Every wizard also has a collision capsule
+  on every machine, so a joined player's pushes are real in the simulation
+  that matters. Discrete events (deaths, breaks, boss attacks) replay as they
+  arrive.
 - The **server is a gameplay-blind relay + matchmaker** that *enforces*
   authority purely by channel-name prefix (`a:` host-only, `h:` to-host,
   `p:` peer broadcast). It never learns what an enemy or an orb is, so new

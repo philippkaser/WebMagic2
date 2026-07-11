@@ -1,5 +1,6 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
+import { playerPosition } from "../game/player-state";
 import {
   authorityTick,
   registerNetEntity,
@@ -34,18 +35,23 @@ export interface UseNetBodyOptions {
 export interface NetBody {
   /** Are we this entity's simulation authority? Reactive across migration. */
   isAuthority: boolean;
-  /** RigidBody type: dynamic on the authority, kinematic replica otherwise. */
-  bodyType: "dynamic" | "kinematicPosition";
+  /** RigidBody type. Always "dynamic": replicas are PREDICTED bodies steered
+   * toward authority, so local physics (shoves, blasts, the player capsule)
+   * acts on them instantly. Host migration needs no body flip. */
+  bodyType: "dynamic";
   /** Authority: tell everyone this entity despawned (death/break). */
   despawn(data?: unknown): void;
   /** Anyone: route a command to the authority. */
   command(cmd: string, data: unknown): void;
+  /** Replica prediction: apply an impulse locally right now (no-op on the
+   * authority). Pair with a "hit" command so authority agrees shortly. */
+  predictImpulse(impulse: { x: number; y: number; z: number }, scale?: number): void;
 }
 
-/** One hook per replicated entity. Registration, snapshotting, interpolation,
- * commands, despawn replay, late-join and host migration are all handled by
- * the framework — the component keeps its behavior code and checks
- * `isAuthority` to decide whether to simulate. */
+/** One hook per replicated entity. Registration, snapshotting, predicted
+ * replica steering, commands, despawn replay, late-join and host migration
+ * are all handled by the framework — the component keeps its behavior code
+ * and checks `isAuthority` to decide whether to simulate. */
 export function useNetBody(opts: UseNetBodyOptions): NetBody {
   const isAuthority = useNet(selectIsHost);
   const enabled = opts.enabled ?? true;
@@ -75,31 +81,21 @@ export function useNetBody(opts: UseNetBodyOptions): NetBody {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, opts.id]);
 
-  // Host migration: our kinematic replica flips to dynamic — resume with the
-  // last replicated velocity so the fight continues mid-motion, no reload.
-  const wasAuthority = useRef(isAuthority);
-  useEffect(() => {
-    if (isAuthority && !wasAuthority.current && enabled && !opts.immobile) {
-      const v = handle.current?.lastVelocity();
-      if (v) latest.current.body.current?.setLinvel({ x: v[0], y: v[1], z: v[2] }, true);
-    }
-    wasAuthority.current = isAuthority;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthority, enabled]);
-
   return useMemo(
     () => ({
       isAuthority,
-      bodyType: isAuthority ? "dynamic" : "kinematicPosition",
+      bodyType: "dynamic" as const,
       despawn: (data?: unknown) => handle.current?.despawn(data),
       command: (cmd: string, data: unknown) => handle.current?.command(cmd, data),
+      predictImpulse: (impulse: { x: number; y: number; z: number }, scale?: number) =>
+        handle.current?.predictImpulse(impulse, scale),
     }),
     [isAuthority],
   );
 }
 
 /** Mounted once in the scene: runs the authority snapshot cadence and the
- * replica interpolation drive. Offline both are no-ops. */
+ * replica steering drive. Offline both are no-ops. */
 export function NetSystems() {
   const clock = useRef(0);
   useFrame((_, dt) => {
@@ -113,7 +109,7 @@ export function NetSystems() {
       clock.current = SNAP_INTERVAL_S;
       authorityTick();
     } else {
-      replicaFrame();
+      replicaFrame(playerPosition);
     }
   });
   return null;

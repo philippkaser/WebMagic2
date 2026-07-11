@@ -10,6 +10,7 @@ import {
   type SampledPose,
 } from "./snapshots";
 import { session } from "./session";
+import { steer, STEER } from "./steering";
 
 /** Host-authority entity replication — the declarative core.
  *
@@ -19,12 +20,15 @@ import { session } from "./session";
  *
  *  - authority side: snapshots (position/velocity/rotation/fields) are
  *    captured at a fixed rate, delta-filtered, quantized and broadcast;
- *  - replica side: snapshots land in a timestamped buffer and the entity's
- *    kinematic body is driven through interpolated poses each frame;
- *  - commands (e.g. "hit") route to the authority — locally when we are it;
+ *  - replica side: bodies stay DYNAMIC (predicted) and are steered toward
+ *    the buffered authoritative stream with corrective velocities — local
+ *    impulses and the player capsule act on them instantly, and authority
+ *    reconciles underneath (see net/steering.ts);
+ *  - commands (e.g. "hit") route to the authority — locally when we are it —
+ *    and `predictImpulse` applies the physical part immediately on replicas;
  *  - despawns broadcast live and replay silently for late joiners;
- *  - on host migration the promoted client's bodies resume with the last
- *    replicated velocity, mid-fight;
+ *  - host migration is free: replica bodies are already dynamic and carry
+ *    real velocities, so the promoted client's AI just resumes;
  *  - late-join world sync is assembled from this registry plus pluggable
  *    sync providers (loot, treasure, future systems) — joining mid-fight
  *    never shows a pristine "ghost" floor.
@@ -38,9 +42,11 @@ export interface NetBodyLike {
   translation(): { x: number; y: number; z: number };
   rotation(): { x: number; y: number; z: number; w: number };
   linvel(): { x: number; y: number; z: number };
-  setNextKinematicTranslation(v: { x: number; y: number; z: number }): void;
-  setNextKinematicRotation(q: { x: number; y: number; z: number; w: number }): void;
+  setTranslation(v: { x: number; y: number; z: number }, wake: boolean): void;
+  setRotation(q: { x: number; y: number; z: number; w: number }, wake: boolean): void;
   setLinvel(v: { x: number; y: number; z: number }, wake: boolean): void;
+  setAngvel(v: { x: number; y: number; z: number }, wake: boolean): void;
+  applyImpulse(v: { x: number; y: number; z: number }, wake: boolean): void;
   isSleeping(): boolean;
 }
 
@@ -97,6 +103,9 @@ interface Entry {
   spec: NetEntitySpec;
   buffer: SnapshotBuffer;
   lastSent: { p: [number, number, number]; q: [number, number, number, number] | null; f: string; at: number; asleep: boolean } | null;
+  /** Server time until which local prediction holds the steering leash soft
+   * (set by predictImpulse — the round trip authority needs to agree). */
+  predictUntil: number;
 }
 
 const entities = new Map<string, Entry>();
@@ -117,14 +126,16 @@ export interface NetEntityHandle {
   /** Anyone: route a command to the authority ("hit", …). Dispatches locally
    * when we are the authority. */
   command(cmd: string, data: unknown): void;
-  /** Last replicated velocity — used when a promoted host's bodies flip back
-   * to dynamic so motion resumes seamlessly. */
-  lastVelocity(): [number, number, number] | null;
+  /** Replica prediction: apply the physical part of an action immediately
+   * (the authoritative damage travels via command). Softens the steering
+   * leash for one round trip so the prediction isn't fought. No-op on the
+   * authority — its own physics is already the truth. */
+  predictImpulse(impulse: { x: number; y: number; z: number }, scale?: number): void;
   unregister(): void;
 }
 
 export function registerNetEntity(spec: NetEntitySpec): NetEntityHandle {
-  const entry: Entry = { spec, buffer: new SnapshotBuffer(), lastSent: null };
+  const entry: Entry = { spec, buffer: new SnapshotBuffer(), lastSent: null, predictUntil: 0 };
   entities.set(spec.id, entry);
 
   if (pendingDespawns.has(spec.id)) {
@@ -142,9 +153,13 @@ export function registerNetEntity(spec: NetEntitySpec): NetEntityHandle {
     command(cmd: string, data: unknown) {
       entityCmd.request({ id: spec.id, cmd, data });
     },
-    lastVelocity() {
-      const latest = entry.buffer.latest();
-      return latest?.v ?? null;
+    predictImpulse(impulse, scale = 1) {
+      if (isHost()) return;
+      spec.body()?.applyImpulse(
+        { x: impulse.x * scale, y: impulse.y * scale, z: impulse.z * scale },
+        true,
+      );
+      entry.predictUntil = netClock.serverNow() + PREDICT_WINDOW_MS;
     },
     unregister() {
       // Guard against a new floor's entity re-registering under the same id
@@ -252,13 +267,17 @@ onAuthority<WorldSyncMsg>("worldSync", (msg, meta) => {
 
 // ── Ticking (driven by NetSystems) ───────────────────────────────────────────
 
-/** Snapshot cadence. 15 Hz + interpolation reads far smoother than the raw
- * rate suggests because every snap carries velocity. */
-export const SNAP_INTERVAL_S = 1 / 15;
-/** Render this far behind the shared timeline — buys 2+ snaps of buffer. */
-export const INTERP_DELAY_MS = 140;
+/** Snapshot cadence. 20 Hz + velocity-aware interpolation reads far smoother
+ * than the raw rate suggests. */
+export const SNAP_INTERVAL_S = 1 / 20;
+/** Target this far behind the shared timeline — ~2 snaps of jitter buffer.
+ * Predicted replicas soften the cost: corrections are velocities, not warps. */
+export const INTERP_DELAY_MS = 90;
 /** Re-send an unchanged awake entity at least this often. */
 const KEEPALIVE_MS = 500;
+/** How long a predicted impulse keeps the steering leash soft (~1 RTT + one
+ * snapshot interval, so authority has time to agree with the prediction). */
+const PREDICT_WINDOW_MS = 300;
 
 const POS_EPSILON_SQ = 0.0004; // 2 cm
 const QUAT_EPSILON = 1 - 1e-5;
@@ -319,27 +338,69 @@ export function authorityTick(): void {
   if (batch.length > 0) session.sendEnvelope("a:snap", { ents: batch });
 }
 
-/** Replica: drive every entity's kinematic body through its buffer. */
-export function replicaFrame(): void {
-  const renderTime = netClock.serverNow() - INTERP_DELAY_MS;
+const targetPos = { x: 0, y: 0, z: 0 };
+const targetVel = { x: 0, y: 0, z: 0 };
+const targetQuat = { x: 0, y: 0, z: 0, w: 1 };
+const ZERO_VEL = { x: 0, y: 0, z: 0 };
+
+/** Replica: steer every entity's PREDICTED dynamic body toward its buffered
+ * authoritative stream. `localPlayer` (when given) softens the leash for
+ * bodies the local player is close enough to be shoving. */
+export function replicaFrame(localPlayer?: { x: number; y: number; z: number }): void {
+  const now = netClock.serverNow();
+  const renderTime = now - INTERP_DELAY_MS;
   for (const entry of entities.values()) {
     if (entry.spec.immobile) continue;
     const body = entry.spec.body();
     if (!body) continue;
     if (!entry.buffer.sample(renderTime, scratchPose)) continue;
-    body.setNextKinematicTranslation({
-      x: scratchPose.p[0],
-      y: scratchPose.p[1],
-      z: scratchPose.p[2],
-    });
-    if (entry.spec.rotation && scratchPose.q) {
-      body.setNextKinematicRotation({
-        x: scratchPose.q[0],
-        y: scratchPose.q[1],
-        z: scratchPose.q[2],
-        w: scratchPose.q[3],
-      });
+
+    targetPos.x = scratchPose.p[0];
+    targetPos.y = scratchPose.p[1];
+    targetPos.z = scratchPose.p[2];
+    targetVel.x = scratchPose.v[0];
+    targetVel.y = scratchPose.v[1];
+    targetVel.z = scratchPose.v[2];
+    const syncRot = entry.spec.rotation === true && scratchPose.q !== null;
+    if (syncRot) {
+      targetQuat.x = scratchPose.q![0];
+      targetQuat.y = scratchPose.q![1];
+      targetQuat.z = scratchPose.q![2];
+      targetQuat.w = scratchPose.q![3];
     }
+
+    const t = body.translation();
+    // Leash tightness: soft while our prediction is in flight or the local
+    // player is close enough to be physically interacting with this body.
+    let gain: number = STEER.gain;
+    if (entry.predictUntil > now) {
+      gain = STEER.softGain;
+    } else if (localPlayer) {
+      const dSq =
+        (localPlayer.x - t.x) ** 2 + (localPlayer.y - t.y) ** 2 + (localPlayer.z - t.z) ** 2;
+      if (dSq < STEER.interactRadius * STEER.interactRadius) gain = STEER.softGain;
+    }
+
+    const cmd = steer(
+      t,
+      syncRot ? body.rotation() : null,
+      targetPos,
+      targetVel,
+      syncRot ? targetQuat : null,
+      gain,
+    );
+    if (cmd.kind === "rest") continue;
+    if (cmd.kind === "snap") {
+      body.setTranslation(targetPos, true);
+      body.setLinvel(targetVel, true);
+      if (syncRot) {
+        body.setRotation(targetQuat, true);
+        body.setAngvel(ZERO_VEL, true);
+      }
+      continue;
+    }
+    body.setLinvel(cmd.linvel, true);
+    if (cmd.angvel) body.setAngvel(cmd.angvel, true);
   }
 }
 

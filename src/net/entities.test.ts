@@ -22,8 +22,12 @@ interface FakeBody extends NetBodyLike {
   pos: { x: number; y: number; z: number };
   vel: { x: number; y: number; z: number };
   sleeping: boolean;
-  /** Every pose replicaFrame drove into the body. */
+  /** Every velocity the steering drove into the body. */
   driven: { x: number; y: number; z: number }[];
+  /** Every hard snap (setTranslation). */
+  teleports: { x: number; y: number; z: number }[];
+  /** Every predicted impulse. */
+  impulses: { x: number; y: number; z: number }[];
 }
 
 function fakeBody(x = 0, y = 0, z = 0): FakeBody {
@@ -32,14 +36,22 @@ function fakeBody(x = 0, y = 0, z = 0): FakeBody {
     vel: { x: 0, y: 0, z: 0 },
     sleeping: false,
     driven: [],
+    teleports: [],
+    impulses: [],
     translation: () => body.pos,
     rotation: () => ({ x: 0, y: 0, z: 0, w: 1 }),
     linvel: () => body.vel,
-    setNextKinematicTranslation: (v) => body.driven.push({ ...v }),
-    setNextKinematicRotation: () => {},
+    setTranslation: (v) => {
+      body.pos = { ...v };
+      body.teleports.push({ ...v });
+    },
+    setRotation: () => {},
     setLinvel: (v) => {
       body.vel = { ...v };
+      body.driven.push({ ...v });
     },
+    setAngvel: () => {},
+    applyImpulse: (v) => body.impulses.push({ ...v }),
     isSleeping: () => body.sleeping,
   };
   return body;
@@ -142,22 +154,71 @@ describe("authorityTick delta filter", () => {
   });
 });
 
-describe("replica snapshot application", () => {
-  test("incoming snaps drive the kinematic body through interpolated poses", () => {
+describe("predicted replica steering", () => {
+  test("a nearby target is chased with corrective velocity, not teleports", () => {
     asReplica();
-    const body = fakeBody();
+    const body = fakeBody(0, 0, 0);
     registerNetEntity({ id: "e1", body: () => body });
 
-    // Two snaps straddling the render time (serverNow − 140 ms delay).
-    const now = netClock.serverNow();
-    inject("a:snap", { ents: [{ id: "e1", p: [0, 0, 0] }] }, { serverTime: now - 200 });
-    inject("a:snap", { ents: [{ id: "e1", p: [10, 0, 0] }] }, { serverTime: now - 100 });
-
+    // Target 1 m away moving at 2 m/s (sample clamps to this oldest snap).
+    inject("a:snap", { ents: [{ id: "e1", p: [1, 0, 0], v: [2, 0, 0] }] });
     replicaFrame();
+
+    expect(body.teleports).toHaveLength(0);
     expect(body.driven).toHaveLength(1);
-    // renderTime lands 60% of the way through the 100 ms segment.
-    expect(body.driven[0].x).toBeGreaterThan(4);
-    expect(body.driven[0].x).toBeLessThan(8);
+    // target velocity (2) + error × gain, capped at maxCorrection (10) → 12.
+    expect(body.driven[0].x).toBeGreaterThan(10);
+    expect(body.driven[0].x).toBeLessThanOrEqual(12.01);
+  });
+
+  test("a far target hard-snaps (spawn, teleport, long occlusion)", () => {
+    asReplica();
+    const body = fakeBody(0, 0, 0);
+    registerNetEntity({ id: "e1", body: () => body });
+    inject("a:snap", { ents: [{ id: "e1", p: [50, 0, 0], v: [0, 0, 0] }] });
+    replicaFrame();
+    expect(body.teleports).toEqual([{ x: 50, y: 0, z: 0 }]);
+  });
+
+  test("a settled body at a still target is left alone (can sleep)", () => {
+    asReplica();
+    const body = fakeBody(3, 0, 0);
+    registerNetEntity({ id: "e1", body: () => body });
+    inject("a:snap", { ents: [{ id: "e1", p: [3, 0, 0], v: [0, 0, 0] }] });
+    replicaFrame();
+    expect(body.driven).toHaveLength(0);
+    expect(body.teleports).toHaveLength(0);
+  });
+
+  test("the leash softens near the local player (they may be shoving it)", () => {
+    asReplica();
+    const body = fakeBody(0, 0, 0);
+    registerNetEntity({ id: "e1", body: () => body });
+    inject("a:snap", { ents: [{ id: "e1", p: [1, 0, 0], v: [0, 0, 0] }] });
+    replicaFrame({ x: 0.5, y: 0, z: 0 }); // local player right next to the body
+    expect(body.driven).toHaveLength(1);
+    // softGain (2.5) instead of gain (10).
+    expect(body.driven[0].x).toBeCloseTo(2.5, 1);
+  });
+
+  test("predictImpulse applies locally on replicas and softens the leash", () => {
+    asReplica();
+    const body = fakeBody(0, 0, 0);
+    const handle = registerNetEntity({ id: "e1", body: () => body });
+    handle.predictImpulse({ x: 8, y: 0, z: 0 }, 0.5);
+    expect(body.impulses).toEqual([{ x: 4, y: 0, z: 0 }]);
+
+    inject("a:snap", { ents: [{ id: "e1", p: [1, 0, 0], v: [0, 0, 0] }] });
+    replicaFrame();
+    expect(body.driven[0].x).toBeCloseTo(2.5, 1); // soft gain during the window
+  });
+
+  test("predictImpulse is a no-op on the authority", () => {
+    asHost();
+    const body = fakeBody();
+    const handle = registerNetEntity({ id: "e1", body: () => body });
+    handle.predictImpulse({ x: 8, y: 0, z: 0 });
+    expect(body.impulses).toHaveLength(0);
   });
 
   test("snap fields reach onFields", () => {

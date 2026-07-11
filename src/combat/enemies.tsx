@@ -134,9 +134,15 @@ export function useEnemyNet(opts: {
         playHit();
         hitFeedback?.();
         // Shooter-favored: our shots apply where we saw them land — locally
-        // on the authority, via a command to it otherwise.
-        if (isHost()) applyDamage(damage, impulse);
-        else netRef.current?.command("hit", { damage, impulse } satisfies HitData);
+        // on the authority, via a command to it otherwise (with the physical
+        // knockback predicted immediately, so the reaction never waits on
+        // the round trip).
+        if (isHost()) {
+          applyDamage(damage, impulse);
+        } else {
+          netRef.current?.command("hit", { damage, impulse } satisfies HitData);
+          netRef.current?.predictImpulse(impulse, knockbackScale);
+        }
       },
     });
   }, [dead, applyDamage, body, deadRef, flash, hitFeedback]);

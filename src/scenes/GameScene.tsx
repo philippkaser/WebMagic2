@@ -10,6 +10,7 @@ import { FxSystems } from "../fx/Particles";
 import { InteractionSystem } from "../game/interactions";
 import { LootOrbs } from "../items/LootOrbs";
 import { NetSystems } from "../net/NetSystems";
+import { PeerBodies } from "../net/PeerBodies";
 import { RemoteWizards } from "../net/RemoteWizards";
 import { StaffView } from "../player/StaffView";
 import { Effects } from "../render/Effects";
@@ -54,6 +55,7 @@ export function GameScene() {
           )}
           <Projectiles />
           <LootOrbs />
+          <PeerBodies />
         </Physics>
         <RemoteWizards />
         <NetSystems />

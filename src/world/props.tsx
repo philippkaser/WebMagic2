@@ -166,8 +166,13 @@ export function Breakable({
       hit: (damage, impulse) => {
         if (deadRef.current) return;
         playHit();
-        if (isHost()) applyDamageRef.current(damage, impulse);
-        else netRef.current.command("hit", { damage, impulse } satisfies HitData);
+        if (isHost()) {
+          applyDamageRef.current(damage, impulse);
+        } else {
+          netRef.current.command("hit", { damage, impulse } satisfies HitData);
+          // Predicted shove — the crate reacts the instant you hit it.
+          netRef.current.predictImpulse(impulse);
+        }
       },
     });
     const unregisterBody = b ? registerDynamicBody(b) : undefined;
