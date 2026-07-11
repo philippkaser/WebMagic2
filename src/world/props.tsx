@@ -366,19 +366,21 @@ void main() {
   vec2 raw = (vUv - 0.5) * vec2(3.0, 4.0);
   float sd = uSeed;
 
-  // Chunky grid: ~34 cells wide. Blocky silhouette AND blocky interior.
-  vec2 p = pix(raw, 11.0);
+  // Finer pixel grid so the rip's pixels sit closer to the game's own — still
+  // clearly pixelated, but no longer coarse mush.
+  vec2 p = pix(raw, 26.0);
 
   // ---- Tear silhouette: a vertical lens tapering to points, spine wobbling,
-  //      width raggedly frayed by two noise octaves so the rip looks torn. ----
+  //      width raggedly frayed by fast-moving noise so the edges writhe. ----
   float y = p.y / 1.9;                        // -1..1
   float taper = max(1.0 - y * y, 0.0);
   float halfW = pow(taper, 0.62) * 1.0;
-  float fray = fbm(vec2(y * 5.0 + sd, uTime * 0.4 + sd));
-  float jag = fbm(vec2(y * 13.0 - sd, uTime * 0.7));   // fine ragged notches
-  halfW *= 0.5 + 0.5 * fray + 0.22 * (jag - 0.5);
+  float fray = fbm(vec2(y * 5.0 + sd, uTime * 1.1 + sd));
+  float jag = fbm(vec2(y * 14.0 - sd, uTime * 1.9));   // fine ragged notches, fast
+  halfW *= 0.48 + 0.5 * fray + 0.28 * (jag - 0.5);
   halfW *= mix(0.24, 1.0, uActive);           // sealed → a thin slit
-  float spine = 0.20 * (fbm(vec2(y * 2.2 - uTime * 0.22 + sd, sd)) - 0.5);
+  float spine = 0.22 * (fbm(vec2(y * 2.2 - uTime * 0.6 + sd, sd)) - 0.5)
+              + 0.05 * sin(uTime * 3.0 + y * 8.0); // extra live wobble of the crack
   float d = abs(p.x - spine) - halfW;         // <0 inside the tear
 
   float inside = step(d, 0.0);                 // hard, gritty edge (no AA)
@@ -410,8 +412,8 @@ void main() {
 
   vec3 col = voidCol * inside + edgeCol;
 
-  // Hard stepped palette → deliberate pixel-magic banding, extra gritty.
-  col = floor(col * 11.0) / 11.0;
+  // Hard stepped palette → deliberate pixel-magic banding.
+  col = floor(col * 14.0) / 14.0;
 
   float halo = smoothstep(0.34, 0.0, abs(d)) * edge * (0.35 + 0.5 * uActive);
   float alpha = clamp(max(inside, halo), 0.0, 1.0);
@@ -537,7 +539,7 @@ export function Portal({
     };
   }, [position, color, material]);
 
-  useFrame(({ clock }, dt) => {
+  useFrame(({ clock, camera }, dt) => {
     const t = clock.elapsedTime;
     // The wound eases open / shut instead of snapping when the boss falls.
     activity.current += ((locked ? 0.12 : 1) - activity.current) * Math.min(1, dt * 2.5);
@@ -546,6 +548,12 @@ export function Portal({
     material.uniforms.uActive.value = act;
     if (light.current) light.current.intensity = act * (9 + Math.sin(t * 2.2) * 1.2);
     if (group.current) {
+      // Billboard around Y so the tear always presents its face to the player —
+      // a rip in space has no "flat side" to catch.
+      group.current.rotation.y = Math.atan2(
+        camera.position.x - position[0],
+        camera.position.z - position[2],
+      );
       // Breathe, don't spin — a rip is a wound, not a machine.
       group.current.scale.set(
         1 + Math.sin(t * 1.7) * 0.02 * act,

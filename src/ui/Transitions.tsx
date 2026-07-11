@@ -16,9 +16,10 @@ import { TRANSITION_FRAG, createShaderQuad, type ShaderQuad } from "./shaderCanv
  */
 const WARP_MS = 2000;
 const DIVE_MS = 2400;
-/** Progress is clamped here until the floor finishes loading, so we never suck
- * out onto an empty scene. Matches the start of the suck-out phase. */
-const WARP_HOLD = 0.7;
+/** Progress is clamped here (in the dark hover, just before the suck-out) until
+ * the floor finishes loading, so the forceful eject always lands on a real
+ * world and never freezes mid-kick. */
+const WARP_HOLD = 0.62;
 
 export function TransitionLayer() {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -72,10 +73,11 @@ export function TransitionLayer() {
       if (gate && p > WARP_HOLD && !gate()) p = WARP_HOLD; // wait for the floor
       p = Math.min(p, 1);
       quad.setUniforms({ progress: p });
-      if (p >= 0.86 && !fadingOut) {
-        // Smooth handoff: fade the overlay away to reveal the world beneath.
+      if (p >= 0.9 && !fadingOut) {
+        // Smooth handoff after the climax flash: fade the overlay away to
+        // reveal the world beneath.
         fadingOut = true;
-        host.style.transition = "opacity 420ms ease-out";
+        host.style.transition = "opacity 360ms ease-out";
         host.style.opacity = "0";
       }
       if (p >= 1) {

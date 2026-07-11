@@ -146,24 +146,28 @@ void main() {
 
   if (uMode < 0.5) {
     // ---------------- FLOOR WARP: suck in → descend → suck out -------------
-    float suckIn  = 1.0 - ease(p / 0.22);          // 1 → 0 (pull at the start)
-    float suckOut = ease((p - 0.72) / 0.28);        // 0 → 1 (eject at the end)
-    float descend = ease((p - 0.12) / 0.60);        // vertical travel in the middle
-    float mid = (1.0 - suckIn) * (1.0 - suckOut);   // 1 while hovering
+    // Colour arc: start saturated in the portal's colour, fall into a dark
+    // space with only hints of it, then surge back into colour on the way out.
+    float suckIn  = 1.0 - ease(p / 0.20);                  // 1 → 0 (pull in)
+    float suckOut = ease((p - 0.66) / 0.20);               // 0 → 1 (forceful eject)
+    float descend = ease((p - 0.10) / 0.56);               // vertical travel
+    float mid = (1.0 - suckIn) * (1.0 - suckOut);          // 1 while hovering
+    float colorAmt = max(suckIn, suckOut);                 // 1 at the ends, ~0 mid
 
     float r = length(uv);
     float a = atan(uv.y, uv.x);
     // Swirl spikes while sucking, calms to a slow drift while hovering.
-    a += (suckIn * 3.6 + suckOut * 3.2 + 0.22) * (1.2 - r) + uTime * 0.12;
-    // Radial zoom: content rushes toward the center as you're pulled in, then
-    // flies outward past you as you're ejected.
-    float zoom = 1.0 + suckIn * 4.5 - suckOut * 0.9;
+    a += (suckIn * 3.6 + suckOut * 4.0 + 0.22) * (1.2 - r) + uTime * 0.12;
+    // Radial zoom: rushes toward the center as you're pulled in, then blasts
+    // outward past you as you're ejected — a hard outward kick for force.
+    float zoom = 1.0 + suckIn * 4.5 - suckOut * 1.9;
     vec2 sp = vec2(cos(a), sin(a)) * r * zoom;
 
     // Downward drift — you sink through the parallel world floor by floor.
     float vy = descend * 8.0 + uTime * 0.5 * mid;
 
-    // Three parallax star layers.
+    // Three parallax star layers — bright at the colourful ends, dim in the
+    // dark middle.
     for (int i = 0; i < 3; i++) {
       float fi = float(i);
       float depth = 1.0 + fi * 1.7;
@@ -171,54 +175,55 @@ void main() {
       float h = hash21(floor(cell * 20.0) + fi * 31.0);
       float star = step(0.93 - 0.015 * fi, h);
       float tw = 0.55 + 0.45 * sin(uTime * 3.0 + h * 30.0);
-      col += (uTint * 0.7 + 0.3) * star * tw * (0.55 - fi * 0.13);
+      col += (uTint * 0.7 + 0.3) * star * tw * (0.55 - fi * 0.13) * (0.35 + 0.65 * colorAmt);
     }
-    // Parallel-world nebula.
+    // Parallel-world nebula — mostly dark in the middle, only a hint of colour.
     float neb = pow(fbm(vec2(sp.x * 1.8, sp.y * 1.8 - vy * 0.5)), 2.0);
-    col += uTint * neb * (0.22 + 0.4 * mid);
-    col += mix(vec3(0.010, 0.008, 0.030), uTint * 0.06, r);
+    col += uTint * neb * (0.10 + 0.5 * colorAmt);
+    col += mix(vec3(0.006, 0.005, 0.020), uTint * 0.05, r) * (0.5 + 0.5 * colorAmt);
 
-    // Radial streaks screaming past during the suck phases.
+    // Radial streaks screaming past — heavier on the forceful eject.
     float streak = pow(hash21(vec2(floor((a * 0.1591549 + 0.5) * 210.0), 3.0)), 20.0);
-    col += (uTint + 0.3) * streak * (suckIn + suckOut) * smoothstep(0.0, 0.6, r) * 2.2;
+    col += (uTint + 0.3) * streak * (suckIn + suckOut * 2.0) * smoothstep(0.0, 0.6, r) * 2.6;
 
-    col = mix(col, vec3(0.85, 0.95, 1.0), suckOut * suckOut * 0.85);
+    // Eject: surge back into the portal colour, then a hard white flash.
+    col = mix(col, uTint * 1.8 + 0.2, suckOut * 0.85);
+    col = mix(col, vec3(0.94, 0.99, 1.0), pow(suckOut, 2.5) * 0.8);
   } else {
-    // ---------------- MIND-DIVE: hover → punch → into the mind -------------
-    float hover = ease(p / 0.55) * 0.22;                       // slow creep
-    float punch = pow(clamp((p - 0.55) / 0.20, 0.0, 1.0), 3.0) * 6.0; // hard zoom
-    float fly = hover + punch;
+    // ---------------- MIND-DIVE: hover → PUNCH into the mind ---------------
+    // A calm dreaming void with a distant glowing core, then a hard punch that
+    // yanks you into the core — into the wizard's mind. No literal eye.
+    float hover = ease(p / 0.50);
+    float punch = pow(clamp((p - 0.50) / 0.24, 0.0, 1.0), 2.4); // snappy
+    float fly = hover * 0.14 + punch * punch * 11.0;            // big zoom on the punch
     // Gentle floating sway before the punch.
-    uv += 0.03 * vec2(sin(uTime * 0.7), cos(uTime * 0.55)) * (1.0 - clamp(punch, 0.0, 1.0));
+    uv += 0.035 * vec2(sin(uTime * 0.7), cos(uTime * 0.55)) * (1.0 - punch);
 
-    float scale = 1.0 / (1.0 + fly * 1.7);   // zoom in as we fly at the eye
+    float scale = 1.0 / (1.0 + fly);
     vec2 z = uv * scale;
-    float rr = length(z);
-    float aa = atan(z.y, z.x);
+    float r = length(z);
+    float a = atan(z.y, z.x);
 
-    // Deep space surround with drifting dust.
-    vec2 cell = pixel(z, 40.0);
-    float star = step(0.93, hash21(floor(cell * 80.0)));
-    vec3 space = vec3(0.02, 0.02, 0.05) + (uTint * 0.6 + 0.4) * star;
-    space += uTint * pow(fbm(z * 3.0 + uTime * 0.1), 2.0) * 0.3;
+    // Dreamy pixel starfield + nebula.
+    vec2 cell = pixel(z, 26.0);
+    float star = step(0.93, hash21(floor(cell * 40.0)));
+    float neb = pow(fbm(z * 3.0 + uTime * 0.15), 2.0);
 
-    // The wizard's eye: fibrous iris ring around a black pupil.
-    float pupil = smoothstep(0.15, 0.14, rr);
-    float fib = 0.5 + 0.5 * sin(aa * 46.0 + fbm(vec2(aa * 6.0, rr * 10.0)) * 7.0);
-    float irisMask = smoothstep(0.44, 0.40, rr) * (1.0 - pupil);
-    vec3 iris = uTint * (0.25 + 0.75 * fib) * irisMask;
-    col = mix(space, iris, irisMask);
-    col = mix(col, vec3(0.0), pupil);
+    // The mind's core: a soft glow at center that blooms as you punch into it.
+    float core = smoothstep(0.5, 0.0, r);
+    float pulse = 0.6 + 0.4 * sin(uTime * 2.0);
 
-    // The punch: a burst of streaks as we accelerate into the pupil.
-    float pb = pow(clamp((p - 0.55) / 0.20, 0.0, 1.0), 2.0);
-    float streak = pow(hash21(vec2(floor((aa * 0.1591549 + 0.5) * 220.0), 5.0)), 18.0);
-    col += (uTint + 0.4) * streak * pb * smoothstep(0.0, 0.5, rr) * 3.0;
+    col = vec3(0.02, 0.015, 0.05);
+    col += uTint * neb * 0.35;
+    col += (uTint * 0.7 + 0.3) * star * 0.7;
+    col += uTint * core * core * (0.5 + 0.8 * pulse + punch * 3.0);
 
-    // Inside the mind: a warm cosmic swirl, then a flash into the world.
-    float mind = ease((p - 0.74) / 0.24);
-    col = mix(col, uTint * pow(fbm(z * 2.0 + uTime * 0.5), 1.5) * 1.3 + uTint * 0.1, mind * 0.7);
-    col = mix(col, vec3(0.95, 0.98, 1.0), ease((p - 0.9) / 0.1));
+    // Streaks screaming inward as the punch accelerates.
+    float streak = pow(hash21(vec2(floor((a * 0.1591549 + 0.5) * 240.0), 5.0)), 16.0);
+    col += (uTint + 0.5) * streak * punch * smoothstep(0.0, 0.55, r) * 4.5;
+
+    // Whiteout as we punch through the core, peaking just before the reveal.
+    col = mix(col, vec3(0.95, 0.98, 1.0), pow(clamp((p - 0.78) / 0.12, 0.0, 1.0), 2.0));
   }
 
   // Stepped palette → deliberate pixel-magic banding.
