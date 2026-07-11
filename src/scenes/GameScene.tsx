@@ -7,6 +7,7 @@ import { Projectiles } from "../combat/projectiles";
 import { GRAVITY } from "../core/config";
 import { DynamicLights } from "../fx/DynamicLights";
 import { FxSystems } from "../fx/Particles";
+import { ConsumableSystem } from "../game/ConsumableSystem";
 import { InteractionSystem } from "../game/interactions";
 import { LootOrbs } from "../items/LootOrbs";
 import { NetSystems } from "../net/NetSystems";
@@ -64,6 +65,7 @@ export function GameScene() {
         <StaffView />
         <CombatSystem />
         <InteractionSystem />
+        <ConsumableSystem />
         {/* Tiny procedural environment map: gives the wet slabs and metal
             trims something interesting to reflect without external assets. */}
         <Environment resolution={64} frames={1}>

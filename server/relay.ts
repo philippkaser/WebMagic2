@@ -94,9 +94,39 @@ export class Relay {
         // Banking only counts where the portal exists: a checkpoint floor
         // you are ACTUALLY matchmade into — the floor claim can't be faked.
         if (!inst || inst.floor % DUNGEON.checkpointInterval !== 0) return;
-        const save = this.accounts.bank(account, inst.floor, msg.equipment);
+        const save = this.accounts.bank(account, inst.floor, msg.inventory);
         peer.send({ t: "saved", save });
         this.log(`${peer.id} banked at floor ${inst.floor}`);
+        break;
+      }
+      case "escape": {
+        // Feather escape: bank from any floor you're actually on, paid for
+        // with a provably-owned feather. Checkpoint stays where it was.
+        const account = this.accountOf(peer);
+        if (!this.directory.instanceOf(peer.id)) return;
+        const save = this.accounts.escape(account, msg.inventory);
+        if (!save) return; // no feather to spend — nothing banked
+        peer.send({ t: "saved", save });
+        this.log(`${peer.id} escaped by feather`);
+        break;
+      }
+      case "stash": {
+        // Village-only rearrangement — no new items can enter this way.
+        const account = this.accountOf(peer);
+        if (this.directory.instanceOf(peer.id)) return; // not mid-run
+        const save = this.accounts.rearrange(account, msg.inventory);
+        peer.send({ t: "saved", save: save ?? this.accounts.saveOf(account) });
+        break;
+      }
+      case "buy": {
+        // Merchant purchase, validated against the shared economy price
+        // table and the account's banked gold.
+        const account = this.accountOf(peer);
+        if (this.directory.instanceOf(peer.id)) return; // village only
+        if (typeof msg.itemId !== "string") return;
+        const save = this.accounts.rearrange(account, msg.inventory, msg.itemId);
+        peer.send({ t: "saved", save: save ?? this.accounts.saveOf(account) });
+        if (save) this.log(`${peer.id} bought ${msg.itemId}`);
         break;
       }
       case "died":
@@ -112,6 +142,17 @@ export class Relay {
         const target = this.peers.get(msg.playerId);
         if (!target) return;
         this.accounts.grant(this.accountOf(target), msg.itemId);
+        break;
+      }
+      case "grantGold": {
+        // Gold provenance mirrors item grants: host-only, own instance only.
+        if (this.hostOf(peer.id) !== peer.id) return;
+        if (typeof msg.playerId !== "string" || typeof msg.amount !== "number") return;
+        const inst = this.directory.instanceOf(peer.id);
+        if (!inst || !inst.players.has(msg.playerId)) return;
+        const target = this.peers.get(msg.playerId);
+        if (!target) return;
+        this.accounts.grantGold(this.accountOf(target), msg.amount);
         break;
       }
       case "msg":

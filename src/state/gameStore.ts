@@ -1,20 +1,34 @@
 import { create } from "zustand";
-import { playHurt, playPickup } from "../audio/sound";
+import { playHurt, playPickup, playPortal } from "../audio/sound";
 import { DUNGEON, PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
 import { computeStats, getItemDef } from "../items/catalog";
+import { merchantPrice } from "../items/economy";
+import {
+  addToGrid,
+  cloneGrid,
+  hasRoom,
+  markBanked,
+  stripRunLoot,
+  takeOneAt,
+  type Grid,
+} from "../items/inventory";
 import type { DerivedStats, Equipment } from "../items/types";
 import { netBus } from "../net/bus";
 import { session } from "../net/session";
 import {
-  defaultEquipment,
-  fromWireEquipment,
+  defaultSave,
+  fromWireInventory,
   loadSave,
   persistSave,
-  toWireEquipment,
+  toWireInventory,
 } from "./persistence";
 
 export type Phase = "menu" | "village" | "select" | "loading" | "dungeon" | "dead";
+
+/** Fullscreen inventory-family overlays. The world keeps simulating (shared
+ * floors can't pause), so these are DOM layers, not phases. */
+export type Overlay = "none" | "inventory" | "chest" | "merchant";
 
 export interface GameState {
   phase: Phase;
@@ -26,9 +40,20 @@ export interface GameState {
   health: number;
   mana: number;
   equipment: Equipment;
+  /** 5 carry slots — at risk in the dungeon until banked, like equipment. */
+  bag: Grid;
+  /** 2 quick slots for consumables: belt[0] = Q, belt[1] = E. */
+  belt: Grid;
+  /** 30 slots, lives in the village — never carried, never at risk. */
+  chest: Grid;
+  /** Banked gold (safe). */
+  gold: number;
+  /** Gold gathered this run — lost on death, banked with the rest. */
+  runGold: number;
+  overlay: Overlay;
   /** Contextual interaction prompt shown by the HUD ("E — Descend…"). */
   prompt: string | null;
-  lastDeath: { floor: number; lostItems: string[] } | null;
+  lastDeath: { floor: number; lostItems: string[]; lostGold: number } | null;
   /** Quality toggle: the staff/moon shadow costs several extra scene renders
    * per frame, so it's opt-in. */
   shadows: boolean;
@@ -41,7 +66,24 @@ export interface GameState {
   enterDungeon(entryFloor: number): Promise<void>;
   descend(): Promise<void>;
   bankAndLeave(): void;
-  equipItem(defId: string): void;
+  /** Can this pickup go ANYWHERE right now? Gates loot-orb prompts. */
+  canAcquire(defId: string): boolean;
+  /** Route a granted pickup: empty gear slot → equip; consumable → belt,
+   * then bag; gear with its slot taken → bag. Returns false if truly full. */
+  acquireItem(defId: string): boolean;
+  addGold(amount: number): void;
+  /** Swap a bag cell with the matching equipment slot. */
+  equipFromBag(bagIndex: number): void;
+  /** Unequip an optional slot into the bag (staff/boots only swap). */
+  unequipToBag(slot: "amulet" | "cloak"): void;
+  moveBagToBelt(bagIndex: number, beltIndex: number): void;
+  moveBeltToBag(beltIndex: number): void;
+  moveBagToChest(bagIndex: number): void;
+  moveChestToBag(chestIndex: number): void;
+  /** Use the consumable in belt[index] (0 = Q, 1 = E). */
+  useBelt(index: number): void;
+  buyItem(defId: string): void;
+  setOverlay(overlay: Overlay): void;
   takeDamage(amount: number): void;
   heal(amount: number): void;
   spendMana(cost: number): boolean;
@@ -83,6 +125,12 @@ export const useGame = create<GameState>((set, get) => ({
   health: computeStats(saved.equipment).maxHealth,
   mana: PLAYER.maxMana,
   equipment: saved.equipment,
+  bag: saved.bag,
+  belt: saved.belt,
+  chest: saved.chest,
+  gold: saved.gold,
+  runGold: 0,
+  overlay: "none",
   prompt: null,
   lastDeath: null,
   shadows: loadShadowSetting(),
@@ -94,7 +142,7 @@ export const useGame = create<GameState>((set, get) => ({
   closePortalSelect: () => set({ phase: "village" }),
 
   enterDungeon: async (entryFloor) => {
-    set({ phase: "loading", prompt: null });
+    set({ phase: "loading", prompt: null, overlay: "none" });
     await session.ensureConnected(get().playerName);
     const assignment = await session.requestFloor(entryFloor);
     const stats = getStats();
@@ -113,7 +161,7 @@ export const useGame = create<GameState>((set, get) => ({
   descend: async () => {
     const next = get().floor + 1;
     if (next > DUNGEON.maxFloor) return;
-    set({ phase: "loading", prompt: null });
+    set({ phase: "loading", prompt: null, overlay: "none" });
     const assignment = await session.requestFloor(next);
     set({
       phase: "dungeon",
@@ -125,44 +173,262 @@ export const useGame = create<GameState>((set, get) => ({
   },
 
   bankAndLeave: () => {
-    const { floor, checkpoint, equipment } = get();
-    const banked: Equipment = {
-      staff: { ...equipment.staff, runLoot: false },
-      amulet: equipment.amulet && { ...equipment.amulet, runLoot: false },
-      cloak: equipment.cloak && { ...equipment.cloak, runLoot: false },
-      boots: { ...equipment.boots, runLoot: false },
-    };
-    const newCheckpoint = Math.max(checkpoint, floor);
-    persistSave({ checkpoint: newCheckpoint, equipment: banked });
+    const banked = bankCarried(get());
+    const newCheckpoint = Math.max(get().checkpoint, get().floor);
+    persistCurrent({ ...get(), ...banked, checkpoint: newCheckpoint });
     // Server-side bank: provenance-validated; the "saved" ack corrects us if
     // anything didn't check out. Offline this is a no-op (local save rules).
-    session.sendBank(toWireEquipment(banked));
+    session.sendBank(toWireInventory({ ...banked, chest: get().chest }));
     session.leaveDungeon();
     set({
       phase: "village",
-      equipment: banked,
+      ...banked,
       checkpoint: newCheckpoint,
       floor: 0,
-      health: computeStats(banked).maxHealth,
+      health: computeStats(banked.equipment).maxHealth,
       mana: PLAYER.maxMana,
       prompt: null,
+      overlay: "none",
     });
     gameEvents.emit("message", `Loot banked. Checkpoint: floor ${newCheckpoint}`);
   },
 
-  equipItem: (defId) => {
+  canAcquire: (defId) => {
     const def = getItemDef(defId);
-    const equipment: Equipment = { ...get().equipment };
-    const inDungeon = get().phase === "dungeon";
-    const previous = equipment[def.slot];
-    equipment[def.slot] = { defId, runLoot: inDungeon };
-    const stats = computeStats(equipment);
-    set({ equipment, health: Math.min(get().health + (def.passives?.maxHealth ?? 0), stats.maxHealth) });
+    const state = get();
+    if (def.slot === "consumable") {
+      const runLoot = state.phase === "dungeon";
+      return hasRoom(state.belt, defId, runLoot) || hasRoom(state.bag, defId, runLoot);
+    }
+    return state.equipment[def.slot] === null || state.bag.includes(null);
+  },
+
+  acquireItem: (defId) => {
+    const def = getItemDef(defId);
+    const state = get();
+    const runLoot = state.phase === "dungeon";
+
+    if (def.slot === "consumable") {
+      const toBelt = addToGrid(state.belt, defId, runLoot);
+      if (toBelt) {
+        set({ belt: toBelt });
+        afterPickup(def.name, "belt");
+        syncVillage(get());
+        return true;
+      }
+      const toBag = addToGrid(state.bag, defId, runLoot);
+      if (toBag) {
+        set({ bag: toBag });
+        afterPickup(def.name, "bag");
+        syncVillage(get());
+        return true;
+      }
+      // Pickups are gated on canAcquire before the grant, so this only
+      // happens on a rare co-op race (bag filled while the request flew).
+      gameEvents.emit("message", `${def.name} slips away — inventory full`);
+      return false;
+    }
+
+    // Gear: fill an empty slot outright, otherwise stow in the bag.
+    if (state.equipment[def.slot] === null) {
+      set({
+        equipment: { ...state.equipment, [def.slot]: { defId, runLoot } },
+        health: clampedHealth(get()),
+      });
+      playPickup();
+      gameEvents.emit("message", `${def.name} equipped`);
+      syncVillage(get());
+      return true;
+    }
+    const toBag = addToGrid(state.bag, defId, runLoot);
+    if (!toBag) {
+      gameEvents.emit("message", `${def.name} slips away — inventory full`);
+      return false;
+    }
+    set({ bag: toBag });
+    afterPickup(def.name, "bag");
+    syncVillage(get());
+    return true;
+  },
+
+  addGold: (amount) => {
+    if (amount <= 0) return;
+    if (get().phase === "dungeon") {
+      set({ runGold: get().runGold + amount });
+    } else {
+      set({ gold: get().gold + amount });
+      syncVillage(get());
+    }
+    gameEvents.emit("message", `+${amount} gold`);
+  },
+
+  equipFromBag: (bagIndex) => {
+    const state = get();
+    const stack = state.bag[bagIndex];
+    if (!stack) return;
+    const def = getItemDef(stack.defId);
+    if (def.slot === "consumable") {
+      // Convenience: clicking a bag consumable sends it to a free belt slot
+      // (or swaps with Q when the belt is full — moveBagToBelt swaps).
+      const free = state.belt.indexOf(null);
+      get().moveBagToBelt(bagIndex, free === -1 ? 0 : free);
+      return;
+    }
+    const previous = state.equipment[def.slot];
+    const bag = cloneGrid(state.bag);
+    bag[bagIndex] = previous ? { defId: previous.defId, qty: 1, runLoot: previous.runLoot } : null;
+    set({
+      equipment: { ...state.equipment, [def.slot]: { defId: stack.defId, runLoot: stack.runLoot } },
+      bag,
+      health: clampedHealth(get()),
+    });
     playPickup();
     gameEvents.emit(
       "message",
-      previous ? `${def.name} (replaced ${getItemDef(previous.defId).name})` : `${def.name} equipped`,
+      previous ? `${def.name} (swapped ${getItemDef(previous.defId).name})` : `${def.name} equipped`,
     );
+    syncVillage(get());
+  },
+
+  unequipToBag: (slot) => {
+    const state = get();
+    const item = state.equipment[slot];
+    if (!item) return;
+    const bag = addToGrid(state.bag, item.defId, item.runLoot);
+    if (!bag) {
+      gameEvents.emit("message", "Bag is full");
+      return;
+    }
+    set({
+      equipment: { ...state.equipment, [slot]: null },
+      bag,
+      health: clampedHealth(get()),
+    });
+    syncVillage(get());
+  },
+
+  moveBagToBelt: (bagIndex, beltIndex) => {
+    const state = get();
+    const stack = state.bag[bagIndex];
+    if (!stack || getItemDef(stack.defId).slot !== "consumable") return;
+    const bag = cloneGrid(state.bag);
+    const belt = cloneGrid(state.belt);
+    bag[bagIndex] = belt[beltIndex];
+    belt[beltIndex] = stack;
+    set({ bag, belt });
+    syncVillage(get());
+  },
+
+  moveBeltToBag: (beltIndex) => {
+    const state = get();
+    const stack = state.belt[beltIndex];
+    if (!stack) return;
+    const free = state.bag.indexOf(null);
+    if (free === -1) {
+      gameEvents.emit("message", "Bag is full");
+      return;
+    }
+    const bag = cloneGrid(state.bag);
+    const belt = cloneGrid(state.belt);
+    bag[free] = stack;
+    belt[beltIndex] = null;
+    set({ bag, belt });
+    syncVillage(get());
+  },
+
+  moveBagToChest: (bagIndex) => {
+    const state = get();
+    if (state.phase !== "village") return;
+    const stack = state.bag[bagIndex];
+    if (!stack) return;
+    const chest = addToGrid(state.chest, stack.defId, false);
+    if (!chest) {
+      gameEvents.emit("message", "The chest is full");
+      return;
+    }
+    // Chest deposits move one item at a time so stacks split cleanly.
+    set({ bag: takeOneAt(state.bag, bagIndex), chest });
+    syncVillage(get());
+  },
+
+  moveChestToBag: (chestIndex) => {
+    const state = get();
+    if (state.phase !== "village") return;
+    const stack = state.chest[chestIndex];
+    if (!stack) return;
+    const bag = addToGrid(state.bag, stack.defId, false);
+    if (!bag) {
+      gameEvents.emit("message", "Bag is full");
+      return;
+    }
+    set({ chest: takeOneAt(state.chest, chestIndex), bag });
+    syncVillage(get());
+  },
+
+  useBelt: (index) => {
+    const state = get();
+    if (state.phase !== "dungeon" && state.phase !== "village") return;
+    const stack = state.belt[index];
+    if (!stack) return;
+    const def = getItemDef(stack.defId);
+    const effect = def.consumable;
+    if (!effect) return;
+
+    if (effect.escape) {
+      if (state.phase !== "dungeon") {
+        gameEvents.emit("message", "The feather only works in the dungeon");
+        return;
+      }
+      set({ belt: takeOneAt(state.belt, index) });
+      escapeByFeather(set, get);
+      return;
+    }
+    if (effect.heal && state.health >= getStats().maxHealth) {
+      gameEvents.emit("message", "Already at full health");
+      return;
+    }
+    if (effect.mana && !effect.heal && state.mana >= PLAYER.maxMana) {
+      gameEvents.emit("message", "Mana is already full");
+      return;
+    }
+    set({ belt: takeOneAt(state.belt, index) });
+    if (effect.heal) get().heal(effect.heal);
+    if (effect.mana) set({ mana: Math.min(PLAYER.maxMana, get().mana + effect.mana) });
+    playPickup();
+    gameEvents.emit("message", `${def.name} used`);
+    syncVillage(get());
+  },
+
+  buyItem: (defId) => {
+    const state = get();
+    if (state.phase !== "village") return;
+    const price = merchantPrice(defId);
+    if (price === null) return;
+    if (state.gold < price) {
+      gameEvents.emit("message", "Not enough gold");
+      return;
+    }
+    const def = getItemDef(defId);
+    // Purchases land in the belt first (that's where you'll want them).
+    const toBelt = def.slot === "consumable" ? addToGrid(state.belt, defId, false) : null;
+    const toBag = toBelt ? null : addToGrid(state.bag, defId, false);
+    if (!toBelt && !toBag) {
+      gameEvents.emit("message", "No room — make space first");
+      return;
+    }
+    set({
+      gold: state.gold - price,
+      ...(toBelt ? { belt: toBelt } : { bag: toBag! }),
+    });
+    playPickup();
+    gameEvents.emit("message", `Bought ${def.name} for ${price} gold`);
+    const s = get();
+    persistCurrent(s);
+    session.sendBuy(defId, toWireInventory(s));
+  },
+
+  setOverlay: (overlay) => {
+    if (get().overlay !== overlay) set({ overlay, prompt: overlay === "none" ? get().prompt : null });
   },
 
   takeDamage: (amount) => {
@@ -214,6 +480,7 @@ export const useGame = create<GameState>((set, get) => ({
       health: getStats().maxHealth,
       mana: PLAYER.maxMana,
       prompt: null,
+      overlay: "none",
     });
   },
 
@@ -243,41 +510,130 @@ export const useGame = create<GameState>((set, get) => ({
   },
 }));
 
+// ── Internals ────────────────────────────────────────────────────────────────
+
+function afterPickup(name: string, where: string): void {
+  playPickup();
+  gameEvents.emit("message", `${name} → ${where}`);
+}
+
+/** Health never exceeds the (possibly just-changed) max. */
+function clampedHealth(state: GameState): number {
+  return Math.min(state.health, computeStats(state.equipment).maxHealth);
+}
+
+/** Everything carried becomes safe; run gold joins the purse. */
+function bankCarried(state: GameState) {
+  return {
+    equipment: {
+      staff: { ...state.equipment.staff, runLoot: false },
+      amulet: state.equipment.amulet && { ...state.equipment.amulet, runLoot: false },
+      cloak: state.equipment.cloak && { ...state.equipment.cloak, runLoot: false },
+      boots: { ...state.equipment.boots, runLoot: false },
+    },
+    bag: markBanked(state.bag),
+    belt: markBanked(state.belt),
+    gold: state.gold + state.runGold,
+    runGold: 0,
+  };
+}
+
+function persistCurrent(state: {
+  checkpoint: number;
+  equipment: Equipment;
+  bag: Grid;
+  belt: Grid;
+  chest: Grid;
+  gold: number;
+}): void {
+  persistSave({
+    checkpoint: state.checkpoint,
+    equipment: state.equipment,
+    bag: state.bag,
+    belt: state.belt,
+    chest: state.chest,
+    gold: state.gold,
+  });
+}
+
+/** Village inventory changes persist immediately and sync to the server (a
+ * rearrangement, never new items — the server checks). Mid-run changes are
+ * session-local until banked. */
+function syncVillage(state: GameState): void {
+  if (state.phase === "dungeon" || state.phase === "loading") return;
+  persistCurrent(state);
+  session.sendStash(toWireInventory(state));
+}
+
+/** A spent Feather of Safe Passage: bank the run from wherever you stand.
+ * The checkpoint does NOT move — the feather buys safety, not progress. */
+function escapeByFeather(
+  set: (partial: Partial<GameState>) => void,
+  get: () => GameState,
+) {
+  const state = get();
+  const banked = bankCarried(state);
+  persistCurrent({ ...state, ...banked });
+  session.sendEscape(toWireInventory({ ...banked, chest: state.chest }));
+  session.leaveDungeon();
+  playPortal();
+  set({
+    phase: "village",
+    ...banked,
+    floor: 0,
+    health: computeStats(banked.equipment).maxHealth,
+    mana: PLAYER.maxMana,
+    prompt: null,
+    overlay: "none",
+  });
+  gameEvents.emit("message", "The feather carries you home — loot banked");
+}
+
 /** Death: everything picked up during this run is lost. */
 function die(
   set: (partial: Partial<GameState>) => void,
   get: () => GameState,
 ) {
-  const { equipment, floor, checkpoint } = get();
+  const state = get();
   const lostItems: string[] = [];
   const strip = (slot: "amulet" | "cloak") => {
-    const item = equipment[slot];
+    const item = state.equipment[slot];
     if (item?.runLoot) {
       lostItems.push(getItemDef(item.defId).name);
       return null;
     }
     return item;
   };
-  const fallback = defaultEquipment();
+  const fallback = defaultSave().equipment;
   const kept: Equipment = {
-    staff: equipment.staff.runLoot
-      ? (lostItems.push(getItemDef(equipment.staff.defId).name), fallback.staff)
-      : equipment.staff,
+    staff: state.equipment.staff.runLoot
+      ? (lostItems.push(getItemDef(state.equipment.staff.defId).name), fallback.staff)
+      : state.equipment.staff,
     amulet: strip("amulet"),
     cloak: strip("cloak"),
-    boots: equipment.boots.runLoot
-      ? (lostItems.push(getItemDef(equipment.boots.defId).name), fallback.boots)
-      : equipment.boots,
+    boots: state.equipment.boots.runLoot
+      ? (lostItems.push(getItemDef(state.equipment.boots.defId).name), fallback.boots)
+      : state.equipment.boots,
   };
-  persistSave({ checkpoint, equipment: kept });
+  const bagResult = stripRunLoot(state.bag);
+  const beltResult = stripRunLoot(state.belt);
+  for (const s of [...bagResult.lost, ...beltResult.lost]) {
+    const name = getItemDef(s.defId).name;
+    lostItems.push(s.qty > 1 ? `${name} ×${s.qty}` : name);
+  }
+  persistCurrent({ ...state, equipment: kept, bag: bagResult.grid, belt: beltResult.grid });
   session.sendDied(); // the server discards this run's grants
   session.leaveDungeon();
   set({
     phase: "dead",
     equipment: kept,
+    bag: bagResult.grid,
+    belt: beltResult.grid,
     health: computeStats(kept).maxHealth,
-    lastDeath: { floor, lostItems },
+    lastDeath: { floor: state.floor, lostItems, lostGold: state.runGold },
+    runGold: 0,
     prompt: null,
+    overlay: "none",
   });
 }
 
@@ -287,13 +643,14 @@ function die(
 netBus.on("serverSave", (save) => {
   const state = useGame.getState();
   if (state.phase === "dungeon" || state.phase === "loading") return;
-  const equipment = fromWireEquipment(save.equipment);
+  const inv = fromWireInventory(save.inventory);
   useGame.setState({
     checkpoint: save.checkpoint,
-    equipment,
-    health: computeStats(equipment).maxHealth,
+    ...inv,
+    runGold: 0,
+    health: computeStats(inv.equipment).maxHealth,
   });
-  persistSave({ checkpoint: save.checkpoint, equipment });
+  persistCurrent({ checkpoint: save.checkpoint, ...inv });
 });
 
 // Reconnect resync: the session re-enters our floor after a dropped socket.

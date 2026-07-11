@@ -136,8 +136,12 @@ export class LocalTransport implements Transport {
         this.name = msg.name;
         break;
       case "bank":
+      case "escape":
+      case "stash":
+      case "buy":
       case "died":
       case "grant":
+      case "grantGold":
         // Offline progress is persisted client-side.
         break;
       case "enterFloor": {

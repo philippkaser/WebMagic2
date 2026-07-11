@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { FloorDirectory } from "../src/net/matchmaking";
 import type { ServerMsg } from "../src/net/protocol";
-import { AccountStore } from "./accounts";
+import { AccountStore, defaultWireInventory } from "./accounts";
 import { Relay, type RelayPeer } from "./relay";
 
 /** The relay IS the multiplayer authority model — these tests are its spec. */
@@ -278,22 +278,44 @@ describe("accounts: grants and banking", () => {
 
     relay.handle(b.id, {
       t: "bank",
-      equipment: { staff: "ember_staff", amulet: "hacked_amulet", cloak: null, boots: "worn_boots" },
+      inventory: {
+        ...defaultWireInventory(),
+        equipment: { staff: "ember_staff", amulet: "hacked_amulet", cloak: null, boots: "worn_boots" },
+      },
     });
     const saved = lastOf(b, "saved")!.save;
-    expect(saved.equipment.staff).toBe("ember_staff"); // granted → kept
-    expect(saved.equipment.amulet).toBeNull(); // never granted → stripped
+    expect(saved.inventory.equipment.staff).toBe("ember_staff"); // granted → kept
+    expect(saved.inventory.equipment.amulet).toBeNull(); // never granted → stripped
     expect(saved.checkpoint).toBe(5); // from the ACTUAL instance floor
     expect(store.get(tokenB)!.runGrants).toEqual([]); // consumed
   });
 
   test("banking is refused off checkpoint floors", () => {
     join(a, 3); // not a multiple of the checkpoint interval
-    relay.handle(a.id, {
-      t: "bank",
-      equipment: { staff: "apprentice_staff", amulet: null, cloak: null, boots: "worn_boots" },
-    });
+    relay.handle(a.id, { t: "bank", inventory: defaultWireInventory() });
     expect(a.inbox.some((m) => m.t === "saved")).toBe(false);
+  });
+
+  test("gold grants are host-only, and stash/buy are refused mid-run", () => {
+    const tokenB = lastOf(b, "loggedIn")!.token;
+    join(a, 5); // a is host
+    join(b, 5);
+    relay.handle(b.id, { t: "grantGold", playerId: b.id, amount: 50 }); // self-vouch
+    expect(store.get(tokenB)!.runGold).toBe(0);
+    relay.handle(a.id, { t: "grantGold", playerId: b.id, amount: 50 }); // host
+    expect(store.get(tokenB)!.runGold).toBe(50);
+    // Mid-run, village-only messages are dropped.
+    b.inbox.length = 0;
+    relay.handle(b.id, { t: "stash", inventory: defaultWireInventory() });
+    relay.handle(b.id, { t: "buy", itemId: "potion_hp_weak", inventory: defaultWireInventory() });
+    expect(b.inbox.some((m) => m.t === "saved")).toBe(false);
+  });
+
+  test("stash rearranges in the village and answers with the save", () => {
+    relay.handle(a.id, { t: "stash", inventory: defaultWireInventory() });
+    const saved = lastOf(a, "saved");
+    expect(saved).not.toBeNull();
+    expect(saved!.save.inventory.equipment.staff).toBe("apprentice_staff");
   });
 
   test("dying forfeits the run's grants", () => {

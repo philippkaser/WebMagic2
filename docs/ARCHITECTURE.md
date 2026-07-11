@@ -164,24 +164,36 @@ Nothing else changes.
 
 The server owns four things a client must never be trusted with — while
 staying gameplay-blind (item ids are opaque strings; it validates
-*provenance*, never meaning):
+*provenance*, never meaning — the only "meaning" it borrows is the shared
+pure price table and feather id from `items/economy.ts`, the same way it has
+always known the starter-gear ids):
 
 1. **Identity** — `login` presents a device token (or none, minting a fresh
    account). The token comes back with the save and is kept client-side
    (`webmagic.token.v1`). Real auth (email/OAuth) later replaces only the
    token-minting step. (`server/accounts.ts`)
-2. **Saves** — checkpoint + banked equipment live server-side; the client's
+2. **Saves** — checkpoint + the full banked inventory (equipment, Q/E belt,
+   5-slot bag, 30-slot chest, gold) live server-side; the client's
    localStorage is a cache of the last `loggedIn`/`saved` payload (and the
    full save of record when playing offline). Storage is a debounced JSON
    file today (`DATA_FILE`), flushed on shutdown; swapping in a database
    replaces one `persist` callback.
-3. **Item provenance** — the core rule: *an item may be banked ⇔ previously
-   banked ∪ starter gear ∪ granted this run by the floor HOST's attestation*
-   (`grant` messages; the beneficiary can never vouch for itself, mirroring
-   loot authority). Banking (`bank` → `saved`) strips anything else; death
-   (`died`) or quitting forfeits the run's grants. A hacked client can
-   repaint its own screen, but nothing survives a bank round trip the
-   floor's authority didn't hand out.
+3. **Item & gold provenance** — the core rule: *an item may be banked ⇔
+   previously banked ∪ starter gear ∪ granted this run by the floor HOST's
+   attestation* (`grant` messages; the beneficiary can never vouch for
+   itself, mirroring loot authority). Grants are a **multiset** — two granted
+   potions are two bankable potions. Gold follows the same path via
+   `grantGold` under sanity caps (`items/economy.ts#GOLD_RULES`). Banking
+   (`bank` → `saved`) strips anything else; death (`died`) or quitting
+   forfeits the run's grants. Three village/dungeon variants share the rules:
+   - `stash` — village-only rearrangement (chest/bag/belt moves); must be a
+     sub-multiset of the current save, so nothing new can enter this way.
+   - `buy` — merchant purchase; the submitted inventory may contain exactly
+     the bought ware on top of what's owned, paid at the shared economy
+     price from banked gold.
+   - `escape` — feather exit from ANY dungeon floor; same provenance as
+     `bank`, does not advance the checkpoint, and only succeeds if a Feather
+     of Safe Passage was provably owned and is now spent.
 4. **Progression** — floor entry is validated against the account: floor 1,
    anything ≤ your banked checkpoint, one floor deeper than where you are
    (descending), or your current run floor (reconnect resume). Banking only
@@ -261,6 +273,8 @@ sanitization already run server-/authority-side.
 | Want to add | Touch |
 | --- | --- |
 | New staff/amulet/cloak/boots | `items/catalog.ts` (data only) |
+| New consumable | `items/catalog.ts` (`consumable` effect + `maxStack`); add to `items/economy.ts#MERCHANT_STOCK` to sell it |
+| Economy tuning (prices, gold drops) | `items/economy.ts` (the one balance sheet, shared client + server) |
 | New spell | `combat/abilities.ts` + reference it from a staff |
 | New enemy | component in `combat/enemies.tsx` + spawn kind in `world/dungeonGen.ts` |
 | New prop | `world/props.tsx` SPECS + generator prop table |

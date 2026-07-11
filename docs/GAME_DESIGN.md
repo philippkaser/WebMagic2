@@ -148,6 +148,47 @@ in the dungeon: a guaranteed treasure pedestal per floor (rolled
 deterministically from the floor seed, so co-op players see the same reward),
 plus random drops from enemies and props.
 
+### Inventory & carrying
+
+Picking up an item no longer replaces what you have. Every wizard carries:
+
+- **4 equipment slots** (above) — an empty slot auto-equips a pickup.
+- A **5-slot bag** — everything else you grab goes here; swap gear in and out
+  on the inventory screen (**I**).
+- A **2-slot consumable belt** mapped to **Q and E** — potions and feathers
+  are drunk/spent straight from the belt mid-fight. (E prefers interactions:
+  standing at a portal never wastes a draught.)
+- A **30-slot chest at home** in the village — banked storage. It never
+  travels, so it's never at risk.
+
+The inventory screen shows the wizard between the slot columns — and the
+portrait is live: robe, boots, staff crystal and amulet pixels take the
+colors of what's actually equipped. Items list their stats (staff ability
+damage/mana, passives, consumable effects).
+
+### Gold & the merchant (the economy)
+
+**Gold drops** from enemies (~60%), sometimes props, and bosses hoard piles of
+it. Coins vacuum up automatically — no E needed. Gold gathered in the dungeon
+is **run loot like everything else**: die and it's gone, bank it to keep it.
+
+**Maro the Provisioner** runs a stall in the village and sells, for
+deliberately steep prices (all numbers in `items/economy.ts`, the one balance
+sheet):
+
+| Ware | Effect | Feel target |
+| --- | --- | --- |
+| Weak Healing Draught | +40 health | ~a third of an early banked run |
+| Weak Mana Draught | +60 mana | slightly cheaper than healing |
+| **Feather of Safe Passage** | exit the dungeon from ANY floor, banking your run loot — without advancing your checkpoint | ~two banked early runs; insurance you feel |
+
+Potions also drop in the dungeon (uncommon); feathers essentially don't — the
+Warden sometimes drops one, and the balance intent is that they mostly come
+from Maro. The feather is the economy's keystone: it converts gold into a
+softer answer to "one more floor?", without ever granting progress.
+Balance rule of thumb: if consumables ever feel routine, raise prices before
+lowering drops — finding gold should stay exciting.
+
 ### The run structure & the central risk
 
 - **100 floors**, each harder (`floorScale` ramps enemy health, damage, and
@@ -259,9 +300,13 @@ own boss, enemy mix, and environmental gimmick.
 
 - More staffs = more playstyles (channeled beams, lobbed grenades, melee
   staves, summons). Each is one catalog entry + optionally one ability entry.
-- Item **rarities / modifiers** (rolled affixes) for build depth.
+- Item **rarities / modifiers** (rolled affixes) for build depth. (The loot
+  roller already supports per-item `dropWeight` — feathers use it.)
 - Set bonuses across slots.
-- Consumables / one-shot scrolls.
+- More consumables (scrolls, bombs, buffs) — each is one catalog entry; the
+  belt/merchant/provenance plumbing is already generic.
+- A deeper economy: item selling, gold sinks (gambling? shrine offerings?),
+  richer merchant stock at higher checkpoints.
 
 ### Systems
 
@@ -424,11 +469,15 @@ table, and the extension guide.
 - 100-floor procedural generation with difficulty scaling and boss floors.
 - Movement, all four equipment slots, the full ability/enemy/boss/prop set
   listed above, procedural audio, the dynamic-light look.
+- The full inventory & economy layer: bag + Q/E belt + village chest,
+  the inventory screen (live pixel-art portrait), gold drops with auto-pickup,
+  the village merchant, potions, and the Feather of Safe Passage.
 - Real online multiplayer: shared instances, matchmaking, remote wizards with
   name tags, host-authority replication of enemies/props/boss/loot, late-join
   sync, host migration.
-- Persistence of checkpoint progress, banked gear, player name, and the
-  shadows quality toggle (localStorage).
+- Persistence of checkpoint progress, banked inventory + gold, player name,
+  and the shadows quality toggle (localStorage cache; server-authoritative
+  online — including gold provenance and merchant purchase validation).
 
 **Not done yet / known gaps:**
 
@@ -457,7 +506,9 @@ table, and the extension guide.
 | Left / Right click | Staff primary / secondary ability |
 | Space | Jump (double-jump / hover with the right boots) |
 | Shift | Blink-dash (requires Cloak of Blinking) |
-| E | Interact (portals, loot, treasure) |
+| E | Interact (portals, loot, treasure); otherwise use belt slot 2 |
+| Q | Use belt slot 1 |
+| I (or Tab) | Inventory screen |
 | P (or F3) | FPS / frame-time overlay |
 | O (or F4) | Toggle shadows (quality option, off by default) |
 

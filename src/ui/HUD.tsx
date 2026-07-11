@@ -2,14 +2,16 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
 import { computeStats, getItemDef } from "../items/catalog";
-import type { Slot } from "../items/types";
+import type { GearSlot, ItemStack } from "../items/types";
 import { floorPlayerCount, selectIsHost, useNet } from "../net/netStore";
 import { entryFloors, useGame } from "../state/gameStore";
+import { InventoryScreen } from "./InventoryScreen";
 
 /** All DOM UI: crosshair, bars, prompts, message feed, and the fullscreen
  * overlays for menu / portal select / death. */
 export function HUD() {
   const phase = useGame((s) => s.phase);
+  const overlay = useGame((s) => s.overlay);
   const [showPerf, setShowPerf] = useState(false);
 
   // Leaving gameplay always releases the pointer.
@@ -30,18 +32,30 @@ export function HUD() {
       } else if (e.code === "KeyO" || e.code === "F4") {
         e.preventDefault();
         useGame.getState().toggleShadows();
+      } else if (e.code === "KeyI" || e.code === "Tab") {
+        const state = useGame.getState();
+        if (state.phase !== "village" && state.phase !== "dungeon") return;
+        e.preventDefault();
+        if (state.overlay === "none") {
+          document.exitPointerLock();
+          state.setOverlay("inventory");
+        } else {
+          state.setOverlay("none");
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const playing = phase === "village" || phase === "dungeon";
   return (
     <div style={styles.root}>
       <style>{css}</style>
       <div style={styles.buildStamp}>{__BUILD_INFO__}</div>
       {showPerf && <PerfOverlay />}
-      {(phase === "village" || phase === "dungeon") && <PlayHud />}
+      {playing && <PlayHud />}
+      {playing && overlay !== "none" && <InventoryScreen mode={overlay} />}
       {phase === "menu" && <MenuOverlay />}
       {phase === "select" && <SelectOverlay />}
       {phase === "dead" && <DeathOverlay />}
@@ -64,10 +78,14 @@ function PlayHud() {
   const health = useGame((s) => s.health);
   const mana = useGame((s) => s.mana);
   const equipment = useGame((s) => s.equipment);
+  const belt = useGame((s) => s.belt);
+  const gold = useGame((s) => s.gold);
+  const runGold = useGame((s) => s.runGold);
   const prompt = useGame((s) => s.prompt);
   const floorPlayers = useNet(floorPlayerCount);
   const amHost = useNet(selectIsHost);
   const netMode = useNet((s) => s.mode);
+  const overlay = useGame((s) => s.overlay);
   const stats = computeStats(equipment);
   const locked = usePointerLocked();
 
@@ -104,10 +122,24 @@ function PlayHud() {
 
       <MessageFeed />
 
-      {/* Bottom-left: vitals */}
+      {/* Bottom-left: vitals, purse and belt */}
       <div style={{ ...styles.panel, bottom: 16, left: 14, width: 240 }}>
         <Bar label="HP" value={health} max={stats.maxHealth} color="#d84a4a" />
         <Bar label="MP" value={mana} max={PLAYER.maxMana} color="#4a86d8" />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 }}>
+          <span style={{ fontSize: 13, color: "#ffcf4d" }}>
+            ◈ {gold}
+            {runGold > 0 && (
+              <span style={{ color: "#c8a23c" }} title="Unbanked — lost on death">
+                {" "}+{runGold}◦
+              </span>
+            )}
+          </span>
+          <span style={{ display: "flex", gap: 6 }}>
+            <BeltSlot hotkey="Q" stack={belt[0]} />
+            <BeltSlot hotkey="E" stack={belt[1]} />
+          </span>
+        </div>
       </div>
 
       {/* Bottom-right: equipment */}
@@ -116,11 +148,12 @@ function PlayHud() {
         <EquipRow slot="amulet" defId={equipment.amulet?.defId} runLoot={equipment.amulet?.runLoot} />
         <EquipRow slot="cloak" defId={equipment.cloak?.defId} runLoot={equipment.cloak?.runLoot} />
         <EquipRow slot="boots" defId={equipment.boots.defId} runLoot={equipment.boots.runLoot} />
+        <div style={{ fontSize: 10, color: "#55505a", marginTop: 3 }}>I — inventory</div>
       </div>
 
       {/* Interaction prompt / lock hint */}
       {locked && prompt && <div style={styles.prompt}>{prompt}</div>}
-      {!locked && (
+      {!locked && overlay === "none" && (
         <div style={styles.prompt}>Click to take control — WASD move · Space jump · Mouse casts</div>
       )}
     </>
@@ -150,9 +183,38 @@ function Bar({ label, value, max, color }: { label: string; value: number; max: 
   );
 }
 
-const SLOT_ICONS: Record<Slot, string> = { staff: "⚚", amulet: "◈", cloak: "▲", boots: "⬢" };
+const SLOT_ICONS: Record<GearSlot, string> = { staff: "⚚", amulet: "◈", cloak: "▲", boots: "⬢" };
 
-function EquipRow({ slot, defId, runLoot }: { slot: Slot; defId?: string; runLoot?: boolean }) {
+function BeltSlot({ hotkey, stack }: { hotkey: string; stack: ItemStack | null }) {
+  const def = stack ? getItemDef(stack.defId) : null;
+  return (
+    <span
+      title={def ? `${hotkey} — ${def.name}` : `${hotkey} — empty (assign in inventory)`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 3,
+        padding: "1px 5px",
+        border: "1px solid #3a333d",
+        background: "#151218",
+        fontSize: 11,
+        color: def ? "#ded5c2" : "#55505a",
+      }}
+    >
+      <span style={{ color: "#7d7566" }}>{hotkey}</span>
+      {def ? (
+        <>
+          <span style={{ color: def.color }}>◆</span>
+          {stack!.qty > 1 && <span>{stack!.qty}</span>}
+        </>
+      ) : (
+        <span>·</span>
+      )}
+    </span>
+  );
+}
+
+function EquipRow({ slot, defId, runLoot }: { slot: GearSlot; defId?: string; runLoot?: boolean }) {
   const def = defId ? getItemDef(defId) : null;
   return (
     <div style={{ fontSize: 12, marginBottom: 4, color: def ? "#ded5c2" : "#55505a" }}>
@@ -318,7 +380,7 @@ function MenuOverlay() {
       <div style={styles.controls}>
         WASD move · Space jump · Left/Right click cast · Shift dash (cloak) · E interact
         <br />
-        P fps overlay · O shadows
+        I inventory · Q/E use belt items · P fps overlay · O shadows
       </div>
     </Overlay>
   );
@@ -355,10 +417,15 @@ function DeathOverlay() {
     <Overlay>
       <div style={{ ...styles.title, color: "#c23a3a" }}>YOU DIED</div>
       <div style={styles.subtitle}>on floor {lastDeath?.floor ?? "?"}</div>
-      {lastDeath && lastDeath.lostItems.length > 0 ? (
+      {lastDeath && (lastDeath.lostItems.length > 0 || lastDeath.lostGold > 0) ? (
         <p style={styles.blurb}>
           The dungeon keeps what you carried:{" "}
-          <span style={{ color: "#c8a23c" }}>{lastDeath.lostItems.join(", ")}</span>
+          <span style={{ color: "#c8a23c" }}>
+            {[
+              ...lastDeath.lostItems,
+              ...(lastDeath.lostGold > 0 ? [`${lastDeath.lostGold} gold`] : []),
+            ].join(", ")}
+          </span>
         </p>
       ) : (
         <p style={styles.blurb}>You carried nothing the dungeon could take.</p>

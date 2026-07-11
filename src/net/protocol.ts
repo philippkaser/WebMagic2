@@ -50,10 +50,27 @@ export interface WireEquipment {
   boots: string;
 }
 
+/** One inventory cell on the wire (consumables stack). */
+export interface WireStack {
+  id: string;
+  qty: number;
+}
+
+/** The full banked inventory: equipment, the Q/E belt, the 5-slot bag, the
+ * 30-slot village chest, and gold. Item ids stay opaque to the server; it
+ * validates PROVENANCE (multiset ⊆ owned ∪ granted), never meaning. */
+export interface WireInventory {
+  equipment: WireEquipment;
+  bag: (WireStack | null)[];
+  belt: (WireStack | null)[];
+  chest: (WireStack | null)[];
+  gold: number;
+}
+
 /** The server-authoritative save. What the client has locally is a cache. */
 export interface ServerSave {
   checkpoint: number;
-  equipment: WireEquipment;
+  inventory: WireInventory;
 }
 
 export type ClientMsg =
@@ -64,12 +81,27 @@ export type ClientMsg =
   | { t: "leaveDungeon" }
   /** Checkpoint banking. The server validates every item against what was
    * actually granted this run (host-attested) and answers with `saved`. */
-  | { t: "bank"; equipment: WireEquipment }
+  | { t: "bank"; inventory: WireInventory }
+  /** Feather escape: bank from ANY dungeon floor by consuming a Feather of
+   * Safe Passage. Same provenance rules as `bank`, does not move the
+   * checkpoint; the server verifies a feather was actually spent. */
+  | { t: "escape"; inventory: WireInventory }
+  /** Village-only inventory rearrangement (chest/bag/belt moves, item
+   * discards). Must be a sub-multiset of the current save — nothing new can
+   * enter this way. Answered with `saved`. */
+  | { t: "stash"; inventory: WireInventory }
+  /** Merchant purchase: `inventory` is the client's post-purchase arrangement.
+   * The server checks price and gold and that exactly the bought item was
+   * added, then answers with `saved`. */
+  | { t: "buy"; itemId: string; inventory: WireInventory }
   /** The run is lost — the server discards this run's grants. */
   | { t: "died" }
   /** HOST attestation: `playerId` legitimately picked up `itemId`. The only
    * path by which an item becomes bankable. Non-host senders are ignored. */
   | { t: "grant"; playerId: string; itemId: string }
+  /** HOST attestation of a gold pickup — gold's provenance path, mirroring
+   * `grant` (server-side sanity caps in items/economy.ts GOLD_RULES). */
+  | { t: "grantGold"; playerId: string; amount: number }
   /** Clock sync probe; `sent` is the sender's local monotonic time. */
   | { t: "ping"; sent: number }
   | ({ t: "msg" } & Envelope);

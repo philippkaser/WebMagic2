@@ -16,7 +16,8 @@ import { spawnBurst } from "../fx/Particles";
 import { getPlayerBody, playerPosition } from "../game/player-state";
 import { allocId, registerHittable } from "../game/registry";
 import { nearestWizardTo } from "../game/targets";
-import { dropLoot } from "../items/LootOrbs";
+import { GOLD_DROPS } from "../items/economy";
+import { dropGold, dropLoot } from "../items/LootOrbs";
 import { isHost } from "../net/netStore";
 import { useNetBody, type NetBody } from "../net/NetSystems";
 import { getStats, useGame } from "../state/gameStore";
@@ -191,6 +192,7 @@ export function Wisp({
         });
         flashLight([t.x, t.y, t.z], "#b46bff", 22);
         dropLoot([t.x, Math.max(t.y, 0.6), t.z], floor, LOOT_DROP_CHANCE);
+        dropGold([t.x, Math.max(t.y, 0.6), t.z], floor, GOLD_DROPS.enemyChance, "enemy");
       }
       setDead(true);
     },
@@ -363,6 +365,7 @@ export function Sentry({
         });
         flashLight([t.x, t.y + 0.8, t.z], "#ff7a4d", 26);
         dropLoot([t.x, t.y + 0.5, t.z], floor, LOOT_DROP_CHANCE);
+        dropGold([t.x, t.y + 0.5, t.z], floor, GOLD_DROPS.enemyChance, "enemy");
       }
       setDead(true);
     },

@@ -36,7 +36,9 @@ processes in separate terminals: `bun run dev:server` and `bun dev`.
 | Left / Right click | Staff primary / secondary ability |
 | Space | Jump (double-jump / hover with the right boots) |
 | Shift | Blink-dash (requires Cloak of Blinking) |
-| E | Interact (portals, loot, treasure) |
+| E | Interact (portals, loot, treasure); otherwise use belt slot 2 |
+| Q | Use belt slot 1 |
+| I (or Tab) | Inventory screen (gear, bag, belt — chest & merchant in the village) |
 | P (or F3) | FPS / frame-time overlay |
 | O (or F4) | Toggle shadows (quality option, off by default) |
 
@@ -53,7 +55,12 @@ corner — check it against the latest commit when testing.
 - **Death loses the run**: anything you picked up since entering is gone.
 - **Loot** defines your kit: the staff sets both click abilities, amulets add
   passives, cloaks add defense/utility (including the dash), boots change your
-  jump (double jump, hover).
+  jump (double jump, hover). A 5-slot bag and a Q/E consumable belt carry the
+  rest; your 30-slot chest in the village stores what's banked.
+- **Gold & the merchant**: coins drop in the dungeon (auto-pickup) and are
+  run loot like everything else. Maro's stall in the village sells potions
+  and the Feather of Safe Passage — a one-shot "leave from any floor,
+  keep your loot" escape that never advances your checkpoint.
 - **Everything is physical**: crates, barrels and pots tumble, shatter and
   explode; enemies get knocked around; force-blast at your feet to blast-jump.
 - **Bosses every 10th floor**: the Warden of the Deep holds the exit room and

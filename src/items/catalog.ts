@@ -3,6 +3,7 @@ import type { DerivedStats, Equipment, ItemDef, Slot } from "./types";
 
 export const BASIC_STAFF_ID = "apprentice_staff";
 export const BASIC_BOOTS_ID = "worn_boots";
+export const SAVE_FEATHER_ID = "save_feather";
 
 const defs: ItemDef[] = [
   // ── Staffs ────────────────────────────────────────────────────────────────
@@ -153,6 +154,45 @@ const defs: ItemDef[] = [
     desc: "Hold Space to hover",
     jump: "hover",
   },
+  // ── Consumables ───────────────────────────────────────────────────────────
+  // Spent on use (Q/E). Potions drop in the dungeon and sell at the village
+  // merchant; feathers are the merchant's premium ware (the boss drops them
+  // too). Balance note: prices are deliberately steep — gold has to compete
+  // with "one more floor" to matter.
+  {
+    id: "potion_hp_weak",
+    slot: "consumable",
+    name: "Weak Healing Draught",
+    tier: 1,
+    minFloor: 2,
+    color: "#ff5d6e",
+    desc: "Restores 40 health",
+    consumable: { heal: 40 },
+    maxStack: 5,
+  },
+  {
+    id: "potion_mp_weak",
+    slot: "consumable",
+    name: "Weak Mana Draught",
+    tier: 1,
+    minFloor: 2,
+    color: "#4f9dff",
+    desc: "Restores 60 mana",
+    consumable: { mana: 60 },
+    maxStack: 5,
+  },
+  {
+    id: SAVE_FEATHER_ID,
+    slot: "consumable",
+    name: "Feather of Safe Passage",
+    tier: 2,
+    minFloor: 8,
+    color: "#ffe9a8",
+    desc: "Vanish to the village, keeping your loot",
+    dropWeight: 0.15, // dungeon drops are a lucky find, not a supply line
+    consumable: { escape: true },
+    maxStack: 2,
+  },
 ];
 
 const byId = new Map(defs.map((d) => [d.id, d]));
@@ -169,6 +209,11 @@ export function allItemDefs(): readonly ItemDef[] {
 
 export function lootPool(slot: Slot, floor: number): ItemDef[] {
   return defs.filter((d) => d.slot === slot && d.minFloor <= floor);
+}
+
+/** Stack cap for an item id (gear never stacks). */
+export function maxStackOf(id: string): number {
+  return getItemDef(id).maxStack ?? 1;
 }
 
 const BASE: DerivedStats = {

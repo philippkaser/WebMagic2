@@ -20,6 +20,9 @@ export interface Ability {
   name: string;
   mana: number;
   cooldown: number;
+  /** One-line stat summary for inventory/tooltip display ("16 dmg"). Kept
+   * next to the cast numbers so the two can't drift apart. */
+  info: string;
   cast(ctx: AbilityContext): void;
 }
 
@@ -67,6 +70,7 @@ const ABILITIES: Record<string, Ability> = {
     name: "Bolt",
     mana: 3,
     cooldown: 0.26,
+    info: "16 dmg",
     cast: (ctx) => bolt(ctx, { damage: 16, speed: 34, size: 0.13 }),
   },
   scatter: {
@@ -74,6 +78,7 @@ const ABILITIES: Record<string, Ability> = {
     name: "Ember Scatter",
     mana: 7,
     cooldown: 0.55,
+    info: "5×8 dmg, spread",
     cast: (ctx) => {
       for (let i = 0; i < 5; i++) {
         bolt(ctx, {
@@ -92,6 +97,7 @@ const ABILITIES: Record<string, Ability> = {
     name: "Arc Bolt",
     mana: 2,
     cooldown: 0.11,
+    info: "7 dmg, rapid",
     cast: (ctx) => bolt(ctx, { damage: 7, speed: 42, size: 0.09, spread: 0.05 }),
   },
   lance: {
@@ -99,6 +105,7 @@ const ABILITIES: Record<string, Ability> = {
     name: "Void Lance",
     mana: 9,
     cooldown: 0.7,
+    info: "34 dmg + blast",
     cast: (ctx) =>
       bolt(ctx, {
         damage: 34,
@@ -113,6 +120,7 @@ const ABILITIES: Record<string, Ability> = {
     name: "Force Blast",
     mana: 18,
     cooldown: 0.95,
+    info: "24 dmg, knockback",
     cast: (ctx) => {
       tmp.copy(ctx.dir).multiplyScalar(1.5).add(ctx.origin);
       explode({
@@ -141,6 +149,7 @@ const ABILITIES: Record<string, Ability> = {
     name: "Shockwave",
     mana: 14,
     cooldown: 1.15,
+    info: "12 dmg, huge knockback",
     cast: (ctx) => {
       explode({
         position: ctx.origin,

@@ -24,8 +24,9 @@ import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { allocId, registerDynamicBody, registerHittable } from "../game/registry";
 import { wizardDistSqTo } from "../game/targets";
+import { GOLD_DROPS } from "../items/economy";
 import { rollLoot } from "../items/loot";
-import { dropLoot } from "../items/LootOrbs";
+import { dropGold, dropLoot } from "../items/LootOrbs";
 import { hostCommand, hostEvent } from "../net/channels";
 import { registerSyncProvider } from "../net/entities";
 import { isHost, useNet } from "../net/netStore";
@@ -96,6 +97,7 @@ export function Breakable({
         });
         if (!remote) {
           dropLoot([t.x, Math.max(t.y, 0.5), t.z], floor, spec.lootChance);
+          dropGold([t.x, Math.max(t.y, 0.5), t.z], floor, GOLD_DROPS.propChance, "prop");
         }
         if (spec.explodes) {
           // Defer so the chain reaction never re-enters this hit handler. A
@@ -468,7 +470,7 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
       takenRef.current = true;
       setTaken(true);
       const myId = useNet.getState().playerId;
-      if (by !== "" && (by === myId || by === "self")) useGame.getState().equipItem(def.id);
+      if (by !== "" && (by === myId || by === "self")) useGame.getState().acquireItem(def.id);
       if (!silent) {
         spawnBurst({
           position: [position[0], position[1] + 1.5, position[2]],
@@ -528,6 +530,12 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
     const d2 =
       (playerPosition.x - position[0]) ** 2 + (playerPosition.z - position[2]) ** 2;
     if (d2 < 6) {
+      // Gate on inventory space BEFORE requesting — a granted treasure that
+      // can't be held would be lost.
+      if (!useGame.getState().canAcquire(def.id)) {
+        offerInteraction(`Inventory full — can't take ${def.name}`, d2, () => {});
+        return;
+      }
       offerInteraction(`E — Take ${def.name}  (${def.desc})`, d2, () => {
         if (takenRef.current || requested.current > 0) return;
         requested.current = 0.6; // throttle re-requests while awaiting grant

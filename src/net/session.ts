@@ -2,7 +2,7 @@ import { gameEvents } from "../core/events";
 import { netBus } from "./bus";
 import { netClock } from "./clock";
 import { useNet } from "./netStore";
-import type { FloorAssignment, ServerMsg, WireEquipment } from "./protocol";
+import type { FloorAssignment, ServerMsg, WireInventory } from "./protocol";
 import { LocalTransport, WebSocketTransport, type Transport } from "./transport";
 
 const TOKEN_KEY = "webmagic.token.v1";
@@ -86,8 +86,25 @@ export class GameSession {
 
   /** Bank at the current checkpoint floor — the server validates provenance
    * and answers with the authoritative save (netBus "serverSave"). */
-  sendBank(equipment: WireEquipment): void {
-    this.transport?.send({ t: "bank", equipment });
+  sendBank(inventory: WireInventory): void {
+    this.transport?.send({ t: "bank", inventory });
+  }
+
+  /** Feather escape: bank from any floor by spending a Feather of Safe
+   * Passage (the server verifies one was owned and is now gone). */
+  sendEscape(inventory: WireInventory): void {
+    this.transport?.send({ t: "escape", inventory });
+  }
+
+  /** Village inventory rearrangement (chest/bag/belt moves, discards). */
+  sendStash(inventory: WireInventory): void {
+    this.transport?.send({ t: "stash", inventory });
+  }
+
+  /** Merchant purchase: `inventory` is the post-purchase arrangement; the
+   * server validates the price against banked gold. */
+  sendBuy(itemId: string, inventory: WireInventory): void {
+    this.transport?.send({ t: "buy", itemId, inventory });
   }
 
   /** The run is lost — the server discards its grants. */
@@ -99,6 +116,11 @@ export class GameSession {
    * legitimately picked up an item, making it bankable for them. */
   attestGrant(playerId: string, itemId: string): void {
     this.transport?.send({ t: "grant", playerId, itemId });
+  }
+
+  /** HOST only: attest a gold pickup — gold's provenance path. */
+  attestGold(playerId: string, amount: number): void {
+    this.transport?.send({ t: "grantGold", playerId, amount });
   }
 
   // ── Connection plumbing ────────────────────────────────────────────────────

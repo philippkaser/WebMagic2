@@ -10,6 +10,7 @@ import { PlayerController } from "../player/PlayerController";
 import { getTextures } from "../render/textures";
 import { useGame } from "../state/gameStore";
 import { Breakable, Portal, Torch } from "../world/props";
+import { Merchant, StorageChest } from "../world/villageProps";
 import type { Vec3 } from "../world/types";
 
 const WORLD_GROUPS = interactionGroups(GROUPS.WORLD, [
@@ -86,6 +87,10 @@ export function Village() {
       {HUTS.map((hut, i) => (
         <Hut key={i} {...hut} wallTex={wallTex} />
       ))}
+
+      {/* Home economics: your chest by the near hut, Maro's stall opposite. */}
+      <StorageChest position={[8, 0, 9.5]} rotation={-2.2} />
+      <Merchant position={[-8.5, 0, 11]} rotation={2.5} />
 
       {/* A few crates to kick around — the sandbox starts at home. */}
       <Breakable kind="crate" position={[4, 1, 6]} floor={1} entityId="v0" />
