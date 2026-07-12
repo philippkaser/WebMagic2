@@ -1,8 +1,7 @@
 import { useFrame } from "@react-three/fiber";
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { Group, MeshStandardMaterial } from "three";
-import { Boss } from "../combat/Boss";
-import { Sentry, Wisp } from "../combat/enemies";
+import { getEnemyDef } from "../combat/enemyRegistry";
 import { useDevRoom } from "../game/devRoom";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
@@ -92,15 +91,16 @@ export function DevSpawns() {
   const remove = useDevRoom((s) => s.remove);
   return (
     <>
-      {spawns.map((s) =>
-        s.kind === "wisp" ? (
-          <Wisp key={s.id} entityId={s.id} position={s.pos} floor={s.floor} />
-        ) : s.kind === "sentry" ? (
-          <Sentry key={s.id} entityId={s.id} position={s.pos} floor={s.floor} />
-        ) : (
-          <Boss key={s.id} position={s.pos} floor={s.floor} onDeath={() => remove(s.id)} />
-        ),
-      )}
+      {spawns.map((s) => (
+        <Fragment key={s.id}>
+          {getEnemyDef(s.kind).render({
+            entityId: s.id,
+            pos: s.pos,
+            floor: s.floor,
+            onDeath: () => remove(s.id),
+          })}
+        </Fragment>
+      ))}
     </>
   );
 }

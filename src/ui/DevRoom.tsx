@@ -5,7 +5,8 @@ import { allAffixDefs } from "../items/affixes";
 import { allItemDefs, computeStats } from "../items/catalog";
 import { makeItemId } from "../items/itemId";
 import type { GearSlot, ItemDef } from "../items/types";
-import { useDevRoom, type DevEnemyKind } from "../game/devRoom";
+import { ENEMY_DEFS, type EnemyDef } from "../combat/enemyRegistry";
+import { useDevRoom } from "../game/devRoom";
 import { playerPosition } from "../game/player-state";
 import { isDevInvuln, setDevInvuln, useGame } from "../state/gameStore";
 import { iconOf } from "./itemInfo";
@@ -62,12 +63,11 @@ export function DevRoom() {
     useGame.setState({ mana: PLAYER.maxMana });
   };
 
-  const spawn = (kind: DevEnemyKind) => {
-    const y = kind === "sentry" ? 0 : kind === "boss" ? 1.8 : 1.6;
+  const spawn = (def: EnemyDef) => {
     const jitter = () => (Math.random() - 0.5) * 2.2;
     useDevRoom
       .getState()
-      .spawn(kind, [playerPosition.x + jitter() + 2, y, playerPosition.z + jitter()]);
+      .spawn(def.id, [playerPosition.x + jitter() + 2, def.spawnY, playerPosition.z + jitter()]);
   };
 
   const toggleInvuln = () => setInvuln(setDevInvuln(!invuln));
@@ -195,15 +195,11 @@ export function DevRoom() {
                 style={styles.floorInput}
               />
             </label>
-            <button style={styles.btn} onClick={() => spawn("wisp")}>
-              Spawn Wisp
-            </button>
-            <button style={styles.btn} onClick={() => spawn("sentry")}>
-              Spawn Sentry
-            </button>
-            <button style={styles.btn} onClick={() => spawn("boss")}>
-              Spawn Boss
-            </button>
+            {ENEMY_DEFS.map((def) => (
+              <button key={def.id} style={styles.btn} onClick={() => spawn(def)}>
+                Spawn {def.name}
+              </button>
+            ))}
             <button style={styles.btnGhost} onClick={() => useDevRoom.getState().clear()}>
               clear all
             </button>
