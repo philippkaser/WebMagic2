@@ -189,6 +189,14 @@ function WallsAndFloor({ layout }: { layout: FloorLayout }) {
           position={[0, WALL_HEIGHT + 0.5, 0]}
           collisionGroups={WORLD_GROUPS}
         />
+        {layout.ledges.map((box, i) => (
+          <CuboidCollider
+            key={i}
+            args={box.half}
+            position={box.center}
+            collisionGroups={WORLD_GROUPS}
+          />
+        ))}
       </RigidBody>
 
       <instancedMesh
@@ -206,6 +214,19 @@ function WallsAndFloor({ layout }: { layout: FloorLayout }) {
           envMapIntensity={0.4}
         />
       </instancedMesh>
+
+      {layout.ledges.map((box, i) => (
+        <mesh key={i} position={box.center} castShadow receiveShadow>
+          <boxGeometry args={[box.half[0] * 2, box.half[1] * 2, box.half[2] * 2]} />
+          <meshStandardMaterial
+            map={wallTex.map}
+            normalMap={wallTex.normalMap}
+            roughness={0.85}
+            metalness={0.06}
+            envMapIntensity={0.4}
+          />
+        </mesh>
+      ))}
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[layout.extent * 2, layout.extent * 2]} />

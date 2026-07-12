@@ -5,6 +5,7 @@ import type {
   EnemyKind,
   EnemySpawn,
   FloorLayout,
+  LedgeBox,
   PropSpawn,
   Rect,
   TrapSpawn,
@@ -177,6 +178,50 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     }
   }
 
+  // ── Raised ledges & floating loot perches ──────────────────────────────────
+  // Additive vertical playgrounds laid over the base floor: a low terrace you
+  // hop onto (single jump) sitting beside a higher floating perch that holds a
+  // breakable — reachable by a double jump straight up from the floor, or a
+  // step across from the terrace. Missing just drops you back to the floor, so
+  // these never gate the critical path. POI rooms are left clean.
+  const ledges: LedgeBox[] = [];
+  const TERRACE_TOP = 1.3; // single-jump stepping stone
+  const PERCH_TOP = 2.6; // needs a double jump from the floor (or the terrace)
+  let ledgeRooms = 0;
+  for (const room of rng.shuffle([...rooms])) {
+    if (ledgeRooms >= 4) break;
+    if (room === spawnRoom || room === exitRoom || room === treasureRoom) continue;
+    // Candidate mounts: perimeter floor tiles hugging a wall whose inward
+    // neighbour (where the perch floats) is also floor.
+    const spots: Array<{ tx: number; ty: number; dir: [number, number] }> = [];
+    for (let ty = room.y; ty < room.y + room.h; ty++) {
+      for (let tx = room.x; tx < room.x + room.w; tx++) {
+        const onPerimeter =
+          tx === room.x ||
+          tx === room.x + room.w - 1 ||
+          ty === room.y ||
+          ty === room.y + room.h - 1;
+        if (!onPerimeter || at(tx, ty) !== FLOOR) continue;
+        const dir = wallDirs.find(([dx, dy]) => at(tx + dx, ty + dy) === SOLID);
+        if (!dir) continue;
+        if (at(tx - dir[0], ty - dir[1]) !== FLOOR) continue;
+        spots.push({ tx, ty, dir });
+      }
+    }
+    if (spots.length === 0) continue;
+    const { tx, ty, dir } = rng.pick(spots);
+    // Terrace on the wall tile; floating perch one tile toward the room centre.
+    const [twx, , twz] = toWorld(tx, ty, size);
+    const [pwx, , pwz] = toWorld(tx - dir[0], ty - dir[1], size);
+    ledges.push(ledgeFromTop(twx, twz, TILE / 2, TERRACE_TOP));
+    ledges.push(ledgeFromTop(pwx, pwz, TILE * 0.4, PERCH_TOP, 0.25));
+    // Loot payoff: a breakable that settles onto the perch, plus a wall torch
+    // behind it so players notice the climb.
+    props.push({ kind: rng.chance(0.5) ? "crate" : "pot", pos: [pwx, PERCH_TOP + 0.6, pwz] });
+    torches.push([twx + dir[0] * TILE * 0.42, PERCH_TOP, twz + dir[1] * TILE * 0.42]);
+    ledgeRooms++;
+  }
+
   // ── Traps ──────────────────────────────────────────────────────────────────
   // Placed LAST, after every other rng draw, so adding hazards never perturbs
   // the rooms/props/enemies rolled above — a given seed keeps its exact layout
@@ -220,6 +265,7 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     traps,
     wallInstances,
     wallBoxes,
+    ledges,
     extent: (size * TILE) / 2,
   };
 }
@@ -325,6 +371,13 @@ function carveCorridor(
     for (; x !== to[0]; x += Math.sign(to[0] - x)) dig(x, y);
   }
   dig(x, y);
+}
+
+/** Build a stand-on box whose *top* face sits at world height `top`. A terrace
+ * fills from the floor up (omit `thickness`); a perch floats as a thin slab. */
+function ledgeFromTop(wx: number, wz: number, halfXZ: number, top: number, thickness?: number): LedgeBox {
+  const halfY = thickness !== undefined ? thickness / 2 : top / 2;
+  return { center: [wx, top - halfY, wz], half: [halfXZ, halfY, halfXZ] };
 }
 
 function toWorld(tx: number, ty: number, size: number): Vec3 {

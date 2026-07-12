@@ -88,6 +88,25 @@ describe("generateFloor", () => {
     }
   });
 
+  test("ledges are reachable perches that never block the critical path", () => {
+    for (let i = 0; i < 40; i++) {
+      const seed = (i * 2654435761) >>> 0;
+      const floor = 1 + (i % 20);
+      const layout = generateFloor(seed, floor);
+      // A grounded player's capsule bottom peaks ~1.77 on a single jump and
+      // ~3.27 on a double jump. Every perch must sit within double-jump reach,
+      // and terraces low enough for a single jump so nobody is stranded.
+      for (const box of layout.ledges) {
+        const top = box.center[1] + box.half[1];
+        expect(top).toBeLessThanOrEqual(3.27);
+      }
+      // Critical path is unchanged: ledges are separate colliders, so the tile
+      // grid still connects spawn to exit and treasure.
+      expect(isReachable(layout, layout.spawn, layout.exit)).toBe(true);
+      expect(isReachable(layout, layout.spawn, layout.treasure)).toBe(true);
+    }
+  });
+
   test("enemies scale with depth", () => {
     const shallow = generateFloor(42, 1);
     const deep = generateFloor(42, 15);

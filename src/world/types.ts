@@ -32,6 +32,14 @@ export interface WallBox {
   half: Vec3;
 }
 
+/** A stand-on platform — a low stepping terrace or a floating loot perch.
+ * Same shape as a WallBox but its top face (center.y + half.y) is what the
+ * player lands on. Purely additive vertical terrain layered over the floor. */
+export interface LedgeBox {
+  center: Vec3;
+  half: Vec3;
+}
+
 export interface FloorLayout {
   floor: number;
   seed: number;
@@ -57,6 +65,9 @@ export interface FloorLayout {
   wallInstances: Vec3[];
   /** Greedy-merged physics colliders covering all wall tiles. */
   wallBoxes: WallBox[];
+  /** Raised terraces + floating loot perches — optional vertical playgrounds,
+   * never on the critical path. */
+  ledges: LedgeBox[];
   /** World-space half-extent of the whole grid (for floor/ceiling planes). */
   extent: number;
 }

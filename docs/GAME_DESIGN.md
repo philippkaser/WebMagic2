@@ -251,6 +251,10 @@ matchmaking logic (`net/matchmaking.ts`).
 
 - Can I cross a room in a way that feels cool, even with no enemies? ✔ dash,
   double-jump, hover, blast-jump.
+- Is there a reason to *use* that mobility? ✔ raised ledges — a low terrace
+  beside a floating loot perch you reach with a double jump (or a step across
+  from the terrace). Missing just drops you to the floor, so they reward air
+  skill without ever gating the critical path.
 - Does hitting an enemy feel impactful? ✔ hit flash, knockback, hit sound,
   particle spray.
 - Does the room react to me? ✔ props shove/shatter/explode, physics ragdolls.
