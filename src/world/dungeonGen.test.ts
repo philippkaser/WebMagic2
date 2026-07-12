@@ -63,6 +63,31 @@ describe("generateFloor", () => {
     expect(generateFloor(4242, 5).boss).toBeNull();
   });
 
+  test("every torch is mounted against a wall", () => {
+    for (let i = 0; i < 40; i++) {
+      const seed = (i * 2654435761) >>> 0;
+      const floor = 1 + (i % 20);
+      const layout = generateFloor(seed, floor);
+      const { size, tiles } = layout;
+      const at = (x: number, y: number) =>
+        x >= 0 && y >= 0 && x < size && y < size ? tiles[y * size + x] : 0;
+      for (const [wx, , wz] of layout.torches) {
+        // The tile the torch is pushed into must be solid (a wall), and the
+        // tile it hangs over must be walkable floor.
+        const tx = Math.round(wx / TILE + size / 2 - 0.5);
+        const ty = Math.round(wz / TILE + size / 2 - 0.5);
+        const solidNeighbour = [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ].some(([dx, dy]) => at(tx + dx, ty + dy) === 0);
+        expect(at(tx, ty)).toBe(1);
+        expect(solidNeighbour).toBe(true);
+      }
+    }
+  });
+
   test("enemies scale with depth", () => {
     const shallow = generateFloor(42, 1);
     const deep = generateFloor(42, 15);

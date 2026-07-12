@@ -110,17 +110,40 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
   }
 
   // ── Torches along room walls ───────────────────────────────────────────────
+  // A torch must actually back onto a wall. We only mount them on perimeter
+  // floor tiles that have a solid neighbour, then push the torch toward that
+  // real wall face. Checking the neighbour keeps torches off the open edges
+  // where corridors punch through a room, which used to leave them hanging in
+  // mid-air over a passage.
   const torches: Vec3[] = [];
+  const TORCH_PUSH = TILE * 0.42;
+  const wallDirs: Array<[number, number]> = [
+    [0, -1], // north
+    [0, 1], // south
+    [-1, 0], // west
+    [1, 0], // east
+  ];
   for (const room of rng.shuffle([...rooms])) {
     if (torches.length >= 16) break;
-    for (let i = 0; i < 2; i++) {
-      const onNorth = rng.chance(0.5);
-      const tx = rng.int(room.x + 1, room.x + room.w - 2);
-      const ty = onNorth ? room.y : room.y + room.h - 1;
-      if (at(tx, ty) !== FLOOR) continue;
-      const [wx, , wz] = toWorld(tx, ty, size);
-      // Push toward the adjacent wall face.
-      torches.push([wx, 2.6, wz + (onNorth ? -TILE * 0.42 : TILE * 0.42)]);
+    // Every perimeter floor tile that sits against a wall is a valid mount.
+    const mounts: Vec3[] = [];
+    for (let ty = room.y; ty < room.y + room.h; ty++) {
+      for (let tx = room.x; tx < room.x + room.w; tx++) {
+        const onPerimeter =
+          tx === room.x ||
+          tx === room.x + room.w - 1 ||
+          ty === room.y ||
+          ty === room.y + room.h - 1;
+        if (!onPerimeter || at(tx, ty) !== FLOOR) continue;
+        const dir = wallDirs.find(([dx, dy]) => at(tx + dx, ty + dy) === SOLID);
+        if (!dir) continue;
+        const [wx, , wz] = toWorld(tx, ty, size);
+        mounts.push([wx + dir[0] * TORCH_PUSH, 2.6, wz + dir[1] * TORCH_PUSH]);
+      }
+    }
+    for (const pos of rng.shuffle(mounts).slice(0, 2)) {
+      if (torches.length >= 16) break;
+      torches.push(pos);
     }
   }
 
