@@ -10,7 +10,7 @@
  * shape obvious, factor the common shell out then — informed by real cases,
  * not guessed from two. */
 
-export type EnemyId = "wisp" | "sentry" | "boss";
+export type EnemyId = "wisp" | "sentry" | "shadow" | "boss";
 
 export interface EnemyStats {
   id: EnemyId;
@@ -41,6 +41,14 @@ export const ENEMY_STATS: EnemyStats[] = [
     baseHealth: 60,
     singleton: false,
     spawnY: 0,
+  },
+  {
+    id: "shadow",
+    name: "Shadow",
+    desc: "Lurking stalker — circles at range, then lunges from the dark",
+    baseHealth: 34,
+    singleton: false,
+    spawnY: 0.8,
   },
   {
     id: "boss",

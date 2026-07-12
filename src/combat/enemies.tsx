@@ -466,3 +466,210 @@ export function Sentry({
     </RigidBody>
   );
 }
+
+/** Shadow — a lurking stalker. Instead of the wisp's straight chase it plays
+ * keep-away: prowls a ring around its target, then darts in for a strike and
+ * recoils back into the dark. Floats like the wisp; the authority runs its
+ * stalk→lunge→recoil brain, replicas are driven by the net layer. */
+export function Shadow({
+  position,
+  floor,
+  entityId,
+}: {
+  position: Vec3;
+  floor: number;
+  entityId: string;
+}) {
+  const body = useRef<RapierRigidBody>(null);
+  const mat = useRef<MeshStandardMaterial>(null);
+  const scale = useMemo(() => floorScale(floor), [floor]);
+  const hp = useRef(getEnemyStats("shadow").baseHealth * scale.enemyHealth);
+  const deadRef = useRef(false);
+  const [dead, setDead] = useState(false);
+  const aggro = useRef(false);
+  const knockTimer = useRef(0);
+  const contactTimer = useRef(0);
+  const flash = useRef(0);
+  const phase = useMemo(() => Math.random() * Math.PI * 2, []);
+  const desired = useMemo(() => new Vector3(), []);
+  // Lurk state machine: stalk (prowl the ring) → lunge (dash in) → recoil.
+  const mode = useRef<"stalk" | "lunge" | "recoil">("stalk");
+  const modeTimer = useRef(0);
+  const lungeTimer = useRef(2 + Math.random() * 2);
+  // Fixed orbit direction so a given shadow prowls one way, not jittering.
+  const spin = useMemo(() => (Math.random() < 0.5 ? 1 : -1), []);
+
+  const kill = useCallback(
+    (silent = false) => {
+      if (deadRef.current) return;
+      deadRef.current = true;
+      const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
+      if (!silent) {
+        spawnBurst({
+          position: [t.x, t.y, t.z],
+          count: 26,
+          color: ["#2a1a44", "#6a3d9a", "#050208"],
+          speed: 6,
+          ttl: 0.8,
+          size: 0.1,
+        });
+        flashLight([t.x, t.y, t.z], "#6a3d9a", 18);
+        dropLoot([t.x, Math.max(t.y, 0.6), t.z], floor, LOOT_DROP_CHANCE);
+        dropGold([t.x, Math.max(t.y, 0.6), t.z], floor, GOLD_DROPS.enemyChance, "enemy");
+      }
+      setDead(true);
+    },
+    [floor, position],
+  );
+
+  const hitFeedback = useCallback(() => {
+    const t = body.current?.translation();
+    if (!t) return;
+    spawnBurst({ position: [t.x, t.y, t.z], count: 6, color: "#8a5cc0", speed: 3, ttl: 0.4, size: 0.06 });
+  }, []);
+
+  const onDamaged = useCallback(() => {
+    aggro.current = true;
+  }, []);
+
+  const net = useEnemyNet({
+    entityId,
+    body,
+    hp,
+    deadRef,
+    flash,
+    dead,
+    knockTimer,
+    onKill: kill,
+    hitFeedback,
+    onDamaged,
+  });
+
+  useFrame(({ clock }, dt) => {
+    const b = body.current;
+    if (!b || deadRef.current) return;
+    if (!combatActive()) return;
+
+    flash.current = Math.max(0, flash.current - dt * 5);
+    if (mat.current) {
+      mat.current.emissiveIntensity = 0.8 + flash.current * 6;
+      mat.current.opacity = mode.current === "lunge" ? 0.95 : 0.55;
+    }
+    contactTimer.current -= dt;
+
+    const t = b.translation();
+    const dx = playerPosition.x - t.x;
+    const dy = playerPosition.y - t.y;
+    const dz = playerPosition.z - t.z;
+    const dist = Math.hypot(dx, dy, dz);
+
+    // Contact strike — lands mostly on a lunge; local, like the wisp's burn.
+    if (dist < 1.5 && contactTimer.current <= 0) {
+      contactTimer.current = PLAYER.contactDamageCooldown;
+      useGame.getState().takeDamage(12 * scale.enemyDamage);
+      spawnBurst({
+        position: [playerPosition.x, playerPosition.y + 0.3, playerPosition.z],
+        count: 12,
+        color: ["#2a1a44", "#6a3d9a"],
+        speed: 4,
+        ttl: 0.5,
+        size: 0.08,
+      });
+      const push = 5 / Math.max(dist, 0.4);
+      getPlayerBody()?.applyImpulse({ x: dx * push * 0.3, y: 1.5, z: dz * push * 0.3 }, true);
+    }
+
+    // Replicas are driven by the net layer; only the authority thinks.
+    if (!net.isAuthority) return;
+
+    const target = nearestWizardTo(t.x, t.y, t.z);
+    knockTimer.current -= dt;
+    if (!aggro.current) {
+      if (target.dist < 15 * getStats().aggroMult) aggro.current = true;
+      b.setLinvel({ x: 0, y: Math.sin(clock.elapsedTime * 1.2 + phase) * 0.4, z: 0 }, true);
+      return;
+    }
+    if (knockTimer.current > 0) return;
+
+    // Planar unit vector toward the target, plus its perpendicular (for orbit).
+    const px = target.pos.x - t.x;
+    const pz = target.pos.z - t.z;
+    const planar = Math.hypot(px, pz) || 1;
+    const nx = px / planar;
+    const nz = pz / planar;
+    const targetY = target.pos.y + 0.3 + Math.sin(clock.elapsedTime * 1.8 + phase) * 0.3;
+    const LURK = 6;
+
+    modeTimer.current -= dt;
+    if (mode.current === "stalk") {
+      lungeTimer.current -= dt;
+      // Radial term closes/opens toward the lurk ring; tangential term prowls
+      // around it. Clamp the radial pull so it eases onto the ring.
+      const radial = Math.max(-1, Math.min(1, (target.dist - LURK) * 0.5));
+      const speed = 2.4 + floor * 0.03;
+      desired.set(nx * radial + -nz * spin * 0.7, 0, nz * radial + nx * spin * 0.7);
+      if (desired.lengthSq() > 1e-4) desired.normalize().multiplyScalar(speed);
+      desired.y = Math.max(-3, Math.min(3, (targetY - t.y) * 2));
+      if (lungeTimer.current <= 0 && target.dist < 10) {
+        mode.current = "lunge";
+        modeTimer.current = 0.55;
+      }
+    } else if (mode.current === "lunge") {
+      const speed = 11 + floor * 0.12;
+      desired.set(nx * speed, Math.max(-3, Math.min(3, (targetY - t.y) * 2)), nz * speed);
+      if (modeTimer.current <= 0) {
+        mode.current = "recoil";
+        modeTimer.current = 0.45;
+      }
+    } else {
+      // recoil — shrink back into the dark before prowling again
+      desired.set(-nx * 6, 0, -nz * 6);
+      if (modeTimer.current <= 0) {
+        mode.current = "stalk";
+        lungeTimer.current = 2 + Math.random() * 2;
+      }
+    }
+
+    const v = b.linvel();
+    const k = 1 - Math.exp(-(mode.current === "lunge" ? 6 : 3) * dt);
+    b.setLinvel(
+      { x: v.x + (desired.x - v.x) * k, y: v.y + (desired.y - v.y) * k, z: v.z + (desired.z - v.z) * k },
+      true,
+    );
+  });
+
+  if (dead) return null;
+  return (
+    <RigidBody
+      ref={body}
+      position={position}
+      type={net.bodyType}
+      colliders={false}
+      gravityScale={0}
+      linearDamping={0.6}
+      enabledRotations={[false, false, false]}
+    >
+      <BallCollider args={[0.44]} mass={2} collisionGroups={ENEMY_GROUPS} />
+      <mesh castShadow>
+        <icosahedronGeometry args={[0.5, 0]} />
+        <meshStandardMaterial
+          ref={mat}
+          color="#0a0616"
+          emissive="#5a2d8a"
+          emissiveIntensity={0.8}
+          flatShading
+          roughness={0.6}
+          transparent
+          opacity={0.55}
+        />
+      </mesh>
+      {/* Two faint eyes peering out of the murk. */}
+      {([0.13, -0.13] as const).map((x) => (
+        <mesh key={x} position={[x, 0.06, 0.34]}>
+          <sphereGeometry args={[0.05, 6, 6]} />
+          <meshStandardMaterial color="#000" emissive="#c89cff" emissiveIntensity={3} toneMapped={false} />
+        </mesh>
+      ))}
+    </RigidBody>
+  );
+}

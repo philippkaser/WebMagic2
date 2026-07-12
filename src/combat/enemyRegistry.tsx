@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Vec3 } from "../world/types";
 import { Boss } from "./Boss";
-import { Sentry, Wisp } from "./enemies";
+import { Sentry, Shadow, Wisp } from "./enemies";
 import { ENEMY_STATS, getEnemyStats, type EnemyId, type EnemyStats } from "./enemyStats";
 
 /** The mount layer over the enemy roster: pairs each data entry in
@@ -29,6 +29,9 @@ const RENDERERS: Record<EnemyId, RenderFn> = {
   wisp: ({ entityId, pos, floor }) => <Wisp entityId={entityId} position={pos} floor={floor} />,
   sentry: ({ entityId, pos, floor }) => (
     <Sentry entityId={entityId} position={pos} floor={floor} />
+  ),
+  shadow: ({ entityId, pos, floor }) => (
+    <Shadow entityId={entityId} position={pos} floor={floor} />
   ),
   boss: ({ pos, floor, onDeath }) => <Boss position={pos} floor={floor} onDeath={onDeath} />,
 };

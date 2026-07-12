@@ -1,7 +1,16 @@
 import { DUNGEON, TILE, WALL_HEIGHT, floorScale } from "../core/config";
 import { Rng } from "../core/rng";
 import { TRAP_DEFS } from "./trapCatalog";
-import type { EnemySpawn, FloorLayout, PropSpawn, Rect, TrapSpawn, Vec3, WallBox } from "./types";
+import type {
+  EnemyKind,
+  EnemySpawn,
+  FloorLayout,
+  PropSpawn,
+  Rect,
+  TrapSpawn,
+  Vec3,
+  WallBox,
+} from "./types";
 
 /** Procedural floor generator. Pure and deterministic: the same (seed, floor)
  * pair always yields an identical layout, which is what lets every player in
@@ -137,8 +146,13 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     for (let i = 0; i < share; i++) {
       const pos = randomInRoom(rng, room, size, 1.6);
       if (dist2World(pos, spawn) < 100) continue;
-      const sentry = floor >= 2 && rng.chance(0.22);
-      enemies.push({ kind: sentry ? "sentry" : "wisp", pos: sentry ? [pos[0], 0.9, pos[2]] : pos });
+      // One draw picks the kind: shadow (floor 3+) prowls, sentry (floor 2+)
+      // holds an angle, wisp fills the rest.
+      const roll = rng.next();
+      const kind: EnemyKind =
+        floor >= 3 && roll < 0.16 ? "shadow" : floor >= 2 && roll < 0.38 ? "sentry" : "wisp";
+      const y = kind === "sentry" ? 0.9 : kind === "shadow" ? 0.8 : pos[1];
+      enemies.push({ kind, pos: [pos[0], y, pos[2]] });
       enemyBudget--;
     }
   }

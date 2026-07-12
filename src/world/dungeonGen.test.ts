@@ -69,6 +69,17 @@ describe("generateFloor", () => {
     expect(deep.enemies.length).toBeGreaterThan(shallow.enemies.length);
   });
 
+  test("shadows join the enemy mix on deeper floors", () => {
+    let sawShadow = false;
+    for (let i = 0; i < 30 && !sawShadow; i++) {
+      const layout = generateFloor((i * 2654435761) >>> 0, 5 + (i % 15));
+      if (layout.enemies.some((e) => e.kind === "shadow")) sawShadow = true;
+    }
+    expect(sawShadow).toBe(true);
+    // Floor 1 is too shallow for shadows or sentries — wisps only.
+    expect(generateFloor(7, 1).enemies.every((e) => e.kind === "wisp")).toBe(true);
+  });
+
   test("traps are placed deterministically and scale with depth", () => {
     const a = generateFloor(2024, 6);
     const b = generateFloor(2024, 6);
