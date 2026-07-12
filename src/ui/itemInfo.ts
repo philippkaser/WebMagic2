@@ -58,6 +58,8 @@ export function statLines(item: ResolvedItem, comparedTo?: ResolvedItem | null):
 interface PassiveSpec {
   key: keyof Passives;
   neutral: number;
+  /** Additive stats sum across gear; the rest multiply. */
+  additive: boolean;
   /** +1: bigger is better; −1: smaller is better. */
   better: 1 | -1;
   format(value: number): string;
@@ -67,14 +69,30 @@ const PASSIVE_SPECS: PassiveSpec[] = [
   {
     key: "maxHealth",
     neutral: 0,
+    additive: true,
     better: 1,
     format: (v) => `${v > 0 ? "+" : ""}${v} max health`,
   },
-  { key: "speedMult", neutral: 1, better: 1, format: (v) => pct(v, "movement speed") },
-  { key: "manaRegenMult", neutral: 1, better: 1, format: (v) => pct(v, "mana regeneration") },
-  { key: "damageMult", neutral: 1, better: 1, format: (v) => pct(v, "spell damage") },
-  { key: "damageTakenMult", neutral: 1, better: -1, format: (v) => pct(v, "damage taken") },
-  { key: "aggroMult", neutral: 1, better: -1, format: (v) => pct(v, "enemy notice range") },
+  { key: "speedMult", neutral: 1, additive: false, better: 1, format: (v) => pct(v, "movement speed") },
+  { key: "manaRegenMult", neutral: 1, additive: false, better: 1, format: (v) => pct(v, "mana regeneration") },
+  { key: "damageMult", neutral: 1, additive: false, better: 1, format: (v) => pct(v, "spell damage") },
+  { key: "damageTakenMult", neutral: 1, additive: false, better: -1, format: (v) => pct(v, "damage taken") },
+  { key: "aggroMult", neutral: 1, additive: false, better: -1, format: (v) => pct(v, "enemy notice range") },
+  {
+    key: "extraProjectiles",
+    neutral: 0,
+    additive: true,
+    better: 1,
+    format: (v) => `+${v} projectile${Math.abs(v) === 1 ? "" : "s"} per cast`,
+  },
+  {
+    key: "homing",
+    neutral: 0,
+    additive: true,
+    better: 1,
+    format: (v) => `+${Math.round(v * 100)}% projectile homing`,
+  },
+  { key: "fireRateMult", neutral: 1, additive: false, better: 1, format: (v) => pct(v, "fire rate") },
 ];
 
 function pct(mult: number, label: string): string {
@@ -90,7 +108,7 @@ export function totalPassives(item: ResolvedItem): Partial<Passives> {
       const v = block[spec.key];
       if (v === undefined) continue;
       const prev = total[spec.key] ?? spec.neutral;
-      total[spec.key] = spec.key === "maxHealth" ? prev + v : prev * v;
+      total[spec.key] = spec.additive ? prev + v : prev * v;
     }
   }
   return total;

@@ -32,36 +32,48 @@ function bolt(ctx: AbilityContext, opts: {
   damage: number;
   speed: number;
   size: number;
+  /** Base bolts this cast fires (scatter fires 5); the +extraProjectiles
+   * multishot bonus is added on top. */
+  count?: number;
   spread?: number;
   gravityScale?: number;
   blastRadius?: number;
   blastImpulse?: number;
 }) {
   const spread = opts.spread ?? 0.012;
-  tmp
-    .copy(ctx.dir)
-    .add(
-      new Vector3(
-        (Math.random() - 0.5) * spread,
-        (Math.random() - 0.5) * spread,
-        (Math.random() - 0.5) * spread,
-      ),
-    )
-    .normalize()
-    .multiplyScalar(opts.speed);
-  fireProjectile({
-    team: "player",
-    position: [ctx.origin.x, ctx.origin.y, ctx.origin.z],
-    velocity: [tmp.x, tmp.y, tmp.z],
-    damage: opts.damage * ctx.stats.damageMult,
-    color: ctx.staff.color,
-    size: opts.size,
-    gravityScale: opts.gravityScale ?? 0,
-    blastRadius: opts.blastRadius,
-    blastImpulse: opts.blastImpulse,
-    // A peer's replayed bolt is visual: their own client requests the damage.
-    cosmetic: ctx.remote ?? false,
-  });
+  const homing = ctx.stats.homing ?? 0;
+  const extra = Math.max(0, Math.round(ctx.stats.extraProjectiles ?? 0));
+  const total = (opts.count ?? 1) + extra;
+  // A little extra scatter when multishot widens the volley, so stacked bolts
+  // don't fly as one indistinguishable line.
+  const spreadFor = total > 1 ? Math.max(spread, 0.06) : spread;
+  for (let i = 0; i < total; i++) {
+    tmp
+      .copy(ctx.dir)
+      .add(
+        new Vector3(
+          (Math.random() - 0.5) * spreadFor,
+          (Math.random() - 0.5) * spreadFor,
+          (Math.random() - 0.5) * spreadFor,
+        ),
+      )
+      .normalize()
+      .multiplyScalar(opts.speed);
+    fireProjectile({
+      team: "player",
+      position: [ctx.origin.x, ctx.origin.y, ctx.origin.z],
+      velocity: [tmp.x, tmp.y, tmp.z],
+      damage: opts.damage * ctx.stats.damageMult,
+      color: ctx.staff.color,
+      size: opts.size,
+      gravityScale: opts.gravityScale ?? 0,
+      blastRadius: opts.blastRadius,
+      blastImpulse: opts.blastImpulse,
+      homing,
+      // A peer's replayed bolt is visual: their own client requests the damage.
+      cosmetic: ctx.remote ?? false,
+    });
+  }
 }
 
 const ABILITIES: Record<string, Ability> = {
@@ -79,18 +91,16 @@ const ABILITIES: Record<string, Ability> = {
     mana: 7,
     cooldown: 0.55,
     info: "5×8 dmg, spread",
-    cast: (ctx) => {
-      for (let i = 0; i < 5; i++) {
-        bolt(ctx, {
-          damage: 8,
-          speed: 26,
-          size: 0.1,
-          spread: 0.22,
-          gravityScale: 0.35,
-          blastRadius: 1.4,
-        });
-      }
-    },
+    cast: (ctx) =>
+      bolt(ctx, {
+        damage: 8,
+        speed: 26,
+        size: 0.1,
+        count: 5,
+        spread: 0.22,
+        gravityScale: 0.35,
+        blastRadius: 1.4,
+      }),
   },
   rapid: {
     id: "rapid",

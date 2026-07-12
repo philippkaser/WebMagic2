@@ -42,6 +42,29 @@ export function forEachHittable(cb: (h: Hittable) => void): void {
   for (const h of hittables.values()) cb(h);
 }
 
+/** Nearest registered hittable of a team within maxDist (world units), or null.
+ * Used by homing projectiles to pick a target to curve toward. */
+export function nearestHittable(
+  team: HitTeam,
+  x: number,
+  y: number,
+  z: number,
+  maxDist: number,
+): Hittable | null {
+  let best: Hittable | null = null;
+  let bestD2 = maxDist * maxDist;
+  for (const h of hittables.values()) {
+    if (h.team !== team) continue;
+    const p = h.getPosition();
+    const d2 = (p.x - x) ** 2 + (p.y - y) ** 2 + (p.z - z) ** 2;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = h;
+    }
+  }
+  return best;
+}
+
 export function registerDynamicBody(body: PhysBody): () => void {
   dynamicBodies.add(body);
   return () => dynamicBodies.delete(body);

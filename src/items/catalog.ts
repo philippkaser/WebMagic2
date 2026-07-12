@@ -53,6 +53,30 @@ const defs: ItemDef[] = [
     primary: "lance",
     secondary: "blast",
   },
+  {
+    id: "seeker_staff",
+    slot: "staff",
+    name: "Seeker's Wand",
+    tier: 2,
+    minFloor: 3,
+    color: "#4fe0c0",
+    desc: "Bolt / Force Blast — bolts seek",
+    primary: "bolt",
+    secondary: "blast",
+    passives: { homing: 0.5 },
+  },
+  {
+    id: "splinter_staff",
+    slot: "staff",
+    name: "Splinterstaff",
+    tier: 2,
+    minFloor: 4,
+    color: "#ffd24a",
+    desc: "Twin Bolt / Shockwave",
+    primary: "bolt",
+    secondary: "shockwave",
+    passives: { extraProjectiles: 1 },
+  },
   // ── Amulets ───────────────────────────────────────────────────────────────
   {
     id: "amulet_vigor",
@@ -93,6 +117,36 @@ const defs: ItemDef[] = [
     color: "#ffb13d",
     desc: "+30% spell damage",
     passives: { damageMult: 1.3 },
+  },
+  {
+    id: "amulet_seeker",
+    slot: "amulet",
+    name: "Amulet of the Seeker",
+    tier: 2,
+    minFloor: 4,
+    color: "#4fe0c0",
+    desc: "+45% projectile homing",
+    passives: { homing: 0.45 },
+  },
+  {
+    id: "amulet_haste",
+    slot: "amulet",
+    name: "Amulet of Haste",
+    tier: 2,
+    minFloor: 4,
+    color: "#ffe08a",
+    desc: "+22% fire rate",
+    passives: { fireRateMult: 1.22 },
+  },
+  {
+    id: "amulet_multi",
+    slot: "amulet",
+    name: "Amulet of Multiplicity",
+    tier: 3,
+    minFloor: 6,
+    color: "#c9a5ff",
+    desc: "+1 projectile per cast",
+    passives: { extraProjectiles: 1 },
   },
   // ── Cloaks ────────────────────────────────────────────────────────────────
   {
@@ -253,6 +307,9 @@ const BASE: DerivedStats = {
   damageMult: 1,
   damageTakenMult: 1,
   aggroMult: 1,
+  extraProjectiles: 0,
+  homing: 0,
+  fireRateMult: 1,
   jump: "single",
   dash: false,
 };
@@ -271,6 +328,9 @@ export function computeStats(equipment: Equipment): DerivedStats {
       stats.damageMult *= p.damageMult ?? 1;
       stats.damageTakenMult *= p.damageTakenMult ?? 1;
       stats.aggroMult *= p.aggroMult ?? 1;
+      stats.extraProjectiles += p.extraProjectiles ?? 0;
+      stats.homing += p.homing ?? 0;
+      stats.fireRateMult *= p.fireRateMult ?? 1;
     }
     if (item.def.jump) stats.jump = item.def.jump;
     if (item.def.dash) stats.dash = true;
