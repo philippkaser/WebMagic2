@@ -1,7 +1,11 @@
 /** Global tuning constants. Keep gameplay feel numbers here so they are easy to iterate on. */
 
 export const TILE = 2; // world units per dungeon tile
-export const WALL_HEIGHT = 4;
+// Ceiling height (walls span 0..WALL_HEIGHT; the ceiling collider sits on top).
+// Sized so a perfectly-timed double jump clears it: a grounded capsule head
+// sits at halfHeight+radius, and a full jump (1.77) chained into a second at
+// apex (1.50) lifts it to ~5.07 world units — 6 leaves comfortable headroom.
+export const WALL_HEIGHT = 6;
 export const EYE_HEIGHT = 0.7; // camera offset above player body center
 
 export const GRAVITY = -26;
