@@ -1,6 +1,7 @@
 import { DUNGEON, TILE, WALL_HEIGHT, floorScale } from "../core/config";
 import { Rng } from "../core/rng";
-import type { EnemySpawn, FloorLayout, PropSpawn, Rect, Vec3, WallBox } from "./types";
+import { TRAP_DEFS } from "./trapCatalog";
+import type { EnemySpawn, FloorLayout, PropSpawn, Rect, TrapSpawn, Vec3, WallBox } from "./types";
 
 /** Procedural floor generator. Pure and deterministic: the same (seed, floor)
  * pair always yields an identical layout, which is what lets every player in
@@ -142,6 +143,32 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     }
   }
 
+  // ── Traps ──────────────────────────────────────────────────────────────────
+  // Placed LAST, after every other rng draw, so adding hazards never perturbs
+  // the rooms/props/enemies rolled above — a given seed keeps its exact layout
+  // and merely gains traps. The warp is filtered off checkpoint floors so it
+  // can't yank a wizard away from a floor they came to bank on.
+  const traps: TrapSpawn[] = [];
+  const eligibleTraps = TRAP_DEFS.filter((t) => !(t.noCheckpoint && isCheckpoint));
+  const trapWeight = eligibleTraps.reduce((s, t) => s + t.weight, 0);
+  const trapBudget = Math.min(2 + Math.floor(floor / 3), 9);
+  for (let tries = 0; tries < trapBudget * 5 && traps.length < trapBudget; tries++) {
+    const room = rng.pick(rooms);
+    if (room === spawnRoom || (isBossFloor && room === exitRoom)) continue;
+    const pos = randomInRoom(rng, room, size, 0);
+    if (dist2World(pos, spawn) < 64) continue; // never right on top of the entrance
+    let r = rng.next() * trapWeight;
+    let def = eligibleTraps[0];
+    for (const t of eligibleTraps) {
+      r -= t.weight;
+      if (r <= 0) {
+        def = t;
+        break;
+      }
+    }
+    traps.push({ kind: def.id, pos });
+  }
+
   return {
     floor,
     seed,
@@ -156,6 +183,7 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     torches,
     props,
     enemies,
+    traps,
     wallInstances,
     wallBoxes,
     extent: (size * TILE) / 2,

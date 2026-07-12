@@ -14,6 +14,7 @@ import { PlayerController } from "../player/PlayerController";
 import { getTextures } from "../render/textures";
 import { useGame } from "../state/gameStore";
 import { Breakable, Portal, Torch, TreasurePedestal } from "../world/props";
+import { Trap } from "../world/traps";
 import type { FloorLayout } from "../world/types";
 
 const WORLD_GROUPS = interactionGroups(GROUPS.WORLD, [
@@ -103,6 +104,9 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
             onDeath: NOOP,
           })}
         </Fragment>
+      ))}
+      {layout.traps.map((trap, i) => (
+        <Trap key={i} kind={trap.kind} pos={trap.pos} floor={layout.floor} />
       ))}
 
       <TreasurePedestal position={layout.treasure} floor={layout.floor} seed={layout.seed} />

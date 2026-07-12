@@ -6,6 +6,7 @@ import { allItemDefs, computeStats } from "../items/catalog";
 import { makeItemId } from "../items/itemId";
 import type { GearSlot, ItemDef } from "../items/types";
 import { ENEMY_DEFS, type EnemyDef } from "../combat/enemyRegistry";
+import { TRAP_DEFS, type TrapDef } from "../world/trapCatalog";
 import { useDevRoom } from "../game/devRoom";
 import { playerPosition } from "../game/player-state";
 import { isDevInvuln, setDevInvuln, useGame } from "../state/gameStore";
@@ -68,6 +69,13 @@ export function DevRoom() {
     useDevRoom
       .getState()
       .spawn(def.id, [playerPosition.x + jitter() + 2, def.spawnY, playerPosition.z + jitter()]);
+  };
+
+  const spawnTrap = (def: TrapDef) => {
+    const jitter = () => (Math.random() - 0.5) * 1.6;
+    useDevRoom
+      .getState()
+      .spawnTrap(def.id, [playerPosition.x + jitter() + 2.5, 0, playerPosition.z + jitter()]);
   };
 
   const toggleInvuln = () => setInvuln(setDevInvuln(!invuln));
@@ -222,6 +230,37 @@ export function DevRoom() {
           <div style={styles.hint}>
             HP shown scales to the spawn floor. Enemies spawn beside you and fight here in the
             village — close this panel (Esc / I) and click to take control.
+          </div>
+        </Section>
+
+        {/* Trap spawner — same table pattern as enemies */}
+        <Section label="TRAPS">
+          <div style={styles.row}>
+            {TRAP_DEFS.map((def) => (
+              <button key={def.id} style={styles.btn} onClick={() => spawnTrap(def)}>
+                Place {def.name}
+              </button>
+            ))}
+          </div>
+          <div style={styles.itemList}>
+            {TRAP_DEFS.map((def) => (
+              <div key={def.id} style={styles.itemRow}>
+                <span style={styles.itemName}>{def.name}</span>
+                <span style={styles.itemDesc}>{def.desc}</span>
+                <span
+                  style={{ ...styles.tier, width: 60 }}
+                  title={`base ${def.baseDamage} dmg × floor ${spawnFloor} scaling`}
+                >
+                  {def.baseDamage > 0
+                    ? `${Math.round(def.baseDamage * floorScale(spawnFloor).enemyDamage)} dmg`
+                    : "—"}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div style={styles.hint}>
+            Traps trigger on contact (spikes, warp) or fire at you (dart). The warp only descends
+            inside a real dungeon — here it just shows a message.
           </div>
         </Section>
 

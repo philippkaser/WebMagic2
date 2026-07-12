@@ -3,6 +3,7 @@ import { Fragment, useEffect, useRef } from "react";
 import { Group, MeshStandardMaterial } from "three";
 import { getEnemyDef } from "../combat/enemyRegistry";
 import { useDevRoom } from "../game/devRoom";
+import { Trap } from "./traps";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { addLightSource, removeLightSource } from "../fx/DynamicLights";
@@ -88,6 +89,7 @@ export function DevSlab({ position }: { position: Vec3 }) {
  * village while a dev session is running. */
 export function DevSpawns() {
   const spawns = useDevRoom((s) => s.spawns);
+  const traps = useDevRoom((s) => s.traps);
   const remove = useDevRoom((s) => s.remove);
   return (
     <>
@@ -100,6 +102,9 @@ export function DevSpawns() {
             onDeath: () => remove(s.id),
           })}
         </Fragment>
+      ))}
+      {traps.map((t) => (
+        <Trap key={t.id} kind={t.kind} pos={t.pos} floor={t.floor} />
       ))}
     </>
   );

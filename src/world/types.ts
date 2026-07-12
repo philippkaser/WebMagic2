@@ -9,6 +9,7 @@ export interface Rect {
 
 export type PropKind = "crate" | "barrel" | "pot";
 export type EnemyKind = "wisp" | "sentry";
+export type TrapKind = "spike" | "dart" | "warp";
 
 export interface PropSpawn {
   kind: PropKind;
@@ -17,6 +18,11 @@ export interface PropSpawn {
 
 export interface EnemySpawn {
   kind: EnemyKind;
+  pos: Vec3;
+}
+
+export interface TrapSpawn {
+  kind: TrapKind;
   pos: Vec3;
 }
 
@@ -46,6 +52,7 @@ export interface FloorLayout {
   torches: Vec3[];
   props: PropSpawn[];
   enemies: EnemySpawn[];
+  traps: TrapSpawn[];
   /** One entry per visible wall cube (world position of cube center). */
   wallInstances: Vec3[];
   /** Greedy-merged physics colliders covering all wall tiles. */
