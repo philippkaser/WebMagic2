@@ -49,6 +49,8 @@ export function floorScale(floor: number) {
   return {
     enemyHealth: 1 + (floor - 1) * 0.18,
     enemyDamage: 1 + (floor - 1) * 0.12,
-    enemyCount: Math.min(4 + Math.floor(floor * 1.4), 26),
+    // Deliberately lean — rooms should feel tense, not swarmed, and slimes add
+    // bodies by splitting. Ramps gently and caps lower than the old 26.
+    enemyCount: Math.min(3 + Math.floor(floor * 0.7), 14),
   };
 }

@@ -146,17 +146,7 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     for (let i = 0; i < share; i++) {
       const pos = randomInRoom(rng, room, size, 1.6);
       if (dist2World(pos, spawn) < 100) continue;
-      // One draw picks the kind: shadow (floor 3+) prowls, sentry (floor 2+)
-      // holds an angle, slime hops, wisp fills the rest.
-      const roll = rng.next();
-      const kind: EnemyKind =
-        floor >= 3 && roll < 0.15
-          ? "shadow"
-          : floor >= 2 && roll < 0.32
-            ? "sentry"
-            : roll < 0.62
-              ? "slime"
-              : "wisp";
+      const kind = pickEnemyKind(rng, floor);
       const y =
         kind === "sentry" ? 0.9 : kind === "shadow" ? 0.8 : kind === "slime" ? 0.6 : pos[1];
       enemies.push({ kind, pos: [pos[0], y, pos[2]] });
@@ -209,6 +199,29 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     wallBoxes,
     extent: (size * TILE) / 2,
   };
+}
+
+/** Enemy roster with staggered introduction: each kind appears from a later
+ * floor and its weight ramps in slowly, so early floors stay mostly wisps and
+ * new threats are eased in one at a time as you descend. The wisp is the
+ * constant backbone (weight 1); the others start rare and grow with depth. */
+const ENEMY_INTRO: { kind: EnemyKind; from: number; weight: (f: number) => number }[] = [
+  { kind: "wisp", from: 1, weight: () => 1 },
+  { kind: "slime", from: 3, weight: (f) => Math.min(0.8, 0.1 + (f - 3) * 0.06) },
+  { kind: "sentry", from: 5, weight: (f) => Math.min(0.6, 0.1 + (f - 5) * 0.05) },
+  { kind: "shadow", from: 8, weight: (f) => Math.min(0.55, 0.08 + (f - 8) * 0.04) },
+];
+
+/** Weighted pick over the kinds available at this depth (one rng draw). */
+function pickEnemyKind(rng: Rng, floor: number): EnemyKind {
+  const eligible = ENEMY_INTRO.filter((e) => floor >= e.from);
+  const total = eligible.reduce((s, e) => s + e.weight(floor), 0);
+  let r = rng.next() * total;
+  for (const e of eligible) {
+    r -= e.weight(floor);
+    if (r <= 0) return e.kind;
+  }
+  return "wisp";
 }
 
 /** BFS over walkable tiles — used by tests to prove every floor is traversable. */

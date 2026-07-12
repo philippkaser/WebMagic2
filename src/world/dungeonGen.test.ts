@@ -69,17 +69,20 @@ describe("generateFloor", () => {
     expect(deep.enemies.length).toBeGreaterThan(shallow.enemies.length);
   });
 
-  test("shadows join the enemy mix on deeper floors", () => {
-    let sawShadow = false;
-    for (let i = 0; i < 30 && !sawShadow; i++) {
-      const layout = generateFloor((i * 2654435761) >>> 0, 5 + (i % 15));
-      if (layout.enemies.some((e) => e.kind === "shadow")) sawShadow = true;
+  test("new enemy kinds are introduced gradually with depth", () => {
+    // Floor 1 is only wisps — nothing else has been introduced yet.
+    for (const seed of [7, 99, 4242]) {
+      expect(generateFloor(seed, 1).enemies.every((e) => e.kind === "wisp")).toBe(true);
     }
-    expect(sawShadow).toBe(true);
-    // Floor 1 is too shallow for shadows or sentries — only wisps and slimes.
-    expect(
-      generateFloor(7, 1).enemies.every((e) => e.kind === "wisp" || e.kind === "slime"),
-    ).toBe(true);
+    // Deep floors mix in the later arrivals (slime ≥3, sentry ≥5, shadow ≥8).
+    const seen = new Set<string>();
+    for (let i = 0; i < 60; i++) {
+      const layout = generateFloor((i * 2654435761) >>> 0, 10 + (i % 15));
+      for (const e of layout.enemies) seen.add(e.kind);
+    }
+    expect(seen.has("shadow")).toBe(true);
+    expect(seen.has("sentry")).toBe(true);
+    expect(seen.has("slime")).toBe(true);
   });
 
   test("traps are placed deterministically and scale with depth", () => {
