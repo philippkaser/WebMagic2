@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { getAbility } from "../combat/abilities";
-import { PLAYER } from "../core/config";
+import { floorScale, PLAYER } from "../core/config";
 import { allAffixDefs } from "../items/affixes";
 import { allItemDefs, computeStats } from "../items/catalog";
 import { makeItemId } from "../items/itemId";
@@ -204,9 +204,24 @@ export function DevRoom() {
               clear all
             </button>
           </div>
+          {/* The roster, straight from the enemy table — compare at a glance. */}
+          <div style={styles.itemList}>
+            {ENEMY_DEFS.map((def) => (
+              <div key={def.id} style={styles.itemRow}>
+                <span style={styles.itemName}>{def.name}</span>
+                <span style={styles.itemDesc}>{def.desc}</span>
+                <span
+                  style={{ ...styles.tier, width: 60 }}
+                  title={`base ${def.baseHealth} HP × floor ${spawnFloor} scaling`}
+                >
+                  {Math.round(def.baseHealth * floorScale(spawnFloor).enemyHealth)} HP
+                </span>
+              </div>
+            ))}
+          </div>
           <div style={styles.hint}>
-            Enemies spawn beside you and fight here in the village. Close this panel (Esc / I) and
-            click to take control.
+            HP shown scales to the spawn floor. Enemies spawn beside you and fight here in the
+            village — close this panel (Esc / I) and click to take control.
           </div>
         </Section>
 

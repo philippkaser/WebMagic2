@@ -23,6 +23,7 @@ import { useNetBody, type NetBody } from "../net/NetSystems";
 import { combatActive, getStats, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
 import { sanitizeHit, type HitData } from "./damage";
+import { getEnemyStats } from "./enemyStats";
 import { enemyCast } from "./remoteEffects";
 
 const ENEMY_GROUPS = interactionGroups(GROUPS.ENEMY, [
@@ -166,7 +167,7 @@ export function Wisp({
   const body = useRef<RapierRigidBody>(null);
   const mat = useRef<MeshStandardMaterial>(null);
   const scale = useMemo(() => floorScale(floor), [floor]);
-  const hp = useRef(30 * scale.enemyHealth);
+  const hp = useRef(getEnemyStats("wisp").baseHealth * scale.enemyHealth);
   const deadRef = useRef(false);
   const [dead, setDead] = useState(false);
   const aggro = useRef(false);
@@ -338,7 +339,7 @@ export function Sentry({
   const mat = useRef<MeshStandardMaterial>(null);
   const { world, rapier } = useRapier();
   const scale = useMemo(() => floorScale(floor), [floor]);
-  const hp = useRef(60 * scale.enemyHealth);
+  const hp = useRef(getEnemyStats("sentry").baseHealth * scale.enemyHealth);
   const deadRef = useRef(false);
   const [dead, setDead] = useState(false);
   const fireTimer = useRef(2 + Math.random() * 1.5);

@@ -2,18 +2,17 @@ import type { ReactNode } from "react";
 import type { Vec3 } from "../world/types";
 import { Boss } from "./Boss";
 import { Sentry, Wisp } from "./enemies";
+import { ENEMY_STATS, getEnemyStats, type EnemyId, type EnemyStats } from "./enemyStats";
 
-/** The enemy catalog — the single place that enumerates every enemy kind in
- * the game, mirroring items/catalog.ts. Both the dungeon floor (its regular
- * enemies) and the dev-room spawner render through this list, so adding an
- * enemy is one edit here: give it an id and a render() and it shows up
- * everywhere enemies are listed or spawned.
- *
- * Behaviour and tuning (health, damage, AI) stay inside each component
- * (Wisp/Sentry/Boss) — this registry is identity and how to mount one, never
- * a second copy of the numbers, so the two can't drift apart. */
+/** The mount layer over the enemy roster: pairs each data entry in
+ * enemyStats.ts with how to render an instance. Both the dungeon floor and the
+ * dev-room spawner go through this, so adding an enemy is (1) a row in
+ * ENEMY_STATS and (2) a renderer here — no bespoke switch statements anywhere
+ * downstream. Behaviour/tuning stay in the components and the stats table; this
+ * file is identity + JSX only. */
 
-export type EnemyId = "wisp" | "sentry" | "boss";
+export type { EnemyId, EnemyStats };
+export { ENEMY_STATS, getEnemyStats };
 
 export interface EnemySpawnProps {
   entityId: string;
@@ -24,41 +23,24 @@ export interface EnemySpawnProps {
   onDeath: () => void;
 }
 
-export interface EnemyDef {
-  id: EnemyId;
-  name: string;
-  /** Only one may be alive at a time (the boss hardcodes its net id + HUD bar). */
-  singleton: boolean;
-  /** Preferred spawn height — sentries sit on the ground, fliers hover. */
-  spawnY: number;
-  render(props: EnemySpawnProps): ReactNode;
+type RenderFn = (props: EnemySpawnProps) => ReactNode;
+
+const RENDERERS: Record<EnemyId, RenderFn> = {
+  wisp: ({ entityId, pos, floor }) => <Wisp entityId={entityId} position={pos} floor={floor} />,
+  sentry: ({ entityId, pos, floor }) => (
+    <Sentry entityId={entityId} position={pos} floor={floor} />
+  ),
+  boss: ({ pos, floor, onDeath }) => <Boss position={pos} floor={floor} onDeath={onDeath} />,
+};
+
+export interface EnemyDef extends EnemyStats {
+  render: RenderFn;
 }
 
-export const ENEMY_DEFS: EnemyDef[] = [
-  {
-    id: "wisp",
-    name: "Wisp",
-    singleton: false,
-    spawnY: 1.6,
-    render: ({ entityId, pos, floor }) => <Wisp entityId={entityId} position={pos} floor={floor} />,
-  },
-  {
-    id: "sentry",
-    name: "Sentry",
-    singleton: false,
-    spawnY: 0,
-    render: ({ entityId, pos, floor }) => (
-      <Sentry entityId={entityId} position={pos} floor={floor} />
-    ),
-  },
-  {
-    id: "boss",
-    name: "Warden of the Deep",
-    singleton: true,
-    spawnY: 1.8,
-    render: ({ pos, floor, onDeath }) => <Boss position={pos} floor={floor} onDeath={onDeath} />,
-  },
-];
+export const ENEMY_DEFS: EnemyDef[] = ENEMY_STATS.map((stats) => ({
+  ...stats,
+  render: RENDERERS[stats.id],
+}));
 
 const byId = new Map(ENEMY_DEFS.map((d) => [d.id, d]));
 
