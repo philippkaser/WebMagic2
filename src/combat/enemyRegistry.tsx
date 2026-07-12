@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Vec3 } from "../world/types";
 import { Boss } from "./Boss";
-import { Sentry, Shadow, Wisp } from "./enemies";
+import { Sentry, Shadow, Slime, Wisp } from "./enemies";
 import { ENEMY_STATS, getEnemyStats, type EnemyId, type EnemyStats } from "./enemyStats";
 
 /** The mount layer over the enemy roster: pairs each data entry in
@@ -18,9 +18,11 @@ export interface EnemySpawnProps {
   entityId: string;
   pos: Vec3;
   floor: number;
-  /** Fired when the instance dies/despawns. Singletons (the boss) use it so
-   * their owner can drop them from its list; regular enemies ignore it. */
+  /** Fired when the instance dies/despawns. Singletons (the boss) and runtime
+   * spawns use it so their owner can drop them from its list; others ignore it. */
   onDeath: () => void;
+  /** Split depth for enemies that spawn children (the slime); 0 otherwise. */
+  generation?: number;
 }
 
 type RenderFn = (props: EnemySpawnProps) => ReactNode;
@@ -32,6 +34,9 @@ const RENDERERS: Record<EnemyId, RenderFn> = {
   ),
   shadow: ({ entityId, pos, floor }) => (
     <Shadow entityId={entityId} position={pos} floor={floor} />
+  ),
+  slime: ({ entityId, pos, floor, generation, onDeath }) => (
+    <Slime entityId={entityId} position={pos} floor={floor} generation={generation} onDeath={onDeath} />
   ),
   boss: ({ pos, floor, onDeath }) => <Boss position={pos} floor={floor} onDeath={onDeath} />,
 };

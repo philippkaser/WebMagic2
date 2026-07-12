@@ -76,8 +76,10 @@ describe("generateFloor", () => {
       if (layout.enemies.some((e) => e.kind === "shadow")) sawShadow = true;
     }
     expect(sawShadow).toBe(true);
-    // Floor 1 is too shallow for shadows or sentries — wisps only.
-    expect(generateFloor(7, 1).enemies.every((e) => e.kind === "wisp")).toBe(true);
+    // Floor 1 is too shallow for shadows or sentries — only wisps and slimes.
+    expect(
+      generateFloor(7, 1).enemies.every((e) => e.kind === "wisp" || e.kind === "slime"),
+    ).toBe(true);
   });
 
   test("traps are placed deterministically and scale with depth", () => {

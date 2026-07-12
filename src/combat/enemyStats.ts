@@ -10,7 +10,7 @@
  * shape obvious, factor the common shell out then — informed by real cases,
  * not guessed from two. */
 
-export type EnemyId = "wisp" | "sentry" | "shadow" | "boss";
+export type EnemyId = "wisp" | "sentry" | "shadow" | "slime" | "boss";
 
 export interface EnemyStats {
   id: EnemyId;
@@ -49,6 +49,14 @@ export const ENEMY_STATS: EnemyStats[] = [
     baseHealth: 34,
     singleton: false,
     spawnY: 0.8,
+  },
+  {
+    id: "slime",
+    name: "Slime",
+    desc: "Hopping blob — splits into two smaller, faster slimes when killed",
+    baseHealth: 46,
+    singleton: false,
+    spawnY: 0.6,
   },
   {
     id: "boss",

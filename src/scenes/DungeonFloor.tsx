@@ -5,6 +5,7 @@ import { Color, Fog, InstancedMesh, Object3D } from "three";
 import { startAmbient, stopAmbient } from "../audio/sound";
 import { Boss } from "../combat/Boss";
 import { getEnemyDef } from "../combat/enemyRegistry";
+import { SpawnedEnemies } from "../combat/SpawnedEnemies";
 import { GROUPS, TILE, WALL_HEIGHT } from "../core/config";
 import { resetRegistries } from "../game/registry";
 import { hashSeed } from "../core/rng";
@@ -108,6 +109,8 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
       {layout.traps.map((trap, i) => (
         <Trap key={i} kind={trap.kind} pos={trap.pos} floor={layout.floor} />
       ))}
+      {/* Enemies spawned at runtime (slime splits). */}
+      <SpawnedEnemies />
 
       <TreasurePedestal position={layout.treasure} floor={layout.floor} seed={layout.seed} />
 

@@ -147,11 +147,18 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
       const pos = randomInRoom(rng, room, size, 1.6);
       if (dist2World(pos, spawn) < 100) continue;
       // One draw picks the kind: shadow (floor 3+) prowls, sentry (floor 2+)
-      // holds an angle, wisp fills the rest.
+      // holds an angle, slime hops, wisp fills the rest.
       const roll = rng.next();
       const kind: EnemyKind =
-        floor >= 3 && roll < 0.16 ? "shadow" : floor >= 2 && roll < 0.38 ? "sentry" : "wisp";
-      const y = kind === "sentry" ? 0.9 : kind === "shadow" ? 0.8 : pos[1];
+        floor >= 3 && roll < 0.15
+          ? "shadow"
+          : floor >= 2 && roll < 0.32
+            ? "sentry"
+            : roll < 0.62
+              ? "slime"
+              : "wisp";
+      const y =
+        kind === "sentry" ? 0.9 : kind === "shadow" ? 0.8 : kind === "slime" ? 0.6 : pos[1];
       enemies.push({ kind, pos: [pos[0], y, pos[2]] });
       enemyBudget--;
     }

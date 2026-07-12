@@ -9,6 +9,7 @@ import { resetRegistries } from "../game/registry";
 import { PlayerController } from "../player/PlayerController";
 import { getTextures } from "../render/textures";
 import { useGame } from "../state/gameStore";
+import { SpawnedEnemies } from "../combat/SpawnedEnemies";
 import { DevSlab, DevSpawns } from "../world/devProps";
 import { Breakable, Portal, Torch } from "../world/props";
 import { Merchant, StorageChest } from "../world/villageProps";
@@ -125,6 +126,8 @@ export function Village() {
         <>
           <DevSlab position={[0, 0, 14]} />
           <DevSpawns />
+          {/* So dev-spawned slimes can actually split in the arena. */}
+          <SpawnedEnemies />
         </>
       )}
 

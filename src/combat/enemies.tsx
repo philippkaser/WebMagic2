@@ -8,7 +8,7 @@ import {
   type RapierRigidBody,
 } from "@react-three/rapier";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Group, MeshStandardMaterial, Vector3 } from "three";
+import { Group, Mesh, MeshStandardMaterial, Vector3 } from "three";
 import { playHit } from "../audio/sound";
 import { floorScale, GROUPS, PLAYER } from "../core/config";
 import { flashLight } from "../fx/DynamicLights";
@@ -25,6 +25,7 @@ import type { Vec3 } from "../world/types";
 import { sanitizeHit, type HitData } from "./damage";
 import { getEnemyStats } from "./enemyStats";
 import { enemyCast } from "./remoteEffects";
+import { spawnEnemy } from "./spawnedEnemyStore";
 
 const ENEMY_GROUPS = interactionGroups(GROUPS.ENEMY, [
   GROUPS.WORLD,
@@ -668,6 +669,185 @@ export function Shadow({
         <mesh key={x} position={[x, 0.06, 0.34]}>
           <sphereGeometry args={[0.05, 6, 6]} />
           <meshStandardMaterial color="#000" emissive="#c89cff" emissiveIntensity={3} toneMapped={false} />
+        </mesh>
+      ))}
+    </RigidBody>
+  );
+}
+
+/** Slime — a gelatinous melee blob that hops toward its prey and, on death,
+ * SPLITS into two smaller, faster copies (down to a terminal generation).
+ * Children are spawned host-authoritatively via spawnEnemy() and rendered by
+ * <SpawnedEnemies>. Unlike the fliers it lives on the floor (gravity on). */
+const SLIME_MAX_GEN = 2;
+const SLIME_GEN = [
+  { size: 1.0, speed: 3.2, hp: 1.0, contact: 12, hop: 5.4 },
+  { size: 0.66, speed: 4.6, hp: 0.5, contact: 9, hop: 5.0 },
+  { size: 0.44, speed: 6.2, hp: 0.3, contact: 6, hop: 4.6 },
+];
+
+export function Slime({
+  position,
+  floor,
+  entityId,
+  generation = 0,
+  onDeath,
+}: {
+  position: Vec3;
+  floor: number;
+  entityId: string;
+  generation?: number;
+  onDeath?: () => void;
+}) {
+  const gen = Math.min(generation, SLIME_MAX_GEN);
+  const cfg = SLIME_GEN[gen];
+  const radius = 0.5 * cfg.size;
+  const body = useRef<RapierRigidBody>(null);
+  const mesh = useRef<Mesh>(null);
+  const mat = useRef<MeshStandardMaterial>(null);
+  const scale = useMemo(() => floorScale(floor), [floor]);
+  const hp = useRef(getEnemyStats("slime").baseHealth * cfg.hp * scale.enemyHealth);
+  const deadRef = useRef(false);
+  const [dead, setDead] = useState(false);
+  const aggro = useRef(false);
+  const knockTimer = useRef(0);
+  const contactTimer = useRef(0);
+  const hopTimer = useRef(Math.random() * 0.6);
+  const flash = useRef(0);
+
+  const kill = useCallback(
+    (silent = false) => {
+      if (deadRef.current) return;
+      deadRef.current = true;
+      const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
+      if (!silent) {
+        spawnBurst({
+          position: [t.x, t.y, t.z],
+          count: 20,
+          color: ["#7fdc4a", "#2f5a1a", "#c8ff8a"],
+          speed: 5,
+          ttl: 0.7,
+          size: 0.09 + cfg.size * 0.05,
+        });
+        flashLight([t.x, t.y, t.z], "#7fdc4a", 14);
+        dropGold([t.x, Math.max(t.y, 0.4), t.z], floor, GOLD_DROPS.enemyChance, "enemy");
+        // The whole slime's loot lands when its LAST piece dies, not on every split.
+        if (gen >= SLIME_MAX_GEN) dropLoot([t.x, Math.max(t.y, 0.4), t.z], floor, LOOT_DROP_CHANCE);
+        // Split into two smaller, faster children (host decides; all render).
+        if (gen < SLIME_MAX_GEN) {
+          spawnEnemy("slime", gen + 1, [t.x - 0.7, t.y + 0.2, t.z], floor);
+          spawnEnemy("slime", gen + 1, [t.x + 0.7, t.y + 0.2, t.z], floor);
+        }
+      }
+      onDeath?.();
+      setDead(true);
+    },
+    [floor, position, gen, cfg.size, onDeath],
+  );
+
+  const hitFeedback = useCallback(() => {
+    const t = body.current?.translation();
+    if (!t) return;
+    spawnBurst({ position: [t.x, t.y, t.z], count: 6, color: "#a8f06a", speed: 3, ttl: 0.4, size: 0.06 });
+  }, []);
+
+  const onDamaged = useCallback(() => {
+    aggro.current = true;
+  }, []);
+
+  const net = useEnemyNet({
+    entityId,
+    body,
+    hp,
+    deadRef,
+    flash,
+    dead,
+    knockTimer,
+    onKill: kill,
+    hitFeedback,
+    onDamaged,
+  });
+
+  useFrame((_, dt) => {
+    const b = body.current;
+    if (!b || deadRef.current) return;
+    if (!combatActive()) return;
+
+    flash.current = Math.max(0, flash.current - dt * 5);
+    if (mat.current) mat.current.emissiveIntensity = 0.9 + flash.current * 6;
+    contactTimer.current -= dt;
+
+    const t = b.translation();
+    const v = b.linvel();
+    // Squash & stretch from vertical motion — reads as a bouncing blob.
+    if (mesh.current) {
+      const sy = Math.max(0.72, Math.min(1.28, 1 + v.y * 0.03));
+      const sxz = 1 / Math.sqrt(sy);
+      mesh.current.scale.set(cfg.size * sxz, cfg.size * sy, cfg.size * sxz);
+    }
+
+    const dx = playerPosition.x - t.x;
+    const dz = playerPosition.z - t.z;
+    const dist = Math.hypot(dx, playerPosition.y - t.y, dz);
+    if (dist < radius + 0.8 && contactTimer.current <= 0) {
+      contactTimer.current = PLAYER.contactDamageCooldown;
+      useGame.getState().takeDamage(cfg.contact * scale.enemyDamage);
+      const push = 4 / Math.max(dist, 0.4);
+      getPlayerBody()?.applyImpulse({ x: dx * push * 0.3, y: 1.5, z: dz * push * 0.3 }, true);
+    }
+
+    if (!net.isAuthority) return;
+
+    const target = nearestWizardTo(t.x, t.y, t.z);
+    knockTimer.current -= dt;
+    if (!aggro.current) {
+      if (target.dist < 14 * getStats().aggroMult) aggro.current = true;
+      return;
+    }
+    if (knockTimer.current > 0) return;
+
+    const tx = target.pos.x - t.x;
+    const tz = target.pos.z - t.z;
+    const planar = Math.hypot(tx, tz) || 1;
+    const speed = cfg.speed + floor * 0.03;
+    let vy = v.y;
+    hopTimer.current -= dt;
+    if (hopTimer.current <= 0 && Math.abs(v.y) < 0.9) {
+      hopTimer.current = 0.55 + Math.random() * 0.4;
+      vy = cfg.hop; // a spring off the floor
+    }
+    b.setLinvel({ x: (tx / planar) * speed, y: vy, z: (tz / planar) * speed }, true);
+  });
+
+  if (dead) return null;
+  return (
+    <RigidBody
+      ref={body}
+      position={position}
+      type={net.bodyType}
+      colliders={false}
+      gravityScale={1}
+      linearDamping={0.1}
+      enabledRotations={[false, false, false]}
+    >
+      <BallCollider args={[radius]} mass={1.2 * cfg.size} collisionGroups={ENEMY_GROUPS} />
+      <mesh ref={mesh} castShadow scale={cfg.size}>
+        <icosahedronGeometry args={[0.5, 1]} />
+        <meshStandardMaterial
+          ref={mat}
+          color="#1f3a1a"
+          emissive="#7fdc4a"
+          emissiveIntensity={0.9}
+          transparent
+          opacity={0.85}
+          roughness={0.5}
+          flatShading
+        />
+      </mesh>
+      {([0.16, -0.16] as const).map((x) => (
+        <mesh key={x} position={[x * cfg.size, 0.1 * cfg.size, 0.34 * cfg.size]}>
+          <sphereGeometry args={[0.06 * cfg.size, 6, 6]} />
+          <meshStandardMaterial color="#04140a" emissive="#d4ffb0" emissiveIntensity={2} toneMapped={false} />
         </mesh>
       ))}
     </RigidBody>
