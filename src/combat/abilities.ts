@@ -1,6 +1,7 @@
 import { Vector3 } from "three";
 import { getPlayerBody } from "../game/player-state";
 import type { DerivedStats, ItemDef } from "../items/types";
+import { activateSingularities } from "./blackhole";
 import { explode } from "./damage";
 import { fireProjectile } from "./projectiles";
 
@@ -153,6 +154,36 @@ const ABILITIES: Record<string, Ability> = {
         );
       }
     },
+  },
+  voidseed: {
+    id: "voidseed",
+    name: "Void Seed",
+    mana: 10,
+    cooldown: 0.5,
+    info: "plant · Collapse to detonate",
+    cast: (ctx) => {
+      tmp.copy(ctx.dir).multiplyScalar(18);
+      fireProjectile({
+        team: "player",
+        position: [ctx.origin.x, ctx.origin.y, ctx.origin.z],
+        velocity: [tmp.x, tmp.y, tmp.z],
+        // The seed carries the black hole's implosion damage.
+        damage: 30 * ctx.stats.damageMult,
+        color: "#a06bff",
+        size: 0.2,
+        gravityScale: 0,
+        singularity: true,
+        cosmetic: ctx.remote ?? false,
+      });
+    },
+  },
+  collapse: {
+    id: "collapse",
+    name: "Collapse",
+    mana: 12,
+    cooldown: 0.8,
+    info: "implode all seeds → black holes",
+    cast: () => activateSingularities(),
   },
   shockwave: {
     id: "shockwave",

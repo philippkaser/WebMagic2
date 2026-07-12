@@ -15,6 +15,7 @@ import {
 } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
 import { nearestHittable } from "../game/registry";
+import { SingularitySeed } from "./blackhole";
 import { explode, type DamageTeam } from "./damage";
 
 // Shared across all bolts: allocating geometry/material per shot causes GC
@@ -53,6 +54,9 @@ export interface ProjectileSpec {
   gravityScale: number;
   /** Seek strength 0..~1: how hard a player bolt curves toward enemies. */
   homing: number;
+  /** A void seed: plants instead of exploding, and collapses into a black hole
+   * when the staff's Collapse ability activates it. */
+  singularity: boolean;
   /** Replayed peer/replicated projectile: explosion skips entity damage. */
   cosmetic: boolean;
 }
@@ -68,6 +72,7 @@ export interface FireOptions {
   size?: number;
   gravityScale?: number;
   homing?: number;
+  singularity?: boolean;
   cosmetic?: boolean;
 }
 
@@ -94,6 +99,7 @@ export function fireProjectile(opts: FireOptions): void {
     size: opts.size ?? 0.13,
     gravityScale: opts.gravityScale ?? 0,
     homing: opts.homing ?? 0,
+    singularity: opts.singularity ?? false,
     cosmetic: opts.cosmetic ?? false,
   });
 }
@@ -115,9 +121,13 @@ export function Projectiles() {
 
   return (
     <>
-      {live.map((spec) => (
-        <Bolt key={spec.id} spec={spec} remove={remove} />
-      ))}
+      {live.map((spec) =>
+        spec.singularity ? (
+          <SingularitySeed key={spec.id} spec={spec} remove={remove} />
+        ) : (
+          <Bolt key={spec.id} spec={spec} remove={remove} />
+        ),
+      )}
     </>
   );
 }

@@ -77,6 +77,17 @@ const defs: ItemDef[] = [
     secondary: "shockwave",
     passives: { extraProjectiles: 1 },
   },
+  {
+    id: "voidcore_staff",
+    slot: "staff",
+    name: "Singularity Staff",
+    tier: 3,
+    minFloor: 8,
+    color: "#a06bff",
+    desc: "Void Seed / Collapse — plant seeds, then implode them into black holes",
+    primary: "voidseed",
+    secondary: "collapse",
+  },
   // ── Amulets ───────────────────────────────────────────────────────────────
   {
     id: "amulet_vigor",
