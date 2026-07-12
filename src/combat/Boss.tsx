@@ -21,7 +21,7 @@ import { playerPosition } from "../game/player-state";
 import { nearestWizardTo } from "../game/targets";
 import { SAVE_FEATHER_ID } from "../items/catalog";
 import { dropGold, dropItem, dropLoot } from "../items/LootOrbs";
-import { useGame } from "../state/gameStore";
+import { combatActive, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
 import { useEnemyNet } from "./enemies";
 import { enemyBoom, enemyCast } from "./remoteEffects";
@@ -152,7 +152,7 @@ export function Boss({
   useFrame(({ clock }, dt) => {
     const b = body.current;
     if (!b || deadRef.current) return;
-    if (useGame.getState().phase !== "dungeon") return;
+    if (!combatActive()) return;
 
     flash.current = Math.max(0, flash.current - dt * 4);
     const enraged = hp.current < maxHp * 0.5;

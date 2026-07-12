@@ -34,8 +34,9 @@ import {
 export type Phase = "menu" | "village" | "select" | "loading" | "dungeon" | "dead";
 
 /** Fullscreen inventory-family overlays. The world keeps simulating (shared
- * floors can't pause), so these are DOM layers, not phases. */
-export type Overlay = "none" | "inventory" | "chest" | "merchant";
+ * floors can't pause), so these are DOM layers, not phases. "devroom" is a
+ * dev-only testing panel (see ui/DevRoom) reached from the village dev slab. */
+export type Overlay = "none" | "inventory" | "chest" | "merchant" | "devroom";
 
 export interface GameState {
   phase: Phase;
@@ -128,6 +129,16 @@ function loadPlayerName(): string {
 
 const saved = loadSave();
 let manaAccumulator = 0;
+/** Dev-room god mode. Module-level (not reactive state) so a production build
+ * carries only a dead boolean — the DEV guard in takeDamage strips the read. */
+let devInvuln = false;
+export function setDevInvuln(on: boolean): boolean {
+  devInvuln = on;
+  return devInvuln;
+}
+export function isDevInvuln(): boolean {
+  return devInvuln;
+}
 /** An Orb of Fortune is in the server's hands — reveal on the next save. */
 let pendingGamble = false;
 
@@ -437,6 +448,7 @@ export const useGame = create<GameState>((set, get) => ({
   takeDamage: (amount) => {
     const state = get();
     if (state.phase !== "dungeon" && state.phase !== "village") return;
+    if (import.meta.env.DEV && devInvuln) return; // dev-room god mode
     const stats = getStats();
     const dealt = amount * stats.damageTakenMult;
     const health = Math.max(0, state.health - dealt);
@@ -691,6 +703,15 @@ if (typeof window !== "undefined" && import.meta.env?.DEV) {
 /** Current derived stats — cheap enough to compute on demand. */
 export function getStats(): DerivedStats {
   return computeStats(useGame.getState().equipment);
+}
+
+/** Enemies think and deal contact damage only while combat is live: the
+ * dungeon, or — in dev builds only — the village, so the dev-room slab can
+ * spawn a test arena. In production `import.meta.env.DEV` is a literal false,
+ * so this is exactly `phase === "dungeon"` and the village branch is stripped. */
+export function combatActive(): boolean {
+  const phase = useGame.getState().phase;
+  return phase === "dungeon" || (import.meta.env.DEV && phase === "village");
 }
 
 /** Entry floors selectable at the village portal. */

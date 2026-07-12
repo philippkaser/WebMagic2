@@ -5,6 +5,7 @@ import { computeStats, resolveItem } from "../items/catalog";
 import type { GearSlot, ItemStack } from "../items/types";
 import { floorPlayerCount, selectIsHost, useNet } from "../net/netStore";
 import { entryFloors, useGame } from "../state/gameStore";
+import { DevRoom } from "./DevRoom";
 import { InventoryScreen } from "./InventoryScreen";
 import { ITEM_ICONS, iconOf } from "./itemInfo";
 
@@ -57,7 +58,8 @@ export function HUD() {
       <div style={styles.buildStamp}>{__BUILD_INFO__}</div>
       {showPerf && <PerfOverlay />}
       {playing && <PlayHud />}
-      {playing && overlay !== "none" && <InventoryScreen mode={overlay} />}
+      {playing && overlay === "devroom" && import.meta.env.DEV && <DevRoom />}
+      {playing && overlay !== "none" && overlay !== "devroom" && <InventoryScreen mode={overlay} />}
       {phase === "menu" && <MenuOverlay />}
       {phase === "select" && <SelectOverlay />}
       {phase === "dead" && <DeathOverlay />}

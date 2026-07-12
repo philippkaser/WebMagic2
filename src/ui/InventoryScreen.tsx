@@ -23,7 +23,7 @@ import { iconOf, statLines } from "./itemInfo";
  * Items move by DRAG & DROP between any cells (click still does the obvious
  * quick-move). All rules live in items/inventory.ts#moveItem — this screen
  * only proposes moves; the store (and the server) decide. */
-export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none"> }) {
+export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none" | "devroom"> }) {
   const equipment = useGame((s) => s.equipment);
   const bag = useGame((s) => s.bag);
   const belt = useGame((s) => s.belt);

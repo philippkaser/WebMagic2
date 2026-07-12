@@ -20,7 +20,7 @@ import { GOLD_DROPS } from "../items/economy";
 import { dropGold, dropLoot } from "../items/LootOrbs";
 import { isHost } from "../net/netStore";
 import { useNetBody, type NetBody } from "../net/NetSystems";
-import { getStats, useGame } from "../state/gameStore";
+import { combatActive, getStats, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
 import { sanitizeHit, type HitData } from "./damage";
 import { enemyCast } from "./remoteEffects";
@@ -232,7 +232,7 @@ export function Wisp({
   useFrame(({ clock }, dt) => {
     const b = body.current;
     if (!b || deadRef.current) return;
-    if (useGame.getState().phase !== "dungeon") return;
+    if (!combatActive()) return;
 
     flash.current = Math.max(0, flash.current - dt * 5);
     if (mat.current) mat.current.emissiveIntensity = 1.7 + flash.current * 6;
@@ -377,7 +377,7 @@ export function Sentry({
   useFrame((_, dt) => {
     const b = body.current;
     if (!b || deadRef.current) return;
-    if (useGame.getState().phase !== "dungeon") return;
+    if (!combatActive()) return;
 
     flash.current = Math.max(0, flash.current - dt * 5);
     const t = b.translation();

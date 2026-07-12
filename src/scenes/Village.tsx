@@ -9,6 +9,7 @@ import { resetRegistries } from "../game/registry";
 import { PlayerController } from "../player/PlayerController";
 import { getTextures } from "../render/textures";
 import { useGame } from "../state/gameStore";
+import { DevSlab, DevSpawns } from "../world/devProps";
 import { Breakable, Portal, Torch } from "../world/props";
 import { Merchant, StorageChest } from "../world/villageProps";
 import type { Vec3 } from "../world/types";
@@ -115,6 +116,17 @@ export function Village() {
         prompt="E — Enter the dungeon"
         onUse={openSelect}
       />
+
+      {/* Dev test bench: a slab behind the spawn that opens the DevRoom panel,
+          plus the enemies it spawns. Only in dev builds (`bun run dev`) —
+          `import.meta.env.DEV` is a literal false in the production build, so
+          neither the slab nor the spawner ships to a deployed server. */}
+      {import.meta.env.DEV && (
+        <>
+          <DevSlab position={[0, 0, 14]} />
+          <DevSpawns />
+        </>
+      )}
 
       <PlayerController spawn={SPAWN} />
     </group>
