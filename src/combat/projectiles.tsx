@@ -14,6 +14,8 @@ import {
   type DynamicLightSource,
 } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
+import { nearestHittable } from "../game/registry";
+import { SingularitySeed } from "./blackhole";
 import { explode, type DamageTeam } from "./damage";
 
 // Shared across all bolts: allocating geometry/material per shot causes GC
@@ -50,6 +52,11 @@ export interface ProjectileSpec {
   color: string;
   size: number;
   gravityScale: number;
+  /** Seek strength 0..~1: how hard a player bolt curves toward enemies. */
+  homing: number;
+  /** A void seed: plants instead of exploding, and collapses into a black hole
+   * when the staff's Collapse ability activates it. */
+  singularity: boolean;
   /** Replayed peer/replicated projectile: explosion skips entity damage. */
   cosmetic: boolean;
 }
@@ -64,12 +71,20 @@ export interface FireOptions {
   color?: string;
   size?: number;
   gravityScale?: number;
+  homing?: number;
+  singularity?: boolean;
   cosmetic?: boolean;
 }
 
 const MAX_LIVE = 80;
 let nextProjectileId = 1;
 let enqueue: ((spec: ProjectileSpec) => void) | null = null;
+
+// Dev-only hook for end-to-end tests (mirrors __game / __spawnEnemy).
+if (typeof window !== "undefined" && import.meta.env?.DEV) {
+  (window as unknown as Record<string, unknown>).__fireProjectile = (o: FireOptions) =>
+    fireProjectile(o);
+}
 
 export function fireProjectile(opts: FireOptions): void {
   enqueue?.({
@@ -83,6 +98,8 @@ export function fireProjectile(opts: FireOptions): void {
     color: opts.color ?? "#7fd4ff",
     size: opts.size ?? 0.13,
     gravityScale: opts.gravityScale ?? 0,
+    homing: opts.homing ?? 0,
+    singularity: opts.singularity ?? false,
     cosmetic: opts.cosmetic ?? false,
   });
 }
@@ -104,9 +121,13 @@ export function Projectiles() {
 
   return (
     <>
-      {live.map((spec) => (
-        <Bolt key={spec.id} spec={spec} remove={remove} />
-      ))}
+      {live.map((spec) =>
+        spec.singularity ? (
+          <SingularitySeed key={spec.id} spec={spec} remove={remove} />
+        ) : (
+          <Bolt key={spec.id} spec={spec} remove={remove} />
+        ),
+      )}
     </>
   );
 }
@@ -167,6 +188,31 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
     if (!b || detonated.current) return;
     const pos = b.translation();
     light.current?.position.set(pos.x, pos.y, pos.z);
+
+    // Homing: gently curve our own bolts toward the nearest enemy ahead,
+    // preserving speed. Player-only and skipped on cosmetic peer replays.
+    if (spec.homing > 0 && spec.team === "player" && !spec.cosmetic) {
+      const v = b.linvel();
+      const speed = Math.hypot(v.x, v.y, v.z);
+      const target = speed > 0.1 ? nearestHittable("enemy", pos.x, pos.y, pos.z, 16) : null;
+      if (target) {
+        const tp = target.getPosition();
+        const tx = tp.x - pos.x;
+        const ty = tp.y - pos.y;
+        const tz = tp.z - pos.z;
+        const td = Math.hypot(tx, ty, tz) || 1;
+        // Only steer toward targets roughly ahead — no U-turns.
+        if ((v.x * tx + v.y * ty + v.z * tz) / (speed * td) > 0.15) {
+          const turn = Math.min(1, spec.homing * dt * 6);
+          const nx = v.x / speed + (tx / td - v.x / speed) * turn;
+          const ny = v.y / speed + (ty / td - v.y / speed) * turn;
+          const nz = v.z / speed + (tz / td - v.z / speed) * turn;
+          const nl = Math.hypot(nx, ny, nz) || 1;
+          b.setLinvel({ x: (nx / nl) * speed, y: (ny / nl) * speed, z: (nz / nl) * speed }, true);
+        }
+      }
+    }
+
     trailClock.current -= dt;
     if (trailClock.current <= 0) {
       trailClock.current = 0.035;

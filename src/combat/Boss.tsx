@@ -21,9 +21,10 @@ import { playerPosition } from "../game/player-state";
 import { nearestWizardTo } from "../game/targets";
 import { SAVE_FEATHER_ID } from "../items/catalog";
 import { dropGold, dropItem, dropLoot } from "../items/LootOrbs";
-import { useGame } from "../state/gameStore";
+import { combatActive, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
 import { useEnemyNet } from "./enemies";
+import { getEnemyStats } from "./enemyStats";
 import { enemyBoom, enemyCast } from "./remoteEffects";
 
 const BOSS_GROUPS = interactionGroups(GROUPS.ENEMY, [
@@ -57,7 +58,7 @@ export function Boss({
   const shell = useRef<Group>(null);
   const mat = useRef<MeshStandardMaterial>(null);
   const scale = useMemo(() => floorScale(floor), [floor]);
-  const maxHp = useMemo(() => 420 * scale.enemyHealth, [scale]);
+  const maxHp = useMemo(() => getEnemyStats("boss").baseHealth * scale.enemyHealth, [scale]);
   const hp = useRef(maxHp);
   const deadRef = useRef(false);
   const [dead, setDead] = useState(false);
@@ -152,7 +153,7 @@ export function Boss({
   useFrame(({ clock }, dt) => {
     const b = body.current;
     if (!b || deadRef.current) return;
-    if (useGame.getState().phase !== "dungeon") return;
+    if (!combatActive()) return;
 
     flash.current = Math.max(0, flash.current - dt * 4);
     const enraged = hp.current < maxHp * 0.5;

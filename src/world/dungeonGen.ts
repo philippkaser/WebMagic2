@@ -1,6 +1,16 @@
 import { DUNGEON, TILE, WALL_HEIGHT, floorScale } from "../core/config";
 import { Rng } from "../core/rng";
-import type { EnemySpawn, FloorLayout, PropSpawn, Rect, Vec3, WallBox } from "./types";
+import { TRAP_DEFS } from "./trapCatalog";
+import type {
+  EnemyKind,
+  EnemySpawn,
+  FloorLayout,
+  PropSpawn,
+  Rect,
+  TrapSpawn,
+  Vec3,
+  WallBox,
+} from "./types";
 
 /** Procedural floor generator. Pure and deterministic: the same (seed, floor)
  * pair always yields an identical layout, which is what lets every player in
@@ -136,10 +146,38 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     for (let i = 0; i < share; i++) {
       const pos = randomInRoom(rng, room, size, 1.6);
       if (dist2World(pos, spawn) < 100) continue;
-      const sentry = floor >= 2 && rng.chance(0.22);
-      enemies.push({ kind: sentry ? "sentry" : "wisp", pos: sentry ? [pos[0], 0.9, pos[2]] : pos });
+      const kind = pickEnemyKind(rng, floor);
+      const y =
+        kind === "sentry" ? 0.9 : kind === "shadow" ? 0.8 : kind === "slime" ? 0.6 : pos[1];
+      enemies.push({ kind, pos: [pos[0], y, pos[2]] });
       enemyBudget--;
     }
+  }
+
+  // ── Traps ──────────────────────────────────────────────────────────────────
+  // Placed LAST, after every other rng draw, so adding hazards never perturbs
+  // the rooms/props/enemies rolled above — a given seed keeps its exact layout
+  // and merely gains traps. The warp is filtered off checkpoint floors so it
+  // can't yank a wizard away from a floor they came to bank on.
+  const traps: TrapSpawn[] = [];
+  const eligibleTraps = TRAP_DEFS.filter((t) => !(t.noCheckpoint && isCheckpoint));
+  const trapWeight = eligibleTraps.reduce((s, t) => s + t.weight, 0);
+  const trapBudget = Math.min(2 + Math.floor(floor / 3), 9);
+  for (let tries = 0; tries < trapBudget * 5 && traps.length < trapBudget; tries++) {
+    const room = rng.pick(rooms);
+    if (room === spawnRoom || (isBossFloor && room === exitRoom)) continue;
+    const pos = randomInRoom(rng, room, size, 0);
+    if (dist2World(pos, spawn) < 64) continue; // never right on top of the entrance
+    let r = rng.next() * trapWeight;
+    let def = eligibleTraps[0];
+    for (const t of eligibleTraps) {
+      r -= t.weight;
+      if (r <= 0) {
+        def = t;
+        break;
+      }
+    }
+    traps.push({ kind: def.id, pos });
   }
 
   return {
@@ -156,10 +194,34 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     torches,
     props,
     enemies,
+    traps,
     wallInstances,
     wallBoxes,
     extent: (size * TILE) / 2,
   };
+}
+
+/** Enemy roster with staggered introduction: each kind appears from a later
+ * floor and its weight ramps in slowly, so early floors stay mostly wisps and
+ * new threats are eased in one at a time as you descend. The wisp is the
+ * constant backbone (weight 1); the others start rare and grow with depth. */
+const ENEMY_INTRO: { kind: EnemyKind; from: number; weight: (f: number) => number }[] = [
+  { kind: "wisp", from: 1, weight: () => 1 },
+  { kind: "slime", from: 3, weight: (f) => Math.min(0.8, 0.1 + (f - 3) * 0.06) },
+  { kind: "sentry", from: 5, weight: (f) => Math.min(0.6, 0.1 + (f - 5) * 0.05) },
+  { kind: "shadow", from: 8, weight: (f) => Math.min(0.55, 0.08 + (f - 8) * 0.04) },
+];
+
+/** Weighted pick over the kinds available at this depth (one rng draw). */
+function pickEnemyKind(rng: Rng, floor: number): EnemyKind {
+  const eligible = ENEMY_INTRO.filter((e) => floor >= e.from);
+  const total = eligible.reduce((s, e) => s + e.weight(floor), 0);
+  let r = rng.next() * total;
+  for (const e of eligible) {
+    r -= e.weight(floor);
+    if (r <= 0) return e.kind;
+  }
+  return "wisp";
 }
 
 /** BFS over walkable tiles — used by tests to prove every floor is traversable. */

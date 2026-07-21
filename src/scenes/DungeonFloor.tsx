@@ -1,10 +1,11 @@
 import { useThree } from "@react-three/fiber";
 import { CuboidCollider, interactionGroups, RigidBody } from "@react-three/rapier";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Color, Fog, InstancedMesh, Object3D } from "three";
 import { startAmbient, stopAmbient } from "../audio/sound";
 import { Boss } from "../combat/Boss";
-import { Sentry, Wisp } from "../combat/enemies";
+import { getEnemyDef } from "../combat/enemyRegistry";
+import { SpawnedEnemies } from "../combat/SpawnedEnemies";
 import { GROUPS, TILE, WALL_HEIGHT } from "../core/config";
 import { resetRegistries } from "../game/registry";
 import { hashSeed } from "../core/rng";
@@ -14,6 +15,7 @@ import { PlayerController } from "../player/PlayerController";
 import { getTextures } from "../render/textures";
 import { useGame } from "../state/gameStore";
 import { Breakable, Portal, Torch, TreasurePedestal } from "../world/props";
+import { Trap } from "../world/traps";
 import type { FloorLayout } from "../world/types";
 
 const WORLD_GROUPS = interactionGroups(GROUPS.WORLD, [
@@ -23,6 +25,10 @@ const WORLD_GROUPS = interactionGroups(GROUPS.WORLD, [
   GROUPS.ENEMY_PROJECTILE,
   GROUPS.PROP,
 ]);
+
+/** Regular enemies never despawn through the registry's onDeath (they manage
+ * their own death); only the boss, rendered separately below, needs it. */
+const NOOP = () => {};
 
 /** Renders one generated dungeon floor: instanced walls with greedy-merged
  * colliders, torches, physics props, enemies, treasure and portals. */
@@ -90,13 +96,21 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
           entityId={`p${i}`}
         />
       ))}
-      {layout.enemies.map((enemy, i) =>
-        enemy.kind === "wisp" ? (
-          <Wisp key={i} position={enemy.pos} floor={layout.floor} entityId={`e${i}`} />
-        ) : (
-          <Sentry key={i} position={enemy.pos} floor={layout.floor} entityId={`e${i}`} />
-        ),
-      )}
+      {layout.enemies.map((enemy, i) => (
+        <Fragment key={i}>
+          {getEnemyDef(enemy.kind).render({
+            entityId: `e${i}`,
+            pos: enemy.pos,
+            floor: layout.floor,
+            onDeath: NOOP,
+          })}
+        </Fragment>
+      ))}
+      {layout.traps.map((trap, i) => (
+        <Trap key={i} kind={trap.kind} pos={trap.pos} floor={layout.floor} />
+      ))}
+      {/* Enemies spawned at runtime (slime splits). */}
+      <SpawnedEnemies />
 
       <TreasurePedestal position={layout.treasure} floor={layout.floor} seed={layout.seed} />
 

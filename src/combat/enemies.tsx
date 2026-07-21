@@ -8,7 +8,7 @@ import {
   type RapierRigidBody,
 } from "@react-three/rapier";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Group, MeshStandardMaterial, Vector3 } from "three";
+import { Group, Mesh, MeshStandardMaterial, Vector3 } from "three";
 import { playHit } from "../audio/sound";
 import { floorScale, GROUPS, PLAYER } from "../core/config";
 import { flashLight } from "../fx/DynamicLights";
@@ -20,10 +20,12 @@ import { GOLD_DROPS } from "../items/economy";
 import { dropGold, dropLoot } from "../items/LootOrbs";
 import { isHost } from "../net/netStore";
 import { useNetBody, type NetBody } from "../net/NetSystems";
-import { getStats, useGame } from "../state/gameStore";
+import { combatActive, getStats, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
 import { sanitizeHit, type HitData } from "./damage";
+import { getEnemyStats } from "./enemyStats";
 import { enemyCast } from "./remoteEffects";
+import { spawnEnemy } from "./spawnedEnemyStore";
 
 const ENEMY_GROUPS = interactionGroups(GROUPS.ENEMY, [
   GROUPS.WORLD,
@@ -166,7 +168,7 @@ export function Wisp({
   const body = useRef<RapierRigidBody>(null);
   const mat = useRef<MeshStandardMaterial>(null);
   const scale = useMemo(() => floorScale(floor), [floor]);
-  const hp = useRef(30 * scale.enemyHealth);
+  const hp = useRef(getEnemyStats("wisp").baseHealth * scale.enemyHealth);
   const deadRef = useRef(false);
   const [dead, setDead] = useState(false);
   const aggro = useRef(false);
@@ -232,7 +234,7 @@ export function Wisp({
   useFrame(({ clock }, dt) => {
     const b = body.current;
     if (!b || deadRef.current) return;
-    if (useGame.getState().phase !== "dungeon") return;
+    if (!combatActive()) return;
 
     flash.current = Math.max(0, flash.current - dt * 5);
     if (mat.current) mat.current.emissiveIntensity = 1.7 + flash.current * 6;
@@ -338,7 +340,7 @@ export function Sentry({
   const mat = useRef<MeshStandardMaterial>(null);
   const { world, rapier } = useRapier();
   const scale = useMemo(() => floorScale(floor), [floor]);
-  const hp = useRef(60 * scale.enemyHealth);
+  const hp = useRef(getEnemyStats("sentry").baseHealth * scale.enemyHealth);
   const deadRef = useRef(false);
   const [dead, setDead] = useState(false);
   const fireTimer = useRef(2 + Math.random() * 1.5);
@@ -377,7 +379,7 @@ export function Sentry({
   useFrame((_, dt) => {
     const b = body.current;
     if (!b || deadRef.current) return;
-    if (useGame.getState().phase !== "dungeon") return;
+    if (!combatActive()) return;
 
     flash.current = Math.max(0, flash.current - dt * 5);
     const t = b.translation();
@@ -462,6 +464,392 @@ export function Sentry({
           />
         </mesh>
       </group>
+    </RigidBody>
+  );
+}
+
+/** Shadow — a lurking stalker. Instead of the wisp's straight chase it plays
+ * keep-away: prowls a ring around its target, then darts in for a strike and
+ * recoils back into the dark. Floats like the wisp; the authority runs its
+ * stalk→lunge→recoil brain, replicas are driven by the net layer. */
+export function Shadow({
+  position,
+  floor,
+  entityId,
+}: {
+  position: Vec3;
+  floor: number;
+  entityId: string;
+}) {
+  const body = useRef<RapierRigidBody>(null);
+  const mat = useRef<MeshStandardMaterial>(null);
+  const scale = useMemo(() => floorScale(floor), [floor]);
+  const hp = useRef(getEnemyStats("shadow").baseHealth * scale.enemyHealth);
+  const deadRef = useRef(false);
+  const [dead, setDead] = useState(false);
+  const aggro = useRef(false);
+  const knockTimer = useRef(0);
+  const contactTimer = useRef(0);
+  const flash = useRef(0);
+  const phase = useMemo(() => Math.random() * Math.PI * 2, []);
+  const desired = useMemo(() => new Vector3(), []);
+  // Lurk state machine: stalk (prowl the ring) → lunge (dash in) → recoil.
+  const mode = useRef<"stalk" | "lunge" | "recoil">("stalk");
+  const modeTimer = useRef(0);
+  const lungeTimer = useRef(2 + Math.random() * 2);
+  // Fixed orbit direction so a given shadow prowls one way, not jittering.
+  const spin = useMemo(() => (Math.random() < 0.5 ? 1 : -1), []);
+
+  const kill = useCallback(
+    (silent = false) => {
+      if (deadRef.current) return;
+      deadRef.current = true;
+      const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
+      if (!silent) {
+        spawnBurst({
+          position: [t.x, t.y, t.z],
+          count: 26,
+          color: ["#2a1a44", "#6a3d9a", "#050208"],
+          speed: 6,
+          ttl: 0.8,
+          size: 0.1,
+        });
+        flashLight([t.x, t.y, t.z], "#6a3d9a", 18);
+        dropLoot([t.x, Math.max(t.y, 0.6), t.z], floor, LOOT_DROP_CHANCE);
+        dropGold([t.x, Math.max(t.y, 0.6), t.z], floor, GOLD_DROPS.enemyChance, "enemy");
+      }
+      setDead(true);
+    },
+    [floor, position],
+  );
+
+  const hitFeedback = useCallback(() => {
+    const t = body.current?.translation();
+    if (!t) return;
+    spawnBurst({ position: [t.x, t.y, t.z], count: 6, color: "#8a5cc0", speed: 3, ttl: 0.4, size: 0.06 });
+  }, []);
+
+  const onDamaged = useCallback(() => {
+    aggro.current = true;
+  }, []);
+
+  const net = useEnemyNet({
+    entityId,
+    body,
+    hp,
+    deadRef,
+    flash,
+    dead,
+    knockTimer,
+    onKill: kill,
+    hitFeedback,
+    onDamaged,
+  });
+
+  useFrame(({ clock }, dt) => {
+    const b = body.current;
+    if (!b || deadRef.current) return;
+    if (!combatActive()) return;
+
+    flash.current = Math.max(0, flash.current - dt * 5);
+    if (mat.current) {
+      mat.current.emissiveIntensity = 0.8 + flash.current * 6;
+      mat.current.opacity = mode.current === "lunge" ? 0.95 : 0.55;
+    }
+    contactTimer.current -= dt;
+
+    const t = b.translation();
+    const dx = playerPosition.x - t.x;
+    const dy = playerPosition.y - t.y;
+    const dz = playerPosition.z - t.z;
+    const dist = Math.hypot(dx, dy, dz);
+
+    // Contact strike — lands mostly on a lunge; local, like the wisp's burn.
+    if (dist < 1.5 && contactTimer.current <= 0) {
+      contactTimer.current = PLAYER.contactDamageCooldown;
+      useGame.getState().takeDamage(12 * scale.enemyDamage);
+      spawnBurst({
+        position: [playerPosition.x, playerPosition.y + 0.3, playerPosition.z],
+        count: 12,
+        color: ["#2a1a44", "#6a3d9a"],
+        speed: 4,
+        ttl: 0.5,
+        size: 0.08,
+      });
+      const push = 5 / Math.max(dist, 0.4);
+      getPlayerBody()?.applyImpulse({ x: dx * push * 0.3, y: 1.5, z: dz * push * 0.3 }, true);
+    }
+
+    // Replicas are driven by the net layer; only the authority thinks.
+    if (!net.isAuthority) return;
+
+    const target = nearestWizardTo(t.x, t.y, t.z);
+    knockTimer.current -= dt;
+    if (!aggro.current) {
+      if (target.dist < 15 * getStats().aggroMult) aggro.current = true;
+      b.setLinvel({ x: 0, y: Math.sin(clock.elapsedTime * 1.2 + phase) * 0.4, z: 0 }, true);
+      return;
+    }
+    if (knockTimer.current > 0) return;
+
+    // Planar unit vector toward the target, plus its perpendicular (for orbit).
+    const px = target.pos.x - t.x;
+    const pz = target.pos.z - t.z;
+    const planar = Math.hypot(px, pz) || 1;
+    const nx = px / planar;
+    const nz = pz / planar;
+    const targetY = target.pos.y + 0.3 + Math.sin(clock.elapsedTime * 1.8 + phase) * 0.3;
+    const LURK = 6;
+
+    modeTimer.current -= dt;
+    if (mode.current === "stalk") {
+      lungeTimer.current -= dt;
+      // Radial term closes/opens toward the lurk ring; tangential term prowls
+      // around it. Clamp the radial pull so it eases onto the ring.
+      const radial = Math.max(-1, Math.min(1, (target.dist - LURK) * 0.5));
+      const speed = 2.4 + floor * 0.03;
+      desired.set(nx * radial + -nz * spin * 0.7, 0, nz * radial + nx * spin * 0.7);
+      if (desired.lengthSq() > 1e-4) desired.normalize().multiplyScalar(speed);
+      desired.y = Math.max(-3, Math.min(3, (targetY - t.y) * 2));
+      if (lungeTimer.current <= 0 && target.dist < 10) {
+        mode.current = "lunge";
+        modeTimer.current = 0.55;
+      }
+    } else if (mode.current === "lunge") {
+      const speed = 11 + floor * 0.12;
+      desired.set(nx * speed, Math.max(-3, Math.min(3, (targetY - t.y) * 2)), nz * speed);
+      if (modeTimer.current <= 0) {
+        mode.current = "recoil";
+        modeTimer.current = 0.45;
+      }
+    } else {
+      // recoil — shrink back into the dark before prowling again
+      desired.set(-nx * 6, 0, -nz * 6);
+      if (modeTimer.current <= 0) {
+        mode.current = "stalk";
+        lungeTimer.current = 2 + Math.random() * 2;
+      }
+    }
+
+    const v = b.linvel();
+    const k = 1 - Math.exp(-(mode.current === "lunge" ? 6 : 3) * dt);
+    b.setLinvel(
+      { x: v.x + (desired.x - v.x) * k, y: v.y + (desired.y - v.y) * k, z: v.z + (desired.z - v.z) * k },
+      true,
+    );
+  });
+
+  if (dead) return null;
+  return (
+    <RigidBody
+      ref={body}
+      position={position}
+      type={net.bodyType}
+      colliders={false}
+      gravityScale={0}
+      linearDamping={0.6}
+      enabledRotations={[false, false, false]}
+    >
+      <BallCollider args={[0.44]} mass={2} collisionGroups={ENEMY_GROUPS} />
+      <mesh castShadow>
+        <icosahedronGeometry args={[0.5, 0]} />
+        <meshStandardMaterial
+          ref={mat}
+          color="#0a0616"
+          emissive="#5a2d8a"
+          emissiveIntensity={0.8}
+          flatShading
+          roughness={0.6}
+          transparent
+          opacity={0.55}
+        />
+      </mesh>
+      {/* Two faint eyes peering out of the murk. */}
+      {([0.13, -0.13] as const).map((x) => (
+        <mesh key={x} position={[x, 0.06, 0.34]}>
+          <sphereGeometry args={[0.05, 6, 6]} />
+          <meshStandardMaterial color="#000" emissive="#c89cff" emissiveIntensity={3} toneMapped={false} />
+        </mesh>
+      ))}
+    </RigidBody>
+  );
+}
+
+/** Slime — a gelatinous melee blob that hops toward its prey and, on death,
+ * SPLITS into two smaller, faster copies (down to a terminal generation).
+ * Children are spawned host-authoritatively via spawnEnemy() and rendered by
+ * <SpawnedEnemies>. Unlike the fliers it lives on the floor (gravity on). */
+const SLIME_MAX_GEN = 2;
+const SLIME_GEN = [
+  { size: 1.0, speed: 3.2, hp: 1.0, contact: 12, hop: 5.4 },
+  { size: 0.66, speed: 4.6, hp: 0.5, contact: 9, hop: 5.0 },
+  { size: 0.44, speed: 6.2, hp: 0.3, contact: 6, hop: 4.6 },
+];
+
+export function Slime({
+  position,
+  floor,
+  entityId,
+  generation = 0,
+  onDeath,
+}: {
+  position: Vec3;
+  floor: number;
+  entityId: string;
+  generation?: number;
+  onDeath?: () => void;
+}) {
+  const gen = Math.min(generation, SLIME_MAX_GEN);
+  const cfg = SLIME_GEN[gen];
+  const radius = 0.5 * cfg.size;
+  const body = useRef<RapierRigidBody>(null);
+  const mesh = useRef<Mesh>(null);
+  const mat = useRef<MeshStandardMaterial>(null);
+  const scale = useMemo(() => floorScale(floor), [floor]);
+  const hp = useRef(getEnemyStats("slime").baseHealth * cfg.hp * scale.enemyHealth);
+  const deadRef = useRef(false);
+  const [dead, setDead] = useState(false);
+  const aggro = useRef(false);
+  const knockTimer = useRef(0);
+  const contactTimer = useRef(0);
+  const hopTimer = useRef(Math.random() * 0.6);
+  const flash = useRef(0);
+
+  const kill = useCallback(
+    (silent = false) => {
+      if (deadRef.current) return;
+      deadRef.current = true;
+      const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
+      if (!silent) {
+        spawnBurst({
+          position: [t.x, t.y, t.z],
+          count: 20,
+          color: ["#7fdc4a", "#2f5a1a", "#c8ff8a"],
+          speed: 5,
+          ttl: 0.7,
+          size: 0.09 + cfg.size * 0.05,
+        });
+        flashLight([t.x, t.y, t.z], "#7fdc4a", 14);
+        dropGold([t.x, Math.max(t.y, 0.4), t.z], floor, GOLD_DROPS.enemyChance, "enemy");
+        // The whole slime's loot lands when its LAST piece dies, not on every split.
+        if (gen >= SLIME_MAX_GEN) dropLoot([t.x, Math.max(t.y, 0.4), t.z], floor, LOOT_DROP_CHANCE);
+        // Split into two smaller, faster children (host decides; all render).
+        if (gen < SLIME_MAX_GEN) {
+          spawnEnemy("slime", gen + 1, [t.x - 0.7, t.y + 0.2, t.z], floor);
+          spawnEnemy("slime", gen + 1, [t.x + 0.7, t.y + 0.2, t.z], floor);
+        }
+      }
+      onDeath?.();
+      setDead(true);
+    },
+    [floor, position, gen, cfg.size, onDeath],
+  );
+
+  const hitFeedback = useCallback(() => {
+    const t = body.current?.translation();
+    if (!t) return;
+    spawnBurst({ position: [t.x, t.y, t.z], count: 6, color: "#a8f06a", speed: 3, ttl: 0.4, size: 0.06 });
+  }, []);
+
+  const onDamaged = useCallback(() => {
+    aggro.current = true;
+  }, []);
+
+  const net = useEnemyNet({
+    entityId,
+    body,
+    hp,
+    deadRef,
+    flash,
+    dead,
+    knockTimer,
+    onKill: kill,
+    hitFeedback,
+    onDamaged,
+  });
+
+  useFrame((_, dt) => {
+    const b = body.current;
+    if (!b || deadRef.current) return;
+    if (!combatActive()) return;
+
+    flash.current = Math.max(0, flash.current - dt * 5);
+    if (mat.current) mat.current.emissiveIntensity = 0.9 + flash.current * 6;
+    contactTimer.current -= dt;
+
+    const t = b.translation();
+    const v = b.linvel();
+    // Squash & stretch from vertical motion — reads as a bouncing blob.
+    if (mesh.current) {
+      const sy = Math.max(0.72, Math.min(1.28, 1 + v.y * 0.03));
+      const sxz = 1 / Math.sqrt(sy);
+      mesh.current.scale.set(cfg.size * sxz, cfg.size * sy, cfg.size * sxz);
+    }
+
+    const dx = playerPosition.x - t.x;
+    const dz = playerPosition.z - t.z;
+    const dist = Math.hypot(dx, playerPosition.y - t.y, dz);
+    if (dist < radius + 0.8 && contactTimer.current <= 0) {
+      contactTimer.current = PLAYER.contactDamageCooldown;
+      useGame.getState().takeDamage(cfg.contact * scale.enemyDamage);
+      const push = 4 / Math.max(dist, 0.4);
+      getPlayerBody()?.applyImpulse({ x: dx * push * 0.3, y: 1.5, z: dz * push * 0.3 }, true);
+    }
+
+    if (!net.isAuthority) return;
+
+    const target = nearestWizardTo(t.x, t.y, t.z);
+    knockTimer.current -= dt;
+    if (!aggro.current) {
+      if (target.dist < 14 * getStats().aggroMult) aggro.current = true;
+      return;
+    }
+    if (knockTimer.current > 0) return;
+
+    const tx = target.pos.x - t.x;
+    const tz = target.pos.z - t.z;
+    const planar = Math.hypot(tx, tz) || 1;
+    const speed = cfg.speed + floor * 0.03;
+    let vy = v.y;
+    hopTimer.current -= dt;
+    if (hopTimer.current <= 0 && Math.abs(v.y) < 0.9) {
+      hopTimer.current = 0.55 + Math.random() * 0.4;
+      vy = cfg.hop; // a spring off the floor
+    }
+    b.setLinvel({ x: (tx / planar) * speed, y: vy, z: (tz / planar) * speed }, true);
+  });
+
+  if (dead) return null;
+  return (
+    <RigidBody
+      ref={body}
+      position={position}
+      type={net.bodyType}
+      colliders={false}
+      gravityScale={1}
+      linearDamping={0.1}
+      enabledRotations={[false, false, false]}
+    >
+      <BallCollider args={[radius]} mass={1.2 * cfg.size} collisionGroups={ENEMY_GROUPS} />
+      <mesh ref={mesh} castShadow scale={cfg.size}>
+        <icosahedronGeometry args={[0.5, 1]} />
+        <meshStandardMaterial
+          ref={mat}
+          color="#1f3a1a"
+          emissive="#7fdc4a"
+          emissiveIntensity={0.9}
+          transparent
+          opacity={0.85}
+          roughness={0.5}
+          flatShading
+        />
+      </mesh>
+      {([0.16, -0.16] as const).map((x) => (
+        <mesh key={x} position={[x * cfg.size, 0.1 * cfg.size, 0.34 * cfg.size]}>
+          <sphereGeometry args={[0.06 * cfg.size, 6, 6]} />
+          <meshStandardMaterial color="#04140a" emissive="#d4ffb0" emissiveIntensity={2} toneMapped={false} />
+        </mesh>
+      ))}
     </RigidBody>
   );
 }

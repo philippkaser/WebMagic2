@@ -15,6 +15,10 @@ export interface Passives {
   damageMult: number;
   damageTakenMult: number;
   aggroMult: number; // enemy notice radius multiplier
+  // ── Casting modifiers (read by abilities/projectiles/combat) ──────────────
+  extraProjectiles: number; // additive: extra bolts per projectile cast
+  homing: number; // additive 0..~1: how hard player bolts seek enemies
+  fireRateMult: number; // multiplicative: >1 shortens ability cooldowns
 }
 
 /** What happens when a consumable is used (Q/E). */

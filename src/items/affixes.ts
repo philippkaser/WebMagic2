@@ -21,6 +21,9 @@ const defs: AffixDef[] = [
   { id: "focused", name: "Focused", desc: "+30% mana regeneration", passives: { manaRegenMult: 1.3 } },
   { id: "warded", name: "Warded", desc: "-10% damage taken", passives: { damageTakenMult: 0.9 } },
   { id: "veiled", name: "Veiled", desc: "-25% enemy notice range", passives: { aggroMult: 0.75 } },
+  { id: "seeking", name: "Seeking", desc: "+30% projectile homing", passives: { homing: 0.3 } },
+  { id: "hasty", name: "Hasty", desc: "+15% fire rate", passives: { fireRateMult: 1.15 } },
+  { id: "twinned", name: "Twinned", desc: "+1 projectile per cast", passives: { extraProjectiles: 1 } },
 ];
 
 const byId = new Map(defs.map((d) => [d.id, d]));

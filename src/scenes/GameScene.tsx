@@ -2,6 +2,7 @@ import { Environment, PointerLockControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { Suspense, useMemo } from "react";
+import { BlackHoles } from "../combat/blackhole";
 import { CombatSystem } from "../combat/CombatSystem";
 import { Projectiles } from "../combat/projectiles";
 import { GRAVITY } from "../core/config";
@@ -55,6 +56,7 @@ export function GameScene() {
             <Village />
           )}
           <Projectiles />
+          <BlackHoles />
           <LootOrbs />
           <PeerBodies />
         </Physics>

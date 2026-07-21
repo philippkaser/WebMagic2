@@ -56,6 +56,7 @@ export function CombatSystem() {
     if (!document.pointerLockElement) return;
 
     const staff = getItemDef(state.equipment.staff.defId);
+    const stats = getStats();
     const tryCast = (abilityId: string | undefined, cd: { current: number }) => {
       if (!abilityId || cd.current > 0) return;
       const ability = getAbility(abilityId);
@@ -70,13 +71,14 @@ export function CombatSystem() {
         .addScaledVector(dir, 0.62)
         .addScaledVector(right, 0.24)
         .addScaledVector(UP, -0.16);
-      ability.cast({ origin, dir, stats: getStats(), staff });
+      ability.cast({ origin, dir, stats, staff });
       peerCast.send({
         abilityId: ability.id,
         origin: [origin.x, origin.y, origin.z],
         dir: [dir.x, dir.y, dir.z],
       });
-      cd.current = ability.cooldown;
+      // Fire-rate gear shortens the cooldown (higher mult = faster).
+      cd.current = ability.cooldown / Math.max(0.25, stats.fireRateMult);
       playCast();
       gameEvents.emit("staffKick", 0.9);
       gameEvents.emit("shake", 0.05);

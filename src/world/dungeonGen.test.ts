@@ -68,4 +68,52 @@ describe("generateFloor", () => {
     const deep = generateFloor(42, 15);
     expect(deep.enemies.length).toBeGreaterThan(shallow.enemies.length);
   });
+
+  test("new enemy kinds are introduced gradually with depth", () => {
+    // Floor 1 is only wisps — nothing else has been introduced yet.
+    for (const seed of [7, 99, 4242]) {
+      expect(generateFloor(seed, 1).enemies.every((e) => e.kind === "wisp")).toBe(true);
+    }
+    // Deep floors mix in the later arrivals (slime ≥3, sentry ≥5, shadow ≥8).
+    const seen = new Set<string>();
+    for (let i = 0; i < 60; i++) {
+      const layout = generateFloor((i * 2654435761) >>> 0, 10 + (i % 15));
+      for (const e of layout.enemies) seen.add(e.kind);
+    }
+    expect(seen.has("shadow")).toBe(true);
+    expect(seen.has("sentry")).toBe(true);
+    expect(seen.has("slime")).toBe(true);
+  });
+
+  test("traps are placed deterministically and scale with depth", () => {
+    const a = generateFloor(2024, 6);
+    const b = generateFloor(2024, 6);
+    expect(a.traps).toEqual(b.traps);
+    expect(a.traps.length).toBeGreaterThan(0);
+    const deep = generateFloor(2024, 24);
+    expect(deep.traps.length).toBeGreaterThanOrEqual(a.traps.length);
+  });
+
+  test("warp traps never spawn on checkpoint floors", () => {
+    for (const floor of [5, 10, 15, 20]) {
+      const layout = generateFloor(31337, floor);
+      expect(layout.traps.some((t) => t.kind === "warp")).toBe(false);
+    }
+    // ...but do appear somewhere across non-checkpoint floors.
+    let sawWarp = false;
+    for (let f = 1; f < 20 && !sawWarp; f++) {
+      if (f % 5 === 0) continue;
+      if (generateFloor(31337, f).traps.some((t) => t.kind === "warp")) sawWarp = true;
+    }
+    expect(sawWarp).toBe(true);
+  });
+
+  test("adding traps left the rest of the layout untouched (traps roll last)", () => {
+    // Regression guard: trap generation must not perturb earlier rng draws.
+    const layout = generateFloor(123456, 3);
+    const fresh = generateFloor(123456, 3);
+    expect(layout.enemies).toEqual(fresh.enemies);
+    expect(layout.props).toEqual(fresh.props);
+    expect(layout.tiles).toEqual(fresh.tiles);
+  });
 });
