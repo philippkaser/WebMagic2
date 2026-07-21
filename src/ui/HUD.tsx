@@ -10,12 +10,11 @@ import { InventoryScreen } from "./InventoryScreen";
 import { ITEM_ICONS, iconOf } from "./itemInfo";
 import {
   barSegments,
-  boneButton,
-  fleshPanel,
+  conjuredPanel,
+  manaWell,
+  runeButton,
   scarred,
   themeCss,
-  uiTile,
-  woundTrack,
 } from "./theme";
 
 /** All DOM UI: crosshair, bars, prompts, message feed, and the fullscreen
@@ -80,11 +79,89 @@ export function HUD() {
 
 // ── Crossing the tear ─────────────────────────────────────────────────────────
 
-/** The old "DESCENDING…" wall of text, replaced by the crossing itself: the
- * whole eye goes void, a teal slit rips open and shut, dead stars behind it.
- * Purely DOM — it sits over the canvas while the next floor streams in. */
+/** The crossing itself: you are pulled through the wound into the space
+ * between floors. A low-res canvas (rendered at ~200px then pixel-upscaled to
+ * fill the eye) draws a warp tunnel — stars streaking out from a vanishing
+ * point, dragged into a spiral, colors posterized to a few teal/violet steps.
+ * Sits over the R3F canvas while the next floor streams in. */
 function RiftCrossing() {
-  const voidTile = uiTile("void");
+  const ref = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    // Fixed tiny buffer — the browser upscales it with the pixelated hint, so
+    // the whole warp is intrinsically chunky and cheap no matter the screen.
+    const W = 220;
+    const H = 124;
+    canvas.width = W;
+    canvas.height = H;
+
+    // A field of stars, each on a ray from center at a fixed angle; every
+    // frame they rush outward (radius grows), wrapping back to the middle.
+    const N = 150;
+    const stars = Array.from({ length: N }, () => ({
+      a: Math.random() * Math.PI * 2,
+      r: Math.random(), // 0..1 along the ray
+      speed: 0.35 + Math.random() * 0.9,
+      hue: Math.random(),
+    }));
+    // Posterize helper: snap a 0..1 level to N bands so gradients stay chunky.
+    const band = (v: number, n: number) => Math.round(v * n) / n;
+
+    let raf = 0;
+    let last = performance.now();
+    let swirl = 0;
+    const maxR = Math.hypot(W, H) * 0.5;
+    const cx = W / 2;
+    const cy = H / 2;
+
+    const draw = (now: number) => {
+      const dt = Math.min((now - last) / 1000, 1 / 20);
+      last = now;
+      swirl += dt * 1.4;
+
+      // Trail the previous frame instead of clearing — stars smear into
+      // streaks, the whole thing reads as motion.
+      ctx.fillStyle = "rgba(3,1,8,0.42)";
+      ctx.fillRect(0, 0, W, H);
+
+      for (const s of stars) {
+        s.r += s.speed * dt * (0.35 + s.r); // accelerate as they near the edge
+        if (s.r > 1) {
+          s.r = Math.random() * 0.12;
+          s.a = Math.random() * Math.PI * 2;
+          s.hue = Math.random();
+        }
+        // Twist the ray angle by radius — the tunnel spirals inward.
+        const ang = s.a + swirl * (0.4 + s.r) + s.r * 2.2;
+        const rr = band(s.r, 10) * maxR;
+        const x = cx + Math.cos(ang) * rr * 1.5;
+        const y = cy + Math.sin(ang) * rr;
+        const bright = band(Math.min(1, s.r * 1.3), 4);
+        // Teal core drifting to violet at the rim.
+        const teal = s.hue < 0.7;
+        const r = teal ? 0.27 * bright : 0.7 * bright;
+        const g = teal ? 1.0 * bright : 0.42 * bright;
+        const b = teal ? 0.82 * bright : 1.0 * bright;
+        ctx.fillStyle = `rgb(${(r * 255) | 0},${(g * 255) | 0},${(b * 255) | 0})`;
+        const size = 1 + Math.round(s.r * 2);
+        ctx.fillRect((x | 0) - (size >> 1), (y | 0) - (size >> 1), size, size);
+      }
+
+      // A hot mouth at the vanishing point.
+      const pulse = 0.6 + Math.sin(swirl * 3) * 0.25;
+      ctx.fillStyle = `rgba(${(160 * pulse) | 0},255,${(220 * pulse) | 0},0.5)`;
+      ctx.fillRect(cx - 2, cy - 2, 4, 4);
+
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   return (
     <div
       className="wm-tear-veil"
@@ -92,23 +169,29 @@ function RiftCrossing() {
         position: "absolute",
         inset: 0,
         pointerEvents: "auto",
-        backgroundColor: "#020106",
-        backgroundImage: voidTile ? `url(${voidTile})` : undefined,
-        backgroundSize: "160px 160px",
-        imageRendering: "pixelated",
+        backgroundColor: "#030108",
+        overflow: "hidden",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
       }}
     >
-      <div
-        className="wm-tear-slit"
+      <canvas
+        ref={ref}
         style={{
-          width: "min(30vw, 340px)",
-          height: "72vh",
-          background:
-            "radial-gradient(ellipse 48% 50% at 50% 50%, #eafffa 0%, #46ffd0 18%, #0d4a3c 45%, transparent 68%)",
-          filter: "saturate(1.2)",
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          imageRendering: "pixelated",
+        }}
+      />
+      {/* Vignette so the tunnel funnels toward the center. */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "radial-gradient(ellipse at 50% 50%, transparent 30%, rgba(3,1,8,0.85) 82%)",
         }}
       />
       <div
@@ -122,7 +205,7 @@ function RiftCrossing() {
           color: "#9fe8d4",
         }}
       >
-        THE TEAR TAKES YOU
+        THROUGH THE TEAR
       </div>
     </div>
   );
@@ -186,7 +269,7 @@ function PlayHud() {
       <BossBar />
 
       {/* Top-left: location, scarred into a graft of hide */}
-      <div className="wm-breathe" style={{ ...styles.panel, ...fleshPanel("loc"), top: 14, left: 14, ...anchor(4) }}>
+      <div className="wm-conjure" style={{ ...styles.panel, ...conjuredPanel("loc"), top: 14, left: 14, ...anchor(4) }}>
         {phase === "dungeon" ? (
           <>
             <div style={{ fontSize: 18, ...scarred }}>FLOOR {floor}</div>
@@ -213,8 +296,8 @@ function PlayHud() {
 
       {/* Bottom-left: vitals, purse and belt */}
       <div
-        className="wm-breathe"
-        style={{ ...styles.panel, ...fleshPanel("vitals"), bottom: 16, left: 14, width: 240, ...anchor(4) }}
+        className="wm-conjure"
+        style={{ ...styles.panel, ...conjuredPanel("vitals"), bottom: 16, left: 14, width: 240, ...anchor(4) }}
       >
         <Bar
           label="♥ BLOOD"
@@ -246,8 +329,8 @@ function PlayHud() {
 
       {/* Bottom-right: equipment */}
       <div
-        className="wm-breathe"
-        style={{ ...styles.panel, ...fleshPanel("gear"), bottom: 16, right: 14, textAlign: "right", ...anchor(-4) }}
+        className="wm-conjure"
+        style={{ ...styles.panel, ...conjuredPanel("gear"), bottom: 16, right: 14, textAlign: "right", ...anchor(-4) }}
       >
         <EquipRow slot="staff" defId={equipment.staff.defId} runLoot={equipment.staff.runLoot} />
         <EquipRow slot="amulet" defId={equipment.amulet?.defId} runLoot={equipment.amulet?.runLoot} />
@@ -276,7 +359,7 @@ function Bar({ label, value, max, color }: { label: string; value: number; max: 
           {Math.ceil(value)} / {Math.round(max)}
         </span>
       </div>
-      <div style={{ height: 12, ...woundTrack }}>
+      <div style={{ height: 12, ...manaWell }}>
         <div
           style={{
             height: "100%",
@@ -374,7 +457,7 @@ function BossBar() {
       <div
         style={{
           height: 14,
-          ...woundTrack,
+          ...manaWell,
           boxShadow: "0 0 0 2px rgba(200,184,152,0.5), 0 0 0 3px #000, inset 0 2px 3px rgba(0,0,0,0.9)",
         }}
       >
@@ -451,7 +534,7 @@ function PerfOverlay() {
     return () => cancelAnimationFrame(raf);
   }, []);
   return (
-    <div style={{ ...styles.panel, ...fleshPanel("perf"), top: 110, left: 14, fontSize: 12, color: "#8fe3a0" }}>
+    <div style={{ ...styles.panel, ...conjuredPanel("perf"), top: 110, left: 14, fontSize: 12, color: "#8fe3a0" }}>
       {stats.fps} fps · p95 {stats.p95}ms · worst {stats.worst}ms
     </div>
   );
@@ -477,7 +560,7 @@ function Overlay({ children }: { children: ReactNode }) {
  * a thing hanging in the world (it breathes), not a window over it. */
 function Sheet({ children }: { children: ReactNode }) {
   return (
-    <div className="wm-breathe" style={styles.sheet}>
+    <div className="wm-conjure" style={styles.sheet}>
       {children}
     </div>
   );
@@ -626,13 +709,13 @@ const styles: Record<string, CSSProperties> = {
     width: 64,
     height: 5,
     marginLeft: -32,
-    ...woundTrack,
+    ...manaWell,
   },
   chargeFill: {
     height: "100%",
     transition: "width 40ms linear",
   },
-  // Base graft geometry — each call site layers fleshPanel(seed) over this.
+  // Base graft geometry — each call site layers conjuredPanel(seed) over this.
   panel: {
     position: "absolute",
     padding: "12px 16px",
@@ -649,7 +732,7 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 14,
     letterSpacing: 1,
     whiteSpace: "nowrap",
-    ...fleshPanel("prompt"),
+    ...conjuredPanel("prompt"),
     ...scarred,
   },
   feed: {
@@ -703,7 +786,7 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "center",
     padding: "38px 52px 32px",
     maxWidth: 640,
-    ...fleshPanel("sheet"),
+    ...conjuredPanel("sheet"),
   },
   title: {
     fontSize: 52,
@@ -719,8 +802,8 @@ const styles: Record<string, CSSProperties> = {
   },
   subtitle: { fontSize: 18, letterSpacing: 4, color: "#b09a90", marginTop: 8, textShadow: "0 2px 0 #000" },
   blurb: { maxWidth: 460, fontSize: 14, lineHeight: 1.6, color: "#b8a494", margin: "18px 0", textShadow: "0 1px 0 #000" },
-  button: boneButton("main"),
-  buttonSmall: { ...boneButton("small"), fontSize: 12, padding: "8px 18px", opacity: 0.85 },
+  button: runeButton("main"),
+  buttonSmall: { ...runeButton("small"), fontSize: 12, padding: "8px 18px", opacity: 0.85 },
   nameInput: {
     fontFamily: "'Courier New', monospace",
     fontSize: 16,
@@ -728,7 +811,7 @@ const styles: Record<string, CSSProperties> = {
     padding: "9px 14px",
     color: "#e0d4b8",
     border: "none",
-    ...woundTrack,
+    ...manaWell,
     textAlign: "center",
     outline: "none",
     width: 220,

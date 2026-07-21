@@ -56,6 +56,7 @@ export function Boss({
 }) {
   const body = useRef<RapierRigidBody>(null);
   const shell = useRef<Group>(null);
+  const eye = useRef<Group>(null);
   const mat = useRef<MeshStandardMaterial>(null);
   const scale = useMemo(() => floorScale(floor), [floor]);
   const maxHp = useMemo(() => getEnemyStats("boss").baseHealth * scale.enemyHealth, [scale]);
@@ -164,6 +165,14 @@ export function Boss({
     if (shell.current) shell.current.rotation.y += dt * (enraged ? 1.6 : 0.7);
 
     const t = b.translation();
+    // The eye fixes on the local player even as the tusked shell spins.
+    if (eye.current) {
+      const target = Math.atan2(playerPosition.x - t.x, playerPosition.z - t.z);
+      let d = target - eye.current.rotation.y;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      eye.current.rotation.y += d * Math.min(1, dt * 5);
+    }
     if (light.current) {
       light.current.position.set(t.x, t.y, t.z);
       light.current.intensity =
@@ -364,15 +373,17 @@ export function Boss({
           </mesh>
         ))}
       </group>
-      {/* The eye. It does not blink. */}
-      <mesh>
-        <sphereGeometry args={[0.44, 10, 10]} />
-        <meshStandardMaterial color="#000" emissive="#ffd0b0" emissiveIntensity={3.4} toneMapped={false} />
-      </mesh>
-      <mesh position={[0, 0, 0.38]}>
-        <sphereGeometry args={[0.15, 8, 6]} />
-        <meshStandardMaterial color="#050203" roughness={0.25} />
-      </mesh>
+      {/* The eye. It does not blink, and it does not lose you. */}
+      <group ref={eye}>
+        <mesh>
+          <sphereGeometry args={[0.44, 10, 10]} />
+          <meshStandardMaterial color="#000" emissive="#ffd0b0" emissiveIntensity={3.4} toneMapped={false} />
+        </mesh>
+        <mesh position={[0, 0, 0.38]}>
+          <sphereGeometry args={[0.15, 8, 6]} />
+          <meshStandardMaterial color="#050203" roughness={0.25} />
+        </mesh>
+      </group>
     </RigidBody>
   );
 }

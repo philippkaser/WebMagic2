@@ -346,6 +346,7 @@ function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void 
       color: "#b06bff",
       particles: 34,
       light: 30,
+      style: "arcane",
       remote: !isHost(),
     });
   }, [hole]);

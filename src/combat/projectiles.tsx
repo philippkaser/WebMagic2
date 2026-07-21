@@ -210,6 +210,8 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
       color: spec.color,
       particles: 14,
       light: 14,
+      // Spells discharge; enemy fire bolts burn.
+      style: spec.team === "player" ? "arcane" : "fire",
       remote: spec.cosmetic,
     });
     remove(spec.id);

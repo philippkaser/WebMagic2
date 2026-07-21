@@ -26,28 +26,40 @@ export function Trap({ kind, pos, floor }: { kind: TrapKind; pos: Vec3; floor: n
   }
 }
 
-const SPIKE_OFFSETS: [number, number][] = [
-  [-0.26, -0.26],
-  [0.26, -0.26],
-  [-0.26, 0.26],
-  [0.26, 0.26],
-  [0, 0],
-];
-
-/** A scab of dead flesh grown over the floor; the bone splinters underneath
- * stab up when something steps on it, then sink back and re-arm. */
+/** Fangs of bone hidden in a split of the floor. They lie flush until
+ * something crosses them, then stab up out of the crack — a maw biting shut —
+ * before sinking back to re-arm. No flat disc: the shape is the teeth and the
+ * broken slab they push through. */
 function SpikeTrap({ pos, floor }: { pos: Vec3; floor: number }) {
   const def = getTrapDef("spike");
-  const spikes = useRef<Group>(null);
+  const teeth = useRef<Group>(null);
   const armTimer = useRef(0);
   const pop = useRef(0);
   const scale = useMemo(() => floorScale(floor), [floor]);
   const r2 = def.radius * def.radius;
 
+  // A ragged double row of fangs of varied length/lean, seeded once.
+  const fangs = useMemo(() => {
+    const out: { x: number; z: number; h: number; lean: number; tilt: number; twist: number }[] = [];
+    for (let i = 0; i < 9; i++) {
+      const row = i < 5 ? -0.14 : 0.14;
+      const along = ((i % 5) - 2) * 0.19;
+      out.push({
+        x: along + (i % 2) * 0.05,
+        z: row + (i % 3) * 0.03,
+        h: 0.34 + ((i * 37) % 5) * 0.06,
+        lean: ((i % 3) - 1) * 0.25,
+        tilt: ((i % 2) - 0.5) * 0.3,
+        twist: (i * 1.3) % Math.PI,
+      });
+    }
+    return out;
+  }, []);
+
   useFrame((_, dt) => {
     armTimer.current -= dt;
     pop.current = Math.max(0, pop.current - dt * 3);
-    if (spikes.current) spikes.current.position.y = -0.3 + pop.current * 0.36;
+    if (teeth.current) teeth.current.position.y = -0.42 + pop.current * 0.5;
     if (!combatActive()) return;
     const dx = playerPosition.x - pos[0];
     const dz = playerPosition.z - pos[2];
@@ -58,11 +70,12 @@ function SpikeTrap({ pos, floor }: { pos: Vec3; floor: number }) {
       useGame.getState().takeDamage(def.baseDamage * scale.enemyDamage);
       playHit();
       spawnBurst({
-        position: [pos[0], pos[1] + 0.15, pos[2]],
-        count: 10,
-        color: ["#c8b898", "#a02020"],
-        speed: 3,
-        ttl: 0.4,
+        position: [pos[0], pos[1] + 0.25, pos[2]],
+        count: 12,
+        color: ["#c8b898", "#a02020", "#3a2418"],
+        speed: 3.5,
+        upward: 1.4,
+        ttl: 0.45,
         size: 0.06,
       });
     }
@@ -70,20 +83,37 @@ function SpikeTrap({ pos, floor }: { pos: Vec3; floor: number }) {
 
   return (
     <group position={pos}>
-      {/* The scab — a shade off the slabs, easy to miss until it bites. */}
-      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0.7]} receiveShadow>
-        <circleGeometry args={[def.radius, 7]} />
-        <meshStandardMaterial color="#2a1418" roughness={0.95} />
+      {/* Broken slabs shoved aside where the crack opened — angular rubble,
+          not a ring. */}
+      {[0, 1, 2, 3].map((i) => {
+        const a = (i / 4) * Math.PI * 2 + 0.4;
+        return (
+          <mesh
+            key={i}
+            position={[Math.cos(a) * 0.42, 0.04, Math.sin(a) * 0.42]}
+            rotation={[(i % 2) * 0.3 - 0.15, a, 0.12]}
+            receiveShadow
+          >
+            <boxGeometry args={[0.4, 0.08, 0.3]} />
+            <meshStandardMaterial color="#2c2630" roughness={0.95} flatShading />
+          </mesh>
+        );
+      })}
+      {/* The dark gap the fangs rise from. */}
+      <mesh position={[0, 0.015, 0]} rotation={[-Math.PI / 2, 0, 0.3]}>
+        <planeGeometry args={[0.7, 0.5]} />
+        <meshStandardMaterial color="#050307" roughness={1} />
       </mesh>
-      {/* Old stains around the rim. */}
-      <mesh position={[0, 0.025, 0]} rotation={[-Math.PI / 2, 0, 1.9]}>
-        <ringGeometry args={[def.radius * 0.7, def.radius * 0.92, 6]} />
-        <meshStandardMaterial color="#3a0c10" roughness={1} transparent opacity={0.8} side={2} />
-      </mesh>
-      <group ref={spikes} position={[0, -0.3, 0]}>
-        {SPIKE_OFFSETS.map(([x, z], i) => (
-          <mesh key={i} position={[x, 0.2, z]} rotation={[(i % 3) * 0.08, 0, (i % 2) * -0.1]} castShadow>
-            <coneGeometry args={[0.06, 0.42 + (i % 2) * 0.08, 4]} />
+      {/* The fangs, hidden below until they strike. */}
+      <group ref={teeth} position={[0, -0.42, 0]}>
+        {fangs.map((f, i) => (
+          <mesh
+            key={i}
+            position={[f.x, f.h * 0.5, f.z]}
+            rotation={[f.tilt, f.twist, f.lean]}
+            castShadow
+          >
+            <coneGeometry args={[0.07, f.h, 4]} />
             <meshStandardMaterial color="#b8a888" roughness={0.7} flatShading />
           </mesh>
         ))}
@@ -92,18 +122,23 @@ function SpikeTrap({ pos, floor }: { pos: Vec3; floor: number }) {
   );
 }
 
-/** A hairline tear in the floor that flings whoever steps on it down to the
- * next floor. Local and one-shot — each wizard triggers their own descent. */
+/** A wound in the floor that swallows whoever steps on it and spits them out a
+ * floor below. Not a painted rune — a jagged violet gash of crossed slabs
+ * pulled apart, glowing from the depth between, with grit hanging in the pull. */
 function WarpTrap({ pos }: { pos: Vec3 }) {
   const def = getTrapDef("warp");
-  const disc = useRef<MeshStandardMaterial>(null);
-  const shards = useRef<Group>(null);
+  const glowMat = useRef<MeshStandardMaterial>(null);
+  const grit = useRef<Group>(null);
   const triggered = useRef(false);
   const r2 = def.radius * def.radius;
 
   useFrame(({ clock }, dt) => {
-    if (disc.current) disc.current.emissiveIntensity = 1.2 + Math.sin(clock.elapsedTime * 3) * 0.5;
-    if (shards.current) shards.current.rotation.y += dt * 0.6;
+    if (glowMat.current)
+      glowMat.current.emissiveIntensity = 1.3 + Math.sin(clock.elapsedTime * 3) * 0.6;
+    if (grit.current) {
+      grit.current.rotation.y += dt * 0.7;
+      grit.current.position.y = 0.3 + Math.sin(clock.elapsedTime * 1.5) * 0.05;
+    }
     if (!combatActive() || triggered.current) return;
     const dx = playerPosition.x - pos[0];
     const dz = playerPosition.z - pos[2];
@@ -111,15 +146,16 @@ function WarpTrap({ pos }: { pos: Vec3 }) {
       triggered.current = true;
       spawnBurst({
         position: [pos[0], pos[1] + 0.6, pos[2]],
-        count: 22,
-        color: ["#b46bff", "#ffffff"],
+        count: 24,
+        color: ["#b46bff", "#e2ccff", "#ffffff"],
         speed: 5,
+        upward: 2,
         ttl: 0.7,
         size: 0.08,
       });
-      flashLight([pos[0], pos[1] + 0.6, pos[2]], "#b46bff", 20);
+      flashLight([pos[0], pos[1] + 0.6, pos[2]], "#b46bff", 22);
       playPortal();
-      // descend() requires an active floor session; from the dev village arena
+      // descend() needs an active floor session; from the dev village arena
       // there is none, so guard it (a rejected requestFloor would strand us on
       // the loading screen). In a real dungeon you're always connected.
       if (useGame.getState().phase === "dungeon") {
@@ -132,43 +168,46 @@ function WarpTrap({ pos }: { pos: Vec3 }) {
 
   return (
     <group position={pos}>
-      {/* Jagged violet fracture, two offset rings so the edge never reads round. */}
-      <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0.3]}>
-        <ringGeometry args={[0.5, 0.95, 5]} />
+      {/* The glow from the depths, seen through the gap between the slabs. */}
+      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.62, 6]} />
         <meshStandardMaterial
-          ref={disc}
+          ref={glowMat}
           color="#0c0616"
           emissive="#b46bff"
-          emissiveIntensity={1.2}
+          emissiveIntensity={1.3}
           toneMapped={false}
-          side={2}
         />
       </mesh>
-      <mesh position={[0, 0.025, 0]} rotation={[-Math.PI / 2, 0, 1.4]}>
-        <ringGeometry args={[0.62, 0.8, 6]} />
-        <meshStandardMaterial
-          color="#0c0616"
-          emissive="#7a3dcc"
-          emissiveIntensity={0.7}
-          toneMapped={false}
-          transparent
-          opacity={0.8}
-          side={2}
-        />
-      </mesh>
-      {/* Grit hanging over the crack, slowly circling. */}
-      <group ref={shards}>
-        {[0, 1, 2].map((i) => {
-          const a = (i / 3) * Math.PI * 2;
+      {/* Slabs of floor heaved apart, forming a jagged four-pointed gash. */}
+      {[0, 1, 2, 3, 4, 5].map((i) => {
+        const a = (i / 6) * Math.PI * 2;
+        const len = 0.5 + (i % 3) * 0.16;
+        return (
+          <mesh
+            key={i}
+            position={[Math.cos(a) * (0.5 + len * 0.4), 0.06 + (i % 2) * 0.04, Math.sin(a) * (0.5 + len * 0.4)]}
+            rotation={[(i % 2) * 0.4 - 0.2, -a, 0.18 + (i % 3) * 0.1]}
+            castShadow
+          >
+            <boxGeometry args={[len, 0.12, 0.26]} />
+            <meshStandardMaterial color="#241e2a" roughness={0.95} flatShading />
+          </mesh>
+        );
+      })}
+      {/* Grit torn off the edges, circling the pull. */}
+      <group ref={grit} position={[0, 0.3, 0]}>
+        {[0, 1, 2, 3].map((i) => {
+          const a = (i / 4) * Math.PI * 2;
           return (
             <mesh
               key={i}
-              position={[Math.cos(a) * 0.6, 0.24 + i * 0.1, Math.sin(a) * 0.6]}
-              rotation={[a, a * 1.3, 0]}
-              scale={0.07 + (i % 2) * 0.03}
+              position={[Math.cos(a) * 0.55, (i % 2) * 0.12, Math.sin(a) * 0.55]}
+              rotation={[a, a * 1.3, a * 0.6]}
+              scale={0.06 + (i % 2) * 0.03}
             >
               <tetrahedronGeometry args={[1, 0]} />
-              <meshStandardMaterial color="#100c18" emissive="#b46bff" emissiveIntensity={0.8} flatShading />
+              <meshStandardMaterial color="#100c18" emissive="#b46bff" emissiveIntensity={0.9} flatShading />
             </mesh>
           );
         })}

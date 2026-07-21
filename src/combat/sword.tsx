@@ -185,6 +185,7 @@ function SwordSwing({ spec, remove }: { spec: SwingSpec; remove: (id: number) =>
         color: spec.color,
         particles: 22,
         light: 26,
+        style: "arcane",
         remote: spec.cosmetic,
       });
     }

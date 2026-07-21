@@ -37,6 +37,18 @@ const ENEMY_GROUPS = interactionGroups(GROUPS.ENEMY, [
 
 const LOOT_DROP_CHANCE = 0.24;
 
+/** Smoothly yaw a cosmetic group toward the local player. Enemy bodies keep
+ * their rotations locked for physics, so "facing" is pure presentation: each
+ * client turns the eyes/maw toward its own wizard. */
+function facePlayer(g: Group | null, dx: number, dz: number, dt: number): void {
+  if (!g) return;
+  const target = Math.atan2(dx, dz);
+  let d = target - g.rotation.y;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  g.rotation.y += d * Math.min(1, dt * 6);
+}
+
 /** Shared enemy networking: registers the entity with the replication
  * framework (snapshots, interpolation, late-join and migration are all
  * automatic) and wires the hittable so damage routes to the authority.
@@ -167,6 +179,7 @@ export function Wisp({
 }) {
   const body = useRef<RapierRigidBody>(null);
   const mat = useRef<MeshStandardMaterial>(null);
+  const face = useRef<Group>(null);
   const scale = useMemo(() => floorScale(floor), [floor]);
   const hp = useRef(getEnemyStats("wisp").baseHealth * scale.enemyHealth);
   const deadRef = useRef(false);
@@ -245,6 +258,7 @@ export function Wisp({
     const dy = playerPosition.y - t.y;
     const dz = playerPosition.z - t.z;
     const dist = Math.hypot(dx, dy, dz);
+    facePlayer(face.current, dx, dz, dt);
 
     // Contact burn is local on every client — your health is yours.
     if (dist < 1.45 && contactTimer.current <= 0) {
@@ -304,38 +318,40 @@ export function Wisp({
       enabledRotations={[false, false, false]}
     >
       <BallCollider args={[0.42]} mass={2} collisionGroups={ENEMY_GROUPS} />
-      {/* A lidless eye torn loose from something bigger. */}
-      <mesh castShadow>
-        <icosahedronGeometry args={[0.4, 1]} />
-        <meshStandardMaterial
-          ref={mat}
-          color="#241430"
-          emissive="#b46bff"
-          emissiveIntensity={1.7}
-          flatShading
-          roughness={0.55}
-        />
-      </mesh>
-      {/* Iris and pupil, fixed dead ahead. */}
-      <mesh position={[0, 0, 0.3]}>
-        <sphereGeometry args={[0.17, 8, 6]} />
-        <meshStandardMaterial color="#000" emissive="#f0dcff" emissiveIntensity={4} toneMapped={false} />
-      </mesh>
-      <mesh position={[0, 0, 0.43]}>
-        <sphereGeometry args={[0.075, 6, 5]} />
-        <meshStandardMaterial color="#050308" roughness={0.3} />
-      </mesh>
-      {/* Torn optic tendrils trailing behind. */}
-      {[-0.35, 0, 0.4].map((a, i) => (
-        <mesh
-          key={i}
-          position={[Math.sin(a) * 0.14, -0.06 + i * 0.09, -0.38]}
-          rotation={[-1.35 + i * 0.18, 0, a]}
-        >
-          <coneGeometry args={[0.05 - i * 0.01, 0.34, 4]} />
-          <meshStandardMaterial color="#4a2a5a" roughness={0.8} flatShading />
+      {/* A lidless eye torn loose from something bigger — it looks AT you. */}
+      <group ref={face}>
+        <mesh castShadow>
+          <icosahedronGeometry args={[0.4, 1]} />
+          <meshStandardMaterial
+            ref={mat}
+            color="#241430"
+            emissive="#b46bff"
+            emissiveIntensity={1.7}
+            flatShading
+            roughness={0.55}
+          />
         </mesh>
-      ))}
+        {/* Iris and pupil, aimed out the front of the eye. */}
+        <mesh position={[0, 0, 0.3]}>
+          <sphereGeometry args={[0.17, 8, 6]} />
+          <meshStandardMaterial color="#000" emissive="#f0dcff" emissiveIntensity={4} toneMapped={false} />
+        </mesh>
+        <mesh position={[0, 0, 0.43]}>
+          <sphereGeometry args={[0.075, 6, 5]} />
+          <meshStandardMaterial color="#050308" roughness={0.3} />
+        </mesh>
+        {/* Torn optic tendrils trailing behind. */}
+        {[-0.35, 0, 0.4].map((a, i) => (
+          <mesh
+            key={i}
+            position={[Math.sin(a) * 0.14, -0.06 + i * 0.09, -0.38]}
+            rotation={[-1.35 + i * 0.18, 0, a]}
+          >
+            <coneGeometry args={[0.05 - i * 0.01, 0.34, 4]} />
+            <meshStandardMaterial color="#4a2a5a" roughness={0.8} flatShading />
+          </mesh>
+        ))}
+      </group>
     </RigidBody>
   );
 }
@@ -537,6 +553,7 @@ export function Shadow({
 }) {
   const body = useRef<RapierRigidBody>(null);
   const mat = useRef<MeshStandardMaterial>(null);
+  const face = useRef<Group>(null);
   const scale = useMemo(() => floorScale(floor), [floor]);
   const hp = useRef(getEnemyStats("shadow").baseHealth * scale.enemyHealth);
   const deadRef = useRef(false);
@@ -617,6 +634,7 @@ export function Shadow({
     const dy = playerPosition.y - t.y;
     const dz = playerPosition.z - t.z;
     const dist = Math.hypot(dx, dy, dz);
+    facePlayer(face.current, dx, dz, dt);
 
     // Contact strike — lands mostly on a lunge; local, like the wisp's burn.
     if (dist < 1.5 && contactTimer.current <= 0) {
@@ -735,19 +753,22 @@ export function Shadow({
           />
         </mesh>
       ))}
-      {/* Too many eyes peering out of the murk, none of them level. */}
-      <mesh position={[0.13, 0.06, 0.34]}>
-        <sphereGeometry args={[0.05, 6, 6]} />
-        <meshStandardMaterial color="#000" emissive="#c89cff" emissiveIntensity={3} toneMapped={false} />
-      </mesh>
-      <mesh position={[-0.12, 0.0, 0.35]}>
-        <sphereGeometry args={[0.06, 6, 6]} />
-        <meshStandardMaterial color="#000" emissive="#c89cff" emissiveIntensity={3} toneMapped={false} />
-      </mesh>
-      <mesh position={[0.01, 0.18, 0.32]}>
-        <sphereGeometry args={[0.032, 6, 6]} />
-        <meshStandardMaterial color="#000" emissive="#e2ccff" emissiveIntensity={2.4} toneMapped={false} />
-      </mesh>
+      {/* Too many eyes peering out of the murk, none of them level — and all
+          of them turned toward you. */}
+      <group ref={face}>
+        <mesh position={[0.13, 0.06, 0.34]}>
+          <sphereGeometry args={[0.05, 6, 6]} />
+          <meshStandardMaterial color="#000" emissive="#c89cff" emissiveIntensity={3} toneMapped={false} />
+        </mesh>
+        <mesh position={[-0.12, 0.0, 0.35]}>
+          <sphereGeometry args={[0.06, 6, 6]} />
+          <meshStandardMaterial color="#000" emissive="#c89cff" emissiveIntensity={3} toneMapped={false} />
+        </mesh>
+        <mesh position={[0.01, 0.18, 0.32]}>
+          <sphereGeometry args={[0.032, 6, 6]} />
+          <meshStandardMaterial color="#000" emissive="#e2ccff" emissiveIntensity={2.4} toneMapped={false} />
+        </mesh>
+      </group>
     </RigidBody>
   );
 }
@@ -782,6 +803,7 @@ export function Slime({
   const body = useRef<RapierRigidBody>(null);
   const mesh = useRef<Mesh>(null);
   const mat = useRef<MeshStandardMaterial>(null);
+  const face = useRef<Group>(null);
   const scale = useMemo(() => floorScale(floor), [floor]);
   const hp = useRef(getEnemyStats("slime").baseHealth * cfg.hp * scale.enemyHealth);
   const deadRef = useRef(false);
@@ -866,6 +888,7 @@ export function Slime({
     const dx = playerPosition.x - t.x;
     const dz = playerPosition.z - t.z;
     const dist = Math.hypot(dx, playerPosition.y - t.y, dz);
+    facePlayer(face.current, dx, dz, dt);
     if (dist < radius + 0.8 && contactTimer.current <= 0) {
       contactTimer.current = PLAYER.contactDamageCooldown;
       useGame.getState().takeDamage(cfg.contact * scale.enemyDamage);
@@ -930,20 +953,21 @@ export function Slime({
         <coneGeometry args={[0.05 * cfg.size, 0.18 * cfg.size, 4]} />
         <meshStandardMaterial color="#a89878" roughness={0.8} flatShading />
       </mesh>
-      {/* Mismatched eyes, one half-sunk. */}
-      <mesh position={[0.16 * cfg.size, 0.12 * cfg.size, 0.33 * cfg.size]}>
-        <sphereGeometry args={[0.07 * cfg.size, 6, 6]} />
-        <meshStandardMaterial color="#04140a" emissive="#d4ffb0" emissiveIntensity={2} toneMapped={false} />
-      </mesh>
-      <mesh position={[-0.15 * cfg.size, 0.04 * cfg.size, 0.35 * cfg.size]}>
-        <sphereGeometry args={[0.045 * cfg.size, 6, 6]} />
-        <meshStandardMaterial color="#04140a" emissive="#d4ffb0" emissiveIntensity={2} toneMapped={false} />
-      </mesh>
-      {/* A slack mouth-line under the eyes. */}
-      <mesh position={[0, -0.12 * cfg.size, 0.4 * cfg.size]} rotation={[0.3, 0, 0.12]}>
-        <boxGeometry args={[0.3 * cfg.size, 0.045 * cfg.size, 0.05 * cfg.size]} />
-        <meshStandardMaterial color="#0c2410" roughness={0.9} />
-      </mesh>
+      {/* Face — mismatched eyes and a slack mouth, kept turned toward you. */}
+      <group ref={face}>
+        <mesh position={[0.16 * cfg.size, 0.12 * cfg.size, 0.33 * cfg.size]}>
+          <sphereGeometry args={[0.07 * cfg.size, 6, 6]} />
+          <meshStandardMaterial color="#04140a" emissive="#d4ffb0" emissiveIntensity={2} toneMapped={false} />
+        </mesh>
+        <mesh position={[-0.15 * cfg.size, 0.04 * cfg.size, 0.35 * cfg.size]}>
+          <sphereGeometry args={[0.045 * cfg.size, 6, 6]} />
+          <meshStandardMaterial color="#04140a" emissive="#d4ffb0" emissiveIntensity={2} toneMapped={false} />
+        </mesh>
+        <mesh position={[0, -0.12 * cfg.size, 0.4 * cfg.size]} rotation={[0.3, 0, 0.12]}>
+          <boxGeometry args={[0.3 * cfg.size, 0.045 * cfg.size, 0.05 * cfg.size]} />
+          <meshStandardMaterial color="#0c2410" roughness={0.9} />
+        </mesh>
+      </group>
     </RigidBody>
   );
 }

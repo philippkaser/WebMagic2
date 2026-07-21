@@ -15,7 +15,7 @@ import type { GearSlot, ItemStack } from "../items/types";
 import { WizardModel } from "../render/WizardModel";
 import { useGame, type Overlay } from "../state/gameStore";
 import { iconOf, statLines } from "./itemInfo";
-import { boneButton, fleshPanel, scarred } from "./theme";
+import { conjuredPanel, runeButton, scarred } from "./theme";
 
 /** The inventory screen family. One layout, three flavors:
  *  - "inventory": the wizard, gear, belt and bag
@@ -97,7 +97,7 @@ export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none" | "dev
 
   return (
     <div style={styles.backdrop}>
-      <div className="wm-breathe" style={styles.panel}>
+      <div className="wm-conjure" style={styles.panel}>
         <div style={styles.header}>
           <span style={styles.title}>{title}</span>
           <span style={styles.gold}>
@@ -480,11 +480,16 @@ function WizardViewer() {
 
   return (
     <div style={styles.viewer}>
+      {/* Summoning circle behind the mage — two counter-spinning glyph rings
+          and a floor glow: the panels are the spell this cast projects. */}
+      <RuneRing color="#46ffd0" size={224} band={11} spin="wm-rune-ring" />
+      <RuneRing color="#b46bff" size={172} band={17} spin="wm-rune-ring-2" />
+      <div style={styles.viewerGlow} />
       <Canvas
         dpr={0.5}
         gl={{ antialias: false, alpha: true }}
         camera={{ position: [0, 0.3, 3.6], fov: 44 }}
-        style={{ width: "100%", height: "100%", imageRendering: "pixelated" }}
+        style={{ position: "relative", width: "100%", height: "100%", imageRendering: "pixelated" }}
       >
         {/* Dressing-room lighting: brighter than the dungeon so you can
             actually admire the robe. */}
@@ -501,6 +506,33 @@ function WizardViewer() {
         </Turntable>
       </Canvas>
     </div>
+  );
+}
+
+/** A ring of runic ticks (repeating conic gradient masked to a band) that
+ * spins behind the mage — a summoning circle drawn in light. */
+function RuneRing({ color, size, band, spin }: { color: string; size: number; band: number; spin: string }) {
+  const ringMask =
+    "radial-gradient(circle, transparent 58%, #000 60%, #000 70%, transparent 72%)";
+  return (
+    <div
+      className={spin}
+      style={{
+        position: "absolute",
+        left: "50%",
+        top: "62%",
+        width: size,
+        height: size,
+        marginLeft: -size / 2,
+        marginTop: -size / 2,
+        background: `repeating-conic-gradient(${color} 0deg 1.4deg, transparent 1.4deg ${band}deg)`,
+        WebkitMask: ringMask,
+        mask: ringMask,
+        opacity: 0.55,
+        filter: `drop-shadow(0 0 3px ${color})`,
+        pointerEvents: "none",
+      }}
+    />
   );
 }
 
@@ -533,14 +565,14 @@ const styles: Record<string, CSSProperties> = {
     pointerEvents: "auto",
   },
   // The pack itself: a slab of stitched hide hanging in the world in front of
-  // you — chewed edges, veins, a slow breath (class wm-breathe on the div).
+  // you — chewed edges, veins, a slow breath (class wm-conjure on the div).
   panel: {
     width: "min(92vw, 640px)",
     maxHeight: "92vh",
     overflowY: "auto",
     padding: "20px 26px 16px",
     letterSpacing: 1,
-    ...fleshPanel("pack"),
+    ...conjuredPanel("pack"),
   },
   header: {
     display: "flex",
@@ -570,14 +602,28 @@ const styles: Record<string, CSSProperties> = {
     gap: 26,
   },
   sideColumn: { display: "flex", flexDirection: "column", gap: 10 },
-  // The wizard stands in a dark socket carved out of the graft.
+  // The scrying focus: the mage stands mid-cast in a summoning circle, the
+  // panels around them conjured from that same spell.
   viewer: {
+    position: "relative",
+    overflow: "hidden",
     width: 190,
     height: 210,
     flexShrink: 0,
-    boxShadow: "inset 0 0 0 2px #000, inset 0 4px 12px rgba(0,0,0,0.85), 0 0 0 1px rgba(200,180,150,0.2)",
+    boxShadow: "inset 0 0 0 1px rgba(70,255,208,0.4), inset 0 0 22px rgba(70,255,208,0.12), inset 0 4px 16px rgba(0,0,0,0.85)",
     background:
-      "radial-gradient(ellipse at 50% 62%, rgba(70,60,110,0.35), rgba(4,2,7,0.95) 70%)",
+      "radial-gradient(ellipse at 50% 60%, rgba(70,255,208,0.18), rgba(60,40,110,0.22) 40%, rgba(4,2,9,0.97) 74%)",
+  },
+  viewerGlow: {
+    position: "absolute",
+    left: "50%",
+    top: "62%",
+    width: 150,
+    height: 46,
+    transform: "translate(-50%,-50%)",
+    background: "radial-gradient(ellipse at 50% 50%, rgba(70,255,208,0.5), transparent 70%)",
+    filter: "blur(2px)",
+    pointerEvents: "none",
   },
   bagRow: {
     display: "flex",
@@ -635,7 +681,7 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 13,
   },
   buyButton: {
-    ...boneButton("buy"),
+    ...runeButton("buy"),
     fontSize: 12,
     padding: "5px 14px",
   },

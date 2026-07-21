@@ -151,8 +151,9 @@ const ABILITIES: Record<string, Ability> = {
         impulse: 30,
         team: "player",
         color: ctx.staff.color,
-        particles: 40,
-        light: 42,
+        particles: 30,
+        light: 36,
+        style: "arcane",
         remote: ctx.remote,
       });
       // Recoil: aim at the floor to blast-jump. Caster only — a peer's blast
@@ -344,8 +345,9 @@ const ABILITIES: Record<string, Ability> = {
         impulse: 44,
         team: "player",
         color: ctx.staff.color,
-        particles: 54,
-        light: 48,
+        particles: 38,
+        light: 40,
+        style: "arcane",
         remote: ctx.remote,
       });
     },

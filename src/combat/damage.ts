@@ -1,4 +1,4 @@
-import { Vector3 } from "three";
+import { Color, Vector3 } from "three";
 import { playExplosion } from "../audio/sound";
 import { gameEvents } from "../core/events";
 import { flashLight } from "../fx/DynamicLights";
@@ -65,6 +65,12 @@ export interface ExplosionOptions {
   color?: string;
   particles?: number;
   light?: number;
+  /** Visual language of the detonation. "fire" is combustion — flame, smoke,
+   * a mushrooming column (barrels, boss slams, enemy fire). "arcane" is a
+   * spell discharging — a snap of the cast's own color, shards and a ring,
+   * deliberately smaller and shorter so your own casts never wall off your
+   * view. Physics and damage are identical. Defaults to "fire". */
+  style?: "fire" | "arcane";
   /** Replayed from another client: full VFX and local-player damage, but no
    * entity damage — the authoritative copy of this explosion runs elsewhere.
    * Prevents double damage in multiplayer. */
@@ -85,15 +91,62 @@ export function explode(opts: ExplosionOptions): void {
     color = "#ffb367",
     particles = 26,
     light = 30,
+    style = "fire",
   } = opts;
   if (Array.isArray(opts.position)) center.set(...opts.position);
   else center.copy(opts.position);
-
-  // Layered detonation, all chunky pixel debris: a white-hot core that dies
-  // fast, tumbling flame chunks, fast sparks that rain and bounce, slow dark
-  // smoke that rises, and a flat shockwave ring racing along the ground.
-  // `particles` is the budget knob — bigger blasts spend more everywhere.
   const at: [number, number, number] = [center.x, center.y, center.z];
+
+  if (style === "arcane") {
+    // A spell discharging: a snap of unlight in the cast's own color — a brief
+    // white-hot kernel, a shell of colored shards, a flat ring skating along
+    // the ground. No flame, no smoke, gone in half a second, so your own
+    // casts read as force rather than walling off the view.
+    const dark = `#${new Color(color).multiplyScalar(0.3).getHexString()}`;
+    spawnBurst({
+      position: at,
+      count: Math.round(particles * 0.3),
+      color: ["#ffffff", color],
+      speed: radius * 2.6,
+      upward: 0.5,
+      ttl: 0.15,
+      size: 0.13,
+      gravity: 0,
+      drag: 6,
+    });
+    spawnBurst({
+      position: at,
+      count: Math.round(particles * 0.5),
+      color: [color, dark],
+      speed: radius * 2.1,
+      ttl: 0.45,
+      size: 0.08,
+      gravity: -3,
+      drag: 1.5,
+      spawnRadius: radius * 0.14,
+    });
+    spawnBurst({
+      position: [center.x, center.y + 0.1, center.z],
+      count: Math.round(6 + radius * 2.4),
+      color: [color, "#ffffff"],
+      speed: radius * 4.2,
+      upward: 0,
+      ttl: 0.22,
+      size: 0.07,
+      gravity: 0,
+      drag: 3.4,
+      ring: true,
+    });
+    flashLight(at, color, light * 0.8, radius * 2.2);
+    playExplosion(radius * 0.8);
+    applyBlast(opts, radius, damage, impulse, team);
+    return;
+  }
+
+  // Combustion: a white-hot core that dies fast, tumbling flame chunks, fast
+  // sparks that rain and bounce, slow dark smoke that rises, and a flat
+  // shockwave ring racing along the ground. `particles` is the budget knob —
+  // bigger blasts spend more everywhere.
   spawnBurst({
     position: at,
     count: Math.round(particles * 0.3),
@@ -198,7 +251,18 @@ export function explode(opts: ExplosionOptions): void {
   flashLight(at, "#fff6e0", light * 0.9, radius * 3.2);
   flashLight(at, color, light, radius * 2.4);
   playExplosion(radius);
+  applyBlast(opts, radius, damage, impulse, team);
+}
 
+/** The physical half of a detonation, shared by every visual style: radial
+ * entity damage + impulse, plus the local player's damage/shove/shake. */
+function applyBlast(
+  opts: ExplosionOptions,
+  radius: number,
+  damage: number,
+  impulse: number,
+  team: DamageTeam,
+): void {
   if (!opts.remote) {
     forEachHittable((h) => {
       const hurtEnemies = team === "player" || team === "neutral";

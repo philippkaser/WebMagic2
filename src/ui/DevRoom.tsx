@@ -11,7 +11,7 @@ import { useDevRoom } from "../game/devRoom";
 import { playerPosition } from "../game/player-state";
 import { isDevInvuln, setDevInvuln, useGame } from "../state/gameStore";
 import { iconOf } from "./itemInfo";
-import { boneButton, fleshPanel, woundTrack } from "./theme";
+import { conjuredPanel, manaWell, runeButton } from "./theme";
 
 /** The dev test bench — reached from the village dev slab (dev builds only).
  * Equip any staff/gear, hand yourself items and gold, spawn enemies to fight,
@@ -83,7 +83,7 @@ export function DevRoom() {
 
   return (
     <div style={styles.backdrop}>
-      <div className="wm-breathe" style={styles.panel}>
+      <div className="wm-conjure" style={styles.panel}>
         <div style={styles.header}>
           <span style={styles.title}>DEV ROOM</span>
           <span style={styles.tag}>test bench · dev build only</span>
@@ -358,7 +358,7 @@ const styles: Record<string, CSSProperties> = {
     padding: "20px 24px 16px",
     letterSpacing: 1,
     color: "#cfc6b4",
-    ...fleshPanel("devbench"),
+    ...conjuredPanel("devbench", "#7cff9e"),
   },
   header: {
     display: "flex",
@@ -407,7 +407,7 @@ const styles: Record<string, CSSProperties> = {
   itemDesc: { color: "#9a8578", flex: 1, fontSize: 11 },
   tier: { color: "#8a7568", fontSize: 11, width: 22, textAlign: "center" },
   btn: {
-    ...boneButton("dev"),
+    ...runeButton("dev", "#7cff9e"),
     fontSize: 12,
     padding: "6px 12px",
   },
@@ -423,7 +423,7 @@ const styles: Record<string, CSSProperties> = {
     marginBottom: 4,
   },
   mini: {
-    ...boneButton("devmini"),
+    ...runeButton("devmini", "#7cff9e"),
     fontSize: 11,
     padding: "3px 10px",
     letterSpacing: 1,
@@ -459,7 +459,7 @@ const styles: Record<string, CSSProperties> = {
     padding: "4px 6px",
     color: "#e8dfc8",
     border: "none",
-    ...woundTrack,
+    ...manaWell,
     textAlign: "center",
   },
   hint: { marginTop: 6, fontSize: 11, color: "#8a7568" },
