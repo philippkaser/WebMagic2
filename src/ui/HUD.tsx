@@ -8,6 +8,7 @@ import { entryFloors, useGame } from "../state/gameStore";
 import { DevRoom } from "./DevRoom";
 import { InventoryScreen } from "./InventoryScreen";
 import { ITEM_ICONS, iconOf } from "./itemInfo";
+import { barSegments, barTrack, engraved, ironSlab, stoneButton } from "./theme";
 
 /** All DOM UI: crosshair, bars, prompts, message feed, and the fullscreen
  * overlays for menu / portal select / death. */
@@ -101,11 +102,11 @@ function PlayHud() {
       <HurtFlash />
       <BossBar />
 
-      {/* Top-left: location */}
+      {/* Top-left: location, carved into an iron plate */}
       <div style={{ ...styles.panel, top: 14, left: 14 }}>
         {phase === "dungeon" ? (
           <>
-            <div style={{ fontSize: 18, color: "#e8dfc8" }}>FLOOR {floor}</div>
+            <div style={{ fontSize: 18, ...engraved }}>FLOOR {floor}</div>
             <div style={styles.dim}>
               instance {instanceId || "—"}
               {netMode === "online" &&
@@ -113,7 +114,7 @@ function PlayHud() {
             </div>
           </>
         ) : (
-          <div style={{ fontSize: 18, color: "#e8dfc8" }}>THE VILLAGE</div>
+          <div style={{ fontSize: 18, ...engraved }}>THE VILLAGE</div>
         )}
         <div style={styles.dim}>checkpoint: floor {checkpoint}</div>
         <div style={{ ...styles.dim, color: netMode === "online" ? "#4fd08a" : "#7d7566" }}>
@@ -129,8 +130,18 @@ function PlayHud() {
 
       {/* Bottom-left: vitals, purse and belt */}
       <div style={{ ...styles.panel, bottom: 16, left: 14, width: 240 }}>
-        <Bar label="HP" value={health} max={stats.maxHealth} color="#d84a4a" />
-        <Bar label="MP" value={mana} max={PLAYER.maxMana} color="#4a86d8" />
+        <Bar
+          label="♥ BLOOD"
+          value={health}
+          max={stats.maxHealth}
+          color="linear-gradient(180deg, #c93f2e 0%, #911d14 55%, #560b08 100%)"
+        />
+        <Bar
+          label="◆ MANA"
+          value={mana}
+          max={PLAYER.maxMana}
+          color="linear-gradient(180deg, #4f8fd8 0%, #2c55a8 55%, #14275c 100%)"
+        />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 }}>
           <span style={{ fontSize: 13, color: "#ffcf4d" }}>
             ◈ {gold}
@@ -165,21 +176,24 @@ function PlayHud() {
   );
 }
 
+/** A phial set into the plate: recessed track, liquid fill chopped into
+ * pixel-block segments. `color` takes the full fill gradient. */
 function Bar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
   return (
-    <div style={{ marginBottom: 6 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#b9b0a0" }}>
+    <div style={{ marginBottom: 7 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#b9b0a0", textShadow: "0 1px 0 #000" }}>
         <span>{label}</span>
         <span>
           {Math.ceil(value)} / {Math.round(max)}
         </span>
       </div>
-      <div style={{ height: 10, background: "#151218", border: "1px solid #3a333d" }}>
+      <div style={{ height: 12, ...barTrack }}>
         <div
           style={{
             height: "100%",
             width: `${Math.max(0, Math.min(100, (value / max) * 100))}%`,
-            background: color,
+            backgroundImage: `${barSegments}, ${color}`,
+            boxShadow: "inset 0 -2px 0 rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.25)",
             transition: "width 120ms linear",
           }}
         />
@@ -199,8 +213,9 @@ function BeltSlot({ hotkey, stack }: { hotkey: string; stack: ItemStack | null }
         alignItems: "center",
         gap: 3,
         padding: "1px 5px",
-        border: "1px solid #3a333d",
-        background: "#151218",
+        border: "1px solid #060409",
+        background: "#0d0a12",
+        boxShadow: "0 0 0 1px #3a3244, inset 0 2px 3px rgba(0,0,0,0.7)",
         fontSize: 11,
         color: def ? "#ded5c2" : "#55505a",
       }}
@@ -265,15 +280,22 @@ function BossBar() {
   if (!boss) return null;
   return (
     <div style={styles.bossBar}>
-      <div style={{ fontSize: 13, letterSpacing: 4, color: "#ff6a52", marginBottom: 4 }}>
-        {boss.name}
+      <div style={{ fontSize: 13, letterSpacing: 4, color: "#ff6a52", marginBottom: 4, textShadow: "0 2px 0 #000" }}>
+        ☠ {boss.name} ☠
       </div>
-      <div style={{ height: 12, background: "#170a0a", border: "1px solid #5a2a24" }}>
+      <div
+        style={{
+          height: 14,
+          ...barTrack,
+          boxShadow: "0 0 0 1px #6a5a48, 0 0 0 2px #060409, inset 0 2px 2px rgba(0,0,0,0.8)",
+        }}
+      >
         <div
           style={{
             height: "100%",
             width: `${Math.max(0, boss.frac * 100)}%`,
-            background: "linear-gradient(#ff5136, #8a1d10)",
+            backgroundImage: `${barSegments}, linear-gradient(180deg, #ff5136, #8a1d10)`,
+            boxShadow: "inset 0 -2px 0 rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.25)",
             transition: "width 150ms linear",
           }}
         />
@@ -363,6 +385,12 @@ function Overlay({ children }: { children: ReactNode }) {
   return <div style={styles.overlay}>{children}</div>;
 }
 
+/** A riveted iron sheet the fullscreen overlays mount their content on — the
+ * menu is a thing nailed to the world, not a window over it. */
+function Sheet({ children }: { children: ReactNode }) {
+  return <div style={styles.sheet}>{children}</div>;
+}
+
 function MenuOverlay() {
   const startGame = useGame((s) => s.startGame);
   const shadows = useGame((s) => s.shadows);
@@ -371,43 +399,45 @@ function MenuOverlay() {
   const setPlayerName = useGame((s) => s.setPlayerName);
   return (
     <Overlay>
-      <div style={styles.title}>WEBMAGIC</div>
-      <div style={styles.subtitle}>Dungeon of the Hundred Floors</div>
-      <p style={styles.blurb}>
-        For glory, fame and riches — and to find god at the bottom — the wizards
-        of the village step through the portal. One hundred floors down. Leave
-        only every fifth floor. Die, and everything you found goes with you.
-      </p>
-      <div style={{ marginBottom: 18 }}>
-        <div style={{ fontSize: 11, letterSpacing: 2, color: "#7d7566", marginBottom: 5 }}>
-          YOUR NAME
+      <Sheet>
+        <div style={styles.title}>WEBMAGIC</div>
+        <div style={styles.subtitle}>DUNGEON OF THE HUNDRED FLOORS</div>
+        <p style={styles.blurb}>
+          For glory, fame and riches — and to find god at the bottom — the wizards
+          of the village step through the tear. One hundred floors down. Leave
+          only every fifth floor. Die, and everything you found goes with you.
+        </p>
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 11, letterSpacing: 2, color: "#8a8072", marginBottom: 5 }}>
+            SCRATCH YOUR NAME INTO THE LEDGER
+          </div>
+          <input
+            style={styles.nameInput}
+            defaultValue={playerName}
+            maxLength={16}
+            spellCheck={false}
+            onBlur={(e) => setPlayerName(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation(); // typing must not trigger game hotkeys
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
+          />
         </div>
-        <input
-          style={styles.nameInput}
-          defaultValue={playerName}
-          maxLength={16}
-          spellCheck={false}
-          onBlur={(e) => setPlayerName(e.target.value)}
-          onKeyDown={(e) => {
-            e.stopPropagation(); // typing must not trigger game hotkeys
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-          }}
-        />
-      </div>
-      <button style={styles.button} onClick={startGame}>
-        ENTER THE VILLAGE
-      </button>
-      <button
-        style={{ ...styles.button, marginTop: 14, fontSize: 13, borderColor: "#5a5560", color: "#b8afa0" }}
-        onClick={toggleShadows}
-      >
-        SHADOWS: {shadows ? "ON" : "OFF"}
-      </button>
-      <div style={styles.controls}>
-        WASD move · Space jump · Left/Right click cast · Shift dash (cloak) · E interact
-        <br />
-        I inventory · Q/E use belt items · P fps overlay · O shadows
-      </div>
+        <button style={styles.button} onClick={startGame}>
+          ENTER THE VILLAGE
+        </button>
+        <button
+          style={{ ...styles.button, marginTop: 14, fontSize: 13, color: "#b8afa0" }}
+          onClick={toggleShadows}
+        >
+          SHADOWS: {shadows ? "ON" : "OFF"}
+        </button>
+        <div style={styles.controls}>
+          WASD move · Space jump · Left/Right click cast · Shift dash (cloak) · E interact
+          <br />
+          I inventory · Q/E use belt items · P fps overlay · O shadows
+        </div>
+      </Sheet>
     </Overlay>
   );
 }
@@ -418,20 +448,22 @@ function SelectOverlay() {
   const closePortalSelect = useGame((s) => s.closePortalSelect);
   return (
     <Overlay>
-      <div style={styles.subtitle}>CHOOSE YOUR ENTRY FLOOR</div>
-      <p style={{ ...styles.blurb, marginTop: 4 }}>
-        You may begin from any checkpoint you have banked at.
-      </p>
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", maxWidth: 480 }}>
-        {entryFloors(checkpoint).map((f) => (
-          <button key={f} style={styles.button} onClick={() => void enterDungeon(f)}>
-            FLOOR {f}
-          </button>
-        ))}
-      </div>
-      <button style={{ ...styles.button, marginTop: 22, borderColor: "#5a5560", color: "#9a94a0" }} onClick={closePortalSelect}>
-        STAY IN THE VILLAGE
-      </button>
+      <Sheet>
+        <div style={styles.subtitle}>THE TEAR AWAITS</div>
+        <p style={{ ...styles.blurb, marginTop: 4 }}>
+          You may step through to any floor whose seal you have banked.
+        </p>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", maxWidth: 480 }}>
+          {entryFloors(checkpoint).map((f) => (
+            <button key={f} style={styles.button} onClick={() => void enterDungeon(f)}>
+              FLOOR {f}
+            </button>
+          ))}
+        </div>
+        <button style={{ ...styles.button, marginTop: 22, color: "#9a94a0" }} onClick={closePortalSelect}>
+          STAY IN THE VILLAGE
+        </button>
+      </Sheet>
     </Overlay>
   );
 }
@@ -441,7 +473,7 @@ function DeathOverlay() {
   const respawn = useGame((s) => s.respawn);
   return (
     <Overlay>
-      <div style={{ ...styles.title, color: "#c23a3a" }}>YOU DIED</div>
+      <div style={styles.deathTitle}>YOU DIED</div>
       <div style={styles.subtitle}>on floor {lastDeath?.floor ?? "?"}</div>
       {lastDeath && (lastDeath.lostItems.length > 0 || lastDeath.lostGold > 0) ? (
         <p style={styles.blurb}>
@@ -456,7 +488,7 @@ function DeathOverlay() {
       ) : (
         <p style={styles.blurb}>You carried nothing the dungeon could take.</p>
       )}
-      <button style={styles.button} onClick={respawn}>
+      <button style={{ ...styles.button, boxShadow: "0 0 0 1px #6a1d16, inset 0 1px 0 rgba(255,255,255,0.06), 0 4px 0 #060409" }} onClick={respawn}>
         RETURN TO THE VILLAGE
       </button>
     </Overlay>
@@ -475,27 +507,29 @@ const styles: Record<string, CSSProperties> = {
     userSelect: "none",
     zIndex: 10,
   },
+  // Four fat pixels — a crosshair a rat could have gnawed.
   crosshair: {
     position: "absolute",
     top: "50%",
     left: "50%",
-    width: 6,
-    height: 6,
-    marginLeft: -3,
-    marginTop: -3,
-    borderRadius: "50%",
-    background: "rgba(240,235,220,0.85)",
-    boxShadow: "0 0 4px rgba(0,0,0,0.9)",
+    width: 2,
+    height: 2,
+    marginLeft: -1,
+    marginTop: -1,
+    background: "rgba(240,235,220,0.9)",
+    boxShadow:
+      "0 -5px 0 rgba(240,235,220,0.9), 0 5px 0 rgba(240,235,220,0.9), -5px 0 0 rgba(240,235,220,0.9), 5px 0 0 rgba(240,235,220,0.9), 0 0 4px rgba(0,0,0,0.9)",
   },
   chargeTrack: {
     position: "absolute",
     top: "calc(50% + 16px)",
     left: "50%",
     width: 64,
-    height: 4,
+    height: 5,
     marginLeft: -32,
-    background: "rgba(8,6,12,0.7)",
-    border: "1px solid #3f3946",
+    background: "#0a070d",
+    border: "1px solid #060409",
+    boxShadow: "0 0 0 1px #3a3244",
   },
   chargeFill: {
     height: "100%",
@@ -503,23 +537,29 @@ const styles: Record<string, CSSProperties> = {
   },
   panel: {
     position: "absolute",
-    padding: "10px 12px",
-    background: "rgba(8,6,12,0.62)",
-    border: "1px solid #2f2a36",
+    padding: "10px 14px",
     letterSpacing: 1,
+    ...ironSlab(),
   },
-  dim: { fontSize: 11, color: "#7d7566", marginTop: 2 },
+  dim: { fontSize: 11, color: "#7d7566", marginTop: 2, textShadow: "0 1px 0 #000" },
+  // The interaction prompt hangs like a scrap of hide nailed at both ends.
   prompt: {
     position: "absolute",
     bottom: "22%",
     left: "50%",
     transform: "translateX(-50%)",
-    padding: "8px 16px",
-    background: "rgba(8,6,12,0.75)",
-    border: "1px solid #3f3946",
+    padding: "9px 22px",
     fontSize: 14,
     letterSpacing: 1,
     whiteSpace: "nowrap",
+    ...engraved,
+    backgroundColor: "#181018",
+    backgroundImage:
+      "radial-gradient(circle at 8px 50%, #6a5f7a 0 2px, rgba(0,0,0,0.6) 2px 3px, transparent 3px), radial-gradient(circle at calc(100% - 8px) 50%, #6a5f7a 0 2px, rgba(0,0,0,0.6) 2px 3px, transparent 3px)",
+    border: "2px solid #060409",
+    boxShadow: "0 0 0 1px #4a4256, 0 5px 0 rgba(0,0,0,0.5)",
+    clipPath:
+      "polygon(0 4px, 4px 4px, 4px 0, calc(100% - 4px) 0, calc(100% - 4px) 4px, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 4px calc(100% - 4px), 0 calc(100% - 4px))",
   },
   feed: {
     position: "absolute",
@@ -558,37 +598,44 @@ const styles: Record<string, CSSProperties> = {
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    background: "rgba(5,3,9,0.88)",
+    background:
+      "radial-gradient(ellipse at 50% 45%, rgba(10,6,16,0.82) 0%, rgba(3,1,6,0.96) 78%)",
     pointerEvents: "auto",
     textAlign: "center",
     padding: 24,
+  },
+  sheet: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    padding: "34px 46px 30px",
+    maxWidth: 620,
+    ...ironSlab(),
   },
   title: {
     fontSize: 52,
     letterSpacing: 10,
     color: "#e8dfc8",
-    textShadow: "0 0 18px rgba(70,255,208,0.35), 3px 3px 0 #1a1420",
+    textShadow: "0 0 18px rgba(70,255,208,0.3), 0 4px 0 #000, 0 -1px 0 rgba(255,255,255,0.08)",
   },
-  subtitle: { fontSize: 18, letterSpacing: 4, color: "#8f86a0", marginTop: 8 },
+  deathTitle: {
+    fontSize: 56,
+    letterSpacing: 10,
+    color: "#c23a3a",
+    textShadow: "0 5px 0 #4a0808, 0 8px 0 #000, 0 0 26px rgba(160,10,10,0.5)",
+  },
+  subtitle: { fontSize: 18, letterSpacing: 4, color: "#8f86a0", marginTop: 8, textShadow: "0 2px 0 #000" },
   blurb: { maxWidth: 460, fontSize: 14, lineHeight: 1.6, color: "#a89e8c", margin: "18px 0" },
-  button: {
-    fontFamily: "'Courier New', monospace",
-    fontSize: 16,
-    letterSpacing: 2,
-    padding: "12px 26px",
-    background: "#120e1a",
-    color: "#e8dfc8",
-    border: "1px solid #46ffd0",
-    cursor: "pointer",
-  },
+  button: stoneButton,
   nameInput: {
     fontFamily: "'Courier New', monospace",
     fontSize: 16,
     letterSpacing: 2,
     padding: "9px 14px",
-    background: "#120e1a",
+    background: "#0d0a12",
     color: "#e8dfc8",
-    border: "1px solid #3f3946",
+    border: "2px solid #060409",
+    boxShadow: "0 0 0 1px #3a3244, inset 0 2px 3px rgba(0,0,0,0.7)",
     textAlign: "center",
     outline: "none",
     width: 220,
@@ -597,9 +644,10 @@ const styles: Record<string, CSSProperties> = {
 };
 
 const css = `
-.wm-msg { animation: wm-fade 5s forwards; padding: 3px 8px; background: rgba(8,6,12,0.55); margin-bottom: 4px; border-right: 2px solid #46ffd0; }
+.wm-msg { animation: wm-fade 5s forwards; padding: 3px 8px; background: rgba(8,6,12,0.7); margin-bottom: 4px; border: 1px solid #060409; border-right: 2px solid #46ffd0; text-shadow: 0 1px 0 #000; }
 @keyframes wm-fade { 0% { opacity: 0; transform: translateX(8px);} 6% { opacity: 1; transform: none;} 80% { opacity: 1;} 100% { opacity: 0;} }
 .wm-hurt { animation: wm-hurt-fade 500ms forwards; }
 @keyframes wm-hurt-fade { from { opacity: 1; } to { opacity: 0; } }
-button:hover { background: #1c1628 !important; }
+button:hover { filter: brightness(1.35); }
+button:active { transform: translateY(2px); box-shadow: 0 0 0 1px #4a4256, inset 0 1px 0 rgba(255,255,255,0.06), 0 2px 0 #060409 !important; }
 `;

@@ -8,7 +8,7 @@ import {
   type RapierRigidBody,
 } from "@react-three/rapier";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Group, MeshStandardMaterial, Vector3 } from "three";
+import { Group, Vector3 } from "three";
 import { playHit, playPortal } from "../audio/sound";
 import { GROUPS } from "../core/config";
 import { Rng, hashSeed } from "../core/rng";
@@ -34,6 +34,7 @@ import { isHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
 import { useNetBody } from "../net/NetSystems";
 import { useGame } from "../state/gameStore";
+import { RiftPortal } from "../render/RiftPortal";
 import { getTextures } from "../render/textures";
 import type { PropKind, Vec3 } from "./types";
 
@@ -321,7 +322,8 @@ export function Torch({ position }: { position: Vec3 }) {
   );
 }
 
-/** Interactive portal ring. While `locked`, it burns dim and refuses use. */
+/** Interactive portal — a tear in space and time. While `locked`, the wound
+ * is barely a seam and refuses use. Visuals live in render/RiftPortal.tsx. */
 export function Portal({
   position,
   color,
@@ -337,8 +339,6 @@ export function Portal({
   locked?: boolean;
   lockedPrompt?: string;
 }) {
-  const disc = useRef<MeshStandardMaterial>(null);
-  const group = useRef<Group>(null);
   const light = useRef<DynamicLightSource | null>(null);
   const sparkClock = useRef(0);
 
@@ -359,22 +359,23 @@ export function Portal({
 
   useFrame(({ clock }, dt) => {
     const t = clock.elapsedTime;
-    if (disc.current) {
-      disc.current.emissiveIntensity = locked ? 0.35 : 1.9 + Math.sin(t * 2.2) * 0.5;
-    }
     if (light.current) {
-      light.current.intensity = locked ? 1.5 : 9 + Math.sin(t * 2.2) * 1.2;
+      light.current.intensity = locked ? 1.5 : 9 + Math.sin(t * 2.2) * 1.2 + Math.sin(t * 13.7) * 0.8;
     }
-    if (group.current) group.current.rotation.z = t * (locked ? 0.06 : 0.35);
 
     sparkClock.current -= dt;
     if (sparkClock.current <= 0 && !locked) {
       sparkClock.current = 0.09;
-      const a = Math.random() * Math.PI * 2;
+      // Motes bleed out of the slit and drift upward along it.
+      const y = (Math.random() - 0.5) * 2.6;
       spawnBurst({
-        position: [position[0] + Math.cos(a) * 1.1, position[1] + 1.5 + Math.sin(a) * 1.1, position[2]],
+        position: [
+          position[0] + (Math.random() - 0.5) * 0.5,
+          position[1] + 1.6 + y,
+          position[2] + (Math.random() - 0.5) * 0.3,
+        ],
         count: 1,
-        color,
+        color: Math.random() < 0.8 ? color : "#ffffff",
         speed: 0.4,
         upward: 0.7,
         ttl: 0.9,
@@ -400,29 +401,24 @@ export function Portal({
 
   return (
     <group position={position}>
-      {/* Steps */}
+      {/* Cracked dais the tear hangs over. */}
       <mesh position={[0, 0.12, 0]} receiveShadow>
         <boxGeometry args={[3.4, 0.24, 1.6]} />
-        <meshStandardMaterial color="#4a4452" roughness={0.85} />
+        <meshStandardMaterial color="#231e2c" roughness={0.85} />
       </mesh>
-      <group ref={group} position={[0, 1.5, 0]}>
-        <mesh castShadow>
-          <torusGeometry args={[1.15, 0.13, 8, 24]} />
-          <meshStandardMaterial color="#2c2836" metalness={0.6} roughness={0.35} />
-        </mesh>
-        <mesh>
-          <circleGeometry args={[1.05, 24]} />
-          <meshStandardMaterial
-            ref={disc}
-            color="#05030a"
-            emissive={color}
-            emissiveIntensity={1.9}
-            toneMapped={false}
-            transparent
-            opacity={0.92}
-            side={2}
-          />
-        </mesh>
+      {/* Rune scar burnt into the dais under the wound. */}
+      <mesh position={[0, 0.245, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.55, 0.72, 5]} />
+        <meshStandardMaterial
+          color="#05030a"
+          emissive={color}
+          emissiveIntensity={locked ? 0.2 : 1.1}
+          toneMapped={false}
+          side={2}
+        />
+      </mesh>
+      <group position={[0, 1.65, 0]}>
+        <RiftPortal color={color} activity={locked ? 0.12 : 1} />
       </group>
     </group>
   );

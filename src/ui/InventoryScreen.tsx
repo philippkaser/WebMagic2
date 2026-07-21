@@ -15,6 +15,7 @@ import type { GearSlot, ItemStack } from "../items/types";
 import { WizardModel } from "../render/WizardModel";
 import { useGame, type Overlay } from "../state/gameStore";
 import { iconOf, statLines } from "./itemInfo";
+import { engraved, leatherBoard } from "./theme";
 
 /** The inventory screen family. One layout, three flavors:
  *  - "inventory": the wizard, gear, belt and bag
@@ -226,7 +227,9 @@ export function InventoryScreen({ mode }: { mode: Exclude<Overlay, "none" | "dev
               <button
                 style={{
                   ...styles.buyButton,
-                  ...(gold >= GAMBLE_PRICE ? { borderColor: ENCHANT_COLOR } : styles.buyDisabled),
+                  ...(gold >= GAMBLE_PRICE
+                    ? { boxShadow: `0 0 0 1px ${ENCHANT_COLOR}, 0 3px 0 #060409` }
+                    : styles.buyDisabled),
                 }}
                 disabled={gold < GAMBLE_PRICE}
                 onClick={() => act.gamble()}
@@ -306,8 +309,8 @@ function SlotCell({
           ...styles.cell,
           width: size,
           height: size,
-          borderColor: droppable ? "#46ffd0" : accent ? "#4a4436" : "#2f2a36",
-          background: droppable ? "#12241f" : "#151218",
+          borderColor: droppable ? "#46ffd0" : accent ? "#5a4a30" : "#060409",
+          background: droppable ? "#12241f" : "#0d0a12",
           cursor: def ? "grab" : "default",
         }}
         onClick={def && onClick ? onClick : undefined}
@@ -376,7 +379,7 @@ function DropZone({
           height: 58,
           borderStyle: "dashed",
           borderColor: active ? hue : "#3a3540",
-          background: active ? (mode === "sell" ? "#241f10" : "#241214") : "#151218",
+          background: active ? (mode === "sell" ? "#241f10" : "#241214") : "#0d0a12",
           color: active ? hue : "#55505a",
           fontSize: offer !== null ? 13 : 20,
         }}
@@ -521,34 +524,40 @@ const styles: Record<string, CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    background: "rgba(5,3,9,0.78)",
+    background:
+      "radial-gradient(ellipse at 50% 45%, rgba(8,5,12,0.72) 0%, rgba(3,1,6,0.92) 80%)",
     pointerEvents: "auto",
   },
+  // The pack itself: a slab of cracked leather with a stitched seam inside
+  // the iron edge — laid on the ground in front of you, not a window.
   panel: {
     width: "min(92vw, 640px)",
     maxHeight: "92vh",
     overflowY: "auto",
-    background: "rgba(12,9,18,0.96)",
-    border: "1px solid #3f3946",
     padding: "16px 22px 12px",
     letterSpacing: 1,
+    ...leatherBoard(),
+    outline: "1px dashed rgba(200,180,140,0.22)",
+    outlineOffset: -7,
   },
   header: {
     display: "flex",
     alignItems: "baseline",
     gap: 16,
-    borderBottom: "1px solid #2f2a36",
+    borderBottom: "2px solid rgba(0,0,0,0.55)",
+    boxShadow: "0 1px 0 rgba(255,255,255,0.05)",
     paddingBottom: 10,
     marginBottom: 14,
   },
-  title: { fontSize: 18, letterSpacing: 4, color: "#e8dfc8", flex: 1 },
-  gold: { fontSize: 15, color: "#ffcf4d" },
+  title: { fontSize: 18, letterSpacing: 4, flex: 1, ...engraved },
+  gold: { fontSize: 15, color: "#ffcf4d", textShadow: "0 2px 0 #000" },
   close: {
     fontFamily: "'Courier New', monospace",
     fontSize: 14,
-    background: "none",
+    background: "#0d0a12",
     color: "#8f86a0",
-    border: "1px solid #3f3946",
+    border: "2px solid #060409",
+    boxShadow: "0 0 0 1px #4a3826, 0 2px 0 #060409",
     cursor: "pointer",
     padding: "2px 8px",
   },
@@ -559,13 +568,15 @@ const styles: Record<string, CSSProperties> = {
     gap: 26,
   },
   sideColumn: { display: "flex", flexDirection: "column", gap: 10 },
+  // The wizard stands in a scrying pool set into the leather.
   viewer: {
     width: 190,
     height: 210,
     flexShrink: 0,
-    border: "1px solid #2f2a36",
+    border: "2px solid #060409",
+    boxShadow: "0 0 0 1px #4a3826, inset 0 3px 8px rgba(0,0,0,0.8)",
     background:
-      "radial-gradient(ellipse at 50% 62%, rgba(70,60,110,0.35), rgba(10,8,16,0.9) 70%)",
+      "radial-gradient(ellipse at 50% 62%, rgba(70,60,110,0.35), rgba(6,4,10,0.95) 70%)",
   },
   bagRow: {
     display: "flex",
@@ -573,17 +584,19 @@ const styles: Record<string, CSSProperties> = {
     gap: 10,
     marginTop: 14,
   },
+  // Sockets punched into the hide, riveted at the rim.
   cell: {
     position: "relative",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    background: "#151218",
-    border: "1px solid #2f2a36",
+    background: "#0d0a12",
+    border: "1px solid #060409",
+    boxShadow: "0 0 0 1px #4a3f30, inset 0 3px 4px rgba(0,0,0,0.75), inset 0 -1px 0 rgba(255,255,255,0.04)",
     fontFamily: "'Courier New', monospace",
     padding: 0,
   },
-  cellLabel: { fontSize: 10, color: "#7d7566", marginTop: 3, letterSpacing: 1 },
+  cellLabel: { fontSize: 10, color: "#8a7f6c", marginTop: 3, letterSpacing: 1, textShadow: "0 1px 0 #000" },
   qty: {
     position: "absolute",
     right: 3,
@@ -594,12 +607,14 @@ const styles: Record<string, CSSProperties> = {
   },
   runLoot: { position: "absolute", left: 3, top: 0, fontSize: 12, color: "#c8a23c" },
   enchantMark: { position: "absolute", right: 3, top: 0, fontSize: 10, color: "#c9a5ff" },
+  // The appraisal strip: a parchment scrap pinned under the sockets.
   detail: {
     minHeight: 58,
     marginTop: 12,
     padding: "8px 12px",
-    background: "#0d0a13",
-    border: "1px solid #2f2a36",
+    background: "#0a070e",
+    border: "1px solid #060409",
+    boxShadow: "0 0 0 1px #3a3040, inset 0 2px 5px rgba(0,0,0,0.7)",
   },
   chestGrid: {
     display: "grid",
@@ -609,13 +624,15 @@ const styles: Record<string, CSSProperties> = {
     justifyItems: "center",
   },
   wares: { marginTop: 12, display: "flex", flexDirection: "column", gap: 6 },
+  // Ledger lines in Maro's crooked hand.
   wareRow: {
     display: "flex",
     alignItems: "center",
     gap: 10,
     padding: "7px 10px",
-    background: "#0d0a13",
-    border: "1px solid #2f2a36",
+    background: "#0a070e",
+    border: "1px solid #060409",
+    boxShadow: "0 0 0 1px #3a3040, inset 0 1px 3px rgba(0,0,0,0.6)",
     fontSize: 13,
   },
   buyButton: {
@@ -623,11 +640,13 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 12,
     letterSpacing: 2,
     padding: "5px 14px",
-    background: "#120e1a",
-    color: "#e8dfc8",
-    border: "1px solid #46ffd0",
+    background: "#141020",
+    color: "#d8cfb8",
+    textShadow: "0 1px 0 #000",
+    border: "2px solid #060409",
+    boxShadow: "0 0 0 1px #46ffd0, 0 3px 0 #060409",
     cursor: "pointer",
   },
-  buyDisabled: { borderColor: "#3a3540", color: "#55505a", cursor: "default" },
-  footer: { marginTop: 12, fontSize: 10, color: "#55505a", textAlign: "center", letterSpacing: 2 },
+  buyDisabled: { boxShadow: "0 0 0 1px #3a3540, 0 3px 0 #060409", color: "#55505a", cursor: "default" },
+  footer: { marginTop: 12, fontSize: 10, color: "#6a6055", textAlign: "center", letterSpacing: 2, textShadow: "0 1px 0 #000" },
 };

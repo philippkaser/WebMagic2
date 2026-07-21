@@ -64,16 +64,36 @@ export function StaffView() {
       />
       <pointLight position={[0, 0.05, -0.3]} color={staff.color} intensity={1.6} distance={4} decay={2} />
       <group scale={0.5}>
-        {/* Shaft */}
+        {/* Gnarled shaft — the old shaft's exact line, but faceted and knotted. */}
         <mesh position={[0, -0.12, 0.14]} rotation={[0.5, 0, 0]} castShadow>
-          <cylinderGeometry args={[0.022, 0.03, 0.92, 6]} />
-          <meshStandardMaterial color="#4a3526" roughness={0.85} />
+          <cylinderGeometry args={[0.022, 0.032, 0.92, 5]} />
+          <meshStandardMaterial color="#3a2a1c" roughness={0.9} flatShading />
         </mesh>
-        {/* Grip ring */}
+        {/* Knots where branches were cut away. */}
+        <mesh position={[0.014, -0.1, 0.15]}>
+          <sphereGeometry args={[0.032, 5, 4]} />
+          <meshStandardMaterial color="#2c2014" roughness={0.95} flatShading />
+        </mesh>
+        <mesh position={[-0.012, -0.32, 0.05]}>
+          <sphereGeometry args={[0.028, 5, 4]} />
+          <meshStandardMaterial color="#2c2014" roughness={0.95} flatShading />
+        </mesh>
+        {/* Sinew wrap where a grip ring used to shine. */}
         <mesh position={[0, 0.12, 0.02]} rotation={[0.5, 0, 0]}>
-          <torusGeometry args={[0.045, 0.014, 6, 10]} />
-          <meshStandardMaterial color="#8a7a4a" metalness={0.8} roughness={0.35} />
+          <torusGeometry args={[0.042, 0.016, 5, 8]} />
+          <meshStandardMaterial color="#5a2028" roughness={0.9} flatShading />
         </mesh>
+        {/* Bone talons cradling the crystal. */}
+        {[-0.5, 1.1, 2.7, 4.3].map((a, i) => (
+          <mesh
+            key={i}
+            position={[Math.cos(a) * 0.055, 0.28, -0.09 + Math.sin(a) * 0.055]}
+            rotation={[Math.sin(a) * 0.45, 0, -Math.cos(a) * 0.45]}
+          >
+            <coneGeometry args={[0.016, 0.14, 4]} />
+            <meshStandardMaterial color="#b8a888" roughness={0.7} flatShading />
+          </mesh>
+        ))}
         {/* Crystal tip */}
         <mesh position={[0, 0.33, -0.09]}>
           <octahedronGeometry args={[0.06]} />

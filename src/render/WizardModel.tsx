@@ -1,7 +1,19 @@
-/** THE wizard body — robe, head, hat, staff with glowing crystal, and
- * optionally boots and a floating amulet gem. One component renders both the
- * remote wizards on shared floors and the live preview in the inventory
- * screen, so "what a wizard looks like" has exactly one definition. */
+import { useMemo } from "react";
+import { Color } from "three";
+
+/** THE wizard body — a gaunt, hunched thing in a tattered robe. Sprite-count
+ * low-poly with flat shading so the chunky renderer reads every facet: ragged
+ * hem spikes, a hood drooping over a lightless face, two ember eyes, one
+ * skeletal claw around a crooked staff. One component renders both the remote
+ * wizards on shared floors and the live preview in the inventory screen, so
+ * "what a wizard looks like" has exactly one definition. */
+
+/** Ragged hem: a ring of downward spikes around the robe's base. */
+const HEM_SPIKES = [0, 1, 2, 3, 4, 5, 6].map((i) => {
+  const a = (i / 7) * Math.PI * 2 + 0.3;
+  return { a, x: Math.cos(a) * 0.34, z: Math.sin(a) * 0.34, len: 0.22 + ((i * 37) % 5) * 0.03 };
+});
+
 export function WizardModel({
   robeColor,
   staffColor,
@@ -16,24 +28,61 @@ export function WizardModel({
   amuletColor?: string | null;
   castShadow?: boolean;
 }) {
+  // Hood and rags run a shade darker than the robe so the silhouette layers.
+  const darkRobe = useMemo(
+    () => `#${new Color(robeColor).multiplyScalar(0.55).getHexString()}`,
+    [robeColor],
+  );
   return (
     <group>
-      {/* Robe */}
-      <mesh position={[0, -0.1, 0]} castShadow={castShadow}>
-        <coneGeometry args={[0.45, 1.5, 8]} />
-        <meshStandardMaterial color={robeColor} roughness={0.85} />
+      {/* Robe — slightly crooked, flat-shaded so the folds facet. */}
+      <mesh position={[0, -0.1, 0]} rotation={[0.06, 0.4, 0.04]} castShadow={castShadow}>
+        <coneGeometry args={[0.46, 1.5, 7]} />
+        <meshStandardMaterial color={robeColor} roughness={0.92} flatShading />
       </mesh>
-      {/* Head */}
-      <mesh position={[0, 0.8, 0]} castShadow={castShadow}>
-        <sphereGeometry args={[0.22, 10, 8]} />
-        <meshStandardMaterial color="#d8b894" roughness={0.8} />
+      {/* Ragged hem spikes. */}
+      {HEM_SPIKES.map(({ a, x, z, len }, i) => (
+        <mesh
+          key={i}
+          position={[x, -0.78 - len * 0.3, z]}
+          rotation={[Math.sin(a) * 0.35, 0, -Math.cos(a) * 0.35]}
+        >
+          <coneGeometry args={[0.09, len, 4]} />
+          <meshStandardMaterial color={darkRobe} roughness={0.95} flatShading />
+        </mesh>
+      ))}
+      {/* Hunched back — the descent bends every spine eventually. */}
+      <mesh position={[0, 0.52, -0.16]} scale={[1, 0.75, 0.9]} castShadow={castShadow}>
+        <sphereGeometry args={[0.3, 7, 5]} />
+        <meshStandardMaterial color={robeColor} roughness={0.92} flatShading />
       </mesh>
-      {/* Hat */}
-      <mesh position={[0, 1.12, 0]} castShadow={castShadow}>
-        <coneGeometry args={[0.32, 0.62, 8]} />
-        <meshStandardMaterial color={robeColor} roughness={0.9} />
+      {/* The face is a hole. */}
+      <mesh position={[0, 0.72, 0.08]}>
+        <sphereGeometry args={[0.19, 8, 6]} />
+        <meshStandardMaterial color="#0a0708" roughness={1} />
       </mesh>
-      {/* Amulet: a small gem hovering at the chest */}
+      {/* Two embers where eyes should be. */}
+      {([0.075, -0.075] as const).map((x) => (
+        <mesh key={x} position={[x, 0.75, 0.22]}>
+          <boxGeometry args={[0.05, 0.045, 0.03]} />
+          <meshStandardMaterial
+            color="#000"
+            emissive="#d8e6a8"
+            emissiveIntensity={3}
+            toneMapped={false}
+          />
+        </mesh>
+      ))}
+      {/* Hood — drooped forward over the void, tip broken sideways. */}
+      <mesh position={[0, 0.94, 0.0]} rotation={[0.28, 0.2, 0]} castShadow={castShadow}>
+        <coneGeometry args={[0.31, 0.6, 7]} />
+        <meshStandardMaterial color={darkRobe} roughness={0.95} flatShading />
+      </mesh>
+      <mesh position={[0.04, 1.24, 0.12]} rotation={[0.85, 0, -0.25]} castShadow={castShadow}>
+        <coneGeometry args={[0.11, 0.38, 5]} />
+        <meshStandardMaterial color={darkRobe} roughness={0.95} flatShading />
+      </mesh>
+      {/* Amulet: a small gem hovering at the sunken chest */}
       {amuletColor && (
         <mesh position={[0, 0.42, 0.33]}>
           <octahedronGeometry args={[0.06]} />
@@ -45,26 +94,41 @@ export function WizardModel({
           />
         </mesh>
       )}
-      {/* Boots peeking out under the robe hem */}
+      {/* Boots peeking out under the ragged hem */}
       {bootsColor && (
         <>
           <mesh position={[-0.16, -0.82, 0.12]} castShadow={castShadow}>
             <boxGeometry args={[0.16, 0.14, 0.3]} />
-            <meshStandardMaterial color={bootsColor} roughness={0.8} />
+            <meshStandardMaterial color={bootsColor} roughness={0.8} flatShading />
           </mesh>
           <mesh position={[0.16, -0.82, 0.12]} castShadow={castShadow}>
             <boxGeometry args={[0.16, 0.14, 0.3]} />
-            <meshStandardMaterial color={bootsColor} roughness={0.8} />
+            <meshStandardMaterial color={bootsColor} roughness={0.8} flatShading />
           </mesh>
         </>
       )}
-      {/* Staff */}
+      {/* Staff — crooked, gripped by a fleshless claw. */}
       <group position={[0.42, 0.1, 0.1]} rotation={[0, 0, -0.12]}>
-        <mesh castShadow={castShadow}>
-          <cylinderGeometry args={[0.03, 0.04, 1.5, 6]} />
-          <meshStandardMaterial color="#4a3526" roughness={0.85} />
+        <mesh position={[0, -0.35, 0]} castShadow={castShadow}>
+          <cylinderGeometry args={[0.032, 0.045, 0.85, 5]} />
+          <meshStandardMaterial color="#3a2a1c" roughness={0.9} flatShading />
         </mesh>
-        <mesh position={[0, 0.85, 0]}>
+        <mesh position={[0.045, 0.42, 0.02]} rotation={[0.05, 0, 0.14]} castShadow={castShadow}>
+          <cylinderGeometry args={[0.024, 0.032, 0.75, 5]} />
+          <meshStandardMaterial color="#3a2a1c" roughness={0.9} flatShading />
+        </mesh>
+        {/* Bone claw cradling the crystal. */}
+        {[-0.6, 0.7, 2.6].map((a, i) => (
+          <mesh
+            key={i}
+            position={[0.11 + Math.cos(a) * 0.07, 0.78, 0.02 + Math.sin(a) * 0.07]}
+            rotation={[Math.sin(a) * 0.55, 0, -Math.cos(a) * 0.55 + 0.14]}
+          >
+            <coneGeometry args={[0.022, 0.18, 4]} />
+            <meshStandardMaterial color="#b8a888" roughness={0.7} flatShading />
+          </mesh>
+        ))}
+        <mesh position={[0.11, 0.85, 0.02]}>
           <octahedronGeometry args={[0.09]} />
           <meshStandardMaterial
             color="#0a0a12"
@@ -72,6 +136,11 @@ export function WizardModel({
             emissiveIntensity={2}
             toneMapped={false}
           />
+        </mesh>
+        {/* The claw's owner: a bony hand clamped to the shaft. */}
+        <mesh position={[-0.06, 0.05, 0.03]} rotation={[0, 0, 0.5]}>
+          <boxGeometry args={[0.1, 0.06, 0.07]} />
+          <meshStandardMaterial color="#c8b494" roughness={0.8} flatShading />
         </mesh>
       </group>
     </group>
