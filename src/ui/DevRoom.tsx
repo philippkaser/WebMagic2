@@ -11,6 +11,7 @@ import { useDevRoom } from "../game/devRoom";
 import { playerPosition } from "../game/player-state";
 import { isDevInvuln, setDevInvuln, useGame } from "../state/gameStore";
 import { iconOf } from "./itemInfo";
+import { boneButton, fleshPanel, woundTrack } from "./theme";
 
 /** The dev test bench — reached from the village dev slab (dev builds only).
  * Equip any staff/gear, hand yourself items and gold, spawn enemies to fight,
@@ -82,7 +83,7 @@ export function DevRoom() {
 
   return (
     <div style={styles.backdrop}>
-      <div style={styles.panel}>
+      <div className="wm-breathe" style={styles.panel}>
         <div style={styles.header}>
           <span style={styles.title}>DEV ROOM</span>
           <span style={styles.tag}>test bench · dev build only</span>
@@ -259,8 +260,8 @@ export function DevRoom() {
             ))}
           </div>
           <div style={styles.hint}>
-            Traps trigger on contact (spikes, warp) or fire at you (dart). The warp only descends
-            inside a real dungeon — here it just shows a message.
+            Traps trigger on contact (spikes, warp). The warp only descends inside a real
+            dungeon — here it just shows a message.
           </div>
         </Section>
 
@@ -325,9 +326,9 @@ function Chip({
       onClick={onClick}
       style={{
         ...styles.chip,
-        borderColor: on ? "#c9a5ff" : "#3f3946",
-        color: on ? "#e8dfc8" : "#9a94a0",
-        background: on ? "#231a33" : "#120e1a",
+        borderColor: on ? "#c9a5ff" : "#4a3830",
+        color: on ? "#e8dfc8" : "#b09a90",
+        background: on ? "#2a1433" : "#0c0508",
       }}
     >
       {label}
@@ -335,6 +336,9 @@ function Chip({
   );
 }
 
+/** Same grotesque chrome as the player-facing UI (the bench is excepted from
+ * nothing) — a slab of hide, wound-cut rows, bone knuckles to press. The dev
+ * green stays as the accent so the bench still reads as the bench. */
 const styles: Record<string, CSSProperties> = {
   backdrop: {
     position: "absolute",
@@ -342,7 +346,8 @@ const styles: Record<string, CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    background: "rgba(5,3,9,0.78)",
+    background:
+      "radial-gradient(ellipse at 50% 45%, rgba(6,3,8,0.5) 0%, rgba(2,1,4,0.85) 85%)",
     pointerEvents: "auto",
     fontFamily: "'Courier New', monospace",
   },
@@ -350,33 +355,34 @@ const styles: Record<string, CSSProperties> = {
     width: "min(94vw, 720px)",
     maxHeight: "92vh",
     overflowY: "auto",
-    background: "rgba(12,9,18,0.97)",
-    border: "1px solid #3a5a44",
-    padding: "16px 20px 12px",
+    padding: "20px 24px 16px",
     letterSpacing: 1,
     color: "#cfc6b4",
+    ...fleshPanel("devbench"),
   },
   header: {
     display: "flex",
     alignItems: "baseline",
     gap: 14,
-    borderBottom: "1px solid #2f3a34",
+    borderBottom: "2px solid rgba(0,0,0,0.55)",
+    boxShadow: "0 1px 0 rgba(224,212,184,0.08)",
     paddingBottom: 10,
     marginBottom: 12,
   },
-  title: { fontSize: 18, letterSpacing: 4, color: "#7cff9e", flex: 1 },
-  tag: { fontSize: 11, color: "#6d6478" },
+  title: { fontSize: 18, letterSpacing: 4, color: "#7cff9e", flex: 1, textShadow: "0 2px 0 rgba(0,0,0,0.85)" },
+  tag: { fontSize: 11, color: "#8a7568" },
   close: {
     fontFamily: "'Courier New', monospace",
     fontSize: 14,
-    background: "none",
-    color: "#8f86a0",
-    border: "1px solid #3f3946",
+    background: "#0c0508",
+    color: "#b09a90",
+    border: "none",
+    boxShadow: "inset 0 0 0 1px #000, 0 0 0 1px rgba(200,180,150,0.25)",
     cursor: "pointer",
     padding: "2px 8px",
   },
   section: { marginBottom: 14 },
-  sectionLabel: { fontSize: 11, letterSpacing: 2, color: "#6d8a76", marginBottom: 6 },
+  sectionLabel: { fontSize: 11, letterSpacing: 2, color: "#6d8a76", marginBottom: 6, textShadow: "0 1px 0 #000" },
   statGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
@@ -384,8 +390,8 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 12,
   },
   stat: { display: "flex", justifyContent: "space-between", gap: 8 },
-  abilities: { marginTop: 8, paddingTop: 8, borderTop: "1px solid #201c28" },
-  abilityLine: { fontSize: 12, color: "#b9b0a0", marginBottom: 3 },
+  abilities: { marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(0,0,0,0.6)" },
+  abilityLine: { fontSize: 12, color: "#c8b8a0", marginBottom: 3 },
   row: { display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" },
   itemList: { display: "flex", flexDirection: "column", gap: 4, marginTop: 4 },
   itemRow: {
@@ -393,56 +399,50 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "center",
     gap: 8,
     padding: "5px 8px",
-    background: "#0d0a13",
-    border: "1px solid #201c28",
+    background: "#0c0508",
+    boxShadow: "inset 0 0 0 1px #000, inset 0 2px 4px rgba(0,0,0,0.7), 0 0 0 1px rgba(200,180,150,0.14)",
     fontSize: 12,
   },
   itemName: { color: "#ded5c2", width: 150 },
-  itemDesc: { color: "#7d7566", flex: 1, fontSize: 11 },
-  tier: { color: "#6d6478", fontSize: 11, width: 22, textAlign: "center" },
+  itemDesc: { color: "#9a8578", flex: 1, fontSize: 11 },
+  tier: { color: "#8a7568", fontSize: 11, width: 22, textAlign: "center" },
   btn: {
-    fontFamily: "'Courier New', monospace",
+    ...boneButton("dev"),
     fontSize: 12,
-    letterSpacing: 1,
     padding: "6px 12px",
-    background: "#120e1a",
-    color: "#e8dfc8",
-    border: "1px solid #3f3946",
-    cursor: "pointer",
   },
   btnGhost: {
     fontFamily: "'Courier New', monospace",
     fontSize: 11,
     padding: "4px 10px",
-    background: "none",
-    color: "#9a94a0",
-    border: "1px solid #2f2a36",
+    background: "#0c0508",
+    color: "#b09a90",
+    border: "none",
+    boxShadow: "inset 0 0 0 1px #000, 0 0 0 1px rgba(200,180,150,0.2)",
     cursor: "pointer",
     marginBottom: 4,
   },
   mini: {
-    fontFamily: "'Courier New', monospace",
+    ...boneButton("devmini"),
     fontSize: 11,
     padding: "3px 10px",
-    background: "#120e1a",
-    color: "#e8dfc8",
-    border: "1px solid #46ffd0",
-    cursor: "pointer",
+    letterSpacing: 1,
   },
   miniGhost: {
     fontFamily: "'Courier New', monospace",
     fontSize: 11,
     padding: "3px 8px",
-    background: "none",
-    color: "#9a94a0",
-    border: "1px solid #2f2a36",
+    background: "#0c0508",
+    color: "#b09a90",
+    border: "none",
+    boxShadow: "inset 0 0 0 1px #000, 0 0 0 1px rgba(200,180,150,0.2)",
     cursor: "pointer",
   },
   chip: {
     fontFamily: "'Courier New', monospace",
     fontSize: 11,
     padding: "4px 10px",
-    border: "1px solid #3f3946",
+    border: "1px solid #4a3830",
     cursor: "pointer",
   },
   floorLabel: {
@@ -450,18 +450,18 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "center",
     gap: 6,
     fontSize: 12,
-    color: "#7d7566",
+    color: "#9a8578",
   },
   floorInput: {
     fontFamily: "'Courier New', monospace",
     width: 56,
     fontSize: 12,
     padding: "4px 6px",
-    background: "#120e1a",
     color: "#e8dfc8",
-    border: "1px solid #3f3946",
+    border: "none",
+    ...woundTrack,
     textAlign: "center",
   },
-  hint: { marginTop: 6, fontSize: 11, color: "#55505a" },
-  footer: { marginTop: 8, fontSize: 10, color: "#55505a", textAlign: "center", letterSpacing: 2 },
+  hint: { marginTop: 6, fontSize: 11, color: "#8a7568" },
+  footer: { marginTop: 8, fontSize: 10, color: "#8a7568", textAlign: "center", letterSpacing: 2 },
 };

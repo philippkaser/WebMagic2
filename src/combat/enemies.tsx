@@ -304,21 +304,38 @@ export function Wisp({
       enabledRotations={[false, false, false]}
     >
       <BallCollider args={[0.42]} mass={2} collisionGroups={ENEMY_GROUPS} />
+      {/* A lidless eye torn loose from something bigger. */}
       <mesh castShadow>
-        <icosahedronGeometry args={[0.42, 0]} />
+        <icosahedronGeometry args={[0.4, 1]} />
         <meshStandardMaterial
           ref={mat}
-          color="#160d26"
+          color="#241430"
           emissive="#b46bff"
           emissiveIntensity={1.7}
           flatShading
-          roughness={0.4}
+          roughness={0.55}
         />
       </mesh>
-      <mesh>
-        <sphereGeometry args={[0.14, 8, 8]} />
+      {/* Iris and pupil, fixed dead ahead. */}
+      <mesh position={[0, 0, 0.3]}>
+        <sphereGeometry args={[0.17, 8, 6]} />
         <meshStandardMaterial color="#000" emissive="#f0dcff" emissiveIntensity={4} toneMapped={false} />
       </mesh>
+      <mesh position={[0, 0, 0.43]}>
+        <sphereGeometry args={[0.075, 6, 5]} />
+        <meshStandardMaterial color="#050308" roughness={0.3} />
+      </mesh>
+      {/* Torn optic tendrils trailing behind. */}
+      {[-0.35, 0, 0.4].map((a, i) => (
+        <mesh
+          key={i}
+          position={[Math.sin(a) * 0.14, -0.06 + i * 0.09, -0.38]}
+          rotation={[-1.35 + i * 0.18, 0, a]}
+        >
+          <coneGeometry args={[0.05 - i * 0.01, 0.34, 4]} />
+          <meshStandardMaterial color="#4a2a5a" roughness={0.8} flatShading />
+        </mesh>
+      ))}
     </RigidBody>
   );
 }
@@ -446,23 +463,60 @@ export function Sentry({
   return (
     <RigidBody ref={body} position={position} type="fixed" colliders={false}>
       <CuboidCollider args={[0.42, 0.55, 0.42]} position={[0, 0.55, 0]} collisionGroups={ENEMY_GROUPS} />
-      {/* Base plinth */}
-      <mesh position={[0, 0.45, 0]} castShadow>
-        <boxGeometry args={[0.8, 0.9, 0.8]} />
-        <meshStandardMaterial color="#3a3442" roughness={0.9} />
-      </mesh>
+      {/* A spine planted in the floor, vertebra on vertebra. */}
+      {[0.12, 0.38, 0.62, 0.84].map((y, i) => (
+        <mesh key={i} position={[(i % 2) * 0.03 - 0.015, y, 0]} castShadow>
+          <cylinderGeometry args={[0.16 - i * 0.02, 0.19 - i * 0.02, 0.16, 6]} />
+          <meshStandardMaterial color="#a89878" roughness={0.8} flatShading />
+        </mesh>
+      ))}
+      {/* Broken ribs still clinging on. */}
+      {([-1, 1] as const).map((side) => (
+        <mesh
+          key={side}
+          position={[side * 0.24, 0.5, 0.05]}
+          rotation={[0.2, 0, side * 2.1]}
+          castShadow
+        >
+          <coneGeometry args={[0.045, 0.5, 4]} />
+          <meshStandardMaterial color="#988868" roughness={0.85} flatShading />
+        </mesh>
+      ))}
+      {/* The skull that watches — the whole head group tracks its target. */}
       <group ref={head} position={[0, 1.05, 0]}>
         <mesh castShadow>
-          <octahedronGeometry args={[0.34]} />
+          <boxGeometry args={[0.42, 0.34, 0.4]} />
+          <meshStandardMaterial color="#b8a888" roughness={0.75} flatShading />
+        </mesh>
+        {/* Eye pits — dead, faintly lit from inside. */}
+        {([0.11, -0.11] as const).map((x) => (
+          <mesh key={x} position={[x, 0.04, 0.21]}>
+            <boxGeometry args={[0.1, 0.09, 0.03]} />
+            <meshStandardMaterial color="#000" emissive="#ff5136" emissiveIntensity={0.7} toneMapped={false} />
+          </mesh>
+        ))}
+        {/* The jaw hangs open; the fire builds in its throat (charging glow). */}
+        <mesh position={[0, -0.24, 0.06]} rotation={[0.35, 0, 0]} castShadow>
+          <boxGeometry args={[0.34, 0.1, 0.34]} />
+          <meshStandardMaterial color="#a89878" roughness={0.8} flatShading />
+        </mesh>
+        <mesh position={[0, -0.14, 0.14]}>
+          <boxGeometry args={[0.26, 0.12, 0.16]} />
           <meshStandardMaterial
             ref={mat}
             color="#1c0c08"
             emissive="#ff5136"
             emissiveIntensity={1.4}
-            flatShading
-            roughness={0.3}
+            toneMapped={false}
           />
         </mesh>
+        {/* Cracked horn stubs. */}
+        {([0.16, -0.16] as const).map((x) => (
+          <mesh key={x} position={[x, 0.22, 0]} rotation={[0, 0, -x * 2.2]} castShadow>
+            <coneGeometry args={[0.05, 0.2, 4]} />
+            <meshStandardMaterial color="#988868" roughness={0.85} flatShading />
+          </mesh>
+        ))}
       </group>
     </RigidBody>
   );
@@ -664,13 +718,36 @@ export function Shadow({
           opacity={0.55}
         />
       </mesh>
-      {/* Two faint eyes peering out of the murk. */}
-      {([0.13, -0.13] as const).map((x) => (
-        <mesh key={x} position={[x, 0.06, 0.34]}>
-          <sphereGeometry args={[0.05, 6, 6]} />
-          <meshStandardMaterial color="#000" emissive="#c89cff" emissiveIntensity={3} toneMapped={false} />
+      {/* Rags of dark trailing under it. */}
+      {[-0.9, -0.2, 0.6, 1.4].map((a, i) => (
+        <mesh
+          key={i}
+          position={[Math.cos(a) * 0.26, -0.42 - (i % 2) * 0.1, Math.sin(a) * 0.26]}
+          rotation={[Math.sin(a) * 0.3, 0, Math.cos(a) * 0.3]}
+        >
+          <coneGeometry args={[0.09, 0.34 + (i % 3) * 0.1, 4]} />
+          <meshStandardMaterial
+            color="#0a0616"
+            roughness={0.8}
+            flatShading
+            transparent
+            opacity={0.4}
+          />
         </mesh>
       ))}
+      {/* Too many eyes peering out of the murk, none of them level. */}
+      <mesh position={[0.13, 0.06, 0.34]}>
+        <sphereGeometry args={[0.05, 6, 6]} />
+        <meshStandardMaterial color="#000" emissive="#c89cff" emissiveIntensity={3} toneMapped={false} />
+      </mesh>
+      <mesh position={[-0.12, 0.0, 0.35]}>
+        <sphereGeometry args={[0.06, 6, 6]} />
+        <meshStandardMaterial color="#000" emissive="#c89cff" emissiveIntensity={3} toneMapped={false} />
+      </mesh>
+      <mesh position={[0.01, 0.18, 0.32]}>
+        <sphereGeometry args={[0.032, 6, 6]} />
+        <meshStandardMaterial color="#000" emissive="#e2ccff" emissiveIntensity={2.4} toneMapped={false} />
+      </mesh>
     </RigidBody>
   );
 }
@@ -844,12 +921,29 @@ export function Slime({
           flatShading
         />
       </mesh>
-      {([0.16, -0.16] as const).map((x) => (
-        <mesh key={x} position={[x * cfg.size, 0.1 * cfg.size, 0.34 * cfg.size]}>
-          <sphereGeometry args={[0.06 * cfg.size, 6, 6]} />
-          <meshStandardMaterial color="#04140a" emissive="#d4ffb0" emissiveIntensity={2} toneMapped={false} />
-        </mesh>
-      ))}
+      {/* Things it has eaten, still visible inside. */}
+      <mesh position={[0.1 * cfg.size, -0.05 * cfg.size, 0.05 * cfg.size]} rotation={[0.5, 0.8, 0.2]}>
+        <boxGeometry args={[0.16 * cfg.size, 0.07 * cfg.size, 0.07 * cfg.size]} />
+        <meshStandardMaterial color="#b8a888" roughness={0.8} flatShading />
+      </mesh>
+      <mesh position={[-0.12 * cfg.size, 0.08 * cfg.size, -0.04 * cfg.size]} rotation={[1.2, 0.2, 0.9]}>
+        <coneGeometry args={[0.05 * cfg.size, 0.18 * cfg.size, 4]} />
+        <meshStandardMaterial color="#a89878" roughness={0.8} flatShading />
+      </mesh>
+      {/* Mismatched eyes, one half-sunk. */}
+      <mesh position={[0.16 * cfg.size, 0.12 * cfg.size, 0.33 * cfg.size]}>
+        <sphereGeometry args={[0.07 * cfg.size, 6, 6]} />
+        <meshStandardMaterial color="#04140a" emissive="#d4ffb0" emissiveIntensity={2} toneMapped={false} />
+      </mesh>
+      <mesh position={[-0.15 * cfg.size, 0.04 * cfg.size, 0.35 * cfg.size]}>
+        <sphereGeometry args={[0.045 * cfg.size, 6, 6]} />
+        <meshStandardMaterial color="#04140a" emissive="#d4ffb0" emissiveIntensity={2} toneMapped={false} />
+      </mesh>
+      {/* A slack mouth-line under the eyes. */}
+      <mesh position={[0, -0.12 * cfg.size, 0.4 * cfg.size]} rotation={[0.3, 0, 0.12]}>
+        <boxGeometry args={[0.3 * cfg.size, 0.045 * cfg.size, 0.05 * cfg.size]} />
+        <meshStandardMaterial color="#0c2410" roughness={0.9} />
+      </mesh>
     </RigidBody>
   );
 }

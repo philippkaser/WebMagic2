@@ -340,11 +340,12 @@ export function Portal({
   lockedPrompt?: string;
 }) {
   const light = useRef<DynamicLightSource | null>(null);
+  const rift = useRef<Group>(null);
   const sparkClock = useRef(0);
 
   useEffect(() => {
     const src = addLightSource({
-      position: [position[0], position[1] + 1.6, position[2] + 0.8],
+      position: [position[0], position[1] + 1.6, position[2]],
       color,
       intensity: 9,
       distance: 12,
@@ -361,6 +362,20 @@ export function Portal({
     const t = clock.elapsedTime;
     if (light.current) {
       light.current.intensity = locked ? 1.5 : 9 + Math.sin(t * 2.2) * 1.2 + Math.sin(t * 13.7) * 0.8;
+    }
+
+    // The wound always faces whoever looks at it — turn (yaw only, smoothly)
+    // toward the local player.
+    if (rift.current) {
+      const targetYaw = Math.atan2(
+        playerPosition.x - position[0],
+        playerPosition.z - position[2],
+      );
+      const cur = rift.current.rotation.y;
+      let delta = targetYaw - cur;
+      while (delta > Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      rift.current.rotation.y = cur + delta * Math.min(1, dt * 5);
     }
 
     sparkClock.current -= dt;
@@ -401,14 +416,9 @@ export function Portal({
 
   return (
     <group position={position}>
-      {/* Cracked dais the tear hangs over. */}
-      <mesh position={[0, 0.12, 0]} receiveShadow>
-        <boxGeometry args={[3.4, 0.24, 1.6]} />
-        <meshStandardMaterial color="#231e2c" roughness={0.85} />
-      </mesh>
-      {/* Rune scar burnt into the dais under the wound. */}
-      <mesh position={[0, 0.245, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.55, 0.72, 5]} />
+      {/* No pedestal — just the scar the tear burnt into the ground under it. */}
+      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0.4]}>
+        <ringGeometry args={[0.55, 0.78, 5]} />
         <meshStandardMaterial
           color="#05030a"
           emissive={color}
@@ -417,7 +427,19 @@ export function Portal({
           side={2}
         />
       </mesh>
-      <group position={[0, 1.65, 0]}>
+      <mesh position={[0, 0.015, 0]} rotation={[-Math.PI / 2, 0, 1.1]}>
+        <ringGeometry args={[0.9, 0.97, 6]} />
+        <meshStandardMaterial
+          color="#05030a"
+          emissive={color}
+          emissiveIntensity={locked ? 0.08 : 0.35}
+          toneMapped={false}
+          transparent
+          opacity={0.7}
+          side={2}
+        />
+      </mesh>
+      <group ref={rift} position={[0, 1.65, 0]}>
         <RiftPortal color={color} activity={locked ? 0.12 : 1} />
       </group>
     </group>

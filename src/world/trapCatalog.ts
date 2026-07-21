@@ -14,10 +14,11 @@ export interface TrapDef {
   /** Base damage at floor 1, scaled by floorScale(floor).enemyDamage on hit.
    * 0 = the trap does something other than damage (e.g. the warp). */
   baseDamage: number;
-  /** Trigger/effect radius in world units. For the dart this is firing range. */
+  /** Trigger/effect radius in world units. */
   radius: number;
   /** How it sits in the world: flush with the floor, or mounted on a room-edge
-   * wall (drives both placement and the mesh). */
+   * wall. Everything current is floor-mounted; the field stays for future
+   * wall hazards. */
   mount: "floor" | "wall";
   /** Never generated on checkpoint floors — the warp mustn't yank a wizard off
    * a floor where they came to bank. */
@@ -36,16 +37,6 @@ export const TRAP_DEFS: TrapDef[] = [
     mount: "floor",
     noCheckpoint: false,
     weight: 3,
-  },
-  {
-    id: "dart",
-    name: "Dart Launcher",
-    desc: "Wall emitter — fires a fast bolt at wizards in line of sight",
-    baseDamage: 12,
-    radius: 12,
-    mount: "wall",
-    noCheckpoint: false,
-    weight: 2,
   },
   {
     id: "warp",

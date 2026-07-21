@@ -269,15 +269,38 @@ export function SingularitySeed({
         restitution={spec.bounces > 0 ? 0.8 : 0}
         restitutionCombineRule={CoefficientCombineRule.Max}
       />
+      {/* A splinter of the tear itself: black kernel in a cage of shards. */}
       <group ref={swirl} scale={spec.size}>
         <mesh>
-          <icosahedronGeometry args={[1, 0]} />
+          <icosahedronGeometry args={[0.8, 0]} />
           <meshStandardMaterial
             color="#0a0416"
             emissive="#a06bff"
             emissiveIntensity={2.4}
             flatShading
             toneMapped={false}
+          />
+        </mesh>
+        <mesh rotation={[0.6, 0.3, 0.9]} scale={1.4}>
+          <tetrahedronGeometry args={[1, 0]} />
+          <meshStandardMaterial
+            color="#050208"
+            emissive="#6a3dcc"
+            emissiveIntensity={1.1}
+            flatShading
+            transparent
+            opacity={0.65}
+          />
+        </mesh>
+        <mesh rotation={[2.1, 1.4, 0.2]} scale={1.15}>
+          <tetrahedronGeometry args={[1, 0]} />
+          <meshStandardMaterial
+            color="#050208"
+            emissive="#c89cff"
+            emissiveIntensity={0.8}
+            flatShading
+            transparent
+            opacity={0.5}
           />
         </mesh>
       </group>
@@ -401,15 +424,61 @@ function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void 
 
   return (
     <group position={hole.pos}>
+      {/* A wound in the world, rim chewed ragged, reality splintering off it. */}
       <group ref={core}>
         <mesh>
-          <sphereGeometry args={[0.6, 16, 16]} />
-          <meshStandardMaterial color="#000000" emissive="#3a1a6a" emissiveIntensity={1.4} toneMapped={false} />
+          <icosahedronGeometry args={[0.6, 1]} />
+          <meshStandardMaterial
+            color="#000000"
+            emissive="#3a1a6a"
+            emissiveIntensity={1.4}
+            flatShading
+            toneMapped={false}
+          />
         </mesh>
+        {/* Two jagged low-poly accretion rings, counter-tilted. */}
         <mesh rotation={[Math.PI / 2.3, 0, 0]}>
-          <torusGeometry args={[1.15, 0.12, 8, 24]} />
-          <meshStandardMaterial color="#1a0630" emissive="#b06bff" emissiveIntensity={2.6} toneMapped={false} />
+          <torusGeometry args={[1.15, 0.12, 3, 7]} />
+          <meshStandardMaterial
+            color="#1a0630"
+            emissive="#b06bff"
+            emissiveIntensity={2.6}
+            flatShading
+            toneMapped={false}
+          />
         </mesh>
+        <mesh rotation={[Math.PI / 1.7, 0.5, 0]}>
+          <torusGeometry args={[0.9, 0.07, 3, 6]} />
+          <meshStandardMaterial
+            color="#0c0318"
+            emissive="#e0ccff"
+            emissiveIntensity={1.6}
+            flatShading
+            toneMapped={false}
+            transparent
+            opacity={0.8}
+          />
+        </mesh>
+        {/* Splinters of floor and wall caught on the rim. */}
+        {[0, 1, 2, 3, 4].map((i) => {
+          const a = (i / 5) * Math.PI * 2;
+          return (
+            <mesh
+              key={i}
+              position={[Math.cos(a) * 1.3, Math.sin(a * 2.7) * 0.3, Math.sin(a) * 1.3]}
+              rotation={[a * 1.7, a, a * 0.6]}
+              scale={0.14 + (i % 3) * 0.05}
+            >
+              <tetrahedronGeometry args={[1, 0]} />
+              <meshStandardMaterial
+                color="#100c18"
+                emissive="#b06bff"
+                emissiveIntensity={0.9}
+                flatShading
+              />
+            </mesh>
+          );
+        })}
       </group>
     </group>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
 import { computeStats, resolveItem } from "../items/catalog";
@@ -8,7 +8,15 @@ import { entryFloors, useGame } from "../state/gameStore";
 import { DevRoom } from "./DevRoom";
 import { InventoryScreen } from "./InventoryScreen";
 import { ITEM_ICONS, iconOf } from "./itemInfo";
-import { barSegments, barTrack, engraved, ironSlab, stoneButton } from "./theme";
+import {
+  barSegments,
+  boneButton,
+  fleshPanel,
+  scarred,
+  themeCss,
+  uiTile,
+  woundTrack,
+} from "./theme";
 
 /** All DOM UI: crosshair, bars, prompts, message feed, and the fullscreen
  * overlays for menu / portal select / death. */
@@ -64,12 +72,87 @@ export function HUD() {
       {phase === "menu" && <MenuOverlay />}
       {phase === "select" && <SelectOverlay />}
       {phase === "dead" && <DeathOverlay />}
-      {phase === "loading" && (
-        <Overlay>
-          <div style={styles.title}>DESCENDING…</div>
-        </Overlay>
-      )}
+      {phase === "loading" && <RiftCrossing />}
+      <ArrivalFade phase={phase} />
     </div>
+  );
+}
+
+// ── Crossing the tear ─────────────────────────────────────────────────────────
+
+/** The old "DESCENDING…" wall of text, replaced by the crossing itself: the
+ * whole eye goes void, a teal slit rips open and shut, dead stars behind it.
+ * Purely DOM — it sits over the canvas while the next floor streams in. */
+function RiftCrossing() {
+  const voidTile = uiTile("void");
+  return (
+    <div
+      className="wm-tear-veil"
+      style={{
+        position: "absolute",
+        inset: 0,
+        pointerEvents: "auto",
+        backgroundColor: "#020106",
+        backgroundImage: voidTile ? `url(${voidTile})` : undefined,
+        backgroundSize: "160px 160px",
+        imageRendering: "pixelated",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        className="wm-tear-slit"
+        style={{
+          width: "min(30vw, 340px)",
+          height: "72vh",
+          background:
+            "radial-gradient(ellipse 48% 50% at 50% 50%, #eafffa 0%, #46ffd0 18%, #0d4a3c 45%, transparent 68%)",
+          filter: "saturate(1.2)",
+        }}
+      />
+      <div
+        className="wm-tear-text"
+        style={{
+          position: "absolute",
+          bottom: "16%",
+          fontSize: 15,
+          letterSpacing: 8,
+          ...scarred,
+          color: "#9fe8d4",
+        }}
+      >
+        THE TEAR TAKES YOU
+      </div>
+    </div>
+  );
+}
+
+/** On stepping out the far side (loading→dungeon, menu→village, any arrival
+ * into play), a teal afterimage drains off the eye — the smooth half of the
+ * portal transition. */
+function ArrivalFade({ phase }: { phase: ReturnType<typeof useGame.getState>["phase"] }) {
+  const prev = useRef(phase);
+  const [fadeKey, setFadeKey] = useState(0);
+  useEffect(() => {
+    const was = prev.current;
+    prev.current = phase;
+    const arriving =
+      (phase === "dungeon" || phase === "village") && (was === "loading" || was === "menu" || was === "dead");
+    if (arriving) setFadeKey((k) => k + 1);
+  }, [phase]);
+  if (fadeKey === 0) return null;
+  return (
+    <div
+      key={fadeKey}
+      className="wm-arrive"
+      style={{
+        position: "absolute",
+        inset: 0,
+        background:
+          "radial-gradient(ellipse at 50% 50%, rgba(70,255,208,0.28) 0%, rgba(2,1,6,0.9) 72%)",
+      }}
+    />
   );
 }
 
@@ -102,11 +185,11 @@ function PlayHud() {
       <HurtFlash />
       <BossBar />
 
-      {/* Top-left: location, carved into an iron plate */}
-      <div style={{ ...styles.panel, top: 14, left: 14 }}>
+      {/* Top-left: location, scarred into a graft of hide */}
+      <div className="wm-breathe" style={{ ...styles.panel, ...fleshPanel("loc"), top: 14, left: 14, ...anchor(4) }}>
         {phase === "dungeon" ? (
           <>
-            <div style={{ fontSize: 18, ...engraved }}>FLOOR {floor}</div>
+            <div style={{ fontSize: 18, ...scarred }}>FLOOR {floor}</div>
             <div style={styles.dim}>
               instance {instanceId || "—"}
               {netMode === "online" &&
@@ -114,7 +197,7 @@ function PlayHud() {
             </div>
           </>
         ) : (
-          <div style={{ fontSize: 18, ...engraved }}>THE VILLAGE</div>
+          <div style={{ fontSize: 18, ...scarred }}>THE VILLAGE</div>
         )}
         <div style={styles.dim}>checkpoint: floor {checkpoint}</div>
         <div style={{ ...styles.dim, color: netMode === "online" ? "#4fd08a" : "#7d7566" }}>
@@ -129,7 +212,10 @@ function PlayHud() {
       <MessageFeed />
 
       {/* Bottom-left: vitals, purse and belt */}
-      <div style={{ ...styles.panel, bottom: 16, left: 14, width: 240 }}>
+      <div
+        className="wm-breathe"
+        style={{ ...styles.panel, ...fleshPanel("vitals"), bottom: 16, left: 14, width: 240, ...anchor(4) }}
+      >
         <Bar
           label="♥ BLOOD"
           value={health}
@@ -159,7 +245,10 @@ function PlayHud() {
       </div>
 
       {/* Bottom-right: equipment */}
-      <div style={{ ...styles.panel, bottom: 16, right: 14, textAlign: "right" }}>
+      <div
+        className="wm-breathe"
+        style={{ ...styles.panel, ...fleshPanel("gear"), bottom: 16, right: 14, textAlign: "right", ...anchor(-4) }}
+      >
         <EquipRow slot="staff" defId={equipment.staff.defId} runLoot={equipment.staff.runLoot} />
         <EquipRow slot="amulet" defId={equipment.amulet?.defId} runLoot={equipment.amulet?.runLoot} />
         <EquipRow slot="cloak" defId={equipment.cloak?.defId} runLoot={equipment.cloak?.runLoot} />
@@ -176,18 +265,18 @@ function PlayHud() {
   );
 }
 
-/** A phial set into the plate: recessed track, liquid fill chopped into
+/** An open wound in the graft: recessed cut, liquid fill chopped into
  * pixel-block segments. `color` takes the full fill gradient. */
 function Bar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
   return (
     <div style={{ marginBottom: 7 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#b9b0a0", textShadow: "0 1px 0 #000" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#c8b8a0", textShadow: "0 1px 0 #000" }}>
         <span>{label}</span>
         <span>
           {Math.ceil(value)} / {Math.round(max)}
         </span>
       </div>
-      <div style={{ height: 12, ...barTrack }}>
+      <div style={{ height: 12, ...woundTrack }}>
         <div
           style={{
             height: "100%",
@@ -213,11 +302,10 @@ function BeltSlot({ hotkey, stack }: { hotkey: string; stack: ItemStack | null }
         alignItems: "center",
         gap: 3,
         padding: "1px 5px",
-        border: "1px solid #060409",
-        background: "#0d0a12",
-        boxShadow: "0 0 0 1px #3a3244, inset 0 2px 3px rgba(0,0,0,0.7)",
+        background: "#0c0508",
+        boxShadow: "inset 0 0 0 1px #000, inset 0 2px 3px rgba(0,0,0,0.85), 0 0 0 1px rgba(200,180,150,0.18)",
         fontSize: 11,
-        color: def ? "#ded5c2" : "#55505a",
+        color: def ? "#ded5c2" : "#6a5a50",
       }}
     >
       <span style={{ color: "#7d7566" }}>{hotkey}</span>
@@ -286,8 +374,8 @@ function BossBar() {
       <div
         style={{
           height: 14,
-          ...barTrack,
-          boxShadow: "0 0 0 1px #6a5a48, 0 0 0 2px #060409, inset 0 2px 2px rgba(0,0,0,0.8)",
+          ...woundTrack,
+          boxShadow: "0 0 0 2px rgba(200,184,152,0.5), 0 0 0 3px #000, inset 0 2px 3px rgba(0,0,0,0.9)",
         }}
       >
         <div
@@ -363,7 +451,7 @@ function PerfOverlay() {
     return () => cancelAnimationFrame(raf);
   }, []);
   return (
-    <div style={{ ...styles.panel, top: 110, left: 14, fontSize: 12, color: "#8fe3a0" }}>
+    <div style={{ ...styles.panel, ...fleshPanel("perf"), top: 110, left: 14, fontSize: 12, color: "#8fe3a0" }}>
       {stats.fps} fps · p95 {stats.p95}ms · worst {stats.worst}ms
     </div>
   );
@@ -385,10 +473,14 @@ function Overlay({ children }: { children: ReactNode }) {
   return <div style={styles.overlay}>{children}</div>;
 }
 
-/** A riveted iron sheet the fullscreen overlays mount their content on — the
- * menu is a thing nailed to the world, not a window over it. */
+/** The slab of stitched hide the fullscreen overlays mount their content on —
+ * a thing hanging in the world (it breathes), not a window over it. */
 function Sheet({ children }: { children: ReactNode }) {
-  return <div style={styles.sheet}>{children}</div>;
+  return (
+    <div className="wm-breathe" style={styles.sheet}>
+      {children}
+    </div>
+  );
 }
 
 function MenuOverlay() {
@@ -427,7 +519,7 @@ function MenuOverlay() {
           ENTER THE VILLAGE
         </button>
         <button
-          style={{ ...styles.button, marginTop: 14, fontSize: 13, color: "#b8afa0" }}
+          style={{ ...styles.buttonSmall, marginTop: 14 }}
           onClick={toggleShadows}
         >
           SHADOWS: {shadows ? "ON" : "OFF"}
@@ -460,7 +552,7 @@ function SelectOverlay() {
             </button>
           ))}
         </div>
-        <button style={{ ...styles.button, marginTop: 22, color: "#9a94a0" }} onClick={closePortalSelect}>
+        <button style={{ ...styles.buttonSmall, marginTop: 22 }} onClick={closePortalSelect}>
           STAY IN THE VILLAGE
         </button>
       </Sheet>
@@ -488,7 +580,7 @@ function DeathOverlay() {
       ) : (
         <p style={styles.blurb}>You carried nothing the dungeon could take.</p>
       )}
-      <button style={{ ...styles.button, boxShadow: "0 0 0 1px #6a1d16, inset 0 1px 0 rgba(255,255,255,0.06), 0 4px 0 #060409" }} onClick={respawn}>
+      <button style={styles.button} onClick={respawn}>
         RETURN TO THE VILLAGE
       </button>
     </Overlay>
@@ -496,6 +588,13 @@ function DeathOverlay() {
 }
 
 // ── Styles ───────────────────────────────────────────────────────────────────
+
+/** Perspective anchor for HUD grafts: a small yaw so the corner panels sit IN
+ * the view instead of ON the glass. Fed to the breathe animation as a CSS var
+ * so the two transforms compose. */
+function anchor(deg: number): CSSProperties {
+  return { "--wm-anchor": `perspective(720px) rotateY(${deg}deg)` } as CSSProperties;
+}
 
 const styles: Record<string, CSSProperties> = {
   root: {
@@ -527,39 +626,31 @@ const styles: Record<string, CSSProperties> = {
     width: 64,
     height: 5,
     marginLeft: -32,
-    background: "#0a070d",
-    border: "1px solid #060409",
-    boxShadow: "0 0 0 1px #3a3244",
+    ...woundTrack,
   },
   chargeFill: {
     height: "100%",
     transition: "width 40ms linear",
   },
+  // Base graft geometry — each call site layers fleshPanel(seed) over this.
   panel: {
     position: "absolute",
-    padding: "10px 14px",
+    padding: "12px 16px",
     letterSpacing: 1,
-    ...ironSlab(),
   },
-  dim: { fontSize: 11, color: "#7d7566", marginTop: 2, textShadow: "0 1px 0 #000" },
-  // The interaction prompt hangs like a scrap of hide nailed at both ends.
+  dim: { fontSize: 11, color: "#8a7568", marginTop: 2, textShadow: "0 1px 0 #000" },
+  // The interaction prompt: a strip of hide stitched up at eye level.
   prompt: {
     position: "absolute",
     bottom: "22%",
     left: "50%",
     transform: "translateX(-50%)",
-    padding: "9px 22px",
+    padding: "10px 26px",
     fontSize: 14,
     letterSpacing: 1,
     whiteSpace: "nowrap",
-    ...engraved,
-    backgroundColor: "#181018",
-    backgroundImage:
-      "radial-gradient(circle at 8px 50%, #6a5f7a 0 2px, rgba(0,0,0,0.6) 2px 3px, transparent 3px), radial-gradient(circle at calc(100% - 8px) 50%, #6a5f7a 0 2px, rgba(0,0,0,0.6) 2px 3px, transparent 3px)",
-    border: "2px solid #060409",
-    boxShadow: "0 0 0 1px #4a4256, 0 5px 0 rgba(0,0,0,0.5)",
-    clipPath:
-      "polygon(0 4px, 4px 4px, 4px 0, calc(100% - 4px) 0, calc(100% - 4px) 4px, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 4px calc(100% - 4px), 0 calc(100% - 4px))",
+    ...fleshPanel("prompt"),
+    ...scarred,
   },
   feed: {
     position: "absolute",
@@ -591,6 +682,8 @@ const styles: Record<string, CSSProperties> = {
     color: "#4d4756",
     textShadow: "1px 1px 0 #000",
   },
+  // Overlays barely dim the world — the village is still there behind the
+  // graft, which is the point.
   overlay: {
     position: "absolute",
     inset: 0,
@@ -599,7 +692,7 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     background:
-      "radial-gradient(ellipse at 50% 45%, rgba(10,6,16,0.82) 0%, rgba(3,1,6,0.96) 78%)",
+      "radial-gradient(ellipse at 50% 45%, rgba(6,3,8,0.45) 0%, rgba(2,1,4,0.85) 85%)",
     pointerEvents: "auto",
     textAlign: "center",
     padding: 24,
@@ -608,15 +701,15 @@ const styles: Record<string, CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    padding: "34px 46px 30px",
-    maxWidth: 620,
-    ...ironSlab(),
+    padding: "38px 52px 32px",
+    maxWidth: 640,
+    ...fleshPanel("sheet"),
   },
   title: {
     fontSize: 52,
     letterSpacing: 10,
-    color: "#e8dfc8",
-    textShadow: "0 0 18px rgba(70,255,208,0.3), 0 4px 0 #000, 0 -1px 0 rgba(255,255,255,0.08)",
+    color: "#e0d4b8",
+    textShadow: "0 0 20px rgba(70,255,208,0.35), 0 4px 0 rgba(0,0,0,0.9)",
   },
   deathTitle: {
     fontSize: 56,
@@ -624,30 +717,31 @@ const styles: Record<string, CSSProperties> = {
     color: "#c23a3a",
     textShadow: "0 5px 0 #4a0808, 0 8px 0 #000, 0 0 26px rgba(160,10,10,0.5)",
   },
-  subtitle: { fontSize: 18, letterSpacing: 4, color: "#8f86a0", marginTop: 8, textShadow: "0 2px 0 #000" },
-  blurb: { maxWidth: 460, fontSize: 14, lineHeight: 1.6, color: "#a89e8c", margin: "18px 0" },
-  button: stoneButton,
+  subtitle: { fontSize: 18, letterSpacing: 4, color: "#b09a90", marginTop: 8, textShadow: "0 2px 0 #000" },
+  blurb: { maxWidth: 460, fontSize: 14, lineHeight: 1.6, color: "#b8a494", margin: "18px 0", textShadow: "0 1px 0 #000" },
+  button: boneButton("main"),
+  buttonSmall: { ...boneButton("small"), fontSize: 12, padding: "8px 18px", opacity: 0.85 },
   nameInput: {
     fontFamily: "'Courier New', monospace",
     fontSize: 16,
     letterSpacing: 2,
     padding: "9px 14px",
-    background: "#0d0a12",
-    color: "#e8dfc8",
-    border: "2px solid #060409",
-    boxShadow: "0 0 0 1px #3a3244, inset 0 2px 3px rgba(0,0,0,0.7)",
+    color: "#e0d4b8",
+    border: "none",
+    ...woundTrack,
     textAlign: "center",
     outline: "none",
     width: 220,
   },
-  controls: { marginTop: 26, fontSize: 12, color: "#6d6478", letterSpacing: 1 },
+  controls: { marginTop: 26, fontSize: 12, color: "#8a7568", letterSpacing: 1, textShadow: "0 1px 0 #000" },
 };
 
 const css = `
-.wm-msg { animation: wm-fade 5s forwards; padding: 3px 8px; background: rgba(8,6,12,0.7); margin-bottom: 4px; border: 1px solid #060409; border-right: 2px solid #46ffd0; text-shadow: 0 1px 0 #000; }
+.wm-msg { animation: wm-fade 5s forwards; padding: 4px 10px; background: rgba(26,10,14,0.82); margin-bottom: 4px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.8), inset 0 0 12px rgba(0,0,0,0.5); border-right: 3px solid #46ffd0; text-shadow: 0 1px 0 #000; clip-path: polygon(0 3px, 3px 3px, 3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) calc(100% - 3px), calc(100% - 3px) 100%, 0 100%); }
 @keyframes wm-fade { 0% { opacity: 0; transform: translateX(8px);} 6% { opacity: 1; transform: none;} 80% { opacity: 1;} 100% { opacity: 0;} }
 .wm-hurt { animation: wm-hurt-fade 500ms forwards; }
 @keyframes wm-hurt-fade { from { opacity: 1; } to { opacity: 0; } }
-button:hover { filter: brightness(1.35); }
-button:active { transform: translateY(2px); box-shadow: 0 0 0 1px #4a4256, inset 0 1px 0 rgba(255,255,255,0.06), 0 2px 0 #060409 !important; }
+button:hover { filter: brightness(1.18) saturate(1.1); }
+button:active { transform: translateY(2px); }
+${themeCss}
 `;

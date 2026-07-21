@@ -56,14 +56,28 @@ export function WizardModel({
         <sphereGeometry args={[0.3, 7, 5]} />
         <meshStandardMaterial color={robeColor} roughness={0.92} flatShading />
       </mesh>
-      {/* The face is a hole. */}
-      <mesh position={[0, 0.72, 0.08]}>
+      {/* Shoulder mantle the cowl grows out of. */}
+      <mesh position={[0, 0.55, 0]} castShadow={castShadow}>
+        <coneGeometry args={[0.4, 0.52, 7]} />
+        <meshStandardMaterial color={darkRobe} roughness={0.95} flatShading />
+      </mesh>
+      {/* The cowl: a deep hood, not a hat. The face inside is a hole. */}
+      <mesh position={[0, 0.86, -0.03]} scale={[1, 1.08, 1.02]} castShadow={castShadow}>
+        <sphereGeometry args={[0.27, 8, 6]} />
+        <meshStandardMaterial color={darkRobe} roughness={0.95} flatShading />
+      </mesh>
+      <mesh position={[0, 0.83, 0.1]}>
         <sphereGeometry args={[0.19, 8, 6]} />
         <meshStandardMaterial color="#0a0708" roughness={1} />
       </mesh>
+      {/* The cowl's rim, ringing the dark. */}
+      <mesh position={[0, 0.84, 0.17]} rotation={[0.22, 0, 0]} castShadow={castShadow}>
+        <torusGeometry args={[0.21, 0.05, 5, 8]} />
+        <meshStandardMaterial color={darkRobe} roughness={0.95} flatShading />
+      </mesh>
       {/* Two embers where eyes should be. */}
       {([0.075, -0.075] as const).map((x) => (
-        <mesh key={x} position={[x, 0.75, 0.22]}>
+        <mesh key={x} position={[x, 0.85, 0.24]}>
           <boxGeometry args={[0.05, 0.045, 0.03]} />
           <meshStandardMaterial
             color="#000"
@@ -73,13 +87,9 @@ export function WizardModel({
           />
         </mesh>
       ))}
-      {/* Hood — drooped forward over the void, tip broken sideways. */}
-      <mesh position={[0, 0.94, 0.0]} rotation={[0.28, 0.2, 0]} castShadow={castShadow}>
-        <coneGeometry args={[0.31, 0.6, 7]} />
-        <meshStandardMaterial color={darkRobe} roughness={0.95} flatShading />
-      </mesh>
-      <mesh position={[0.04, 1.24, 0.12]} rotation={[0.85, 0, -0.25]} castShadow={castShadow}>
-        <coneGeometry args={[0.11, 0.38, 5]} />
+      {/* The hood's slack, folded down the back. */}
+      <mesh position={[0, 1.0, -0.22]} rotation={[-1.15, 0, 0]} castShadow={castShadow}>
+        <coneGeometry args={[0.12, 0.42, 5]} />
         <meshStandardMaterial color={darkRobe} roughness={0.95} flatShading />
       </mesh>
       {/* Amulet: a small gem hovering at the sunken chest */}

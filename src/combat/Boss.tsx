@@ -314,41 +314,64 @@ export function Boss({
       enabledRotations={[false, false, false]}
     >
       <BallCollider args={[1.15]} mass={30} collisionGroups={BOSS_GROUPS} />
+      {/* The Warden: a knot of scarred flesh that never stops turning, teeth
+          all the way around, one great eye at the center of it. */}
       <group ref={shell}>
         <mesh castShadow>
           <icosahedronGeometry args={[1.15, 1]} />
           <meshStandardMaterial
             ref={mat}
-            color="#1c0806"
+            color="#2a0a08"
             emissive={COLOR}
             emissiveIntensity={1.3}
             flatShading
-            roughness={0.35}
-            metalness={0.3}
+            roughness={0.5}
           />
         </mesh>
+        {/* A ring of tusks jutting from the meat. */}
+        {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
+          const a = (i / 8) * Math.PI * 2;
+          return (
+            <mesh
+              key={i}
+              position={[Math.cos(a) * 1.12, ((i % 3) - 1) * 0.24, Math.sin(a) * 1.12]}
+              rotation={[0, -a + Math.PI / 2, -Math.PI / 2 + 0.3]}
+              castShadow
+            >
+              <coneGeometry args={[0.11, 0.52, 4]} />
+              <meshStandardMaterial color="#c8b898" roughness={0.7} flatShading />
+            </mesh>
+          );
+        })}
+        {/* Torn-off vertebrae still orbiting in its pull. */}
         {[0, 1, 2].map((i) => (
           <mesh
-            key={i}
+            key={`v${i}`}
             position={[
               Math.cos((i / 3) * Math.PI * 2) * 1.7,
               Math.sin(i * 2.1) * 0.4,
               Math.sin((i / 3) * Math.PI * 2) * 1.7,
             ]}
           >
-            <octahedronGeometry args={[0.22]} />
+            <cylinderGeometry args={[0.14, 0.17, 0.2, 5]} />
             <meshStandardMaterial
-              color="#0c0402"
+              color="#a89878"
               emissive="#ff8b3d"
-              emissiveIntensity={2.4}
-              toneMapped={false}
+              emissiveIntensity={0.8}
+              flatShading
+              roughness={0.8}
             />
           </mesh>
         ))}
       </group>
+      {/* The eye. It does not blink. */}
       <mesh>
-        <sphereGeometry args={[0.42, 10, 10]} />
+        <sphereGeometry args={[0.44, 10, 10]} />
         <meshStandardMaterial color="#000" emissive="#ffd0b0" emissiveIntensity={3.4} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, 0, 0.38]}>
+        <sphereGeometry args={[0.15, 8, 6]} />
+        <meshStandardMaterial color="#050203" roughness={0.25} />
       </mesh>
     </RigidBody>
   );
