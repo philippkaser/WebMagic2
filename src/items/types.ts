@@ -19,6 +19,8 @@ export interface Passives {
   extraProjectiles: number; // additive: extra bolts per projectile cast
   homing: number; // additive 0..~1: how hard player bolts seek enemies
   fireRateMult: number; // multiplicative: >1 shortens ability cooldowns
+  split: number; // additive: bolts split into 1+split children mid-air
+  bounces: number; // additive: bolts ricochet off the world this many times
 }
 
 /** What happens when a consumable is used (Q/E). */

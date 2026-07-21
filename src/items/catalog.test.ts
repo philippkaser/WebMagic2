@@ -34,6 +34,25 @@ describe("computeStats — casting modifiers", () => {
     expect(s.extraProjectiles).toBe(3);
   });
 
+  test("split and bounce modifiers sum across gear and affixes", () => {
+    const s = computeStats(
+      kit({
+        // Amulet of Fission (+1 split) with the Bouncing affix (+2 bounces),
+        // on a staff carrying the Splitting affix (+1 split).
+        staff: { defId: makeItemId("apprentice_staff", "splitting"), runLoot: false },
+        amulet: { defId: makeItemId("amulet_fission", "bouncing"), runLoot: false },
+      }),
+    );
+    expect(s.split).toBe(2);
+    expect(s.bounces).toBe(2);
+
+    const ricochet = computeStats(
+      kit({ amulet: { defId: makeItemId("amulet_ricochet", "bouncing"), runLoot: false } }),
+    );
+    expect(ricochet.bounces).toBe(4);
+    expect(ricochet.split).toBe(0);
+  });
+
   test("homing sums across staff and amulet; fire rate multiplies", () => {
     const s = computeStats(
       kit({

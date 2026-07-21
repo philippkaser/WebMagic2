@@ -97,6 +97,7 @@ function PlayHud() {
     <>
       {/* Crosshair */}
       <div style={styles.crosshair} />
+      <ChargeMeter />
       <HurtFlash />
       <BossBar />
 
@@ -277,6 +278,27 @@ function BossBar() {
           }}
         />
       </div>
+    </div>
+  );
+}
+
+/** Thin arc under the crosshair while holding a charged ability (the laser
+ * staff): fills with charge, flares white when full. */
+function ChargeMeter() {
+  const [frac, setFrac] = useState(0);
+  useEffect(() => gameEvents.on("charge", setFrac), []);
+  if (frac <= 0) return null;
+  const full = frac >= 0.999;
+  return (
+    <div style={styles.chargeTrack}>
+      <div
+        style={{
+          ...styles.chargeFill,
+          width: `${Math.round(frac * 100)}%`,
+          background: full ? "#ffffff" : "#ffb35d",
+          boxShadow: full ? "0 0 8px #fff" : "0 0 4px #ffb35d88",
+        }}
+      />
     </div>
   );
 }
@@ -464,6 +486,20 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: "50%",
     background: "rgba(240,235,220,0.85)",
     boxShadow: "0 0 4px rgba(0,0,0,0.9)",
+  },
+  chargeTrack: {
+    position: "absolute",
+    top: "calc(50% + 16px)",
+    left: "50%",
+    width: 64,
+    height: 4,
+    marginLeft: -32,
+    background: "rgba(8,6,12,0.7)",
+    border: "1px solid #3f3946",
+  },
+  chargeFill: {
+    height: "100%",
+    transition: "width 40ms linear",
   },
   panel: {
     position: "absolute",

@@ -1,12 +1,15 @@
 import { useFrame } from "@react-three/fiber";
 import {
   BallCollider,
+  CoefficientCombineRule,
   interactionGroups,
   RigidBody,
+  type CollisionPayload,
   type RapierRigidBody,
 } from "@react-three/rapier";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MeshStandardMaterial, SphereGeometry } from "three";
+import { playBounce } from "../audio/sound";
 import { GROUPS } from "../core/config";
 import {
   addLightSource,
@@ -54,6 +57,14 @@ export interface ProjectileSpec {
   gravityScale: number;
   /** Seek strength 0..~1: how hard a player bolt curves toward enemies. */
   homing: number;
+  /** Ricochets off the WORLD this many times before a wall detonates it.
+   * Enemies and props always detonate on contact. */
+  bounces: number;
+  /** Mid-air fission: after a short flight the bolt splits into 1+split
+   * children fanning out (children never split again). */
+  split: number;
+  /** Detonate this many seconds after launch (0 = default lifetime). */
+  fuse: number;
   /** A void seed: plants instead of exploding, and collapses into a black hole
    * when the staff's Collapse ability activates it. */
   singularity: boolean;
@@ -72,6 +83,9 @@ export interface FireOptions {
   size?: number;
   gravityScale?: number;
   homing?: number;
+  bounces?: number;
+  split?: number;
+  fuse?: number;
   singularity?: boolean;
   cosmetic?: boolean;
 }
@@ -99,6 +113,9 @@ export function fireProjectile(opts: FireOptions): void {
     size: opts.size ?? 0.13,
     gravityScale: opts.gravityScale ?? 0,
     homing: opts.homing ?? 0,
+    bounces: Math.max(0, Math.round(opts.bounces ?? 0)),
+    split: Math.max(0, Math.round(opts.split ?? 0)),
+    fuse: opts.fuse ?? 0,
     singularity: opts.singularity ?? false,
     cosmetic: opts.cosmetic ?? false,
   });
@@ -137,6 +154,8 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
   const detonated = useRef(false);
   const trailClock = useRef(0);
   const light = useRef<DynamicLightSource | null>(null);
+  const bouncesLeft = useRef(spec.bounces);
+  const age = useRef(0);
 
   const detonate = useCallback(() => {
     if (detonated.current) return;
@@ -159,6 +178,99 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
     remove(spec.id);
   }, [remove, spec]);
 
+  // Walls eat a bounce charge (or detonate); flesh and props always detonate.
+  const onCollision = useCallback(
+    (payload: CollisionPayload) => {
+      const groups = payload.other.collider?.collisionGroups() ?? 0;
+      const hitWorld = ((groups >> 16) & (1 << GROUPS.WORLD)) !== 0;
+      if (hitWorld && bouncesLeft.current > 0) {
+        bouncesLeft.current -= 1;
+        playBounce();
+        const b = body.current;
+        if (b) {
+          const t = b.translation();
+          spawnBurst({
+            position: [t.x, t.y, t.z],
+            count: 4,
+            color: [spec.color, "#fff3d0"],
+            speed: 2.4,
+            upward: 0.5,
+            ttl: 0.3,
+            size: 0.05,
+          });
+        }
+        return;
+      }
+      detonate();
+    },
+    [detonate, spec.color],
+  );
+
+  // Fission: after a beat of flight the bolt pops into a fan of children.
+  const splitNow = useCallback(() => {
+    if (detonated.current) return;
+    detonated.current = true;
+    const b = body.current;
+    if (!b) return remove(spec.id);
+    const t = b.translation();
+    const v = b.linvel();
+    const speed = Math.hypot(v.x, v.y, v.z) || 1;
+    // Two unit vectors perpendicular to the flight path span the fan plane.
+    const ax = Math.abs(v.y) < 0.9 * speed ? 0 : 1;
+    let px = ax === 0 ? -v.z : 0;
+    let py = ax === 0 ? 0 : v.z;
+    let pz = ax === 0 ? v.x : -v.y;
+    const pl = Math.hypot(px, py, pz) || 1;
+    px /= pl;
+    py /= pl;
+    pz /= pl;
+    const qx = (v.y * pz - v.z * py) / speed;
+    const qy = (v.z * px - v.x * pz) / speed;
+    const qz = (v.x * py - v.y * px) / speed;
+    const children = spec.split + 1;
+    for (let i = 0; i < children; i++) {
+      const a = (i / children) * Math.PI * 2 + Math.random() * 0.8;
+      const wob = 0.22 + Math.random() * 0.1;
+      const ox = (Math.cos(a) * px + Math.sin(a) * qx) * wob;
+      const oy = (Math.cos(a) * py + Math.sin(a) * qy) * wob;
+      const oz = (Math.cos(a) * pz + Math.sin(a) * qz) * wob;
+      const nl = Math.hypot(v.x / speed + ox, v.y / speed + oy, v.z / speed + oz) || 1;
+      fireProjectile({
+        team: spec.team,
+        position: [t.x, t.y, t.z],
+        velocity: [
+          ((v.x / speed + ox) / nl) * speed,
+          ((v.y / speed + oy) / nl) * speed,
+          ((v.z / speed + oz) / nl) * speed,
+        ],
+        damage: spec.damage * 0.65,
+        blastRadius: spec.blastRadius * 0.85,
+        blastImpulse: spec.blastImpulse * 0.85,
+        color: spec.color,
+        size: spec.size * 0.8,
+        gravityScale: spec.gravityScale,
+        homing: spec.homing,
+        bounces: bouncesLeft.current,
+        split: 0,
+        // Fused parents (grenades) hand children the remaining fuse.
+        fuse: spec.fuse > 0 ? Math.max(0.45, spec.fuse - 0.22) : 0,
+        cosmetic: spec.cosmetic,
+      });
+    }
+    spawnBurst({
+      position: [t.x, t.y, t.z],
+      count: 8,
+      color: [spec.color, "#ffffff"],
+      speed: 3,
+      upward: 0,
+      ttl: 0.25,
+      size: 0.07,
+      gravity: 0,
+      drag: 2,
+    });
+    remove(spec.id);
+  }, [remove, spec]);
+
   useEffect(() => {
     body.current?.setLinvel(
       { x: spec.velocity[0], y: spec.velocity[1], z: spec.velocity[2] },
@@ -174,7 +286,7 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
       priority: 3,
     });
     light.current = src;
-    const timeout = setTimeout(detonate, 3200);
+    const timeout = setTimeout(detonate, spec.fuse > 0 ? spec.fuse * 1000 : 3200);
     return () => {
       clearTimeout(timeout);
       removeLightSource(src);
@@ -188,6 +300,14 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
     if (!b || detonated.current) return;
     const pos = b.translation();
     light.current?.position.set(pos.x, pos.y, pos.z);
+
+    // Fission pops shortly after launch — far enough to have cleared the
+    // caster, early enough that the fan still converges on the aim point.
+    age.current += dt;
+    if (spec.split > 0 && age.current >= 0.22) {
+      splitNow();
+      return;
+    }
 
     // Homing: gently curve our own bolts toward the nearest enemy ahead,
     // preserving speed. Player-only and skipped on cosmetic peer replays.
@@ -245,12 +365,16 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
       gravityScale={spec.gravityScale}
       ccd
       colliders={false}
-      onCollisionEnter={detonate}
+      onCollisionEnter={onCollision}
     >
       <BallCollider
         args={[spec.size]}
         collisionGroups={interactionGroups(membership, collidesWith)}
         mass={0.05}
+        restitution={spec.bounces > 0 ? 0.85 : 0}
+        // Max rule: the wall's restitution 0 must not deaden the ricochet.
+        restitutionCombineRule={CoefficientCombineRule.Max}
+        friction={0.1}
       />
       <mesh geometry={boltGeometry} material={boltMaterial(spec.color)} scale={spec.size} />
     </RigidBody>

@@ -43,6 +43,11 @@ export interface BurstOptions {
   size?: number;
   gravity?: number;
   drag?: number;
+  /** Horizontal ring instead of a sphere: velocities radiate outward in the
+   * XZ plane (explosion shockwaves). */
+  ring?: boolean;
+  /** Scatter spawn points inside this radius instead of a single point. */
+  spawnRadius?: number;
 }
 
 interface Manager {
@@ -67,6 +72,8 @@ export function spawnBurst(opts: BurstOptions): void {
     size = 0.09,
     gravity = -14,
     drag = 1.6,
+    ring = false,
+    spawnRadius = 0,
   } = opts;
   const [x, y, z] = Array.isArray(opts.position)
     ? opts.position
@@ -78,12 +85,21 @@ export function spawnBurst(opts: BurstOptions): void {
     manager.cursor = (manager.cursor + 1) % MAX_PARTICLES;
     manager.highWater = Math.max(manager.highWater, slot + 1);
     const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(2 * Math.random() - 1);
-    const s = speed * (0.35 + Math.random() * 0.65);
+    // Rings stay flat; sphere bursts pick a random polar angle.
+    const phi = ring ? Math.PI / 2 : Math.acos(2 * Math.random() - 1);
+    const s = ring ? speed * (0.85 + Math.random() * 0.3) : speed * (0.35 + Math.random() * 0.65);
     p.alive = true;
     p.px = x;
     p.py = y;
     p.pz = z;
+    if (spawnRadius > 0) {
+      const sr = spawnRadius * Math.cbrt(Math.random());
+      const st = Math.random() * Math.PI * 2;
+      const sp = Math.acos(2 * Math.random() - 1);
+      p.px += Math.sin(sp) * Math.cos(st) * sr;
+      p.py += Math.abs(Math.cos(sp)) * sr * 0.5;
+      p.pz += Math.sin(sp) * Math.sin(st) * sr;
+    }
     p.vx = Math.sin(phi) * Math.cos(theta) * s;
     p.vy = Math.cos(phi) * s + upward;
     p.vz = Math.sin(phi) * Math.sin(theta) * s;

@@ -2,9 +2,11 @@ import { Environment, PointerLockControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { Suspense, useMemo } from "react";
+import { LaserBeams } from "../combat/beam";
 import { BlackHoles } from "../combat/blackhole";
 import { CombatSystem } from "../combat/CombatSystem";
 import { Projectiles } from "../combat/projectiles";
+import { PhantomSwords } from "../combat/sword";
 import { GRAVITY } from "../core/config";
 import { DynamicLights } from "../fx/DynamicLights";
 import { FxSystems } from "../fx/Particles";
@@ -57,6 +59,8 @@ export function GameScene() {
           )}
           <Projectiles />
           <BlackHoles />
+          <LaserBeams />
+          <PhantomSwords />
           <LootOrbs />
           <PeerBodies />
         </Physics>

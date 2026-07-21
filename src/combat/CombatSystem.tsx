@@ -1,8 +1,9 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import { Vector3 } from "three";
-import { playCast } from "../audio/sound";
+import { playCast, playChargeTick } from "../audio/sound";
 import { gameEvents } from "../core/events";
+import { spawnBurst } from "../fx/Particles";
 import { computeStats, getItemDef } from "../items/catalog";
 import { peerMessage } from "../net/channels";
 import { peerStaffId } from "../net/players";
@@ -17,6 +18,8 @@ interface CastMsg {
   abilityId: string;
   origin: [number, number, number];
   dir: [number, number, number];
+  /** Charge fraction for charged abilities (absent = full/instant). */
+  power?: number;
 }
 
 /** Floor-mates' casts replay through the identical ability code — the same
@@ -30,6 +33,7 @@ const peerCast = peerMessage<CastMsg>("cast", (msg, meta) => {
       dir: new Vector3(...msg.dir),
       stats: computeStats(defaultEquipment()),
       staff,
+      power: msg.power,
       remote: true,
     });
   } catch {
@@ -44,6 +48,10 @@ export function CombatSystem() {
   const { camera } = useThree();
   const cooldownL = useRef(0);
   const cooldownR = useRef(0);
+  // Seconds spent charging a hold-to-charge ability; -1 = not charging.
+  const chargeL = useRef(-1);
+  const chargeR = useRef(-1);
+  const chargeTick = useRef(0);
   const dir = useMemo(() => new Vector3(), []);
   const right = useMemo(() => new Vector3(), []);
   const origin = useMemo(() => new Vector3(), []);
@@ -53,17 +61,20 @@ export function CombatSystem() {
     cooldownR.current -= dt;
     const state = useGame.getState();
     if (state.phase !== "dungeon" && state.phase !== "village") return;
-    if (!document.pointerLockElement) return;
+    if (!document.pointerLockElement) {
+      // Losing the pointer mid-charge drops the charge.
+      if (chargeL.current >= 0 || chargeR.current >= 0) {
+        chargeL.current = -1;
+        chargeR.current = -1;
+        gameEvents.emit("charge", 0);
+      }
+      return;
+    }
 
     const staff = getItemDef(state.equipment.staff.defId);
     const stats = getStats();
-    const tryCast = (abilityId: string | undefined, cd: { current: number }) => {
-      if (!abilityId || cd.current > 0) return;
-      const ability = getAbility(abilityId);
-      if (!state.spendMana(ability.mana)) {
-        cd.current = 0.2; // dry-fire throttle
-        return;
-      }
+
+    const aim = () => {
       camera.getWorldDirection(dir);
       right.crossVectors(dir, UP).normalize();
       origin
@@ -71,21 +82,87 @@ export function CombatSystem() {
         .addScaledVector(dir, 0.62)
         .addScaledVector(right, 0.24)
         .addScaledVector(UP, -0.16);
-      ability.cast({ origin, dir, stats, staff });
+    };
+
+    const cast = (ability: ReturnType<typeof getAbility>, power?: number) => {
+      aim();
+      ability.cast({ origin, dir, stats, staff, power });
       peerCast.send({
         abilityId: ability.id,
         origin: [origin.x, origin.y, origin.z],
         dir: [dir.x, dir.y, dir.z],
+        power,
       });
-      // Fire-rate gear shortens the cooldown (higher mult = faster).
-      cd.current = ability.cooldown / Math.max(0.25, stats.fireRateMult);
       playCast();
       gameEvents.emit("staffKick", 0.9);
       gameEvents.emit("shake", 0.05);
     };
 
-    if (input.mouseLeft) tryCast(staff.primary, cooldownL);
-    if (input.mouseRight) tryCast(staff.secondary, cooldownR);
+    const tryCast = (
+      abilityId: string | undefined,
+      held: boolean,
+      cd: { current: number },
+      charge: { current: number },
+    ) => {
+      if (!abilityId) return;
+      const ability = getAbility(abilityId);
+
+      // Hold-to-charge: build power while the button is down, release fires.
+      if (ability.charge) {
+        if (held) {
+          if (charge.current < 0) {
+            if (cd.current > 0) return;
+            charge.current = 0;
+          }
+          charge.current = Math.min(charge.current + dt, ability.charge.max);
+          const frac = charge.current / ability.charge.max;
+          gameEvents.emit("charge", Math.max(frac, 0.02));
+          chargeTick.current -= dt;
+          if (chargeTick.current <= 0) {
+            chargeTick.current = 0.11 - frac * 0.05; // ticks speed up as it fills
+            playChargeTick(frac);
+            gameEvents.emit("staffKick", 0.05 + frac * 0.1);
+            aim();
+            // Energy crackling around the staff tip while it drinks mana.
+            spawnBurst({
+              position: [origin.x, origin.y, origin.z],
+              count: 1 + Math.round(frac * 2),
+              color: [staff.color, "#ffffff"],
+              speed: 0.5 + frac,
+              upward: 0.3,
+              ttl: 0.25,
+              size: 0.045,
+              gravity: 0,
+              drag: 2,
+            });
+          }
+        } else if (charge.current >= 0) {
+          const frac = charge.current / ability.charge.max;
+          charge.current = -1;
+          gameEvents.emit("charge", 0);
+          // A tap too short to aim a charge, or an empty mana pool, fizzles.
+          if (frac < 0.12 || !state.spendMana(ability.mana)) {
+            cd.current = 0.2;
+            return;
+          }
+          cast(ability, frac);
+          cd.current = ability.cooldown / Math.max(0.25, stats.fireRateMult);
+        }
+        return;
+      }
+
+      if (!held || cd.current > 0) return;
+      if (!state.spendMana(ability.mana)) {
+        cd.current = 0.2; // dry-fire throttle
+        return;
+      }
+      cast(ability);
+      // Fire-rate gear shortens the cooldown (higher mult = faster).
+      cd.current = ability.cooldown / Math.max(0.25, stats.fireRateMult);
+    };
+
+    tryCast(staff.primary, input.mouseLeft, cooldownL, chargeL);
+    tryCast(staff.secondary, input.mouseRight, cooldownR, chargeR);
   });
 
   return null;

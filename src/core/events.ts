@@ -31,6 +31,8 @@ export interface GameEvents extends Record<string, unknown> {
   shake: number;
   /** Staff viewmodel recoil, strength 0..1. */
   staffKick: number;
+  /** Charge-up fraction 0..1 while holding a charged ability; 0 hides it. */
+  charge: number;
   /** Boss health fraction 0..1 for the HUD bar, or null to hide it. */
   bossHp: { name: string; frac: number } | null;
   /** Player dropped items from the inventory — the loot system spawns real

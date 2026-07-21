@@ -89,15 +89,70 @@ export function explode(opts: ExplosionOptions): void {
   if (Array.isArray(opts.position)) center.set(...opts.position);
   else center.copy(opts.position);
 
+  // Layered detonation, all chunky pixel debris: a white-hot core that dies
+  // fast, tumbling flame chunks, fast sparks that rain and bounce, slow dark
+  // smoke that rises, and a flat shockwave ring racing along the ground.
+  // `particles` is the budget knob — bigger blasts spend more everywhere.
+  const at: [number, number, number] = [center.x, center.y, center.z];
   spawnBurst({
-    position: [center.x, center.y, center.z],
-    count: particles,
-    color: [color, "#fff3d0", "#3c2a18"],
-    speed: radius * 2.6,
-    ttl: 0.7,
-    size: 0.11,
+    position: at,
+    count: Math.round(particles * 0.3),
+    color: ["#fffbe8", "#ffe9a8", color],
+    speed: radius * 3.1,
+    upward: 1,
+    ttl: 0.2,
+    size: 0.19,
+    gravity: 0,
+    drag: 5,
   });
-  flashLight([center.x, center.y, center.z], color, light);
+  spawnBurst({
+    position: at,
+    count: Math.round(particles * 0.4),
+    color: [color, "#ffd27a", "#ff7a2a"],
+    speed: radius * 2.3,
+    ttl: 0.55,
+    size: 0.13,
+    gravity: -7,
+    drag: 2,
+    spawnRadius: radius * 0.12,
+  });
+  spawnBurst({
+    position: at,
+    count: Math.round(particles * 0.25),
+    color: ["#fff3d0", "#ffca6b", color],
+    speed: radius * 4.4,
+    upward: 3,
+    ttl: 1.05,
+    size: 0.055,
+    gravity: -24,
+    drag: 0.35,
+  });
+  spawnBurst({
+    position: at,
+    count: Math.round(particles * 0.3),
+    color: ["#241c16", "#3c2a18", "#141110"],
+    speed: radius * 0.8,
+    upward: 1.6,
+    ttl: 1.4,
+    size: 0.26,
+    gravity: 2.4,
+    drag: 2.6,
+    spawnRadius: radius * 0.3,
+  });
+  spawnBurst({
+    position: [center.x, center.y + 0.1, center.z],
+    count: Math.round(8 + radius * 3),
+    color: ["#fff3d0", color],
+    speed: radius * 4.6,
+    upward: 0,
+    ttl: 0.28,
+    size: 0.09,
+    gravity: 0,
+    drag: 3.2,
+    ring: true,
+  });
+  flashLight(at, "#fff6e0", light * 0.9, radius * 3.2);
+  flashLight(at, color, light, radius * 2.4);
   playExplosion(radius);
 
   if (!opts.remote) {
@@ -130,8 +185,9 @@ export function explode(opts: ExplosionOptions): void {
       tmp.normalize().multiplyScalar(push);
       body.applyImpulse({ x: tmp.x, y: tmp.y + push * 0.5, z: tmp.z }, true);
     }
-    gameEvents.emit("shake", Math.min(falloff * 0.7, 1));
-  } else if (playerDist < radius * 2.5) {
-    gameEvents.emit("shake", 0.15);
+    gameEvents.emit("shake", Math.min(0.25 + falloff * (0.5 + radius * 0.09), 1));
+  } else if (playerDist < radius * 3) {
+    // Nearby blasts still thump — force you can feel from the next room over.
+    gameEvents.emit("shake", 0.28 * (1 - playerDist / (radius * 3)) + 0.06);
   }
 }

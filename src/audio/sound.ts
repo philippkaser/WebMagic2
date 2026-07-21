@@ -103,8 +103,66 @@ export function playCast(): void {
 
 export function playExplosion(radius: number): void {
   const size = Math.min(radius / 4, 1.6);
-  noise({ dur: 0.32 + size * 0.2, vol: 0.22 + size * 0.1, filterFreq: 1100, filterEnd: 90 });
-  tone({ type: "sine", freq: 110, freqEnd: 34, dur: 0.34 + size * 0.15, vol: 0.28 });
+  // Crack → boom → rumble: a sharp transient bite, a deep sub thump, and a
+  // longer low tail with crackling debris so big blasts feel like pressure.
+  noise({ dur: 0.06, vol: 0.2 + size * 0.08, filterFreq: 4200, filterEnd: 1400, type: "bandpass", q: 0.7 });
+  noise({ dur: 0.34 + size * 0.22, vol: 0.24 + size * 0.12, filterFreq: 1100, filterEnd: 70 });
+  tone({ type: "sine", freq: 96, freqEnd: 28, dur: 0.38 + size * 0.2, vol: 0.34 + size * 0.08 });
+  tone({ type: "triangle", freq: 52, freqEnd: 22, dur: 0.5 + size * 0.3, vol: 0.2 + size * 0.1, delay: 0.02 });
+  // Debris crackle sputtering out after the boom.
+  for (let i = 0; i < 3; i++) {
+    noise({
+      dur: 0.05,
+      vol: 0.07 + size * 0.03,
+      filterFreq: 2400 + Math.random() * 1800,
+      type: "bandpass",
+      q: 5,
+      delay: 0.12 + i * (0.07 + Math.random() * 0.06),
+    });
+  }
+}
+
+/** Phantom-blade swing: an airy whoosh sweeping down in pitch. */
+export function playSwing(heavy = false): void {
+  noise({
+    dur: heavy ? 0.3 : 0.18,
+    vol: heavy ? 0.18 : 0.13,
+    filterFreq: heavy ? 900 : 1500,
+    filterEnd: heavy ? 180 : 420,
+    type: "bandpass",
+    q: 1.6,
+  });
+  tone({ type: "sine", freq: heavy ? 220 : 340, freqEnd: heavy ? 70 : 150, dur: heavy ? 0.22 : 0.14, vol: 0.06 });
+}
+
+/** Spectral blade connecting — a short metallic bite. */
+export function playSwordHit(): void {
+  tone({ type: "square", freq: 480, freqEnd: 190, dur: 0.07, vol: 0.1 });
+  tone({ type: "triangle", freq: 1250, freqEnd: 700, dur: 0.09, vol: 0.07 });
+  noise({ dur: 0.07, vol: 0.08, filterFreq: 3200, filterEnd: 900, type: "bandpass", q: 2.4 });
+}
+
+/** One tick of the laser charge-up — pitch rises with charge fraction. */
+export function playChargeTick(frac: number): void {
+  tone({ type: "sine", freq: 240 + frac * 620, dur: 0.06, vol: 0.05 + frac * 0.05 });
+}
+
+/** Laser release: a zap whose weight scales with charge. */
+export function playBeam(power: number): void {
+  tone({ type: "sawtooth", freq: 1400 + power * 600, freqEnd: 140, dur: 0.22 + power * 0.18, vol: 0.12 + power * 0.1 });
+  tone({ type: "square", freq: 190, freqEnd: 60, dur: 0.2 + power * 0.2, vol: 0.1 + power * 0.12 });
+  noise({ dur: 0.18 + power * 0.15, vol: 0.1, filterFreq: 5200, filterEnd: 700, type: "bandpass", q: 1.2 });
+}
+
+/** Grenade lob: a hollow thoomp out of the staff mortar. */
+export function playLob(): void {
+  tone({ type: "sine", freq: 150, freqEnd: 60, dur: 0.18, vol: 0.22 });
+  noise({ dur: 0.12, vol: 0.1, filterFreq: 500, filterEnd: 140 });
+}
+
+/** A projectile ricocheting off the world. */
+export function playBounce(): void {
+  tone({ type: "triangle", freq: 620 + Math.random() * 160, freqEnd: 260, dur: 0.06, vol: 0.08 });
 }
 
 export function playHit(): void {

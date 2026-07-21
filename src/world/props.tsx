@@ -108,13 +108,13 @@ export function Breakable({
           queueMicrotask(() =>
             explode({
               position: at,
-              radius: 3.4,
-              damage: 26,
-              impulse: 28,
+              radius: 3.9,
+              damage: 30,
+              impulse: 44,
               team: "neutral",
               color: "#ff9a3c",
-              particles: 36,
-              light: 40,
+              particles: 52,
+              light: 52,
               remote,
             }),
           );

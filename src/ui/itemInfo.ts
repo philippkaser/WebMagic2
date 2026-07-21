@@ -93,6 +93,20 @@ const PASSIVE_SPECS: PassiveSpec[] = [
     format: (v) => `+${Math.round(v * 100)}% projectile homing`,
   },
   { key: "fireRateMult", neutral: 1, additive: false, better: 1, format: (v) => pct(v, "fire rate") },
+  {
+    key: "split",
+    neutral: 0,
+    additive: true,
+    better: 1,
+    format: (v) => `Projectiles split into ${1 + v} mid-air`,
+  },
+  {
+    key: "bounces",
+    neutral: 0,
+    additive: true,
+    better: 1,
+    format: (v) => `Projectiles bounce ${v}× off walls`,
+  },
 ];
 
 function pct(mult: number, label: string): string {

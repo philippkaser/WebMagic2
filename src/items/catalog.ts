@@ -88,6 +88,39 @@ const defs: ItemDef[] = [
     primary: "voidseed",
     secondary: "collapse",
   },
+  {
+    id: "blade_staff",
+    slot: "staff",
+    name: "Swordsinger's Staff",
+    tier: 2,
+    minFloor: 4,
+    color: "#cfe0ff",
+    desc: "Phantom Blade / Spectral Cleave — every attack conjures a swinging greatsword",
+    primary: "sword",
+    secondary: "cleave",
+  },
+  {
+    id: "mortar_staff",
+    slot: "staff",
+    name: "Bombardier's Staff",
+    tier: 2,
+    minFloor: 5,
+    color: "#ff9a3c",
+    desc: "Grenade Lob / Force Blast — arcing bombs that bounce, then burst",
+    primary: "grenade",
+    secondary: "blast",
+  },
+  {
+    id: "laser_staff",
+    slot: "staff",
+    name: "Sunpiercer Staff",
+    tier: 3,
+    minFloor: 7,
+    color: "#ff5470",
+    desc: "Piercing Ray / Shockwave — hold to charge, release to burn a hole through the floor's worth of enemies",
+    primary: "laser",
+    secondary: "shockwave",
+  },
   // ── Amulets ───────────────────────────────────────────────────────────────
   {
     id: "amulet_vigor",
@@ -158,6 +191,26 @@ const defs: ItemDef[] = [
     color: "#c9a5ff",
     desc: "+1 projectile per cast",
     passives: { extraProjectiles: 1 },
+  },
+  {
+    id: "amulet_fission",
+    slot: "amulet",
+    name: "Amulet of Fission",
+    tier: 3,
+    minFloor: 6,
+    color: "#8affc4",
+    desc: "Projectiles split mid-air",
+    passives: { split: 1 },
+  },
+  {
+    id: "amulet_ricochet",
+    slot: "amulet",
+    name: "Ricochet Charm",
+    tier: 2,
+    minFloor: 4,
+    color: "#ffd8f0",
+    desc: "Projectiles bounce off walls twice",
+    passives: { bounces: 2 },
   },
   // ── Cloaks ────────────────────────────────────────────────────────────────
   {
@@ -321,6 +374,8 @@ const BASE: DerivedStats = {
   extraProjectiles: 0,
   homing: 0,
   fireRateMult: 1,
+  split: 0,
+  bounces: 0,
   jump: "single",
   dash: false,
 };
@@ -342,6 +397,8 @@ export function computeStats(equipment: Equipment): DerivedStats {
       stats.extraProjectiles += p.extraProjectiles ?? 0;
       stats.homing += p.homing ?? 0;
       stats.fireRateMult *= p.fireRateMult ?? 1;
+      stats.split += p.split ?? 0;
+      stats.bounces += p.bounces ?? 0;
     }
     if (item.def.jump) stats.jump = item.def.jump;
     if (item.def.dash) stats.dash = true;

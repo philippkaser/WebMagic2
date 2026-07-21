@@ -24,6 +24,8 @@ const defs: AffixDef[] = [
   { id: "seeking", name: "Seeking", desc: "+30% projectile homing", passives: { homing: 0.3 } },
   { id: "hasty", name: "Hasty", desc: "+15% fire rate", passives: { fireRateMult: 1.15 } },
   { id: "twinned", name: "Twinned", desc: "+1 projectile per cast", passives: { extraProjectiles: 1 } },
+  { id: "splitting", name: "Splitting", desc: "projectiles split mid-air", passives: { split: 1 } },
+  { id: "bouncing", name: "Bouncing", desc: "projectiles ricochet twice", passives: { bounces: 2 } },
 ];
 
 const byId = new Map(defs.map((d) => [d.id, d]));

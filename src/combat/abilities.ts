@@ -1,9 +1,12 @@
 import { Vector3 } from "three";
+import { playBeam, playLob } from "../audio/sound";
 import { getPlayerBody } from "../game/player-state";
 import type { DerivedStats, ItemDef } from "../items/types";
+import { fireBeam } from "./beam";
 import { activateSingularities } from "./blackhole";
 import { explode } from "./damage";
 import { fireProjectile } from "./projectiles";
+import { conjureSword } from "./sword";
 
 /** Staff abilities. Staffs reference these by id, so new staffs are pure data. */
 
@@ -12,6 +15,8 @@ export interface AbilityContext {
   dir: Vector3;
   stats: DerivedStats;
   staff: ItemDef;
+  /** Charge fraction 0..1 for abilities with `charge` (1 when absent). */
+  power?: number;
   /** True when replaying a floor-mate's cast — skip caster-only effects. */
   remote?: boolean;
 }
@@ -21,6 +26,9 @@ export interface Ability {
   name: string;
   mana: number;
   cooldown: number;
+  /** Hold-to-charge: the button is held to build power and casts on release.
+   * `max` is seconds to full charge; the cast receives ctx.power 0..1. */
+  charge?: { max: number };
   /** One-line stat summary for inventory/tooltip display ("16 dmg"). Kept
    * next to the cast numbers so the two can't drift apart. */
   info: string;
@@ -71,6 +79,8 @@ function bolt(ctx: AbilityContext, opts: {
       blastRadius: opts.blastRadius,
       blastImpulse: opts.blastImpulse,
       homing,
+      split: ctx.stats.split,
+      bounces: ctx.stats.bounces,
       // A peer's replayed bolt is visual: their own client requests the damage.
       cosmetic: ctx.remote ?? false,
     });
@@ -184,6 +194,122 @@ const ABILITIES: Record<string, Ability> = {
     cooldown: 0.8,
     info: "implode all seeds → black holes",
     cast: () => activateSingularities(),
+  },
+  sword: {
+    id: "sword",
+    name: "Phantom Blade",
+    mana: 5,
+    cooldown: 0.42,
+    info: "26 dmg arc",
+    cast: (ctx) =>
+      conjureSword({
+        kind: "slash",
+        origin: [ctx.origin.x, ctx.origin.y, ctx.origin.z],
+        dir: [ctx.dir.x, ctx.dir.y, ctx.dir.z],
+        damage: 26 * ctx.stats.damageMult,
+        impulse: 14,
+        color: ctx.staff.color,
+        cosmetic: ctx.remote,
+      }),
+  },
+  cleave: {
+    id: "cleave",
+    name: "Spectral Cleave",
+    mana: 13,
+    cooldown: 1.05,
+    info: "40 dmg + slam",
+    cast: (ctx) =>
+      conjureSword({
+        kind: "cleave",
+        origin: [ctx.origin.x, ctx.origin.y, ctx.origin.z],
+        dir: [ctx.dir.x, ctx.dir.y, ctx.dir.z],
+        damage: 40 * ctx.stats.damageMult,
+        impulse: 22,
+        color: ctx.staff.color,
+        cosmetic: ctx.remote,
+      }),
+  },
+  laser: {
+    id: "laser",
+    name: "Piercing Ray",
+    mana: 16,
+    cooldown: 0.8,
+    charge: { max: 1.1 },
+    info: "18–76 dmg beam, hold to charge",
+    cast: (ctx) => {
+      const power = ctx.power ?? 1;
+      // Multishot fans extra beams around the aim.
+      const extra = Math.max(0, Math.round(ctx.stats.extraProjectiles ?? 0));
+      tmp.crossVectors(ctx.dir, new Vector3(0, 1, 0));
+      // Aiming straight up/down leaves no horizontal "right" — pick any.
+      const right = tmp.lengthSq() < 1e-4 ? tmp.set(1, 0, 0) : tmp.normalize();
+      for (let i = 0; i <= extra; i++) {
+        const off = extra > 0 ? (i - extra / 2) * 0.07 : 0;
+        const d = new Vector3()
+          .copy(ctx.dir)
+          .addScaledVector(right, off)
+          .normalize();
+        fireBeam({
+          origin: [ctx.origin.x, ctx.origin.y, ctx.origin.z],
+          dir: [d.x, d.y, d.z],
+          // 18–76 at full charge: ×1.3 fury stays under the networked
+          // hit-sanitizer ceiling (100), so online play never clamps it.
+          damage: (18 + 58 * power) * ctx.stats.damageMult,
+          power,
+          color: ctx.staff.color,
+          cosmetic: ctx.remote,
+        });
+      }
+      playBeam(power);
+      // A full-charge shot kicks like a cannon.
+      if (!ctx.remote) {
+        const kick = 1.5 + power * 5;
+        getPlayerBody()?.applyImpulse(
+          { x: -ctx.dir.x * kick, y: Math.max(-ctx.dir.y * kick * 0.5, 0), z: -ctx.dir.z * kick },
+          true,
+        );
+      }
+    },
+  },
+  grenade: {
+    id: "grenade",
+    name: "Grenade Lob",
+    mana: 12,
+    cooldown: 0.9,
+    info: "38 dmg blast, bounces",
+    cast: (ctx) => {
+      const extra = Math.max(0, Math.round(ctx.stats.extraProjectiles ?? 0));
+      for (let i = 0; i <= extra; i++) {
+        // Lobbed: forward pace plus an upward hoist so it arcs like a mortar.
+        tmp
+          .copy(ctx.dir)
+          .add(
+            new Vector3(
+              (Math.random() - 0.5) * (extra > 0 ? 0.14 : 0.02),
+              0,
+              (Math.random() - 0.5) * (extra > 0 ? 0.14 : 0.02),
+            ),
+          )
+          .normalize()
+          .multiplyScalar(16.5);
+        fireProjectile({
+          team: "player",
+          position: [ctx.origin.x, ctx.origin.y, ctx.origin.z],
+          velocity: [tmp.x, tmp.y + 4.2, tmp.z],
+          damage: 38 * ctx.stats.damageMult,
+          color: ctx.staff.color,
+          size: 0.22,
+          gravityScale: 1.35,
+          blastRadius: 3.7,
+          blastImpulse: 34,
+          bounces: 1 + ctx.stats.bounces,
+          split: ctx.stats.split,
+          fuse: 1.15,
+          cosmetic: ctx.remote ?? false,
+        });
+      }
+      playLob();
+    },
   },
   shockwave: {
     id: "shockwave",
