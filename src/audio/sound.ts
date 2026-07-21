@@ -120,6 +120,12 @@ export function playExplosion(radius: number): void {
       delay: 0.12 + i * (0.07 + Math.random() * 0.06),
     });
   }
+  // Big detonations get a second, deeper concussion and a long rumble tail —
+  // the fireball catching after the initial crack.
+  if (radius >= 3.4) {
+    tone({ type: "sine", freq: 64, freqEnd: 18, dur: 0.7, vol: 0.3, delay: 0.06 });
+    noise({ dur: 0.9, vol: 0.14, filterFreq: 300, filterEnd: 40, delay: 0.1 });
+  }
 }
 
 /** Phantom-blade swing: an airy whoosh sweeping down in pitch. */

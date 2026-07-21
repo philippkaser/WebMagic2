@@ -100,6 +100,43 @@ if (typeof window !== "undefined" && import.meta.env?.DEV) {
     fireProjectile(o);
 }
 
+/** Speed-preserving fan of `count` velocities around v — the shape a
+ * splitting projectile scatters its children into. Shared with the
+ * Singularity staff's splitting void seeds. */
+export function fanVelocities(
+  v: { x: number; y: number; z: number },
+  count: number,
+): [number, number, number][] {
+  const speed = Math.hypot(v.x, v.y, v.z) || 1;
+  // Two unit vectors perpendicular to the flight path span the fan plane.
+  const ax = Math.abs(v.y) < 0.9 * speed ? 0 : 1;
+  let px = ax === 0 ? -v.z : 0;
+  let py = ax === 0 ? 0 : v.z;
+  let pz = ax === 0 ? v.x : -v.y;
+  const pl = Math.hypot(px, py, pz) || 1;
+  px /= pl;
+  py /= pl;
+  pz /= pl;
+  const qx = (v.y * pz - v.z * py) / speed;
+  const qy = (v.z * px - v.x * pz) / speed;
+  const qz = (v.x * py - v.y * px) / speed;
+  const out: [number, number, number][] = [];
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2 + Math.random() * 0.8;
+    const wob = 0.22 + Math.random() * 0.1;
+    const ox = (Math.cos(a) * px + Math.sin(a) * qx) * wob;
+    const oy = (Math.cos(a) * py + Math.sin(a) * qy) * wob;
+    const oz = (Math.cos(a) * pz + Math.sin(a) * qz) * wob;
+    const nl = Math.hypot(v.x / speed + ox, v.y / speed + oy, v.z / speed + oz) || 1;
+    out.push([
+      ((v.x / speed + ox) / nl) * speed,
+      ((v.y / speed + oy) / nl) * speed,
+      ((v.z / speed + oz) / nl) * speed,
+    ]);
+  }
+  return out;
+}
+
 export function fireProjectile(opts: FireOptions): void {
   enqueue?.({
     id: nextProjectileId++,
@@ -213,36 +250,12 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
     const b = body.current;
     if (!b) return remove(spec.id);
     const t = b.translation();
-    const v = b.linvel();
-    const speed = Math.hypot(v.x, v.y, v.z) || 1;
-    // Two unit vectors perpendicular to the flight path span the fan plane.
-    const ax = Math.abs(v.y) < 0.9 * speed ? 0 : 1;
-    let px = ax === 0 ? -v.z : 0;
-    let py = ax === 0 ? 0 : v.z;
-    let pz = ax === 0 ? v.x : -v.y;
-    const pl = Math.hypot(px, py, pz) || 1;
-    px /= pl;
-    py /= pl;
-    pz /= pl;
-    const qx = (v.y * pz - v.z * py) / speed;
-    const qy = (v.z * px - v.x * pz) / speed;
-    const qz = (v.x * py - v.y * px) / speed;
-    const children = spec.split + 1;
-    for (let i = 0; i < children; i++) {
-      const a = (i / children) * Math.PI * 2 + Math.random() * 0.8;
-      const wob = 0.22 + Math.random() * 0.1;
-      const ox = (Math.cos(a) * px + Math.sin(a) * qx) * wob;
-      const oy = (Math.cos(a) * py + Math.sin(a) * qy) * wob;
-      const oz = (Math.cos(a) * pz + Math.sin(a) * qz) * wob;
-      const nl = Math.hypot(v.x / speed + ox, v.y / speed + oy, v.z / speed + oz) || 1;
+    const fan = fanVelocities(b.linvel(), spec.split + 1);
+    for (const velocity of fan) {
       fireProjectile({
         team: spec.team,
         position: [t.x, t.y, t.z],
-        velocity: [
-          ((v.x / speed + ox) / nl) * speed,
-          ((v.y / speed + oy) / nl) * speed,
-          ((v.z / speed + oz) / nl) * speed,
-        ],
+        velocity,
         damage: spec.damage * 0.65,
         blastRadius: spec.blastRadius * 0.85,
         blastImpulse: spec.blastImpulse * 0.85,

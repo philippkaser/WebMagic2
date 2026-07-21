@@ -128,10 +128,12 @@ function SwordSwing({ spec, remove }: { spec: SwingSpec; remove: (id: number) =>
     [],
   );
 
-  // Yaw/pitch aligning the swing rig with the aim direction.
+  // Yaw/pitch aligning the swing rig with the aim direction. The rig's
+  // forward is -Z (three.js convention): rotation.y = yaw maps -Z onto the
+  // horizontal aim, rotation.x = pitch tilts it up/down.
   const [yaw, pitch] = useMemo(() => {
     const [dx, dy, dz] = spec.dir;
-    return [Math.atan2(-dx, -dz) + Math.PI, Math.asin(Math.max(-1, Math.min(1, dy)))];
+    return [Math.atan2(-dx, -dz), Math.asin(Math.max(-1, Math.min(1, dy)))];
   }, [spec.dir]);
 
   useEffect(() => {
@@ -231,8 +233,8 @@ function SwordSwing({ spec, remove }: { spec: SwingSpec; remove: (id: number) =>
         a.rotation.y = from + swing * (spec.mirror ? -3 : 3);
         a.rotation.z = (spec.mirror ? -1 : 1) * Math.sin(swing * Math.PI) * 0.35;
       } else {
-        // Overhead: raised far back, slams down past horizontal.
-        a.rotation.x = -2.1 + swing * 2.9;
+        // Overhead: raised up-and-back, slams down past horizontal.
+        a.rotation.x = 2.1 - swing * 2.9;
       }
     }
 
@@ -269,10 +271,10 @@ function SwordSwing({ spec, remove }: { spec: SwingSpec; remove: (id: number) =>
 
   return (
     <group ref={root} position={spec.origin} rotation={[0, yaw, 0]}>
-      <group rotation={[spec.kind === "cleave" ? 0 : -pitch, 0, 0]}>
+      <group rotation={[spec.kind === "cleave" ? 0 : pitch, 0, 0]}>
         <group ref={arm}>
-          {/* Blade held out along -Z: chunky low-poly greatsword. */}
-          <group position={[0, 0, -cfg.range * 0.45]} rotation={[Math.PI / 2, 0, 0]}>
+          {/* Blade held out along -Z (tip forward): chunky low-poly greatsword. */}
+          <group position={[0, 0, -cfg.range * 0.45]} rotation={[-Math.PI / 2, 0, 0]}>
             {/* Core */}
             <mesh material={bladeMat}>
               <boxGeometry args={[0.16, cfg.range * 0.62, 0.045]} />

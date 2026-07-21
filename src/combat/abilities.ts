@@ -172,19 +172,35 @@ const ABILITIES: Record<string, Ability> = {
     cooldown: 0.5,
     info: "plant · Collapse to detonate",
     cast: (ctx) => {
-      tmp.copy(ctx.dir).multiplyScalar(18);
-      fireProjectile({
-        team: "player",
-        position: [ctx.origin.x, ctx.origin.y, ctx.origin.z],
-        velocity: [tmp.x, tmp.y, tmp.z],
-        // The seed carries the black hole's implosion damage.
-        damage: 30 * ctx.stats.damageMult,
-        color: "#a06bff",
-        size: 0.2,
-        gravityScale: 0,
-        singularity: true,
-        cosmetic: ctx.remote ?? false,
-      });
+      const extra = Math.max(0, Math.round(ctx.stats.extraProjectiles ?? 0));
+      for (let i = 0; i <= extra; i++) {
+        tmp
+          .copy(ctx.dir)
+          .add(
+            new Vector3(
+              (Math.random() - 0.5) * (extra > 0 ? 0.12 : 0),
+              (Math.random() - 0.5) * (extra > 0 ? 0.12 : 0),
+              (Math.random() - 0.5) * (extra > 0 ? 0.12 : 0),
+            ),
+          )
+          .normalize()
+          .multiplyScalar(18);
+        fireProjectile({
+          team: "player",
+          position: [ctx.origin.x, ctx.origin.y, ctx.origin.z],
+          velocity: [tmp.x, tmp.y, tmp.z],
+          // The seed carries the black hole's implosion damage.
+          damage: 30 * ctx.stats.damageMult,
+          color: "#a06bff",
+          size: 0.2,
+          gravityScale: 0,
+          homing: ctx.stats.homing,
+          split: ctx.stats.split,
+          bounces: ctx.stats.bounces,
+          singularity: true,
+          cosmetic: ctx.remote ?? false,
+        });
+      }
     },
   },
   collapse: {
@@ -256,6 +272,8 @@ const ABILITIES: Record<string, Ability> = {
           // hit-sanitizer ceiling (100), so online play never clamps it.
           damage: (18 + 58 * power) * ctx.stats.damageMult,
           power,
+          bounces: ctx.stats.bounces,
+          split: ctx.stats.split,
           color: ctx.staff.color,
           cosmetic: ctx.remote,
         });
@@ -302,6 +320,7 @@ const ABILITIES: Record<string, Ability> = {
           gravityScale: 1.35,
           blastRadius: 3.7,
           blastImpulse: 34,
+          homing: ctx.stats.homing,
           bounces: 1 + ctx.stats.bounces,
           split: ctx.stats.split,
           fuse: 1.15,

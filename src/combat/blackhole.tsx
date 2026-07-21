@@ -1,20 +1,23 @@
 import { useFrame } from "@react-three/fiber";
 import {
   BallCollider,
+  CoefficientCombineRule,
   interactionGroups,
   RigidBody,
+  type CollisionPayload,
   type RapierRigidBody,
 } from "@react-three/rapier";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Group } from "three";
+import { playBounce } from "../audio/sound";
 import { GROUPS } from "../core/config";
 import { addLightSource, removeLightSource, type DynamicLightSource } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
 import { getPlayerBody, playerPosition } from "../game/player-state";
-import { forEachDynamicBody, forEachHittable } from "../game/registry";
+import { forEachDynamicBody, forEachHittable, nearestHittable } from "../game/registry";
 import { isHost } from "../net/netStore";
 import { explode, type DamageTeam } from "./damage";
-import type { ProjectileSpec } from "./projectiles";
+import { fanVelocities, fireProjectile, type ProjectileSpec } from "./projectiles";
 
 /** The Singularity Staff's two-stage weapon. The primary plants slow "void
  * seeds" (a projectile variant); the secondary, Collapse, activates every live
@@ -94,6 +97,8 @@ export function SingularitySeed({
   const collapsed = useRef(false);
   const light = useRef<DynamicLightSource | null>(null);
   const swirl = useRef<Group>(null);
+  const bouncesLeft = useRef(spec.bounces);
+  const age = useRef(0);
 
   const collapse = useCallback(() => {
     if (collapsed.current) return;
@@ -142,6 +147,60 @@ export function SingularitySeed({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Mid-air fission — a splitting seed scatters into a cluster of smaller
+  // seeds, so one Collapse detonates a whole minefield of black holes.
+  const splitNow = useCallback(() => {
+    if (collapsed.current) return;
+    collapsed.current = true;
+    const b = body.current;
+    if (!b) return remove(spec.id);
+    const t = b.translation();
+    for (const velocity of fanVelocities(b.linvel(), spec.split + 1)) {
+      fireProjectile({
+        team: spec.team,
+        position: [t.x, t.y, t.z],
+        velocity,
+        damage: spec.damage * 0.65,
+        color: spec.color,
+        size: spec.size * 0.85,
+        gravityScale: spec.gravityScale,
+        homing: spec.homing,
+        bounces: bouncesLeft.current,
+        split: 0,
+        singularity: true,
+        cosmetic: spec.cosmetic,
+      });
+    }
+    spawnBurst({
+      position: [t.x, t.y, t.z],
+      count: 8,
+      color: [spec.color, "#ffffff"],
+      speed: 3,
+      upward: 0,
+      ttl: 0.25,
+      size: 0.07,
+      gravity: 0,
+      drag: 2,
+    });
+    remove(spec.id);
+  }, [remove, spec]);
+
+  // Walls eat a bounce charge instead of planting the seed; anything else
+  // (or a spent charge) stops it dead, planted where it hit.
+  const onCollision = useCallback(
+    (payload: CollisionPayload) => {
+      const groups = payload.other.collider?.collisionGroups() ?? 0;
+      const hitWorld = ((groups >> 16) & (1 << GROUPS.WORLD)) !== 0;
+      if (hitWorld && bouncesLeft.current > 0) {
+        bouncesLeft.current -= 1;
+        playBounce();
+        return;
+      }
+      body.current?.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    },
+    [],
+  );
+
   useFrame((_, dt) => {
     const b = body.current;
     if (!b) return;
@@ -150,6 +209,39 @@ export function SingularitySeed({
     if (swirl.current) {
       swirl.current.rotation.y += dt * 6;
       swirl.current.rotation.x += dt * 3;
+    }
+
+    age.current += dt;
+    if (spec.split > 0 && age.current >= 0.22) {
+      splitNow();
+      return;
+    }
+
+    // Homing gear steers seeds while they still fly (planted seeds sit still).
+    if (spec.homing > 0 && spec.team === "player" && !spec.cosmetic) {
+      const v = b.linvel();
+      const speed = Math.hypot(v.x, v.y, v.z);
+      if (speed > 2) {
+        const target = nearestHittable("enemy", p.x, p.y, p.z, 16);
+        if (target) {
+          const tp = target.getPosition();
+          const tx = tp.x - p.x;
+          const ty = tp.y - p.y;
+          const tz = tp.z - p.z;
+          const td = Math.hypot(tx, ty, tz) || 1;
+          if ((v.x * tx + v.y * ty + v.z * tz) / (speed * td) > 0.15) {
+            const turn = Math.min(1, spec.homing * dt * 6);
+            const nx = v.x / speed + (tx / td - v.x / speed) * turn;
+            const ny = v.y / speed + (ty / td - v.y / speed) * turn;
+            const nz = v.z / speed + (tz / td - v.z / speed) * turn;
+            const nl = Math.hypot(nx, ny, nz) || 1;
+            b.setLinvel(
+              { x: (nx / nl) * speed, y: (ny / nl) * speed, z: (nz / nl) * speed },
+              true,
+            );
+          }
+        }
+      }
     }
   });
 
@@ -167,13 +259,15 @@ export function SingularitySeed({
       gravityScale={spec.gravityScale}
       ccd
       colliders={false}
-      linearDamping={2.4}
-      onCollisionEnter={() => body.current?.setLinvel({ x: 0, y: 0, z: 0 }, true)}
+      linearDamping={spec.bounces > 0 ? 0.6 : 2.4}
+      onCollisionEnter={onCollision}
     >
       <BallCollider
         args={[spec.size]}
         collisionGroups={interactionGroups(membership, collidesWith)}
         mass={0.05}
+        restitution={spec.bounces > 0 ? 0.8 : 0}
+        restitutionCombineRule={CoefficientCombineRule.Max}
       />
       <group ref={swirl} scale={spec.size}>
         <mesh>

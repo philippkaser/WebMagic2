@@ -24,6 +24,11 @@ interface BeamSpec {
   damage: number;
   /** Charge fraction 0..1 — scales thickness, impulse and impact VFX. */
   power: number;
+  /** Mirror-reflections off the world left in this beam's chain. */
+  bounces: number;
+  /** Prism-shatter: at the final wall the beam splits into 1+split weaker
+   * child beams scattered around the reflection. */
+  split: number;
   color: string;
   cosmetic: boolean;
 }
@@ -33,6 +38,8 @@ export interface BeamOptions {
   dir: [number, number, number];
   damage: number;
   power: number;
+  bounces?: number;
+  split?: number;
   color?: string;
   cosmetic?: boolean;
 }
@@ -47,6 +54,8 @@ export function fireBeam(opts: BeamOptions): void {
     dir: opts.dir,
     damage: opts.damage,
     power: Math.max(0, Math.min(1, opts.power)),
+    bounces: Math.max(0, Math.round(opts.bounces ?? 0)),
+    split: Math.max(0, Math.round(opts.split ?? 0)),
     color: opts.color ?? "#ff5470",
     cosmetic: opts.cosmetic ?? false,
   });
@@ -103,13 +112,13 @@ function Beam({ spec, remove }: { spec: BeamSpec; remove: (id: number) => void }
     [spec.color],
   );
 
-  // Length, orientation and damage are all decided once, synchronously.
-  const { length, quat } = useMemo(() => {
+  // Length, orientation and the wall normal are all decided once, synchronously.
+  const { length, quat, normal } = useMemo(() => {
     const [ox, oy, oz] = spec.origin;
     const [dx, dy, dz] = spec.dir;
     const ray = new rapier.Ray({ x: ox, y: oy, z: oz }, { x: dx, y: dy, z: dz });
     // Only the WORLD stops the beam — it burns straight through crowds.
-    const hit = world.castRay(
+    const hit = world.castRayAndGetNormal(
       ray,
       MAX_LENGTH,
       true,
@@ -117,8 +126,8 @@ function Beam({ spec, remove }: { spec: BeamSpec; remove: (id: number) => void }
       interactionGroups(GROUPS.FRIENDLY_PROJECTILE, [GROUPS.WORLD]),
     );
     const length = hit ? Math.max(hit.timeOfImpact, 0.5) : MAX_LENGTH;
-    const quat = new Quaternion().setFromUnitVectors(UP, tmp.set(dx, dy, dz).normalize().clone());
-    return { length, quat };
+    const quat = new Quaternion().setFromUnitVectors(UP, tmp.set(dx, dy, dz).normalize());
+    return { length, quat, normal: hit ? hit.normal : null };
   }, [spec, world, rapier]);
 
   useEffect(() => {
@@ -160,6 +169,52 @@ function Beam({ spec, remove }: { spec: BeamSpec; remove: (id: number) => void }
       ttl: 0.5,
       size: 0.07,
     });
+    // Modifier chains continue from the wall. Bounces mirror the beam like a
+    // ray of light; once they're spent, split shatters it into a fan of
+    // weaker child beams scattered around the reflection. Cosmetic beams
+    // chain too — peers see the whole light show.
+    if (normal) {
+      const dot = dx * normal.x + dy * normal.y + dz * normal.z;
+      const rx = dx - 2 * dot * normal.x;
+      const ry = dy - 2 * dot * normal.y;
+      const rz = dz - 2 * dot * normal.z;
+      const from: [number, number, number] = [
+        ex + normal.x * 0.06,
+        ey + normal.y * 0.06,
+        ez + normal.z * 0.06,
+      ];
+      if (spec.bounces > 0) {
+        fireBeam({
+          origin: from,
+          dir: [rx, ry, rz],
+          damage: spec.damage * 0.85,
+          power: spec.power,
+          bounces: spec.bounces - 1,
+          split: spec.split,
+          color: spec.color,
+          cosmetic: spec.cosmetic,
+        });
+      } else if (spec.split > 0) {
+        for (let i = 0; i <= spec.split; i++) {
+          const d = tmp
+            .set(
+              rx + (Math.random() - 0.5) * 0.9,
+              ry + (Math.random() - 0.5) * 0.9,
+              rz + (Math.random() - 0.5) * 0.9,
+            )
+            .normalize();
+          fireBeam({
+            origin: from,
+            dir: [d.x, d.y, d.z],
+            damage: spec.damage * 0.55,
+            power: spec.power * 0.8,
+            color: spec.color,
+            cosmetic: spec.cosmetic,
+          });
+        }
+      }
+    }
+
     // Sparks drifting off the column itself.
     const steps = Math.min(10, Math.round(length / 2.5));
     for (let i = 1; i <= steps; i++) {

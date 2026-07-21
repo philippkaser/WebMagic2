@@ -151,6 +151,50 @@ export function explode(opts: ExplosionOptions): void {
     drag: 3.2,
     ring: true,
   });
+  // Big blasts (barrels, grenades, shockwaves, black holes) get extra mass:
+  // slow oversized flame slabs that hang in the air, then a delayed fireball
+  // column mushrooming upward — the explosion has a body, not just a flash.
+  if (radius >= 3.4) {
+    spawnBurst({
+      position: at,
+      count: Math.round(particles * 0.35),
+      color: [color, "#ff7a2a", "#c33d10"],
+      speed: radius * 1.3,
+      upward: 2,
+      ttl: 0.85,
+      size: 0.34,
+      gravity: -4,
+      drag: 1.6,
+      spawnRadius: radius * 0.22,
+    });
+    setTimeout(() => {
+      spawnBurst({
+        position: at,
+        count: Math.round(particles * 0.35),
+        color: [color, "#ffd27a", "#ff7a2a"],
+        speed: radius * 0.9,
+        upward: radius * 1.5,
+        ttl: 0.7,
+        size: 0.22,
+        gravity: -2,
+        drag: 1.8,
+        spawnRadius: radius * 0.18,
+      });
+      spawnBurst({
+        position: at,
+        count: Math.round(particles * 0.45),
+        color: ["#2b211a", "#3c2a18", "#171310"],
+        speed: radius * 0.5,
+        upward: radius * 1.1,
+        ttl: 2,
+        size: 0.4,
+        gravity: 3,
+        drag: 2.2,
+        spawnRadius: radius * 0.3,
+      });
+      flashLight(at, color, light * 0.5, radius * 2.2);
+    }, 80);
+  }
   flashLight(at, "#fff6e0", light * 0.9, radius * 3.2);
   flashLight(at, color, light, radius * 2.4);
   playExplosion(radius);
