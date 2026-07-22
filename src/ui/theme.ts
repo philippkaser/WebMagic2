@@ -1,135 +1,131 @@
 import type { CSSProperties } from "react";
 import { Rng, hashSeed } from "../core/rng";
 
-/** Arcane conjuration UI. Nothing here is a "window" or a scrap of matter —
- * every panel is a projection the wizard summons into the air: a plate of
- * dark void-glass with a jagged sigil edge that glows in the cast's colors,
- * conjured in with a flicker and left breathing. Surfaces carry a tiny
- * procedural grain (same no-binary-assets philosophy as render/textures.ts),
- * upscaled with image-rendering: pixelated so the magic stays as chunky as the
- * game behind it.
+/** In-universe UI, cut from the same cloth as the dungeon: aged, dim, warm —
+ * slabs of dark scrying-stone and enchanted vellum the wizard reads by
+ * candle, not glowing sci-fi glass. Surfaces carry a faint procedural ash
+ * texture (same no-binary-assets philosophy as render/textures.ts), upscaled
+ * with image-rendering: pixelated so the chrome stays as chunky as the game
+ * behind it. Edges are torn by hand, the light is low, the color is warm.
  *
- * The living parts (conjure-in flicker, float, rune-ring spin) live in the
+ * The gentle living parts (fade-in, float, transition veils) live in the
  * `themeCss` string — mount it once from the HUD's <style> tag. */
 
-const ACCENT = "#46ffd0"; // the tear's teal — the default conjuring color
+const RIM = "rgba(150,120,148,0.30)"; // dim dusty-violet enchantment on an edge
+const RIM_SOFT = "rgba(150,120,148,0.20)";
 
-// ── Procedural grain tile ─────────────────────────────────────────────────────
+// ── Procedural ash texture ────────────────────────────────────────────────────
 
 const TILE = 48;
-let grainUrl: string | null = null;
+let ashUrl: string | null = null;
 
-function grainTile(): string {
-  if (grainUrl !== null) return grainUrl;
-  if (typeof document === "undefined") return (grainUrl = ""); // tests / SSR
+function ashTexture(): string {
+  if (ashUrl !== null) return ashUrl;
+  if (typeof document === "undefined") return (ashUrl = ""); // tests / SSR
   const canvas = document.createElement("canvas");
   canvas.width = TILE;
   canvas.height = TILE;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return (grainUrl = "");
+  if (!ctx) return (ashUrl = "");
   const img = ctx.createImageData(TILE, TILE);
-  const rng = new Rng(hashSeed("ui:void-grain"));
+  const rng = new Rng(hashSeed("ui:ash"));
   for (let i = 0; i < TILE * TILE; i++) {
     const n = rng.next();
-    // Near-black void with the odd dim ember of arcane static and rare motes.
-    const star = n > 0.985;
-    const v = star ? 60 + n * 40 : 5 + n * 8;
+    // Warm near-black vellum: low-contrast mottling, the odd darker fleck of
+    // char, and very rarely a dim ember — nothing bright enough to read as
+    // static or a screen.
+    const char = n < 0.06;
+    const ember = n > 0.992;
+    const v = char ? 10 : 22 + n * 12;
     const o = i * 4;
-    img.data[o] = v * 0.7;
-    img.data[o + 1] = v * 0.95;
-    img.data[o + 2] = v * 1.2;
+    img.data[o] = ember ? 120 : v * 1.15;
+    img.data[o + 1] = ember ? 70 : v * 0.86;
+    img.data[o + 2] = ember ? 42 : v * 0.98;
     img.data[o + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
-  return (grainUrl = canvas.toDataURL());
+  return (ashUrl = canvas.toDataURL());
 }
 
-// ── Sigil silhouette ──────────────────────────────────────────────────────────
+// ── Torn silhouette ───────────────────────────────────────────────────────────
 
-/** A jagged sigil outline: pixel-stepped bites and points around every edge,
- * seeded so each panel keeps its own silhouette across renders. Sharper and
- * more angular than a rounded frame — a rune scratched in one stroke. */
-export function sigilClip(seed: string): string {
-  const rng = new Rng(hashSeed(`sigil:${seed}`));
-  const step = () => 4 + Math.floor(rng.next() * 3) * 4; // 4|8|12 px
+/** A hand-torn edge: the rectangle's border nibbled inward by small pixel
+ * steps, seeded so each panel keeps its own ragged outline. No outward spikes
+ * or geometric teeth — just the frayed edge of an old page. */
+export function tornClip(seed: string): string {
+  const rng = new Rng(hashSeed(`torn:${seed}`));
+  const jit = () => Math.floor(rng.next() * 3) * 3; // 0 | 3 | 6 px inward
+  const n = 7;
   const p: string[] = [];
-  const c1 = step();
-  const c2 = step();
-  const c3 = step();
-  const c4 = step();
-  // Top edge with a notched point in the middle.
-  p.push(`0 ${c1}px`, `${c1}px 0`);
-  p.push(`${34 + Math.floor(rng.next() * 12)}% 0`, `50% ${step()}px`, `${54 + Math.floor(rng.next() * 12)}% 0`);
-  p.push(`calc(100% - ${c2}px) 0`, `100% ${c2}px`);
-  // Right edge with an outward tooth.
-  p.push(`calc(100% - ${step() - 2}px) ${40 + Math.floor(rng.next() * 8)}%`, `100% 50%`, `calc(100% - ${step() - 2}px) ${56 + Math.floor(rng.next() * 8)}%`);
-  p.push(`100% calc(100% - ${c3}px)`, `calc(100% - ${c3}px) 100%`);
-  // Bottom edge.
-  p.push(`${56 + Math.floor(rng.next() * 12)}% 100%`, `50% calc(100% - ${step()}px)`, `${34 + Math.floor(rng.next() * 12)}% 100%`);
-  p.push(`${c4}px 100%`, `0 calc(100% - ${c4}px)`);
-  // Left edge tooth.
-  p.push(`${step() - 2}px ${56 + Math.floor(rng.next() * 8)}%`, `0 50%`, `${step() - 2}px ${40 + Math.floor(rng.next() * 8)}%`);
+  for (let i = 0; i <= n; i++) p.push(`${((i / n) * 100).toFixed(1)}% ${jit()}px`); // top L→R
+  for (let i = 1; i <= n; i++) p.push(`calc(100% - ${jit()}px) ${((i / n) * 100).toFixed(1)}%`); // right
+  for (let i = 1; i <= n; i++) p.push(`${(100 - (i / n) * 100).toFixed(1)}% calc(100% - ${jit()}px)`); // bottom
+  for (let i = 1; i < n; i++) p.push(`${jit()}px ${(100 - (i / n) * 100).toFixed(1)}%`); // left
   return `polygon(${p.join(", ")})`;
 }
 
-// ── Conjured surfaces ─────────────────────────────────────────────────────────
+// ── Surfaces ──────────────────────────────────────────────────────────────────
 
-/** A summoned projection — the standard panel surface. Void-glass interior,
- * a jagged sigil silhouette, and an outer glow (via drop-shadow, which follows
- * the clipped shape) in the conjuring color. Give each panel its own `seed`;
- * pass `accent` to recolor the glow (dev bench uses its green). */
-export function conjuredPanel(seed: string, accent: string = ACCENT): CSSProperties {
-  const grain = grainTile();
+/** The standard panel: a dim slab of scrying-stone. Torn silhouette, warm ash
+ * grain, a faint enchantment glowing along the inner edge, deep inner shadow.
+ * `accent` tints that inner enchantment (the dev bench passes its green). */
+export function conjuredPanel(seed: string, accent?: string): CSSProperties {
+  const ash = ashTexture();
+  const edge = accent ? hexA(accent, 0.3) : RIM;
   return {
-    backgroundColor: "rgba(9,7,18,0.9)",
+    backgroundColor: "rgba(18,13,22,0.95)",
     backgroundImage: [
-      `linear-gradient(180deg, ${hexA(accent, 0.09)} 0%, transparent 22%, transparent 78%, ${hexA(accent, 0.06)} 100%)`,
-      grain ? `url(${grain})` : "",
+      "radial-gradient(120% 80% at 50% -10%, rgba(120,96,120,0.10), transparent 60%)",
+      ash ? `url(${ash})` : "",
     ]
       .filter(Boolean)
       .join(", "),
     backgroundSize: "auto, 96px 96px",
     imageRendering: "pixelated",
-    clipPath: sigilClip(seed),
-    // Outer glow follows the sigil silhouette; inner rim + vignette fake depth.
-    filter: `drop-shadow(0 0 2px ${accent}) drop-shadow(0 0 9px ${hexA(accent, 0.55)})`,
-    boxShadow: `inset 0 0 0 1px ${hexA(accent, 0.5)}, inset 0 0 22px ${hexA(accent, 0.16)}, inset 0 0 60px rgba(0,0,0,0.7)`,
+    clipPath: tornClip(seed),
+    boxShadow: [
+      `inset 0 0 0 1px ${edge}`,
+      "inset 0 1px 0 rgba(210,180,150,0.06)",
+      "inset 0 0 34px rgba(0,0,0,0.75)",
+      `0 0 22px ${accent ? hexA(accent, 0.14) : "rgba(70,50,80,0.22)"}`, // a soft, dim aura — not a neon halo
+      "0 8px 20px rgba(0,0,0,0.5)",
+    ].join(", "),
   };
 }
 
-/** A rune struck to press — a button as a small conjured glyph. */
-export function runeButton(seed: string, accent: string = ACCENT): CSSProperties {
+/** A rune tablet you press — carved dark stone, dim edge, warm lettering. */
+export function runeButton(seed: string, accent?: string): CSSProperties {
+  const edge = accent ? hexA(accent, 0.38) : RIM;
   return {
     fontFamily: "'Courier New', monospace",
     fontSize: 15,
     letterSpacing: 2,
     padding: "11px 24px",
-    backgroundColor: "rgba(12,10,22,0.92)",
-    clipPath: sigilClip(`btn:${seed}`),
+    backgroundColor: "rgba(30,22,32,0.96)",
+    clipPath: tornClip(`btn:${seed}`),
     border: "none",
-    color: "#e6f7f0",
-    textShadow: `0 0 6px ${hexA(accent, 0.7)}, 0 2px 0 #000`,
-    filter: `drop-shadow(0 0 2px ${hexA(accent, 0.8)})`,
-    boxShadow: `inset 0 0 0 1px ${hexA(accent, 0.6)}, inset 0 0 14px ${hexA(accent, 0.2)}`,
+    color: "#e6d8bc",
+    textShadow: "0 1px 0 #000, 0 0 8px rgba(120,90,130,0.3)",
+    boxShadow: `inset 0 0 0 1px ${edge}, inset 0 -5px 9px rgba(0,0,0,0.5), 0 2px 0 rgba(0,0,0,0.6)`,
     cursor: "pointer",
   };
 }
 
-/** Lettering etched in glowing glyphs (pale, haloed). */
+/** Lettering etched into the stone — warm parchment with a low candle-halo. */
 export const scarred: CSSProperties = {
-  color: "#e6f7f0",
-  textShadow: "0 0 8px rgba(70,255,208,0.45), 0 2px 0 rgba(0,0,0,0.85)",
+  color: "#e6d8bc",
+  textShadow: "0 2px 0 rgba(0,0,0,0.85), 0 0 10px rgba(120,90,130,0.28)",
 };
 
 /** A recessed well the mana/health/charge liquid sits in. */
 export const manaWell: CSSProperties = {
-  background: "#06040d",
-  boxShadow: "inset 0 0 0 1px #000, inset 0 2px 4px rgba(0,0,0,0.9), 0 0 0 1px rgba(70,255,208,0.28), 0 0 6px rgba(70,255,208,0.18)",
+  background: "#0b0710",
+  boxShadow: `inset 0 0 0 1px #000, inset 0 2px 4px rgba(0,0,0,0.9), 0 0 0 1px ${RIM_SOFT}`,
 };
 
 /** Pixel-block segmentation laid over any bar fill. */
 export const barSegments =
-  "repeating-linear-gradient(90deg, rgba(255,255,255,0.14) 0 2px, transparent 2px 8px)";
+  "repeating-linear-gradient(90deg, rgba(255,255,255,0.12) 0 2px, transparent 2px 8px)";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -142,40 +138,28 @@ function hexA(hex: string, a: number): string {
 
 // ── Living chrome ─────────────────────────────────────────────────────────────
 
-/** Global keyframes + classes. Mounted once from the HUD's <style> tag. */
+/** Global keyframes + classes. Mounted once from the HUD's <style> tag. A
+ * panel simply eases in and drifts — no flicker, no stutter. The anchored
+ * transform is composed via the --wm-anchor var so corner HUD panels can sit
+ * at a slight perspective and still float. */
 export const themeCss = `
-/* A projection flickers into being, then drifts. Conjure-in animates ONLY
-   opacity (so it never clobbers the panel's inline drop-shadow glow), while
-   the float owns transform — the two never touch the same property. The
-   anchored transform is composed via the --wm-anchor var. */
-.wm-conjure { animation: wm-conjure-in 320ms steps(1, end) 1 both, wm-float 5s ease-in-out infinite alternate; }
-@keyframes wm-conjure-in {
-  0% { opacity: 0; }
-  20% { opacity: 0.6; }
-  35% { opacity: 0.12; }
-  55% { opacity: 1; }
-  70% { opacity: 0.55; }
-  100% { opacity: 1; }
-}
-@keyframes wm-float { from { transform: var(--wm-anchor, none) translateY(0); } to { transform: var(--wm-anchor, none) translateY(-3px); } }
+.wm-conjure { animation: wm-appear 260ms ease-out both, wm-float 6.5s ease-in-out infinite alternate; }
+@keyframes wm-appear { from { opacity: 0; } to { opacity: 1; } }
+@keyframes wm-float { from { transform: var(--wm-anchor, none) translateY(0); } to { transform: var(--wm-anchor, none) translateY(-2.5px); } }
 
-/* Rune ring behind a conjured projection — two counter-spinning glyph bands. */
-.wm-rune-ring { animation: wm-spin 18s linear infinite; }
-.wm-rune-ring-2 { animation: wm-spin-rev 26s linear infinite; }
+/* Summoning-circle glyph bands behind the inventory mage — slow, dim. */
+.wm-rune-ring { animation: wm-spin 26s linear infinite; }
+.wm-rune-ring-2 { animation: wm-spin-rev 38s linear infinite; }
 @keyframes wm-spin { to { transform: rotate(360deg); } }
 @keyframes wm-spin-rev { to { transform: rotate(-360deg); } }
 
-/* Crossing the tear: the veil fades up over the warp canvas. */
-.wm-tear-veil { animation: wm-veil-in 260ms ease-out forwards; }
+/* Crossing the tear: the veil fades up over the warp. */
+.wm-tear-veil { animation: wm-veil-in 320ms ease-out forwards; }
 @keyframes wm-veil-in { from { opacity: 0; } to { opacity: 1; } }
-.wm-tear-text { animation: wm-text-pulse 1.2s ease-in-out infinite alternate; }
-@keyframes wm-text-pulse { from { opacity: 0.45; } to { opacity: 1; } }
+.wm-tear-text { animation: wm-text-pulse 1.6s ease-in-out infinite alternate; }
+@keyframes wm-text-pulse { from { opacity: 0.4; } to { opacity: 0.9; } }
 
-/* Arriving on the far side: the teal afterimage drains away. */
-.wm-arrive { animation: wm-arrive 750ms ease-out forwards; }
+/* Arriving on the far side: the afterimage drains away. */
+.wm-arrive { animation: wm-arrive 800ms ease-out forwards; }
 @keyframes wm-arrive { 0% { opacity: 1; } 100% { opacity: 0; } }
 `;
-
-/** Accent color for a conjured surface, exported so callers can match the glow
- * to context (e.g. the dev bench's green). */
-export const CONJURE_ACCENT = ACCENT;

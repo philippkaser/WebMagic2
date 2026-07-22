@@ -111,6 +111,15 @@ export interface GameState {
 const SHADOWS_KEY = "webmagic.shadows.v1";
 const NAME_KEY = "webmagic.name.v1";
 
+/** Floors can stream in almost instantly (offline/loopback), which would make
+ * the crossing-the-tear transition flash by unseen. Hold the loading phase for
+ * at least this long so the passage always reads as a real journey. */
+const TRANSITION_MIN_MS = 1150;
+
+/** Resolve after `ms` — used to pad a too-quick floor load up to the minimum
+ * transition time. */
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, Math.max(0, ms)));
+
 function loadShadowSetting(): boolean {
   try {
     return localStorage.getItem(SHADOWS_KEY) === "1";
@@ -168,9 +177,11 @@ export const useGame = create<GameState>((set, get) => ({
   closePortalSelect: () => set({ phase: "village" }),
 
   enterDungeon: async (entryFloor) => {
+    const startedAt = performance.now();
     set({ phase: "loading", prompt: null, overlay: "none" });
     await session.ensureConnected(get().playerName);
     const assignment = await session.requestFloor(entryFloor);
+    await wait(TRANSITION_MIN_MS - (performance.now() - startedAt));
     const stats = getStats();
     set({
       phase: "dungeon",
@@ -187,8 +198,10 @@ export const useGame = create<GameState>((set, get) => ({
   descend: async () => {
     const next = get().floor + 1;
     if (next > DUNGEON.maxFloor) return;
+    const startedAt = performance.now();
     set({ phase: "loading", prompt: null, overlay: "none" });
     const assignment = await session.requestFloor(next);
+    await wait(TRANSITION_MIN_MS - (performance.now() - startedAt));
     set({
       phase: "dungeon",
       floor: assignment.floor,

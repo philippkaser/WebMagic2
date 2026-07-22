@@ -480,10 +480,10 @@ function WizardViewer() {
 
   return (
     <div style={styles.viewer}>
-      {/* Summoning circle behind the mage — two counter-spinning glyph rings
-          and a floor glow: the panels are the spell this cast projects. */}
-      <RuneRing color="#46ffd0" size={224} band={11} spin="wm-rune-ring" />
-      <RuneRing color="#b46bff" size={172} band={17} spin="wm-rune-ring-2" />
+      {/* Summoning circle behind the mage — two slow, dim glyph rings and a
+          low floor glow: the panels are the spell this cast projects. */}
+      <RuneRing color="#8a6a9a" size={224} band={13} spin="wm-rune-ring" />
+      <RuneRing color="#9a7a4a" size={172} band={19} spin="wm-rune-ring-2" />
       <div style={styles.viewerGlow} />
       <Canvas
         dpr={0.5}
@@ -525,11 +525,10 @@ function RuneRing({ color, size, band, spin }: { color: string; size: number; ba
         height: size,
         marginLeft: -size / 2,
         marginTop: -size / 2,
-        background: `repeating-conic-gradient(${color} 0deg 1.4deg, transparent 1.4deg ${band}deg)`,
+        background: `repeating-conic-gradient(${color} 0deg 1.2deg, transparent 1.2deg ${band}deg)`,
         WebkitMask: ringMask,
         mask: ringMask,
-        opacity: 0.55,
-        filter: `drop-shadow(0 0 3px ${color})`,
+        opacity: 0.3,
         pointerEvents: "none",
       }}
     />
@@ -602,27 +601,27 @@ const styles: Record<string, CSSProperties> = {
     gap: 26,
   },
   sideColumn: { display: "flex", flexDirection: "column", gap: 10 },
-  // The scrying focus: the mage stands mid-cast in a summoning circle, the
-  // panels around them conjured from that same spell.
+  // The scrying focus: the mage stands mid-cast in a dim summoning circle, the
+  // panels around them projected from that same spell.
   viewer: {
     position: "relative",
     overflow: "hidden",
     width: 190,
     height: 210,
     flexShrink: 0,
-    boxShadow: "inset 0 0 0 1px rgba(70,255,208,0.4), inset 0 0 22px rgba(70,255,208,0.12), inset 0 4px 16px rgba(0,0,0,0.85)",
+    boxShadow: "inset 0 0 0 1px rgba(150,120,148,0.3), inset 0 4px 16px rgba(0,0,0,0.85)",
     background:
-      "radial-gradient(ellipse at 50% 60%, rgba(70,255,208,0.18), rgba(60,40,110,0.22) 40%, rgba(4,2,9,0.97) 74%)",
+      "radial-gradient(ellipse at 50% 62%, rgba(120,90,120,0.18), rgba(40,26,44,0.35) 42%, rgba(6,4,10,0.97) 76%)",
   },
   viewerGlow: {
     position: "absolute",
     left: "50%",
-    top: "62%",
-    width: 150,
-    height: 46,
+    top: "64%",
+    width: 140,
+    height: 40,
     transform: "translate(-50%,-50%)",
-    background: "radial-gradient(ellipse at 50% 50%, rgba(70,255,208,0.5), transparent 70%)",
-    filter: "blur(2px)",
+    background: "radial-gradient(ellipse at 50% 50%, rgba(150,110,150,0.32), transparent 72%)",
+    filter: "blur(3px)",
     pointerEvents: "none",
   },
   bagRow: {
