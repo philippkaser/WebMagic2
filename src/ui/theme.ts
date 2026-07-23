@@ -158,8 +158,4 @@ export const themeCss = `
 @keyframes wm-veil-in { from { opacity: 0; } to { opacity: 1; } }
 .wm-tear-text { animation: wm-text-pulse 1.6s ease-in-out infinite alternate; }
 @keyframes wm-text-pulse { from { opacity: 0.4; } to { opacity: 0.9; } }
-
-/* Arriving on the far side: the afterimage drains away. */
-.wm-arrive { animation: wm-arrive 800ms ease-out forwards; }
-@keyframes wm-arrive { 0% { opacity: 1; } 100% { opacity: 0; } }
 `;

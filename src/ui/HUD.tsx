@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
+import { renderTear } from "../fx/tearField";
 import { computeStats, resolveItem } from "../items/catalog";
 import type { GearSlot, ItemStack } from "../items/types";
 import { floorPlayerCount, selectIsHost, useNet } from "../net/netStore";
@@ -79,11 +80,12 @@ export function HUD() {
 
 // ── Crossing the tear ─────────────────────────────────────────────────────────
 
-/** The crossing itself: you are pulled through the wound into the space
- * between floors. A low-res canvas (rendered at ~200px then pixel-upscaled to
- * fill the eye) draws a warp tunnel — stars streaking out from a vanishing
- * point, dragged into a spiral, colors posterized to a few teal/violet steps.
- * Sits over the R3F canvas while the next floor streams in. */
+/** The crossing itself: the same wound you stepped into, blown up to swallow
+ * the eye. A low-res canvas (a few thousand fat pixels, pixel-upscaled to fill
+ * the screen) runs the portal's own shader in 2D — ragged vertical slit,
+ * domain-warped void, dead stars, white-hot frayed rim — staged as being
+ * pulled bodily through the tear. Sits over the R3F canvas while the next
+ * floor streams in. */
 function RiftCrossing() {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -94,68 +96,18 @@ function RiftCrossing() {
     if (!ctx) return;
     // Fixed tiny buffer — the browser upscales it with the pixelated hint, so
     // the whole warp is intrinsically chunky and cheap no matter the screen.
-    const W = 220;
-    const H = 124;
+    const W = 104;
+    const H = 60;
     canvas.width = W;
     canvas.height = H;
-
-    // A field of stars, each on a ray from center at a fixed angle; every
-    // frame they rush outward (radius grows), wrapping back to the middle.
-    const N = 150;
-    const stars = Array.from({ length: N }, () => ({
-      a: Math.random() * Math.PI * 2,
-      r: Math.random(), // 0..1 along the ray
-      speed: 0.35 + Math.random() * 0.9,
-      hue: Math.random(),
-    }));
-    // Posterize helper: snap a 0..1 level to N bands so gradients stay chunky.
-    const band = (v: number, n: number) => Math.round(v * n) / n;
+    const img = ctx.createImageData(W, H);
+    const seed = Math.random() * 37;
 
     let raf = 0;
-    let last = performance.now();
-    let swirl = 0;
-    const maxR = Math.hypot(W, H) * 0.5;
-    const cx = W / 2;
-    const cy = H / 2;
-
+    const t0 = performance.now();
     const draw = (now: number) => {
-      const dt = Math.min((now - last) / 1000, 1 / 20);
-      last = now;
-      swirl += dt * 1.4;
-
-      // Trail the previous frame instead of clearing — stars smear into
-      // streaks, the whole thing reads as motion.
-      ctx.fillStyle = "rgba(3,1,8,0.42)";
-      ctx.fillRect(0, 0, W, H);
-
-      for (const s of stars) {
-        s.r += s.speed * dt * (0.35 + s.r); // accelerate as they near the edge
-        if (s.r > 1) {
-          s.r = Math.random() * 0.12;
-          s.a = Math.random() * Math.PI * 2;
-          s.hue = Math.random();
-        }
-        // Twist the ray angle by radius — the tunnel spirals inward.
-        const ang = s.a + swirl * (0.4 + s.r) + s.r * 2.2;
-        const rr = band(s.r, 10) * maxR;
-        const x = cx + Math.cos(ang) * rr * 1.5;
-        const y = cy + Math.sin(ang) * rr;
-        const bright = band(Math.min(1, s.r * 1.3), 4);
-        // Teal core drifting to violet at the rim.
-        const teal = s.hue < 0.7;
-        const r = teal ? 0.27 * bright : 0.7 * bright;
-        const g = teal ? 1.0 * bright : 0.42 * bright;
-        const b = teal ? 0.82 * bright : 1.0 * bright;
-        ctx.fillStyle = `rgb(${(r * 255) | 0},${(g * 255) | 0},${(b * 255) | 0})`;
-        const size = 1 + Math.round(s.r * 2);
-        ctx.fillRect((x | 0) - (size >> 1), (y | 0) - (size >> 1), size, size);
-      }
-
-      // A hot mouth at the vanishing point.
-      const pulse = 0.6 + Math.sin(swirl * 3) * 0.25;
-      ctx.fillStyle = `rgba(${(160 * pulse) | 0},255,${(220 * pulse) | 0},0.5)`;
-      ctx.fillRect(cx - 2, cy - 2, 4, 4);
-
+      renderTear(img.data, W, H, (now - t0) / 1000, seed, "enter");
+      ctx.putImageData(img, 0, 0);
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
@@ -211,12 +163,15 @@ function RiftCrossing() {
   );
 }
 
-/** On stepping out the far side (loading→dungeon, menu→village, any arrival
- * into play), a teal afterimage drains off the eye — the smooth half of the
- * portal transition. */
+/** Stepping out the far side (loading→dungeon, menu→village, any arrival into
+ * play): the other half of the crossing. A rip of the far side tears open over
+ * the live scene and widens you back out into it — the frayed lip flaring as
+ * you break through — then the last of the void drains away. Same portal
+ * shader as the crossing, run in reverse over the scene beneath. */
 function ArrivalFade({ phase }: { phase: ReturnType<typeof useGame.getState>["phase"] }) {
   const prev = useRef(phase);
   const [fadeKey, setFadeKey] = useState(0);
+  const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const was = prev.current;
     prev.current = phase;
@@ -224,16 +179,50 @@ function ArrivalFade({ phase }: { phase: ReturnType<typeof useGame.getState>["ph
       (phase === "dungeon" || phase === "village") && (was === "loading" || was === "menu" || was === "dead");
     if (arriving) setFadeKey((k) => k + 1);
   }, [phase]);
+
+  useEffect(() => {
+    if (fadeKey === 0) return;
+    const canvas = ref.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const W = 104;
+    const H = 60;
+    canvas.width = W;
+    canvas.height = H;
+    const img = ctx.createImageData(W, H);
+    const seed = Math.random() * 37;
+
+    let raf = 0;
+    const t0 = performance.now();
+    const draw = (now: number) => {
+      const t = (now - t0) / 1000;
+      renderTear(img.data, W, H, t, seed, "exit");
+      ctx.putImageData(img, 0, 0);
+      // Once the void has fully drained the passage is over — stop redrawing
+      // and clear the buffer so nothing lingers over the scene.
+      if (t > 1.05) {
+        ctx.clearRect(0, 0, W, H);
+        return;
+      }
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, [fadeKey]);
+
   if (fadeKey === 0) return null;
   return (
-    <div
+    <canvas
       key={fadeKey}
-      className="wm-arrive"
+      ref={ref}
       style={{
         position: "absolute",
         inset: 0,
-        background:
-          "radial-gradient(ellipse at 50% 50%, rgba(70,255,208,0.28) 0%, rgba(2,1,6,0.9) 72%)",
+        width: "100%",
+        height: "100%",
+        pointerEvents: "none",
+        imageRendering: "pixelated",
       }}
     />
   );
