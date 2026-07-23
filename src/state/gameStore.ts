@@ -67,8 +67,13 @@ export interface GameState {
   shadows: boolean;
   /** Display name shown to floor-mates. */
   playerName: string;
+  /** Colour of the portal last stepped through — tints the crossing/arrival
+   * transition so the tear you fall through matches the one you entered. */
+  portalColor: string;
 
   startGame(): void;
+  /** Record the colour of a portal as it's used, for the transition tint. */
+  setPortalColor(color: string): void;
   openPortalSelect(): void;
   closePortalSelect(): void;
   enterDungeon(entryFloor: number): Promise<void>;
@@ -170,8 +175,10 @@ export const useGame = create<GameState>((set, get) => ({
   lastDeath: null,
   shadows: loadShadowSetting(),
   playerName: loadPlayerName(),
+  portalColor: "#46ffd0",
 
   startGame: () => set({ phase: "village" }),
+  setPortalColor: (color) => set({ portalColor: color }),
 
   openPortalSelect: () => set({ phase: "select", prompt: null }),
   closePortalSelect: () => set({ phase: "village" }),

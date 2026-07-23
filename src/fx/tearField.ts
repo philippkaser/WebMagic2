@@ -64,8 +64,17 @@ const DEEP_R = 0.012;
 const DEEP_G = 0.004;
 const DEEP_B = 0.028;
 
+/** Parse "#rrggbb" to linear-ish 0..1 RGB. Falls back to teal on bad input. */
+export function parseColor(hex: string): [number, number, number] {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return [0.27, 1.0, 0.82];
+  const n = parseInt(m[1], 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
 /** Fill `data` (an RGBA buffer of `gw * gh` fat pixels) with the tear for the
- * given moment. `t` is seconds since the passage began. */
+ * given moment. `t` is seconds since the passage began; `color` is the tint of
+ * the portal being crossed (the wound and the warp share its colour). */
 export function renderTear(
   data: Uint8ClampedArray,
   gw: number,
@@ -73,7 +82,9 @@ export function renderTear(
   t: number,
   seed: number,
   mode: TearMode,
+  color: readonly [number, number, number],
 ): void {
+  const [ur, ug, ub] = color;
   // Passage envelope — how wide the wound gapes (`open`), how far the interior
   // has rushed toward the eye (`zoom`), and, on the way out, how much of the
   // void has bled away (`fade`).
@@ -127,24 +138,18 @@ export function renderTear(
       const inner = fbm(swx * 5.2 + st, swy * 5.2 + st) * 1.5 - st * 0.4;
       const m = fbm(swx * 2.6 + inner, swy * 2.6 + inner);
 
-      // Colour drifts teal at the core toward violet at the rim — the palette
-      // shared by the portals and the warp.
-      const vio = clamp01(r * 0.8);
-      const colR = 0.2 + vio * 0.55;
-      const colG = 0.95 - vio * 0.5;
-      const colB = 0.85 + vio * 0.15;
-
       // Void only lights up inside the lips; a fat pixel just outside stays
-      // near-black so the wound reads against the dark.
+      // near-black so the wound reads against the dark. Everything is tinted
+      // by the portal's own colour — the same `uColor` the tear shader uses.
       const insideS = 1 - smoothstep(0.92, 1.05, d);
       const glow = smoothstep(0.2, 0.85, m) * insideS;
-      let R = DEEP_R * (1 - glow) + colR * 0.55 * glow;
-      let G = DEEP_G * (1 - glow) + colG * 0.55 * glow;
-      let B = DEEP_B * (1 - glow) + colB * 0.55 * glow;
+      let R = DEEP_R * (1 - glow) + ur * 0.55 * glow;
+      let G = DEEP_G * (1 - glow) + ug * 0.55 * glow;
+      let B = DEEP_B * (1 - glow) + ub * 0.55 * glow;
       const p3 = m * m * m * insideS;
-      R += colR * p3 * 2.2;
-      G += colG * p3 * 2.2;
-      B += colB * p3 * 2.2;
+      R += ur * p3 * 2.2;
+      G += ug * p3 * 2.2;
+      B += ub * p3 * 2.2;
       // Dead stars strewn on the far side.
       const twk = Math.floor(st * 3.0) * 0.31 + seed;
       if (insideS > 0.5 && hash(uvx * 93.0 + twk, uvy * 97.0 + twk) >= 0.982) {
@@ -155,9 +160,9 @@ export function renderTear(
       // The frayed rim burns white-hot — a ridge riding the lip of the tear.
       const rim = smoothstep(0.5, 1.0, d) * (1 - smoothstep(1.0, 1.7, d));
       const rimP = rim * rim * rim;
-      R += (colR * 1.6 + 0.85) * rimP * 1.4;
-      G += (colG * 1.6 + 0.85) * rimP * 1.4;
-      B += (colB * 1.6 + 0.85) * rimP * 1.4;
+      R += (ur * 1.6 + 0.85) * rimP * 1.4;
+      G += (ug * 1.6 + 0.85) * rimP * 1.4;
+      B += (ub * 1.6 + 0.85) * rimP * 1.4;
       // Chunky pixels deserve chunky colours.
       R = band(R, 8);
       G = band(G, 8);
@@ -171,9 +176,9 @@ export function renderTear(
         // Through the rip you can see the far side (the live scene beneath);
         // only the frayed lip of the opening still glows.
         const openLip = smoothstep(0.62, 0.98, d);
-        R = band(colR * 1.6 + 0.9, 8);
-        G = band(colG * 1.6 + 0.9, 8);
-        B = band(colB * 1.6 + 0.9, 8);
+        R = band(ur * 1.6 + 0.9, 8);
+        G = band(ug * 1.6 + 0.9, 8);
+        B = band(ub * 1.6 + 0.9, 8);
         a = openLip * (1 - fade);
       } else {
         // The not-yet-torn void still hangs over the scene, draining off as

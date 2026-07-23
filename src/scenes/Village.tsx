@@ -1,4 +1,3 @@
-import { Stars } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 import { CuboidCollider, interactionGroups, RigidBody } from "@react-three/rapier";
 import { useEffect, useMemo } from "react";
@@ -7,6 +6,7 @@ import { startAmbient, stopAmbient } from "../audio/sound";
 import { GROUPS } from "../core/config";
 import { resetRegistries } from "../game/registry";
 import { PlayerController } from "../player/PlayerController";
+import { NightSky } from "../render/NightSky";
 import { getTextures } from "../render/textures";
 import { useGame } from "../state/gameStore";
 import { SpawnedEnemies } from "../combat/SpawnedEnemies";
@@ -71,7 +71,7 @@ export function Village() {
         shadow-camera-top={28}
         shadow-camera-bottom={-28}
       />
-      <Stars radius={90} depth={40} count={2400} factor={4} saturation={0} fade speed={0.6} />
+      <NightSky />
 
       {/* Ground + invisible perimeter */}
       <RigidBody type="fixed" colliders={false}>

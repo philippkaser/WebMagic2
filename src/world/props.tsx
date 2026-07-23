@@ -408,6 +408,8 @@ export function Portal({
       } else {
         offerInteraction(prompt, d2, () => {
           playPortal();
+          // Tint the coming crossing/arrival with this tear's own colour.
+          useGame.getState().setPortalColor(color);
           onUse();
         });
       }

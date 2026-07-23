@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
-import { renderTear } from "../fx/tearField";
+import { parseColor, renderTear } from "../fx/tearField";
 import { computeStats, resolveItem } from "../items/catalog";
 import type { GearSlot, ItemStack } from "../items/types";
 import { floorPlayerCount, selectIsHost, useNet } from "../net/netStore";
@@ -88,6 +88,11 @@ export function HUD() {
  * floor streams in. */
 function RiftCrossing() {
   const ref = useRef<HTMLCanvasElement>(null);
+  const portalColor = useGame((s) => s.portalColor);
+  const colorRef = useRef(parseColor(portalColor));
+  useEffect(() => {
+    colorRef.current = parseColor(portalColor);
+  }, [portalColor]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -106,7 +111,7 @@ function RiftCrossing() {
     let raf = 0;
     const t0 = performance.now();
     const draw = (now: number) => {
-      renderTear(img.data, W, H, (now - t0) / 1000, seed, "enter");
+      renderTear(img.data, W, H, (now - t0) / 1000, seed, "enter", colorRef.current);
       ctx.putImageData(img, 0, 0);
       raf = requestAnimationFrame(draw);
     };
@@ -172,6 +177,9 @@ function ArrivalFade({ phase }: { phase: ReturnType<typeof useGame.getState>["ph
   const prev = useRef(phase);
   const [fadeKey, setFadeKey] = useState(0);
   const ref = useRef<HTMLCanvasElement>(null);
+  const portalColor = useGame((s) => s.portalColor);
+  const colorRef = useRef(parseColor(portalColor));
+  colorRef.current = parseColor(portalColor);
   useEffect(() => {
     const was = prev.current;
     prev.current = phase;
@@ -197,7 +205,7 @@ function ArrivalFade({ phase }: { phase: ReturnType<typeof useGame.getState>["ph
     const t0 = performance.now();
     const draw = (now: number) => {
       const t = (now - t0) / 1000;
-      renderTear(img.data, W, H, t, seed, "exit");
+      renderTear(img.data, W, H, t, seed, "exit", colorRef.current);
       ctx.putImageData(img, 0, 0);
       // Once the void has fully drained the passage is over — stop redrawing
       // and clear the buffer so nothing lingers over the scene.
