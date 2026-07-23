@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
+import { renderRise, renderWake } from "../fx/resurrection";
 import { parseColor, renderTear } from "../fx/tearField";
 import { computeStats, resolveItem } from "../items/catalog";
 import type { GearSlot, ItemStack } from "../items/types";
@@ -23,6 +24,7 @@ import {
 export function HUD() {
   const phase = useGame((s) => s.phase);
   const overlay = useGame((s) => s.overlay);
+  const transition = useGame((s) => s.transition);
   const [showPerf, setShowPerf] = useState(false);
 
   // Leaving gameplay or opening an overlay always releases the pointer.
@@ -72,8 +74,8 @@ export function HUD() {
       {phase === "menu" && <MenuOverlay />}
       {phase === "select" && <SelectOverlay />}
       {phase === "dead" && <DeathOverlay />}
-      {phase === "loading" && <RiftCrossing />}
-      <ArrivalFade phase={phase} />
+      {phase === "loading" && (transition === "ascend" ? <Resurrection /> : <RiftCrossing />)}
+      <ArrivalFade phase={phase} transition={transition} />
     </div>
   );
 }
@@ -168,28 +170,14 @@ function RiftCrossing() {
   );
 }
 
-/** Stepping out the far side (loading→dungeon, menu→village, any arrival into
- * play): the other half of the crossing. A rip of the far side tears open over
- * the live scene and widens you back out into it — the frayed lip flaring as
- * you break through — then the last of the void drains away. Same portal
- * shader as the crossing, run in reverse over the scene beneath. */
-function ArrivalFade({ phase }: { phase: ReturnType<typeof useGame.getState>["phase"] }) {
-  const prev = useRef(phase);
-  const [fadeKey, setFadeKey] = useState(0);
+/** The way back up: leaving the dungeon with your loot, or being dragged back
+ * after death. The same tear as the descent, warmed to gold and staged as a
+ * resurrection — a heart kicking back into beat, life flooding up, embers of it
+ * rising past you. Runs over the held ascent loading phase. */
+function Resurrection() {
   const ref = useRef<HTMLCanvasElement>(null);
-  const portalColor = useGame((s) => s.portalColor);
-  const colorRef = useRef(parseColor(portalColor));
-  colorRef.current = parseColor(portalColor);
-  useEffect(() => {
-    const was = prev.current;
-    prev.current = phase;
-    const arriving =
-      (phase === "dungeon" || phase === "village") && (was === "loading" || was === "menu" || was === "dead");
-    if (arriving) setFadeKey((k) => k + 1);
-  }, [phase]);
 
   useEffect(() => {
-    if (fadeKey === 0) return;
     const canvas = ref.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -204,8 +192,114 @@ function ArrivalFade({ phase }: { phase: ReturnType<typeof useGame.getState>["ph
     let raf = 0;
     const t0 = performance.now();
     const draw = (now: number) => {
+      renderRise(img.data, W, H, (now - t0) / 1000, seed);
+      ctx.putImageData(img, 0, 0);
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  return (
+    <div
+      className="wm-tear-veil"
+      style={{
+        position: "absolute",
+        inset: 0,
+        pointerEvents: "auto",
+        backgroundColor: "#0a0402",
+        overflow: "hidden",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <canvas
+        ref={ref}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          imageRendering: "pixelated",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "radial-gradient(ellipse at 50% 60%, transparent 34%, rgba(10,3,1,0.8) 84%)",
+        }}
+      />
+      <div
+        className="wm-tear-text"
+        style={{
+          position: "absolute",
+          bottom: "16%",
+          fontSize: 15,
+          letterSpacing: 8,
+          ...scarred,
+          color: "#ffcf7a",
+        }}
+      >
+        BACK AMONG THE LIVING
+      </div>
+    </div>
+  );
+}
+
+/** Stepping out the far side (loading→dungeon, menu→village, any arrival into
+ * play): the other half of the crossing. A rip of the far side tears open over
+ * the live scene and widens you back out into it — the frayed lip flaring as
+ * you break through — then the last of the void drains away. Same portal
+ * shader as the crossing, run in reverse over the scene beneath. */
+function ArrivalFade({
+  phase,
+  transition,
+}: {
+  phase: ReturnType<typeof useGame.getState>["phase"];
+  transition: ReturnType<typeof useGame.getState>["transition"];
+}) {
+  const prev = useRef(phase);
+  const [fadeKey, setFadeKey] = useState(0);
+  const ref = useRef<HTMLCanvasElement>(null);
+  const portalColor = useGame((s) => s.portalColor);
+  const colorRef = useRef(parseColor(portalColor));
+  colorRef.current = parseColor(portalColor);
+  // Which arrival to draw, latched when the crossing lands so it can't change
+  // mid-animation.
+  const modeRef = useRef(transition);
+  useEffect(() => {
+    const was = prev.current;
+    prev.current = phase;
+    const arriving =
+      (phase === "dungeon" || phase === "village") && (was === "loading" || was === "menu" || was === "dead");
+    if (arriving) {
+      modeRef.current = transition;
+      setFadeKey((k) => k + 1);
+    }
+  }, [phase, transition]);
+
+  useEffect(() => {
+    if (fadeKey === 0) return;
+    const canvas = ref.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const W = 104;
+    const H = 60;
+    canvas.width = W;
+    canvas.height = H;
+    const img = ctx.createImageData(W, H);
+    const seed = Math.random() * 37;
+    const ascend = modeRef.current === "ascend";
+
+    let raf = 0;
+    const t0 = performance.now();
+    const draw = (now: number) => {
       const t = (now - t0) / 1000;
-      renderTear(img.data, W, H, t, seed, "exit", colorRef.current);
+      if (ascend) renderWake(img.data, W, H, t, seed);
+      else renderTear(img.data, W, H, t, seed, "exit", colorRef.current);
       ctx.putImageData(img, 0, 0);
       // Once the void has fully drained the passage is over — stop redrawing
       // and clear the buffer so nothing lingers over the scene.

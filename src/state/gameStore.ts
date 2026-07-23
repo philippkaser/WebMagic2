@@ -70,6 +70,10 @@ export interface GameState {
   /** Colour of the portal last stepped through — tints the crossing/arrival
    * transition so the tear you fall through matches the one you entered. */
   portalColor: string;
+  /** Which way the last crossing went: "descend" falls into the cold tear,
+   * "ascend" is the warm resurrection back up to the village. Read by the HUD
+   * to pick the crossing and arrival visuals. */
+  transition: "descend" | "ascend";
 
   startGame(): void;
   /** Record the colour of a portal as it's used, for the transition tint. */
@@ -78,7 +82,7 @@ export interface GameState {
   closePortalSelect(): void;
   enterDungeon(entryFloor: number): Promise<void>;
   descend(): Promise<void>;
-  bankAndLeave(): void;
+  bankAndLeave(): Promise<void>;
   /** Can this pickup go ANYWHERE right now? Gates loot-orb prompts. */
   canAcquire(defId: string): boolean;
   /** Route a granted pickup: empty gear slot → equip; consumable → belt,
@@ -107,7 +111,7 @@ export interface GameState {
   heal(amount: number): void;
   spendMana(cost: number): boolean;
   regenMana(dt: number): void;
-  respawn(): void;
+  respawn(): Promise<void>;
   setPrompt(prompt: string | null): void;
   toggleShadows(): void;
   setPlayerName(name: string): void;
@@ -176,6 +180,7 @@ export const useGame = create<GameState>((set, get) => ({
   shadows: loadShadowSetting(),
   playerName: loadPlayerName(),
   portalColor: "#46ffd0",
+  transition: "descend",
 
   startGame: () => set({ phase: "village" }),
   setPortalColor: (color) => set({ portalColor: color }),
@@ -185,7 +190,7 @@ export const useGame = create<GameState>((set, get) => ({
 
   enterDungeon: async (entryFloor) => {
     const startedAt = performance.now();
-    set({ phase: "loading", prompt: null, overlay: "none" });
+    set({ phase: "loading", transition: "descend", prompt: null, overlay: "none" });
     await session.ensureConnected(get().playerName);
     const assignment = await session.requestFloor(entryFloor);
     await wait(TRANSITION_MIN_MS - (performance.now() - startedAt));
@@ -206,7 +211,7 @@ export const useGame = create<GameState>((set, get) => ({
     const next = get().floor + 1;
     if (next > DUNGEON.maxFloor) return;
     const startedAt = performance.now();
-    set({ phase: "loading", prompt: null, overlay: "none" });
+    set({ phase: "loading", transition: "descend", prompt: null, overlay: "none" });
     const assignment = await session.requestFloor(next);
     await wait(TRANSITION_MIN_MS - (performance.now() - startedAt));
     set({
@@ -218,7 +223,8 @@ export const useGame = create<GameState>((set, get) => ({
     gameEvents.emit("message", `Floor ${assignment.floor}`);
   },
 
-  bankAndLeave: () => {
+  bankAndLeave: async () => {
+    const startedAt = performance.now();
     const banked = bankCarried(get());
     const newCheckpoint = Math.max(get().checkpoint, get().floor);
     persistCurrent({ ...get(), ...banked, checkpoint: newCheckpoint });
@@ -226,6 +232,10 @@ export const useGame = create<GameState>((set, get) => ({
     // anything didn't check out. Offline this is a no-op (local save rules).
     session.sendBank(toWireInventory({ ...banked, chest: get().chest }));
     session.leaveDungeon();
+    // Rise back to the living: hold the resurrection crossing over the village
+    // as it streams in (floor 0 → GameScene mounts the Village behind the veil).
+    set({ phase: "loading", transition: "ascend", floor: 0, prompt: null, overlay: "none" });
+    await wait(TRANSITION_MIN_MS - (performance.now() - startedAt));
     set({
       phase: "village",
       ...banked,
@@ -508,7 +518,13 @@ export const useGame = create<GameState>((set, get) => ({
     }
   },
 
-  respawn: () => {
+  respawn: async () => {
+    // Dragged back up through the tear — the same resurrection crossing as
+    // leaving, only this time you had truly died. Village (floor 0) streams in
+    // behind the veil while the heart restarts.
+    const startedAt = performance.now();
+    set({ phase: "loading", transition: "ascend", floor: 0, prompt: null, overlay: "none" });
+    await wait(TRANSITION_MIN_MS - (performance.now() - startedAt));
     set({
       phase: "village",
       floor: 0,
