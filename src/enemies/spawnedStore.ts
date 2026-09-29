@@ -7,8 +7,8 @@ import type { EnemyId } from "./roster";
  * items/LootOrbs: the host alone decides to spawn, and announces it as a host
  * event that replays on every client, so exactly one set of children appears
  * no matter who's on the floor. Late-join is covered by a sync provider the
- * <SpawnedEnemies> component registers. Kept JSX-free so enemies.tsx can call
- * spawnEnemy() from a death handler without an import cycle. */
+ * <SpawnedEnemies> component registers. Kept JSX-free so kinds/Slime.tsx can
+ * call spawnEnemy() from a death handler without an import cycle. */
 
 export interface SpawnedEnemy {
   id: string;

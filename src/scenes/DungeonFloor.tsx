@@ -2,7 +2,6 @@ import { useThree } from "@react-three/fiber";
 import { CuboidCollider, interactionGroups, RigidBody } from "@react-three/rapier";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { InstancedMesh, Object3D } from "three";
-import { Boss } from "../enemies/Warden";
 import { getEnemyDef } from "../enemies/registry";
 import { SpawnedEnemies } from "../enemies/SpawnedEnemies";
 import { GROUPS, TILE, WALL_HEIGHT } from "../core/config";
@@ -115,9 +114,14 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
 
       <TreasurePedestal position={layout.treasure} floor={layout.floor} seed={layout.seed} />
 
-      {layout.boss && bossAlive && (
-        <Boss position={layout.boss} floor={layout.floor} onDeath={() => setBossAlive(false)} />
-      )}
+      {layout.boss &&
+        bossAlive &&
+        getEnemyDef("boss").render({
+          entityId: "boss",
+          pos: layout.boss,
+          floor: layout.floor,
+          onDeath: () => setBossAlive(false),
+        })}
 
       <Portal
         position={layout.exit}

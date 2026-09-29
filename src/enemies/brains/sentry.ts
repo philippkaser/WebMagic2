@@ -1,4 +1,4 @@
-import type { RandomSource, Vec } from "./common";
+import { wrapAngle, type RandomSource, type Vec } from "./common";
 
 /** Sentry brain — the turret. It never moves, so its brain is a reload clock
  * plus aiming math: glow brighter through a short wind-up, then (if a wizard
@@ -90,12 +90,15 @@ export function sentryLead(dir: Vec, dist: number, targetVel: Vec, out: Vec): Ve
 }
 
 /** Cosmetic head tracking: ease the yaw toward the watched player (each
- * client tracks its own), or hold still when they're out of range. */
+ * client tracks its own), or hold still when they're out of range. Turns the
+ * short way round — a player crossing behind the sentry (where atan2 jumps
+ * from +π to −π) must not make the head whip through a full circle — and
+ * keeps the result in [−π, π] so it never winds up. */
 export function sentryYaw(yaw: number, head: Vec, player: Vec, dt: number): number {
   const ax = player.x - head.x;
   const ay = player.y - head.y;
   const az = player.z - head.z;
   if (Math.hypot(ax, ay, az) >= SENTRY.trackRange) return yaw;
-  const targetYaw = Math.atan2(ax, az);
-  return yaw + (targetYaw - yaw) * Math.min(1, dt * SENTRY.turnRate);
+  const turn = wrapAngle(Math.atan2(ax, az) - yaw);
+  return wrapAngle(yaw + turn * Math.min(1, dt * SENTRY.turnRate));
 }

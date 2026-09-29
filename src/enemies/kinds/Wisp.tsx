@@ -1,0 +1,77 @@
+import { useFrame } from "@react-three/fiber";
+import { BallCollider, RigidBody } from "@react-three/rapier";
+import { useMemo, useRef } from "react";
+import type { MeshStandardMaterial } from "three";
+import { ENEMY_GLOW, WispModel } from "../../render/models/enemies";
+import type { Vec3 } from "../../world/types";
+import { createChaseInput, createSteering } from "../brains/common";
+import { tickWisp } from "../brains/wisp";
+import {
+  ENEMY_GROUPS,
+  ENEMY_LOOT_CHANCE,
+  useContactDamage,
+  useEnemy,
+  type EnemyDeathFx,
+  type EnemyDrops,
+} from "../useEnemy";
+
+const DEATH_FX: EnemyDeathFx = {
+  burst: { count: 30, color: ["#b46bff", "#ffffff", "#4a2a7a"], speed: 7, ttl: 0.8, size: 0.1 },
+  light: { color: "#b46bff", intensity: 22 },
+};
+const DROPS: EnemyDrops = { lootChance: ENEMY_LOOT_CHANCE, minY: 0.6 };
+
+/** Wisp — a floating mote of hostile magic. Chases the nearest wizard and
+ * burns on contact. The floor authority runs its brain (brains/wisp.ts);
+ * replicas are driven by the replication framework. */
+export function Wisp({ position, floor, entityId }: { position: Vec3; floor: number; entityId: string }) {
+  const mat = useRef<MeshStandardMaterial>(null);
+  const e = useEnemy({
+    kind: "wisp",
+    entityId,
+    position,
+    floor,
+    deathFx: DEATH_FX,
+    drops: DROPS,
+    hitColor: "#d9a9ff",
+  });
+  const touch = useContactDamage({
+    range: 1.45,
+    damage: 9,
+    floor,
+    push: { force: 5, planar: 0.35, lift: 2 },
+    burst: ["#ff5d5d", "#b46bff"],
+  });
+  const phase = useMemo(() => Math.random() * Math.PI * 2, []);
+  const senses = useMemo(createChaseInput, []);
+  const steering = useMemo(createSteering, []);
+
+  useFrame(({ clock }, dt) => {
+    const b = e.beginFrame(dt);
+    if (!b) return;
+    if (mat.current) mat.current.emissiveIntensity = ENEMY_GLOW.wisp + e.flash.current * 6;
+
+    const t = b.translation();
+    touch(t, dt);
+
+    // Replicas are driven by the net layer; only the authority thinks.
+    if (!e.net.isAuthority) return;
+    e.steer(b, tickWisp(phase, e.sense(senses, b, t, clock.elapsedTime, dt), steering));
+  });
+
+  if (e.dead) return null;
+  return (
+    <RigidBody
+      ref={e.body}
+      position={position}
+      type={e.net.bodyType}
+      colliders={false}
+      gravityScale={0}
+      linearDamping={0.5}
+      enabledRotations={[false, false, false]}
+    >
+      <BallCollider args={[0.42]} mass={2} collisionGroups={ENEMY_GROUPS} />
+      <WispModel materialRef={mat} />
+    </RigidBody>
+  );
+}

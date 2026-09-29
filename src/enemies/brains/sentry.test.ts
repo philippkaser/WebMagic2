@@ -79,4 +79,17 @@ describe("sentry brain", () => {
     expect(sentryYaw(0, HEAD, { x: 5, y: 1, z: 0 }, 1)).toBeCloseTo(Math.PI / 2);
     expect(sentryYaw(0.3, HEAD, { x: 50, y: 1, z: 0 }, 1)).toBe(0.3);
   });
+
+  test("the head turns the short way across the ±π seam", () => {
+    // Facing just shy of +π (behind, slightly right); the player steps to
+    // just past −π (behind, slightly left) — a tiny turn, not a full circle.
+    const facing = Math.PI - 0.05;
+    const player = { x: -Math.sin(0.05), y: 1.05, z: -Math.cos(0.05) }; // atan2 ≈ −π + 0.05
+    const yaw = sentryYaw(facing, HEAD, player, 1);
+    expect(Math.abs(Math.sin(yaw) - Math.sin(Math.PI + 0.05))).toBeLessThan(1e-9);
+    expect(Math.abs(Math.cos(yaw) - Math.cos(Math.PI + 0.05))).toBeLessThan(1e-9);
+    // Halfway there after half the easing: still behind, never swung forward.
+    const half = sentryYaw(facing, HEAD, player, 0.5 / SENTRY.turnRate);
+    expect(Math.cos(half)).toBeLessThan(-0.99);
+  });
 });

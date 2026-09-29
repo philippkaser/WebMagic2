@@ -115,6 +115,12 @@ export function aimDir(from: Vec, to: Vec, out: Vec): Vec {
   return out;
 }
 
+/** An angle folded into [−π, π] — the short way round, for turning toward a
+ * heading without spinning a full circle across the ±π seam. */
+export function wrapAngle(a: number): number {
+  return a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
+}
+
 /** The idle → aggro latch: an enemy wakes once a wizard comes within range
  * and never falls back asleep. */
 export function wakes(aggro: boolean, dist: number, range: number): boolean {

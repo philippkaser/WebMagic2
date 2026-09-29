@@ -1,14 +1,24 @@
 /** The enemy roster as pure data — the single table where every enemy kind
- * and its comparable numbers live, mirroring items/catalog.ts. Component logic
- * (Wisp/Sentry/Boss) reads its baseHealth from here so the tuning isn't a
- * magic number buried in three files; the render/mount layer lives in
- * enemyRegistry.tsx (which imports the components and would cycle if it lived
- * here). Keep this module free of React/component imports for that reason.
+ * and its comparable numbers live, mirroring items/catalog.ts. Keep this
+ * module free of React/component imports: the registry imports the
+ * components, and they import this.
  *
- * Deliberately NOT a behaviour framework: with three enemies, movement and
- * attacks stay as code in each component. When a fourth enemy makes the shared
- * shape obvious, factor the common shell out then — informed by real cases,
- * not guessed from two. */
+ * An enemy is built in four layers; the brain and the model know nothing of
+ * the others, so each can change (or be tested) alone:
+ *
+ *  1. roster (here)      — identity and comparable numbers (baseHealth,
+ *                          singleton, spawn height).
+ *  2. shell (useEnemy.ts) — what every enemy shares: health from this table ×
+ *                          depth × floor rule, the dead latch, hit flash,
+ *                          aggro and knockback, death burst + drops, contact
+ *                          burns, and the replication/damage-routing wiring.
+ *  3. brain (brains/*.ts) — pure AI: steering, state machines, aim and attack
+ *                          choice over plain numbers, unit-tested headless.
+ *  4. model (render/models/enemies.tsx) — presentational meshes, with refs
+ *                          for whatever the behaviour animates.
+ *
+ * A kind component (kinds/*.tsx) is the thin join: shell + brain + model +
+ * its collider. registry.tsx pairs each row below with its component. */
 
 export type EnemyId = "wisp" | "sentry" | "shadow" | "slime" | "boss";
 
@@ -17,7 +27,8 @@ export interface EnemyStats {
   name: string;
   /** One-line role summary for at-a-glance comparison (dev room, docs). */
   desc: string;
-  /** Health at floor 1; scaled by floorScale(floor).enemyHealth at spawn. */
+  /** Health at floor 1; scaled at spawn by floorScale(floor).enemyHealth and
+   * the floor's enemyHealthMult (see useEnemy). */
   baseHealth: number;
   /** Only one may be alive at once (the boss hardcodes its net id + HUD bar). */
   singleton: boolean;

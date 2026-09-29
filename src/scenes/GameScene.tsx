@@ -22,6 +22,7 @@ import { Effects } from "../render/Effects";
 import { useGame } from "../state/gameStore";
 import { generateFloor } from "../world/gen";
 import { omenRules } from "../world/omens";
+import { setFloorRules } from "../game/floorRules";
 import { DungeonFloor } from "./DungeonFloor";
 import { Village } from "./Village";
 
@@ -32,10 +33,15 @@ export function GameScene() {
   const instanceId = useGame((s) => s.instanceId);
 
   const inDungeon = phase === "dungeon" || (phase === "loading" && floor > 0);
-  const layout = useMemo(
-    () => (inDungeon && floorSeed ? generateFloor(floorSeed, floor) : null),
-    [inDungeon, floorSeed, floor],
-  );
+  const layout = useMemo(() => {
+    const next = inDungeon && floorSeed ? generateFloor(floorSeed, floor) : null;
+    // Floor rules (the omen's bends) must be live BEFORE the floor's enemies
+    // render — they read enemyHealthMult as they initialize — so they're
+    // installed here, with the layout, rather than in a mount effect (which
+    // runs after the children). Idempotent, so a re-render is harmless.
+    setFloorRules(next ? omenRules(next.omen) : {});
+    return next;
+  }, [inDungeon, floorSeed, floor]);
   const controlsEnabled = phase === "village" || phase === "dungeon";
   // The Weightless Hour (and any future omen) bends the world's gravity.
   const gravityMult = (layout && omenRules(layout.omen).gravityMult) ?? 1;

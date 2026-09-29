@@ -1,15 +1,19 @@
 import type { ReactNode } from "react";
 import type { Vec3 } from "../world/types";
-import { Boss } from "./Warden";
-import { Sentry, Shadow, Slime, Wisp } from "./kinds";
+import { Sentry } from "./kinds/Sentry";
+import { Shadow } from "./kinds/Shadow";
+import { Slime } from "./kinds/Slime";
+import { Warden } from "./kinds/Warden";
+import { Wisp } from "./kinds/Wisp";
 import { ENEMY_STATS, getEnemyStats, type EnemyId, type EnemyStats } from "./roster";
 
-/** The mount layer over the enemy roster: pairs each data entry in
- * enemyStats.ts with how to render an instance. Both the dungeon floor and the
- * dev-room spawner go through this, so adding an enemy is (1) a row in
- * ENEMY_STATS and (2) a renderer here — no bespoke switch statements anywhere
- * downstream. Behaviour/tuning stay in the components and the stats table; this
- * file is identity + JSX only. */
+/** The mount layer over the enemy roster: pairs each data entry in roster.ts
+ * with how to render an instance. The dungeon floor (regular enemies and the
+ * boss alike), runtime spawns and the dev-room spawner all go through this,
+ * so adding an enemy is (1) a row in ENEMY_STATS and (2) a renderer here — no
+ * bespoke switch statements anywhere downstream. Behaviour and tuning stay in
+ * the kind components, their brains and the roster; this file is identity +
+ * JSX only. */
 
 export type { EnemyId, EnemyStats };
 export { ENEMY_STATS, getEnemyStats };
@@ -38,7 +42,8 @@ const RENDERERS: Record<EnemyId, RenderFn> = {
   slime: ({ entityId, pos, floor, generation, onDeath }) => (
     <Slime entityId={entityId} position={pos} floor={floor} generation={generation} onDeath={onDeath} />
   ),
-  boss: ({ pos, floor, onDeath }) => <Boss position={pos} floor={floor} onDeath={onDeath} />,
+  // A singleton: the Warden always replicates as "boss", whatever id it's given.
+  boss: ({ pos, floor, onDeath }) => <Warden position={pos} floor={floor} onDeath={onDeath} />,
 };
 
 export interface EnemyDef extends EnemyStats {

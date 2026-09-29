@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { aimDir, blendFactor, blendVelocity, wakes } from "./common";
+import { aimDir, blendFactor, blendVelocity, wakes, wrapAngle } from "./common";
 
 describe("brain helpers", () => {
   test("blendFactor is 0 for no time and approaches 1 as time grows", () => {
@@ -31,6 +31,16 @@ describe("brain helpers", () => {
     expect(out.z).toBeCloseTo(0);
     aimDir({ x: 2, y: 2, z: 2 }, { x: 2, y: 2, z: 2 }, out);
     expect(out).toEqual({ x: 0, y: 0, z: 0 });
+  });
+
+  test("wrapAngle folds into [−π, π] without changing the direction", () => {
+    for (const a of [0, 1, -1, 3.5, -3.5, 10, -10, 7 * Math.PI]) {
+      const w = wrapAngle(a);
+      expect(w).toBeGreaterThanOrEqual(-Math.PI);
+      expect(w).toBeLessThanOrEqual(Math.PI);
+      expect(Math.cos(w)).toBeCloseTo(Math.cos(a), 10);
+      expect(Math.sin(w)).toBeCloseTo(Math.sin(a), 10);
+    }
   });
 
   test("wakes latches: in range wakes, out of range keeps the current state", () => {

@@ -3,16 +3,15 @@ import { useEffect } from "react";
 import { Color, Fog } from "three";
 import { playOmen, startAmbient, stopAmbient, type AmbientMood } from "../audio/sound";
 import { gameEvents } from "../core/events";
-import { resetFloorRules, setFloorRules } from "../game/floorRules";
 import { getBiomeDef } from "../world/biomes";
-import { getOmenDef, omenGenMods, omenRules } from "../world/omens";
+import { getOmenDef, omenGenMods } from "../world/omens";
 import type { BiomeId, FloorLayout } from "../world/types";
 
 /** How a floor FEELS, applied while it's mounted: the biome's fog, backdrop
- * and ambient drone; the omen's rule bends (game/floorRules.ts) and its
- * arrival whisper. The layout decides WHAT is on the floor; this decides the
- * mood it's seen and heard in. Everything here is undone on unmount, so the
- * village (and the next floor) always start from neutral. */
+ * and ambient drone, and the omen's arrival whisper. The layout decides WHAT
+ * is on the floor; this decides the mood it's seen and heard in. (The omen's
+ * rule bends are installed by GameScene alongside the layout, before any
+ * enemy renders.) Everything here is undone on unmount. */
 
 /** Each band hums in its own key. */
 const BIOME_MOODS: Record<BiomeId, AmbientMood> = {
@@ -45,7 +44,6 @@ export function useFloorAtmosphere(layout: FloorLayout): void {
     scene.fog = new Fog(fog.color, fog.near, fog.far);
     scene.background = new Color(biome.background);
     startAmbient("dungeon", BIOME_MOODS[layout.biome]);
-    setFloorRules(omenRules(layout.omen));
 
     let omenTimer: ReturnType<typeof setTimeout> | null = null;
     if (layout.omen) {
@@ -59,7 +57,6 @@ export function useFloorAtmosphere(layout: FloorLayout): void {
       if (omenTimer !== null) clearTimeout(omenTimer);
       scene.fog = null;
       stopAmbient();
-      resetFloorRules();
     };
   }, [scene, layout]);
 }
