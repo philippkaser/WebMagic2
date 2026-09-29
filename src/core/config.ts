@@ -27,9 +27,6 @@ export const PLAYER = {
 
 export const DUNGEON = {
   maxFloor: 100,
-  /** @deprecated Checkpoints were replaced by run rules (run/rules.ts); kept
-   * only until the generator refactor lands. */
-  checkpointInterval: 5,
   baseSize: 36,
   sizePerFloor: 1.5,
   maxSize: 64,
