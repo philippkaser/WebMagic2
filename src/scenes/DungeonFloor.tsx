@@ -13,6 +13,7 @@ import { resetNetEntities, setExpectedEntities } from "../net/entities";
 import { useNet } from "../net/netStore";
 import { PlayerController } from "../player/PlayerController";
 import { getTextures } from "../render/textures";
+import { floorsUntilExit } from "../run/rules";
 import { useGame } from "../state/gameStore";
 import { Breakable, Portal, Torch, TreasurePedestal } from "../world/props";
 import { Trap } from "../world/traps";
@@ -37,6 +38,7 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
   const gl = useThree((s) => s.gl);
   const camera = useThree((s) => s.camera);
   const [bossAlive, setBossAlive] = useState(layout.boss !== null);
+  const floorsOwed = useGame((s) => floorsUntilExit(s.run?.floorsPlayed ?? 0));
 
   useEffect(() => {
     scene.fog = new Fog("#070409", 9, 50);
@@ -73,9 +75,9 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
   }, [layout.spawn]);
 
   const descend = () => void useGame.getState().descend();
-  const bankAndLeave = () => {
+  const walkHome = () => {
     document.exitPointerLock();
-    useGame.getState().bankAndLeave();
+    useGame.getState().walkHome();
   };
 
   return (
@@ -126,16 +128,20 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
         locked={bossAlive}
         lockedPrompt="Sealed — the Warden of the Deep still lives"
       />
-      {layout.leave && (
-        <Portal
-          position={layout.leave}
-          color="#ffd44f"
-          prompt="E — Return to the village (bank your loot)"
-          onUse={bankAndLeave}
-          locked={bossAlive}
-          lockedPrompt="Sealed — the Warden of the Deep still lives"
-        />
-      )}
+      {/* The way home: on every floor, but sealed until this run has paid
+          the Tithe of Five (run/rules.ts). */}
+      <Portal
+        position={layout.leave}
+        color="#ffd44f"
+        prompt="E — Walk home (everything you carry becomes safe)"
+        onUse={walkHome}
+        locked={bossAlive || floorsOwed > 0}
+        lockedPrompt={
+          bossAlive
+            ? "Sealed — the Warden of the Deep still lives"
+            : `The way home is sealed — the deep wants ${floorsOwed} more floor${floorsOwed === 1 ? "" : "s"}`
+        }
+      />
 
       <PlayerController spawn={spawnPoint} />
     </group>

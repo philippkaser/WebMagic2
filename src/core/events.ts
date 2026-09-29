@@ -36,6 +36,17 @@ export interface GameEvents extends Record<string, unknown> {
   /** Player dropped items from the inventory — the loot system spawns real
    * orbs at their feet (decoupled: the store can't import presentation). */
   dropItems: { defId: string; qty: number };
+  /** The local wizard just died, still standing on its floor. `items`/`gold`
+   * are what the death took; on a `shared` floor the encounters layer raises
+   * a grave with them (the store can't import presentation or net systems). */
+  wizardFell: {
+    items: { id: string; qty: number }[];
+    gold: number;
+    killerId: string | null;
+    shared: boolean;
+  };
+  /** A lore rune was read (HUD shows the fragment). */
+  loreRead: { fragmentId: string };
 }
 
 export const gameEvents = new Emitter<GameEvents>();

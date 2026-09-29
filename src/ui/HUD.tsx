@@ -4,7 +4,7 @@ import { gameEvents } from "../core/events";
 import { computeStats, resolveItem } from "../items/catalog";
 import type { GearSlot, ItemStack } from "../items/types";
 import { floorPlayerCount, selectIsHost, useNet } from "../net/netStore";
-import { entryFloors, useGame } from "../state/gameStore";
+import { resonanceOf, useGame } from "../state/gameStore";
 import { DevRoom } from "./DevRoom";
 import { InventoryScreen } from "./InventoryScreen";
 import { ITEM_ICONS, iconOf } from "./itemInfo";
@@ -61,7 +61,7 @@ export function HUD() {
       {playing && overlay === "devroom" && import.meta.env.DEV && <DevRoom />}
       {playing && overlay !== "none" && overlay !== "devroom" && <InventoryScreen mode={overlay} />}
       {phase === "menu" && <MenuOverlay />}
-      {phase === "select" && <SelectOverlay />}
+      {phase === "weighing" && <SelectOverlay />}
       {phase === "dead" && <DeathOverlay />}
       {phase === "loading" && (
         <Overlay>
@@ -78,7 +78,7 @@ function PlayHud() {
   const phase = useGame((s) => s.phase);
   const floor = useGame((s) => s.floor);
   const instanceId = useGame((s) => s.instanceId);
-  const checkpoint = useGame((s) => s.checkpoint);
+  const deepest = useGame((s) => s.deepest);
   const health = useGame((s) => s.health);
   const mana = useGame((s) => s.mana);
   const equipment = useGame((s) => s.equipment);
@@ -114,7 +114,7 @@ function PlayHud() {
         ) : (
           <div style={{ fontSize: 18, color: "#e8dfc8" }}>THE VILLAGE</div>
         )}
-        <div style={styles.dim}>checkpoint: floor {checkpoint}</div>
+        <div style={styles.dim}>deepest: {deepest > 0 ? `floor ${deepest}` : "—"}</div>
         <div style={{ ...styles.dim, color: netMode === "online" ? "#4fd08a" : "#7d7566" }}>
           {netMode === "online"
             ? `◉ online${amHost && phase === "dungeon" ? " · host" : ""}`
@@ -391,9 +391,10 @@ function MenuOverlay() {
 }
 
 function SelectOverlay() {
-  const checkpoint = useGame((s) => s.checkpoint);
+  const equipment = useGame((s) => s.equipment);
   const enterDungeon = useGame((s) => s.enterDungeon);
-  const closePortalSelect = useGame((s) => s.closePortalSelect);
+  const closePortalSelect = useGame((s) => s.closeWeighing);
+  const { entryFloor } = resonanceOf(equipment);
   return (
     <Overlay>
       <div style={styles.subtitle}>CHOOSE YOUR ENTRY FLOOR</div>
@@ -401,11 +402,9 @@ function SelectOverlay() {
         You may begin from any checkpoint you have banked at.
       </p>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", maxWidth: 480 }}>
-        {entryFloors(checkpoint).map((f) => (
-          <button key={f} style={styles.button} onClick={() => void enterDungeon(f)}>
-            FLOOR {f}
-          </button>
-        ))}
+        <button style={styles.button} onClick={() => void enterDungeon()}>
+          FLOOR {entryFloor}
+        </button>
       </div>
       <button style={{ ...styles.button, marginTop: 22, borderColor: "#5a5560", color: "#9a94a0" }} onClick={closePortalSelect}>
         STAY IN THE VILLAGE

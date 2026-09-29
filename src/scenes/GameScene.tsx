@@ -6,6 +6,9 @@ import { BlackHoles } from "../weapons/singularity";
 import { CastingSystem } from "../weapons/CastingSystem";
 import { Projectiles } from "../weapons/projectiles";
 import { GRAVITY } from "../core/config";
+import { Graves } from "../encounters/Graves";
+import { PactSystem } from "../encounters/PactSystem";
+import { PresenceSystem } from "../encounters/PresenceSystem";
 import { DynamicLights } from "../fx/DynamicLights";
 import { FxSystems } from "../fx/Particles";
 import { ConsumableSystem } from "../game/ConsumableSystem";
@@ -61,6 +64,9 @@ export function GameScene() {
           <PeerBodies />
         </Physics>
         <RemoteWizards />
+        <Graves />
+        <PactSystem />
+        <PresenceSystem />
         <NetSystems />
         <FxSystems />
         <DynamicLights />

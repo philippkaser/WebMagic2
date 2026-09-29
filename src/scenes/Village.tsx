@@ -52,9 +52,9 @@ export function Village() {
     };
   }, [scene]);
 
-  const openSelect = () => {
+  const openWeighing = () => {
     document.exitPointerLock();
-    useGame.getState().openPortalSelect();
+    useGame.getState().openWeighing();
   };
 
   return (
@@ -114,8 +114,8 @@ export function Village() {
       <Portal
         position={[0, 0, 0]}
         color="#46ffd0"
-        prompt="E — Enter the dungeon"
-        onUse={openSelect}
+        prompt="E — Step into the Weighing Gate"
+        onUse={openWeighing}
       />
 
       {/* Dev test bench: a slab behind the spawn that opens the DevRoom panel,
