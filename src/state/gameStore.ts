@@ -20,6 +20,7 @@ import {
   type SlotRef,
 } from "../items/inventory";
 import type { DerivedStats, Equipment } from "../items/types";
+import type { DamageSource } from "../game/damageSource";
 import { netBus } from "../net/bus";
 import { useNet } from "../net/netStore";
 import { session } from "../net/session";
@@ -98,7 +99,9 @@ export interface GameState {
   useBelt(index: number): void;
   buyItem(defId: string): void;
   setOverlay(overlay: Overlay): void;
-  takeDamage(amount: number): void;
+  /** Hurt the local wizard. `source` attributes the hit (kill credit, grave
+   * chests); omitted = the dungeon itself. */
+  takeDamage(amount: number, source?: DamageSource): void;
   heal(amount: number): void;
   spendMana(cost: number): boolean;
   regenMana(dt: number): void;
@@ -445,7 +448,9 @@ export const useGame = create<GameState>((set, get) => ({
     if (get().overlay !== overlay) set({ overlay, prompt: overlay === "none" ? get().prompt : null });
   },
 
-  takeDamage: (amount) => {
+  // `source` is recorded by the encounters layer (kill credit); the store only
+  // decides health.
+  takeDamage: (amount, _source) => {
     const state = get();
     if (state.phase !== "dungeon" && state.phase !== "village") return;
     if (import.meta.env.DEV && devInvuln) return; // dev-room god mode

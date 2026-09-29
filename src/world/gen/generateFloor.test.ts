@@ -29,11 +29,11 @@ describe("generateFloor", () => {
     }
   });
 
-  test("checkpoint floors have a leave portal, others do not", () => {
-    expect(generateFloor(99, 5).leave).not.toBeNull();
-    expect(generateFloor(99, 10).leave).not.toBeNull();
-    expect(generateFloor(99, 3).leave).toBeNull();
-    expect(generateFloor(99, 7).leave).toBeNull();
+  test("every floor has a way home, reachable from the spawn", () => {
+    for (const floor of [1, 3, 5, 7, 10, 23]) {
+      const layout = generateFloor(99, floor);
+      expect(isReachable(layout, layout.spawn, layout.leave)).toBe(true);
+    }
   });
 
   test("merged wall colliders cover every visible wall cube", () => {

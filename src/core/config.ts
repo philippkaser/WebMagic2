@@ -34,7 +34,15 @@ export const DUNGEON = {
   maxPlayersPerFloor: 4,
 } as const;
 
-/** Rapier collision group indices (see interactionGroups). */
+/** Rapier collision group indices (see interactionGroups).
+ *
+ * Wizard-vs-wizard combat needs three extra bits, because a spell must be able
+ * to hit "that particular other wizard" without hitting its own caster:
+ *  - LOCAL_PLAYER: set only on this client's own capsule (alongside PLAYER).
+ *  - PEER_HOSTILE: set on a peer's collision capsule while they're hostile —
+ *    our own bolts filter on it, so they burst on enemies of ours only.
+ *  - HOSTILE_SPELL: a hostile peer's replayed bolt; collides with LOCAL_PLAYER
+ *    (us) but never with peer capsules (so it can't burst on its caster). */
 export const GROUPS = {
   WORLD: 0,
   PLAYER: 1,
@@ -42,6 +50,18 @@ export const GROUPS = {
   FRIENDLY_PROJECTILE: 3,
   ENEMY_PROJECTILE: 4,
   PROP: 5,
+  LOCAL_PLAYER: 6,
+  PEER_HOSTILE: 7,
+  HOSTILE_SPELL: 8,
+} as const;
+
+/** Wizard-vs-wizard tuning. Damage between hostile wizards is decided on the
+ * VICTIM's machine (your health is always yours), scaled down so a duel is a
+ * fight, not a one-shot. */
+export const PVP = {
+  damageMult: 0.55,
+  /** A hostile hit within this window names the killer on death. */
+  killCreditSeconds: 12,
 } as const;
 
 /** Difficulty scaling per floor. */

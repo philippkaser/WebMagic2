@@ -103,11 +103,8 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
   const boss: Vec3 | null = isBossFloor ? tileToWorld(exitCenter, size, 1.8) : null;
   const treasure = tileToWorld(center(treasureRoom), size, 0);
   const isCheckpoint = floor % DUNGEON.checkpointInterval === 0;
-  let leave: Vec3 | null = null;
-  if (isCheckpoint) {
-    const lx = Math.min(exitTile[0] + 2, exitRoom.x + exitRoom.w - 2);
-    leave = tileToWorld([lx, exitTile[1]], size, 0);
-  }
+  const lx = Math.min(exitTile[0] + 2, exitRoom.x + exitRoom.w - 2);
+  const leave: Vec3 = tileToWorld([lx, exitTile[1]], size, 0);
 
   // ── Torches along room walls ───────────────────────────────────────────────
   const torches: Vec3[] = [];
@@ -186,6 +183,9 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     size,
     tiles,
     rooms,
+    biome: "catacombs",
+    omen: null,
+    lore: [],
     spawn,
     exit,
     leave,

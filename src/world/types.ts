@@ -11,6 +11,21 @@ export type PropKind = "crate" | "barrel" | "pot";
 export type EnemyKind = "wisp" | "sentry" | "shadow" | "slime";
 export type TrapKind = "spike" | "dart" | "warp";
 
+/** Depth bands with their own look, light and monster mix (world/biomes.ts). */
+export type BiomeId = "catacombs" | "drowned" | "forge" | "crystal" | "hollow";
+
+/** Seeded floor moods that bend the rules (world/omens.ts). */
+export type OmenId = "weightless" | "lightless" | "crimson" | "manatide" | "volatile" | "teeming";
+
+/** A readable lore rune carved into a room wall. */
+export interface LoreSpawn {
+  pos: Vec3;
+  /** Yaw (radians) the rune faces — into the room, away from its wall. */
+  facing: number;
+  /** Fragment id from world/lore.ts. */
+  fragmentId: string;
+}
+
 export interface PropSpawn {
   kind: PropKind;
   pos: Vec3;
@@ -40,10 +55,17 @@ export interface FloorLayout {
   /** size*size grid, 1 = walkable floor, 0 = solid. */
   tiles: Uint8Array;
   rooms: Rect[];
+  /** Depth band this floor belongs to — palette, textures, monster mix. */
+  biome: BiomeId;
+  /** This floor's omen, if the dungeon is in a mood (rolled from the seed). */
+  omen: OmenId | null;
+  /** Readable lore runes. */
+  lore: LoreSpawn[];
   spawn: Vec3;
   exit: Vec3;
-  /** Present only on checkpoint floors (5, 10, 15, …). */
-  leave: Vec3 | null;
+  /** The way home, beside the exit. Every floor has one; whether it OPENS
+   * for a given wizard is a run rule (floors played), not a layout rule. */
+  leave: Vec3;
   /** Guaranteed loot pedestal. */
   treasure: Vec3;
   /** Boss arena spawn — present every 10th floor. The floor's portals stay
