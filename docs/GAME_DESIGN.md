@@ -362,10 +362,12 @@ naturally the current systems support it.
 
 ### Enemies (the roster is meant to grow)
 
-Current: **Wisp** (floating chaser, burns on contact) and **Sentry** (fixed
-crystal turret, lobs dodgeable fire bolts with line-of-sight), plus the
-**Warden of the Deep** boss. Adding an enemy is deliberately cheap — a new
-component in `combat/` plus a spawn kind in the generator. Ideas:
+Current: **Wisp** (floating chaser, burns on contact), **Sentry** (fixed
+crystal turret, lobs dodgeable fire bolts with line-of-sight), **Shadow**
+(prowls a ring around you, then lunges from the dark), **Slime** (hops, and
+splits into smaller, faster slimes), plus the **Warden of the Deep** boss.
+Adding an enemy is deliberately cheap — a roster row, a pure brain, a model
+and a small kind file (see ARCHITECTURE.md "Extending"). Ideas:
 
 - **Charger / brute** — melee rusher that telegraphs and can be sidestepped.
 - **Shielder** — must be flanked or blast-knocked to break its guard.
