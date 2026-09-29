@@ -1,6 +1,26 @@
 import { describe, expect, test } from "bun:test";
 import { TILE } from "../../core/config";
+import { biomeForFloor } from "../biomes";
+import { getLoreFragment } from "../lore";
+import { rollOmen } from "../omens";
+import type { FloorLayout, OmenId, Rect, Vec3 } from "../types";
 import { generateFloor, isReachable } from ".";
+import { SOLID, worldToTile } from "./grid";
+
+/** Spread of seeds × depths used by the "holds on every floor" tests. */
+function sampleFloors(count: number): FloorLayout[] {
+  const out: FloorLayout[] = [];
+  for (let i = 0; i < count; i++) {
+    const seed = (i * 2654435761 + 12345) >>> 0;
+    out.push(generateFloor(seed, 1 + ((i * 7) % 100)));
+  }
+  return out;
+}
+
+function roomAt(layout: FloorLayout, p: Vec3): Rect | undefined {
+  const [x, y] = worldToTile(p, layout.size);
+  return layout.rooms.find((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+}
 
 describe("generateFloor", () => {
   test("is deterministic for the same seed", () => {
@@ -10,6 +30,24 @@ describe("generateFloor", () => {
     expect(a.spawn).toEqual(b.spawn);
     expect(a.enemies).toEqual(b.enemies);
     expect(a.props).toEqual(b.props);
+  });
+
+  test("is fully deterministic, biome, omen and lore included", () => {
+    for (const [seed, floor] of [
+      [1, 1],
+      [987654321, 12],
+      [42, 27],
+      [4242, 40],
+      [31337, 66],
+      [0xdeadbeef, 100],
+    ]) {
+      const a = generateFloor(seed, floor);
+      const b = generateFloor(seed, floor);
+      expect(a).toEqual(b);
+      expect(a.biome).toBe(b.biome);
+      expect(a.omen).toBe(b.omen);
+      expect(a.lore).toEqual(b.lore);
+    }
   });
 
   test("differs across seeds", () => {
@@ -25,14 +63,47 @@ describe("generateFloor", () => {
       const layout = generateFloor(seed, floor);
       expect(isReachable(layout, layout.spawn, layout.exit)).toBe(true);
       expect(isReachable(layout, layout.spawn, layout.treasure)).toBe(true);
-      if (layout.leave) expect(isReachable(layout, layout.spawn, layout.leave)).toBe(true);
+      expect(isReachable(layout, layout.spawn, layout.leave)).toBe(true);
     }
   });
 
-  test("every floor has a way home, reachable from the spawn", () => {
-    for (const floor of [1, 3, 5, 7, 10, 23]) {
+  test("exit, way home, treasure and every lore rune are reachable at every depth", () => {
+    for (const layout of sampleFloors(160)) {
+      expect(isReachable(layout, layout.spawn, layout.exit)).toBe(true);
+      expect(isReachable(layout, layout.spawn, layout.leave)).toBe(true);
+      expect(isReachable(layout, layout.spawn, layout.treasure)).toBe(true);
+      if (layout.boss) expect(isReachable(layout, layout.spawn, layout.boss)).toBe(true);
+      for (const rune of layout.lore) {
+        expect(isReachable(layout, layout.spawn, rune.pos)).toBe(true);
+      }
+    }
+  });
+
+  test("every floor has a way home beside the exit, reachable from the spawn", () => {
+    for (const floor of [1, 3, 5, 7, 10, 23, 50, 99, 100]) {
       const layout = generateFloor(99, floor);
       expect(isReachable(layout, layout.spawn, layout.leave)).toBe(true);
+      expect(layout.leave).not.toEqual(layout.exit);
+      expect(roomAt(layout, layout.leave)).toBe(roomAt(layout, layout.exit));
+    }
+  });
+
+  test("biome follows the depth band and the omen matches its own roll", () => {
+    for (const layout of sampleFloors(60)) {
+      expect(layout.biome).toBe(biomeForFloor(layout.floor));
+      expect(layout.omen).toBe(rollOmen(layout.seed, layout.floor));
+    }
+  });
+
+  test("lore runes carry known fragments valid for the floor's depth", () => {
+    for (const layout of sampleFloors(200)) {
+      const ids = layout.lore.map((l) => l.fragmentId);
+      expect(new Set(ids).size).toBe(ids.length);
+      for (const id of ids) {
+        const f = getLoreFragment(id);
+        expect(layout.floor).toBeGreaterThanOrEqual(f.minFloor);
+        expect(layout.floor).toBeLessThanOrEqual(f.maxFloor ?? 100);
+      }
     }
   });
 
@@ -48,6 +119,21 @@ describe("generateFloor", () => {
           Math.abs(wz - box.center[2]) <= box.half[2] - TILE / 2 + 1e-6,
       );
       expect(covered).toBe(true);
+    }
+  });
+
+  test("torches always have rock behind them", () => {
+    for (const layout of sampleFloors(60)) {
+      expect(layout.torches.length).toBeGreaterThanOrEqual(2);
+      for (const [x, , z] of layout.torches) {
+        // The torch is pushed from its tile centre toward its wall; one more
+        // step that way must be solid.
+        const [tx, ty] = worldToTile([x, 0, z], layout.size);
+        const centerZ = (ty - layout.size / 2) * TILE + TILE / 2;
+        const wallY = z < centerZ ? ty - 1 : ty + 1;
+        expect(layout.tiles[ty * layout.size + tx]).toBe(1);
+        expect(layout.tiles[wallY * layout.size + tx]).toBe(SOLID);
+      }
     }
   });
 
@@ -85,6 +171,29 @@ describe("generateFloor", () => {
     expect(seen.has("slime")).toBe(true);
   });
 
+  test("biome enemy weights reshape the mix but never introduce a kind early", () => {
+    // Shadows (from floor 8) are the Hollow's favourites, sentries the Forge's.
+    const tally = (floors: number[]) => {
+      const n: Record<string, number> = {};
+      let total = 0;
+      for (let i = 0; i < 80; i++) {
+        const layout = generateFloor((i * 2654435761 + 99) >>> 0, floors[i % floors.length]);
+        for (const e of layout.enemies) {
+          n[e.kind] = (n[e.kind] ?? 0) + 1;
+          total++;
+        }
+      }
+      return (kind: string) => (n[kind] ?? 0) / total;
+    };
+    const forge = tally([22, 26, 28, 33]);
+    const hollow = tally([62, 70, 81, 93]);
+    expect(forge("sentry")).toBeGreaterThan(hollow("sentry"));
+    expect(hollow("shadow")).toBeGreaterThan(forge("shadow"));
+    for (const seed of [7, 99, 4242]) {
+      expect(generateFloor(seed, 2).enemies.every((e) => e.kind === "wisp")).toBe(true);
+    }
+  });
+
   test("traps are placed deterministically and scale with depth", () => {
     const a = generateFloor(2024, 6);
     const b = generateFloor(2024, 6);
@@ -94,16 +203,28 @@ describe("generateFloor", () => {
     expect(deep.traps.length).toBeGreaterThanOrEqual(a.traps.length);
   });
 
-  test("warp traps never spawn on checkpoint floors", () => {
-    for (const floor of [5, 10, 15, 20]) {
-      const layout = generateFloor(31337, floor);
-      expect(layout.traps.some((t) => t.kind === "warp")).toBe(false);
+  test("warp traps never spawn in the exit room (the way home stands there)", () => {
+    let warps = 0;
+    for (const layout of sampleFloors(300)) {
+      const exitRoom = roomAt(layout, layout.exit);
+      expect(exitRoom).toBeDefined();
+      for (const trap of layout.traps) {
+        if (trap.kind !== "warp") continue;
+        warps++;
+        expect(roomAt(layout, trap.pos)).not.toBe(exitRoom);
+      }
     }
-    // ...but do appear somewhere across non-checkpoint floors.
+    expect(warps).toBeGreaterThan(0);
+  });
+
+  test("warps may appear on any depth — there are no checkpoint floors to protect", () => {
     let sawWarp = false;
-    for (let f = 1; f < 20 && !sawWarp; f++) {
-      if (f % 5 === 0) continue;
-      if (generateFloor(31337, f).traps.some((t) => t.kind === "warp")) sawWarp = true;
+    for (let i = 0; i < 40 && !sawWarp; i++) {
+      for (const floor of [5, 15, 25]) {
+        if (generateFloor((i * 2654435761) >>> 0, floor).traps.some((t) => t.kind === "warp")) {
+          sawWarp = true;
+        }
+      }
     }
     expect(sawWarp).toBe(true);
   });
@@ -115,5 +236,46 @@ describe("generateFloor", () => {
     expect(layout.enemies).toEqual(fresh.enemies);
     expect(layout.props).toEqual(fresh.props);
     expect(layout.tiles).toEqual(fresh.tiles);
+  });
+
+  test("floors under every omen still generate valid layouts", () => {
+    const found = new Map<OmenId, FloorLayout>();
+    for (let i = 0; i < 400 && found.size < 6; i++) {
+      const seed = (i * 2654435761 + 5) >>> 0;
+      const floor = 6 + (i % 60);
+      const omen = rollOmen(seed, floor);
+      if (omen && !found.has(omen)) found.set(omen, generateFloor(seed, floor));
+    }
+    expect(found.size).toBe(6);
+    for (const layout of found.values()) {
+      expect(layout.omen).not.toBeNull();
+      expect(isReachable(layout, layout.spawn, layout.exit)).toBe(true);
+      expect(isReachable(layout, layout.spawn, layout.leave)).toBe(true);
+      expect(isReachable(layout, layout.spawn, layout.treasure)).toBe(true);
+      expect(layout.torches.length).toBeGreaterThanOrEqual(2);
+      expect(layout.props.length).toBeGreaterThan(0);
+      expect(layout.enemies.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("omens bend generation: lightless dims, volatile stocks barrels, teeming crowds", () => {
+    const avg = (omen: OmenId | null, pick: (l: FloorLayout) => number) => {
+      let sum = 0;
+      let n = 0;
+      for (let i = 0; i < 3000 && n < 25; i++) {
+        const seed = (i * 2654435761 + 77) >>> 0;
+        const floor = 12 + (i % 8);
+        if (rollOmen(seed, floor) !== omen) continue;
+        sum += pick(generateFloor(seed, floor));
+        n++;
+      }
+      expect(n).toBe(25);
+      return sum / n;
+    };
+    const barrelShare = (l: FloorLayout) =>
+      l.props.filter((p) => p.kind === "barrel").length / Math.max(1, l.props.length);
+    expect(avg("lightless", (l) => l.torches.length)).toBeLessThan(avg(null, (l) => l.torches.length) * 0.6);
+    expect(avg("volatile", barrelShare)).toBeGreaterThan(avg(null, barrelShare) + 0.2);
+    expect(avg("teeming", (l) => l.enemies.length)).toBeGreaterThan(avg(null, (l) => l.enemies.length) * 1.25);
   });
 });
