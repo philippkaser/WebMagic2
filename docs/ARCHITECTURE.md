@@ -6,14 +6,20 @@ The client is a Vite + React Three Fiber app. Systems are deliberately split
 into three tiers so the game can grow into a large online title without
 rewrites:
 
-1. **Pure logic** (no DOM, no three.js, no physics): `core/`, `world/dungeonGen`,
-   `net/matchmaking`, `items/`. Deterministic, unit-tested with `bun test`,
+1. **Pure logic** (no DOM, no three.js, no physics): `core/`, `run/`,
+   `items/`, `world/gen/` + `world/{biomes,omens,lore}`, `net/matchmaking`,
+   `enemies/brains/` + `enemies/roster`, `weapons/{spellCatalog,allegiance,
+   castMessage,hits}`, `encounters/{pacts,graveRules,killCredit}`,
+   `render/textures/painters/`. Deterministic, unit-tested with `bun test`,
    and safe to run on a server.
 2. **Runtime state**: the zustand store (`state/gameStore.ts`) owns the game
    flow (menu → village → dungeon → death), equipment and run-loot rules.
    Frame-hot data (player position/velocity) lives outside React in
    `game/player-state.ts`; cross-system lookups (what can be hit, what can be
-   shoved) live in `game/registry.ts`.
+   shoved) live in `game/registry.ts`. Small import-free **seams** in `game/`
+   let layers talk without depending on each other: `hostility.ts` (what is
+   that wizard to me?), `floorRules.ts` (how does this floor bend the
+   numbers?), `damageSource.ts` (who hurt me?).
 3. **Presentation**: R3F components render whatever tiers 1–2 decide. They
    register themselves into the registries on mount and clean up on unmount.
 
@@ -32,18 +38,24 @@ personal loot drops) uses `Math.random`.
 
 ## Multiplayer design
 
-### The floor-instance rule
+### The encounter rule
 
-`net/matchmaking.ts#FloorDirectory` implements the core social mechanic:
+`net/matchmaking.ts#FloorDirectory` decides who meets whom:
 
-- Entering floor N joins the **oldest instance of N with a free slot**
-  (max 4 players). You land in the same generated world as its occupants.
-- If all instances are full (or none exist), a **new instance with a new
-  seed** is created — which the next entrant can then join, and so on.
-- Instances are garbage-collected when the last player leaves.
+- Only wizards on the **same floor** can ever share an instance (max 4).
+- Entering floor N **rolls an encounter**: success joins an existing,
+  occupied instance of N with room (fate picks which); failure — or nobody
+  else on N — opens a **private instance with a fresh seed**, which a later
+  entrant may walk into.
+- The odds follow a **tension clock** (`core/config.ts ENCOUNTERS`): 12% on
+  the first floor, +12% for every floor walked alone, capped at 60%, reset by
+  a meeting. Rare, but every quiet floor makes the next one feel loaded.
+- **Reconnects bypass the roll**: the relay remembers each account's last
+  instance and passes `preferInstanceId`, so a dropped wizard returns to the
+  same world, not a fresh one.
+- `ENCOUNTER_CHANCE=1` on the server forces meetings (local testing).
 
-This is a plain class with injected seed/clock functions — the unit tests in
-`matchmaking.test.ts` are the spec.
+Pure class with injected seed/clock/dice — `matchmaking.test.ts` is the spec.
 
 ### The networking stack (src/net/)
 
@@ -179,7 +191,7 @@ always known the starter-gear ids):
    account). The token comes back with the save and is kept client-side
    (`webmagic.token.v1`). Real auth (email/OAuth) later replaces only the
    token-minting step. (`server/accounts.ts`)
-2. **Saves** — checkpoint + the full banked inventory (equipment, Q/E belt,
+2. **Saves** — deepest floor + the full banked inventory (equipment, Q/E belt,
    5-slot bag, 30-slot chest, gold) live server-side; the client's
    localStorage is a cache of the last `loggedIn`/`saved` payload (and the
    full save of record when playing offline). Storage is a debounced JSON
@@ -202,14 +214,17 @@ always known the starter-gear ids):
      credit comes from the shared `sellValue` table (no client-set prices).
    - `gamble` — Orb of Fortune; the SERVER rolls the item with the shared
      pure `rollGamble`, so outcomes can't be fished for client-side.
-   - `escape` — feather exit from ANY dungeon floor; same provenance as
-     `bank`, does not advance the checkpoint, and only succeeds if a Feather
-     of Safe Passage was provably owned and is now spent.
-4. **Progression** — floor entry is validated against the account: floor 1,
-   anything ≤ your banked checkpoint, one floor deeper than where you are
-   (descending), or your current run floor (reconnect resume). Banking only
-   counts on a checkpoint floor you are *actually matchmade into* — the
-   relay reads the floor from the directory, not from the client.
+   - `escape` — feather exit from ANY dungeon floor, even before the tithe;
+     same provenance as `bank`, never counts as a deepest, and only succeeds
+     if a Feather of Safe Passage was provably owned and is now spent.
+4. **Runs** — floor entry is validated against the account (run/rules.ts,
+   shared with the client): a **fresh** run (`enterFloor { fresh: true }`)
+   always lands where the account's *banked* gear resonates, whatever floor
+   was asked for; a continuing run may only re-enter its floor (reconnect)
+   or go exactly one deeper (portal, warp rune), counting `runFloors`.
+   Anything else forfeits the unfinished run (like dying) and starts fresh.
+   Banking (`bank`) is refused until `runFloors ≥ 5` — the Tithe of Five —
+   and records the floor you are *actually matchmade into* as `deepest`.
 
 Known limits, in honesty order: the floor host is still a client, so a
 cheating **host** can attest bogus grants for its floor-mates (fix: headless
@@ -217,7 +232,9 @@ server-side hosts, the path above); item *stats* are client-computed (fix
 follows server hosts); player-dropped items (`dropOrb` → pickup grant) leave
 the dropper's server-side ownership intact, so a hacked dropper could keep
 what an honest taker was granted — a small dupe window in the same trust
-class as host attestation (closed by the same fix); device tokens are bearer
+class as host attestation (closed by the same fix); grave chests ride the
+same path (the dying wizard declares its losses, the host grants each
+plundered copy); device tokens are bearer
 secrets in localStorage (fine for a foundation, replaced by real auth). Rate
 limiting and hit/pickup sanitization already run server-/authority-side.
 
@@ -234,13 +251,90 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   dirty entities); clients interpolate peers and predict themselves (the
   controller is already client-authoritative-shaped for easy reconciliation).
 - **Interest management** is almost free: an instance *is* the interest set.
-- Persistence (bank, checkpoints) moves from localStorage to the account
+- Persistence (bank, run progress) moves from localStorage to the account
   service; `state/persistence.ts` is the single seam.
+
+## Run rules (`run/`)
+
+- **Item levels** ride inside item ids (`defId[+affix][@level]`,
+  `items/itemId.ts`), so the opaque-id provenance stack needed no changes.
+  Gear rolls at its drop floor ±1; ids without a level are legacy items whose
+  level falls back to their catalog `minFloor`. `items/power.ts` turns levels
+  into strength: a staff's level multiplies spell damage, other gear adds a
+  health ward. Networked hit caps follow depth (`weapons/hits.ts`).
+- **The Weighing** (`run/rules.ts`): gear level = mean item level over the
+  four gear slots (empty = 0); entry floor = round(level × 0.85), clamped to
+  1…95. Client and server call the same function.
+- **The Tithe of Five**: every floor generates a way-home portal beside the
+  exit (`FloorLayout.leave`); it opens once `run.floorsPlayed ≥ 5`.
+- **Outcomes** (`run/outcomes.ts`): `bankKit` marks everything carried safe;
+  `settleDeath` strips this run's loot (a lost run staff falls back to the
+  starter) and returns what was lost, by id, for the death screen and graves.
+
+## Wizard vs wizard (`encounters/`)
+
+- **Hostility seam** (`game/hostility.ts`): `relationOf(id)` →
+  stranger | ally | oathbreaker. Pacts install the resolver; everything else
+  (weapons, peer capsules, name tags, presence) only asks.
+- **Pacts** (`encounters/pacts.ts`, pure): wary → offered/invited → bound;
+  one-sided breaks mark an oathbreaker; offers lapse after 20 s.
+  `PactSystem.tsx` sends `p:pact` messages addressed to one wizard and binds
+  the F key.
+- **Victim-side damage**: a peer's cast replays on every machine
+  (`weapons/CastingSystem.tsx`, with the caster's staff and a sanitized stats
+  subset; the origin must be within 6 m of the caster's known pose). On the
+  victim's machine, `weapons/allegiance.ts#localBlastEffect` decides: hostile
+  wizard → damage × `PVP.damageMult` (0.55); own or allied magic → no damage.
+  Your health stays yours, like every other hit.
+- **Collision groups** (`core/config.ts GROUPS`): our capsule is
+  PLAYER + LOCAL_PLAYER; a hostile peer's capsule adds PEER_HOSTILE and
+  accepts FRIENDLY_PROJECTILE (our bolts burst on them visually); a hostile
+  peer's replayed bolt is HOSTILE_SPELL (+ FRIENDLY_PROJECTILE for walls) and
+  filters only LOCAL_PLAYER among wizards — it can hit us, never its caster.
+- **Kill credit** (`encounters/killCredit.ts`): the last other wizard whose
+  magic hurt us within 12 s is named on death.
+- **Graves** (`encounters/graveRules.ts` pure + `Graves.tsx`): on a shared
+  floor the store emits `wizardFell` while still on the floor; the dying
+  client asks the host (`h:graveDrop`) to raise a grave with its losses; the
+  host validates (known ids, stack caps, near the wizard) and announces it
+  (`a:graveSpawned`). Plunder is `h:lootGrave` → `a:graveLooted` with
+  index-stable picks, and the host attests each copy exactly like an orb
+  pickup. Graves ride the world sync (`registerSyncProvider("graves")`) and
+  survive host migration (every client holds the list).
+- **Presence** (`PresenceSystem.tsx`): arrivals are announced without names;
+  a hostile wizard within 24 m makes your heartbeat audible; name tags only
+  show within 16 m (or always, for allies, who also wear a halo).
+
+## Floor mood: biomes, omens, lore
+
+- `world/biomes.ts`: five depth bands with fog, backdrop, ambient light,
+  torch color, surface ids and enemy weight multipliers; the generator reads
+  the monster mix, `scenes/floorAtmosphere.ts` and `DungeonFloor` the rest.
+- `world/omens.ts`: ~28% of floors (never floor 1) roll an omen on their own
+  RNG stream (so layouts stay stable). Omens carry `FloorRules` bends
+  (gravity, enemy damage/speed/health, loot/gold, mana, explosion radius) and
+  generation knobs (torches, fog, barrels, enemy count). **Rules are
+  installed by GameScene together with the layout, during render**, because
+  enemies read `enemyHealthMult` as they initialize.
+- `world/lore.ts` + `world/gen/lorePlacement.ts`: ~55% of floors carve a
+  rune (own RNG stream); `world/loreRunes.tsx` makes it readable, and
+  `state/codex.ts` remembers what was read (localStorage — lore is personal,
+  not loot).
 
 ## Physics & combat
 
 - Rapier via `@react-three/rapier`. Collision groups (`core/config.ts#GROUPS`)
-  keep friendly fire, enemy fire, props and the player interacting correctly.
+  keep friendly fire, enemy fire, props, the player — and hostile wizards —
+  interacting correctly.
+- **Enemies** (`enemies/`): `roster.ts` (data) → `useEnemy.ts` (the shared
+  shell: health from roster × depth × floor rule, death FX and drops, hit
+  routing, local contact damage) → a pure brain in `brains/` (unit-tested
+  steering/state machines over plain vectors) → a presentational model in
+  `render/models/enemies.tsx`. Each kind in `kinds/` is just that wiring.
+- **Spells** (`weapons/`): `spellCatalog.ts` is the data (kind + numbers;
+  tooltips are derived from them), `castKinds.ts` implements each kind,
+  `projectiles.tsx`/`explosions.ts`/`singularity.tsx` do the physics. Void
+  seeds are owned: a Collapse only implodes its caster's seeds.
 - The player is a **dynamic capsule** (not kinematic) so the world can push
   back: enemy hits, barrel explosions and force blasts all shove the player.
   Movement is velocity-shaping: exponential ground acceleration, additive air
@@ -254,9 +348,13 @@ limiting and hit/pickup sanitization already run server-/authority-side.
 ## Rendering
 
 - **Zero binary assets**: all textures are painted onto 64×64 canvases at
-  startup (bricks, slabs, planks, ceramic…), each with a normal map derived
-  from its height field via Sobel — chunky pixels that still catch light.
-  `NearestFilter` everywhere.
+  startup by pure painters (`render/textures/painters/`), each with a normal
+  map derived from its height field via Sobel — chunky pixels that still
+  catch light. Some surfaces add an **emissive map** (magma cracks, crystal
+  veins, bone runes) or a **roughness map** (wet stone that glints).
+  `getSurface(kind)` returns the maps plus the material settings they were
+  tuned under. `NearestFilter` everywhere. Models live in `render/models/`
+  as presentational components; behaviour stays in world/enemies code.
 - **Walls are one instanced draw call**; their physics colliders are
   greedy-merged rectangles (tested to cover every wall tile), so collider
   count stays low as floors grow.
@@ -289,11 +387,17 @@ limiting and hit/pickup sanitization already run server-/authority-side.
 | New staff/amulet/cloak/boots | `items/catalog.ts` (data only) |
 | New consumable | `items/catalog.ts` (`consumable` effect + `maxStack`); add to `items/economy.ts#MERCHANT_STOCK` to sell it |
 | New enchantment affix | `items/affixes.ts` (data only — drops, display, banking, selling follow) |
+| Depth scaling of gear | `items/power.ts` |
+| Run rules (entry depth, floors before exit) | `run/rules.ts` (shared client + server) |
+| Encounter frequency | `core/config.ts#ENCOUNTERS` |
 | Economy tuning (prices, gold drops) | `items/economy.ts` (the one balance sheet, shared client + server) |
-| New spell | `combat/abilities.ts` + reference it from a staff |
-| New enemy | component in `combat/enemies.tsx` + spawn kind in `world/dungeonGen.ts` |
-| New prop | `world/props.tsx` SPECS + generator prop table |
-| New floor biome | new painters in `render/textures.ts`, swap by floor range in `DungeonFloor` |
+| New spell | a row in `weapons/spellCatalog.ts` (+ a kind in `weapons/castKinds.ts` if it's a new shape); reference it from a staff |
+| New enemy | row in `enemies/roster.ts`, brain in `enemies/brains/`, model in `render/models/enemies.tsx`, kind in `enemies/kinds/`, renderer in `enemies/registry.tsx`, spawn weight in `world/gen/population.ts` |
+| New prop | `world/props.tsx` spec + `render/models/PropModels.tsx` + generator prop table |
+| New biome | row in `world/biomes.ts` + surfaces in `render/textures/painters/` (`kinds.ts`) + a drone in `scenes/floorAtmosphere.ts` |
+| New omen | row in `world/omens.ts` (rules via `game/floorRules.ts`) |
+| New lore | a fragment in `world/lore.ts` |
 | New networked entity | `useNetBody({ id, body, … })` — snapshots, interpolation, late-join, migration are automatic |
 | New networked message | `hostEvent` / `hostCommand` / `peerMessage` in the owning module — zero server changes |
 | New late-join state | `registerSyncProvider(key, { collect, apply })` |
+| New HUD widget / overlay | a file in `ui/hud/` or `ui/overlays/` + one line (see `ui/HUD.tsx`) |

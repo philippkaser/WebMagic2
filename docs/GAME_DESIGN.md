@@ -25,15 +25,18 @@ and harder than the last.
 The emotional loop we are chasing:
 
 - **Greed vs. fear.** Every floor you descend makes you richer and stronger,
-  but **death in the dungeon takes everything you gathered on that run.** You
-  can only bank your loot and exit at checkpoint floors (every 5th). The
-  question "one more floor, or turn back?" should be a genuine, tense choice.
+  but **death in the dungeon takes everything you gathered on that run.** The
+  deep only lets you go home after five floors; after that, every floor's
+  way-home portal is open, and the question "one more floor, or turn back?"
+  should be a genuine, tense choice.
 - **Mastery of movement and aim.** Combat rewards positioning, timing, and
   clever use of physics — not just clicking. A skilled wizard flows through a
   room; a clumsy one gets cornered.
-- **Serendipitous multiplayer.** You might round a corner on floor 3 and find
-  another real wizard already fighting there. No lobby, no matchmaking menu —
-  the world just quietly has other people in it.
+- **Serendipitous, uneasy multiplayer.** Now and then the deep lets another
+  real wizard onto your floor. You don't know who, or where — only that
+  someone is there. Swear a pact and fight together, or kill them for what
+  they carry. No lobby, no matchmaking menu — the world just, occasionally,
+  has someone else in it.
 
 ### Design pillars (use these to settle arguments)
 
@@ -194,8 +197,8 @@ sheet):
 | --- | --- | --- |
 | Weak Healing Draught | +40 health | ~a third of an early banked run |
 | Weak Mana Draught | +60 mana | slightly cheaper than healing |
-| **Feather of Safe Passage** | exit the dungeon from ANY floor, banking your run loot — without advancing your checkpoint | ~two banked early runs; insurance you feel |
-| **Orb of Fortune** (65g) | random GEAR rolled a couple floors past your checkpoint, ~45% enchanted | the gold sink: gambling IS affix hunting |
+| **Feather of Safe Passage** | exit the dungeon from ANY floor — even before the tithe of five is paid — banking your run loot | ~two banked early runs; insurance you feel |
+| **Orb of Fortune** (65g) | random GEAR rolled a couple floors past the deepest floor you've walked home from, ~45% enchanted | the gold sink: gambling IS affix hunting (and a way to nudge your resonance deeper) |
 
 Online, every trade is server-validated: purchases against the shared price
 table, sales against provable ownership, and the Orb of Fortune is rolled BY
@@ -218,34 +221,63 @@ an item id with a suffix (`"void_staff+keen"`), so the whole provenance /
 banking / trading stack handles rarities with zero server changes — see
 ARCHITECTURE.md. Adding an affix is one entry in `items/affixes.ts`.
 
+### Item levels
+
+Every piece of gear carries an **item level** — the depth it was found at
+(±1; boss drops a little deeper). A staff's level multiplies its spell
+damage; every other piece adds a **health ward**. So gear found deep keeps
+you roughly on par with deep monsters, and an empty slot is a real weakness.
+Item levels are shown everywhere an item is ("Lv 12").
+
 ### The run structure & the central risk
 
 - **100 floors**, each harder (`floorScale` ramps enemy health, damage, and
-  count with depth).
-- **You can only leave the dungeon at checkpoint floors — every 5th (5, 10,
-  15, …).** A checkpoint floor has a golden portal that banks your loot and
-  returns you to the village. Banked checkpoints become new **entry points**:
-  next run you can start from your deepest banked checkpoint instead of floor 1.
-- **Death is the whole tension.** If you die in the dungeon, **all loot
-  gathered during that run is lost** — you respawn in the village with only
-  what you had banked. (Implementation: items carry a `runLoot` flag;
-  banking clears it, death strips everything still flagged.)
+  count with depth), in five **biomes** (below).
+- **The Weighing.** The village portal reads your gear: your **gear level**
+  is the mean item level of the four gear slots (empty slots count as zero).
+  It casts you to the floor that level belongs at (≈ 0.85 × gear level). You
+  never pick a floor — dress deeper to go deeper, strip down to go shallower.
+- **The Tithe of Five.** Every floor has a golden **way-home portal** beside
+  its exit, sealed until your run has played five floors. From your fifth
+  floor on, any way home banks everything you carry and returns you to the
+  village. The server enforces it.
+- **Death is the whole tension.** Die before you get home and **all loot
+  gathered during that run is lost** — gear you brought from home survives.
+  Alone, the dungeon keeps it. On a shared floor it stays behind in a
+  **grave chest** that anyone may plunder.
 - **Bosses every 10th floor.** The **Warden of the Deep** holds the exit room
-  and **seals both portals until it dies.** It has four attack patterns (aimed
-  volley, projectile ring, charge, telegraphed slam shockwave), an enrage
-  phase below half health, heavy knockback resistance, and guaranteed rich
-  drops for the whole party.
+  and **seals both portals until it dies.**
 
-### The signature multiplayer mechanic
+### Omens
 
-Entering floor *N* drops you into a **shared instance** of that floor if one
-has room (**max 4 wizards per floor**). Walk down from floor 1 → the floors
-you pass through are freshly generated for you, but when you reach a floor
-where others are already playing, **you join their instance** and see the same
-world. If every instance of that floor is full, a brand-new instance with a
-fresh seed is created — which the *next* wizard can then join, and so on. This
-is the "you might just run into someone" fantasy, implemented as pure
-matchmaking logic (`net/matchmaking.ts`).
+About a quarter of floors (never the first) are in a **mood**, rolled from
+the floor seed so everyone on the floor shares it, and announced shortly
+after arrival: **the Weightless Hour** (low gravity — blast-jumping gets
+silly), **the Lightless Vigil** (few torches, close fog), **the Crimson
+Omen** (angrier monsters, richer loot), **the Mana Tide**, **the Tinderbox**
+(barrels everywhere, bigger blasts), **the Teeming** (more, frailer
+monsters). Surprise is part of the charm: you never quite know what the
+next floor will be.
+
+### The signature multiplayer mechanic: rare encounters
+
+- **Only wizards on the same floor can meet**, and they rarely do. Entering
+  a floor rolls an encounter; the odds rise with every floor you walk alone
+  (12% → 60%) and reset when you meet someone. Most floors are yours alone,
+  but none is guaranteed to be.
+- **Presence, not names.** When someone arrives you feel "a presence" — no
+  name, no marker. An eye on the HUD opens and burns redder as a stranger
+  closes in, and your heartbeat becomes audible. Names only appear over heads
+  within ~16 m.
+- **Fight or swear a pact.** Every stranger is hostile by default: your
+  spells hurt each other (at 55% strength, decided on the victim's machine).
+  Stand close and press **F** to offer a pact; if they accept, your magic
+  passes harmlessly between you and they wear a green halo. Pacts can be
+  broken at any moment; the betrayed wizard sees an **oathbreaker** marked in
+  red for the rest of the floor.
+- **Graves.** A wizard who dies on a shared floor leaves a grave holding
+  exactly what the death took from them. The killer — or anyone — can
+  plunder it (E), and what they take is theirs to lose again.
 
 ### Gameplay feel checklist (what "good" means here)
 
@@ -272,12 +304,37 @@ ringed with torches. Through the portal is the descent.
 Wizards go down for the classic reasons — **glory, fame, and riches** — but
 the deepest myth, the thing that drives the boldest, is that **god waits at
 the bottom of the hundredth floor.** Nobody has proven it. Everybody who's
-tried is dead or turned back at a checkpoint.
+tried is dead or turned back at the tithe of five.
 
 The dungeon is not neutral: it *keeps* what the dead were carrying. That's the
 in-fiction justification for the roguelike loot-loss — the dungeon is greedy,
-and every checkpoint is a moment of "the dungeon lets you leave, this once,
-with what you've earned."
+and the Tithe of Five is its price for letting you leave: give it five floors
+and it lets you go, this once, with what you've earned. But it is jealous and
+slow — where other living wizards stand witness, it can't swallow the dead
+fast enough, and a grave remains.
+
+### The written lore
+
+The mythos is now carved into the walls (`world/lore.ts`, ~35 fragments —
+journal scraps, Founders' inscriptions, graffiti, oaths) and collected in the
+**codex** (C). What the fragments collectively know:
+
+- **The Weighing Gate** weighs what a wizard carries and casts them where
+  their weight belongs. **The Tithe of Five** is the deep's price for
+  release.
+- Wizards rarely meet below; the deep keeps them apart and **listens** when
+  it lets them meet. Pacts sworn below bind the staff, not the heart.
+- **Wisps** are the drifting light of wizards who died alone; **sentries**
+  are the Founders' wardstones, which no longer know friend from foe;
+  **shadows** are what an oathbreaker leaves behind; **slimes** are the
+  dungeon's slow digestion; **the Warden** is the jailer, the Founders' last
+  ward.
+- The depth bands: **the Catacombs** (the builders' tombs), **the Drowned
+  Halls** (where the sea got in), **the Ember Forge** (where the Founders
+  forged their wards), **the Crystal Deep** (the dungeon's singing bones),
+  **the Hollow** (near the bottom: silence, pale light — something listens).
+- The deepest carvings hint at the secret: the Founders built the village
+  not to get something out, but to **keep something in**.
 
 ### Tone
 
@@ -291,7 +348,7 @@ oppressive. The contrast between the two is the mood.
 - What actually is at floor 100 — a literal god, a lie, a mirror?
 - The enemies are "hostile magic" (wisps, warding sentries, the Warden). Are
   they the dungeon's immune system? Failed wizards? This is unwritten.
-- Checkpoints as a "mercy" — whose mercy?
+- The Tithe of Five — whose price, and what does the deep do with the floors?
 
 None of this is on rails yet. The mechanics imply a story; the story text is
 mostly still to be written.
@@ -334,7 +391,7 @@ own boss, enemy mix, and environmental gimmick.
 - Set bonuses across slots.
 - More consumables (scrolls, bombs, buffs) — each is one catalog entry; the
   belt/merchant/provenance plumbing is already generic.
-- Richer merchant stock at higher checkpoints; more gold sinks beyond the
+- Richer merchant stock for deeper wizards; more gold sinks beyond the
   Orb of Fortune (shrine offerings? stash upgrades?).
 
 ### Systems
@@ -412,24 +469,29 @@ The whole codebase is organized around a few deliberate bets:
 
 ```
 src/
-  core/      config (all tuning numbers), seeded RNG, typed event bus
-  world/     dungeon generator (pure + tested), props, layout types
-  items/     item catalog, loot tables, loot-orb manager
-  net/       protocol, matchmaking, transport, session, synced clock,
-             snapshot buffers, typed channels, declarative entity
-             replication, wizard pose replication, remote-wizard
-             rendering, reactive net store
-  state/     zustand game store, save persistence
-  player/    input, first-person controller, staff viewmodel
-  combat/    abilities, projectiles, explosions, enemies, boss, combat system
-  fx/        pooled particle system, dynamic light pool
-  audio/     procedural WebAudio synth (sfx + ambient)
-  render/    procedural pixel textures (+normal maps), post-processing
-  scenes/    village, dungeon floor, canvas composition
-  ui/        HUD and overlays
-  game/      cross-system registries (hittables, dynamic bodies, interactions,
-             player-state, enemy target selection)
-server/      Bun WebSocket game server (relay + matchmaking + static host)
+  core/        config (all tuning numbers), seeded RNG, typed event bus
+  run/         run rules: the Weighing, the Tithe of Five, bank/death outcomes
+  items/       catalog, item levels & power, affixes, loot tables, economy,
+               inventory grids, loot-orb manager
+  world/       gen/ (staged pure generator), biomes, omens, lore, props, traps
+  enemies/     roster data, shared enemy shell, pure brains/, kinds/
+  weapons/     spell catalog, cast kinds, projectiles, explosions, singularity,
+               allegiance (who may hurt whom), cast replay
+  encounters/  pacts, presence sense, kill credit, grave chests
+  net/         protocol, matchmaking (tension clock), transport, session,
+               synced clock, snapshots, channels, entity replication,
+               wizard poses, remote wizards + collision capsules
+  state/       zustand game store, codex, save persistence
+  player/      input, first-person controller, staff viewmodel
+  fx/          pooled particle system, dynamic light pool
+  audio/       procedural WebAudio synth (sfx, biome drones)
+  render/      textures/ (pure painters + normal/emissive/roughness maps),
+               models/ (every mesh), post-processing
+  scenes/      village, dungeon floor, floor atmosphere, canvas composition
+  ui/          hud/ widgets, overlays/, inventory/, codex/, devroom/
+  game/        cross-system registries and seams (hostility, floor rules,
+               damage sources, interactions, player-state, targeting)
+server/        Bun WebSocket game server (relay, accounts, provenance)
 ```
 
 **Cross-system glue** avoids React prop-drilling and expensive scene queries:
@@ -493,8 +555,13 @@ table, and the extension guide.
 
 **Working today:**
 
-- Full single-player loop: village → choose entry floor → descend → fight →
-  loot → checkpoint-bank or die-and-lose.
+- Full loop: village → the Weighing casts you by gear level → descend →
+  fight → loot → walk home after five floors, or die and lose (or, on a
+  shared floor, leave a grave).
+- Item levels (gear potency and health wards scale with depth), gear-level
+  entry, the Tithe of Five — enforced server-side.
+- Five depth biomes (own surfaces, light, drone and monster mix), six omens,
+  ~35 lore carvings and the codex.
 - 100-floor procedural generation with difficulty scaling and boss floors.
 - Movement, all four equipment slots, the full ability/enemy/boss/prop set
   listed above, procedural audio, the dynamic-light look.
@@ -503,23 +570,26 @@ table, and the extension guide.
   gold drops with auto-pickup, enchanted (affixed) gear, the village merchant
   (buying AND selling), the Orb of Fortune gamble, potions, and the Feather
   of Safe Passage.
-- Real online multiplayer: shared instances, matchmaking, remote wizards with
-  name tags, host-authority replication of enemies/props/boss/loot, late-join
-  sync, host migration.
-- Persistence of checkpoint progress, banked inventory + gold, player name,
+- Real online multiplayer: rare same-floor encounters (tension clock),
+  presence sense, pacts and wizard-vs-wizard combat, kill credit, grave
+  chests, host-authority replication of enemies/props/boss/loot/graves,
+  late-join sync, host migration, reconnect into the same instance.
+- Persistence of the deepest floor, banked inventory + gold, player name,
   and the shadows quality toggle (localStorage cache; server-authoritative
   online — including gold provenance and merchant purchase validation).
 
 **Not done yet / known gaps:**
 
-- Reconnect is basic: a dropped socket auto-reconnects and re-enters your
-  floor (resyncing state), but you may land in a fresh instance if the old
-  one emptied; no session resume tokens yet.
+- Reconnect returns you to your old instance while it exists (it's gone if
+  everyone left); no session resume tokens yet.
 - No full server authority (host is a client; a laggy/cheating host affects
   its instance).
-- Sparse content breadth: 4 staffs, ~a dozen items, 2 enemy types + 1 boss.
-- No persistent meta-progression beyond checkpoints and banked gear.
-- Lore is implied by mechanics but largely unwritten.
+- Content breadth is still modest: 7 staffs, ~20 items, 4 enemy types + 1
+  boss (the same Warden in every biome).
+- PvP damage is decided on the victim's machine (like all player damage), so
+  a hacked client could ignore it; a cast's origin is sanity-checked against
+  the caster's pose.
+- No persistent meta-progression beyond banked gear, the deepest floor and the codex.
 - Anti-cheat is foundation-level: server-side accounts/saves with
   host-attested item provenance and floor-entry validation exist, but the
   floor host is still a client (a cheating host can vouch for its
@@ -537,9 +607,11 @@ table, and the extension guide.
 | Left / Right click | Staff primary / secondary ability |
 | Space | Jump (double-jump / hover with the right boots) |
 | Shift | Blink-dash (requires Cloak of Blinking) |
-| E | Interact (portals, loot, treasure); otherwise use belt slot 2 |
+| E | Interact (portals, loot, graves, lore carvings); otherwise use belt slot 2 |
+| F | Near another wizard: offer / accept / break a pact |
 | Q | Use belt slot 1 |
 | I (or Tab) | Inventory screen |
+| C | The codex (lore carvings read) |
 | P (or F3) | FPS / frame-time overlay |
 | O (or F4) | Toggle shadows (quality option, off by default) |
 
