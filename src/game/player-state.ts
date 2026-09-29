@@ -18,8 +18,13 @@ export function getPlayerBody(): PhysBody | null {
   return playerBody;
 }
 
-// Dev-only helper for debugging and end-to-end scripts.
+// Dev-only helpers for debugging and end-to-end scripts.
 if (typeof window !== "undefined" && import.meta.env?.DEV) {
+  (window as unknown as Record<string, unknown>).__playerPos = () => [
+    playerPosition.x,
+    playerPosition.y,
+    playerPosition.z,
+  ];
   (window as unknown as Record<string, unknown>).__teleport = (x: number, y: number, z: number) => {
     const body = playerBody as unknown as {
       setTranslation(v: { x: number; y: number; z: number }, wake: boolean): void;

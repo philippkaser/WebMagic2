@@ -87,6 +87,12 @@ netBus.on("peerLeft", ({ playerId }) => {
 netBus.on("assigned", () => resetEncounters());
 netBus.on("leftDungeon", () => resetEncounters());
 
+// Dev-only hook for end-to-end scripts (the F key needs pointer lock).
+if (typeof window !== "undefined" && import.meta.env?.DEV) {
+  (window as unknown as Record<string, unknown>).__pact = (peerId: string) =>
+    apply(peerId, { kind: "press" });
+}
+
 /** Mounted once in the scene: nearest-wizard prompt, the F key, and the
  * lapsing of unanswered offers. */
 export function PactSystem() {

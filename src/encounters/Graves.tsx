@@ -62,6 +62,11 @@ type LiveGrave = GraveRecord & { killerId: string | null };
 
 const useGraves = create<{ graves: LiveGrave[] }>(() => ({ graves: [] }));
 
+// Dev-only inspection for end-to-end scripts.
+if (typeof window !== "undefined" && import.meta.env?.DEV) {
+  (window as unknown as Record<string, unknown>).__graves = () => useGraves.getState().graves;
+}
+
 /** A grave is raised within reach of where its owner actually was. */
 const RAISE_RANGE_SQ = 10 * 10;
 /** Plunder is granted within ~2.4 m of the grave, plus a round trip of slack. */

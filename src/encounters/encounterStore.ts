@@ -34,3 +34,8 @@ export function resetEncounters(): void {
     nearestHostile: null,
   });
 }
+
+// Dev-only inspection for end-to-end scripts.
+if (typeof window !== "undefined" && import.meta.env?.DEV) {
+  (window as unknown as Record<string, unknown>).__relations = () => useEncounters.getState().relations;
+}
