@@ -1,5 +1,5 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Vector3, type Camera } from "three";
 import { playCast } from "../audio/sound";
 import { gameEvents } from "../core/events";
@@ -92,6 +92,24 @@ function castFromStaff(abilityId: string, staff: ItemDef, camera: Camera): numbe
 export function CastingSystem() {
   const { camera } = useThree();
   const cooldown = useRef({ primary: 0, secondary: 0 });
+
+  // Dev-only hook for end-to-end scripts: aim at a world point and cast the
+  // equipped staff's primary/secondary — no pointer lock needed.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const w = window as unknown as Record<string, unknown>;
+    w.__castAt = (x: number, y: number, z: number, which: "primary" | "secondary" = "primary") => {
+      const staff = getItemDef(useGame.getState().equipment.staff.defId);
+      const abilityId = staff[which];
+      if (!abilityId) return false;
+      camera.lookAt(x, y, z);
+      castFromStaff(abilityId, staff, camera);
+      return true;
+    };
+    return () => {
+      delete w.__castAt;
+    };
+  }, [camera]);
 
   useFrame((_, dt) => {
     const cd = cooldown.current;
