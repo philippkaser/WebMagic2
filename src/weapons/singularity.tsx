@@ -1,50 +1,74 @@
 import { useFrame } from "@react-three/fiber";
-import {
-  BallCollider,
-  interactionGroups,
-  RigidBody,
-  type RapierRigidBody,
-} from "@react-three/rapier";
+import { BallCollider, RigidBody, type RapierRigidBody } from "@react-three/rapier";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Group } from "three";
-import { GROUPS } from "../core/config";
 import { addLightSource, removeLightSource, type DynamicLightSource } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
+import type { DamageSource } from "../game/damageSource";
+import { isHostileWizard } from "../game/hostility";
 import { getPlayerBody, playerPosition } from "../game/player-state";
 import { forEachDynamicBody, forEachHittable } from "../game/registry";
 import { isHost } from "../net/netStore";
-import { explode, type DamageTeam } from "./damage";
+import { holePullsLocal, type DamageTeam } from "./allegiance";
+import { explode } from "./explosions";
+import { localWizardId } from "./localWizard";
 import type { ProjectileSpec } from "./projectiles";
 
 /** The Singularity Staff's two-stage weapon. The primary plants slow "void
- * seeds" (a projectile variant); the secondary, Collapse, activates every live
- * seed into a black hole that drags enemies/props/the caster inward for a beat,
- * then implodes for damage.
+ * seeds" (a projectile variant); the secondary, Collapse, activates the
+ * caster's live seeds into black holes that drag enemies/props/wizards inward
+ * for a beat, then implode for damage.
  *
  * Multiplayer: seeds are normal networked projectiles, so peers already see
  * them (cosmetic); the Collapse cast is peer-replayed, so every client
- * collapses its own copies and spawns matching black holes. The inward pull and
- * the implosion damage are host-authoritative (like explosions); the local
- * player is always pulled locally. */
+ * collapses its copies of THAT caster's seeds and spawns matching black holes.
+ * The pull on enemies/props and the implosion's entity damage are
+ * host-authoritative (like explosions). The local wizard is pulled locally by
+ * its own and hostile wizards' holes, and hurt only by hostile ones
+ * (allegiance.ts — the same rule as every blast). */
 
-// ── Void-seed registry — Collapse activates every live seed ──────────────────
+// ── Void-seed registry, keyed by owner ───────────────────────────────────────
+// Every machine holds seeds from several wizards (its own + replays), so a
+// Collapse must only reach its caster's seeds — otherwise a floor-mate's
+// Collapse would detonate the seeds YOU planted.
 
-interface Seed {
-  getPosition(): { x: number; y: number; z: number };
-  collapse(): void;
+/** owner wizard id → (seed projectile id → collapse) */
+const seedsByOwner = new Map<string, Map<number, () => void>>();
+
+function ownerOf(source: DamageSource): string {
+  return source.kind === "wizard" ? source.id : "";
 }
 
-const seeds = new Map<number, Seed>();
-
-/** Collapse all live void seeds (called by the Collapse ability, locally and on
- * peer replay). Collapsing them is what turns the planted seeds into holes. */
-export function activateSingularities(): void {
-  for (const s of [...seeds.values()]) s.collapse();
+function registerSeed(owner: string, id: number, collapse: () => void): void {
+  let mine = seedsByOwner.get(owner);
+  if (!mine) {
+    mine = new Map();
+    seedsByOwner.set(owner, mine);
+  }
+  mine.set(id, collapse);
 }
 
-// Dev-only hook for end-to-end tests (mirrors __game / __fireProjectile).
+function unregisterSeed(owner: string, id: number): void {
+  const mine = seedsByOwner.get(owner);
+  if (!mine) return;
+  mine.delete(id);
+  if (mine.size === 0) seedsByOwner.delete(owner);
+}
+
+/** Collapse every live void seed planted by `owner` (a wizard id) — called by
+ * the Collapse ability, locally with our id and on peer replay with the
+ * caster's. Collapsing them is what turns the planted seeds into holes. */
+export function activateSingularities(owner: string): void {
+  const mine = seedsByOwner.get(owner);
+  if (!mine) return;
+  for (const collapse of [...mine.values()]) collapse();
+}
+
+// Dev-only hook for end-to-end tests (mirrors __game / __fireProjectile):
+// collapses the local wizard's seeds, like pressing Collapse.
 if (typeof window !== "undefined" && import.meta.env?.DEV) {
-  (window as unknown as Record<string, unknown>).__collapse = activateSingularities;
+  (window as unknown as Record<string, unknown>).__collapse = () =>
+    activateSingularities(localWizardId());
 }
 
 // ── Black-hole spawn manager (mounted once, in GameScene) ────────────────────
@@ -54,13 +78,21 @@ interface Hole {
   pos: [number, number, number];
   damage: number;
   team: DamageTeam;
+  /** The seed's caster — who the implosion is credited to, and whether the
+   * hole may tug/hurt the local wizard. */
+  source: DamageSource;
 }
 
 let holeCounter = 1;
 let pushHole: ((h: Hole) => void) | null = null;
 
-function spawnBlackHole(pos: [number, number, number], damage: number, team: DamageTeam): void {
-  pushHole?.({ id: holeCounter++, pos, damage, team });
+function spawnBlackHole(
+  pos: [number, number, number],
+  damage: number,
+  team: DamageTeam,
+  source: DamageSource,
+): void {
+  pushHole?.({ id: holeCounter++, pos, damage, team, source });
 }
 
 export function BlackHoles() {
@@ -102,7 +134,7 @@ export function SingularitySeed({
     const at: [number, number, number] = b
       ? [b.translation().x, b.translation().y, b.translation().z]
       : spec.position;
-    spawnBlackHole(at, spec.damage, spec.team);
+    spawnBlackHole(at, spec.damage, spec.team, spec.source);
     remove(spec.id);
   }, [remove, spec]);
 
@@ -119,25 +151,18 @@ export function SingularitySeed({
       priority: 2,
     });
     light.current = src;
-    seeds.set(spec.id, {
-      getPosition: () =>
-        body.current?.translation() ?? {
-          x: spec.position[0],
-          y: spec.position[1],
-          z: spec.position[2],
-        },
-      collapse,
-    });
+    const owner = ownerOf(spec.source);
+    registerSeed(owner, spec.id, collapse);
     // A seed never activated just fizzles — no free black hole on a timer.
     const expire = setTimeout(() => {
-      seeds.delete(spec.id);
+      unregisterSeed(owner, spec.id);
       remove(spec.id);
     }, 6000);
     return () => {
       clearTimeout(expire);
       removeLightSource(src);
       light.current = null;
-      seeds.delete(spec.id);
+      unregisterSeed(owner, spec.id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -153,13 +178,6 @@ export function SingularitySeed({
     }
   });
 
-  const membership =
-    spec.team === "player" ? GROUPS.FRIENDLY_PROJECTILE : GROUPS.ENEMY_PROJECTILE;
-  const collidesWith =
-    spec.team === "player"
-      ? [GROUPS.WORLD, GROUPS.ENEMY, GROUPS.PROP]
-      : [GROUPS.WORLD, GROUPS.PLAYER, GROUPS.PROP];
-
   return (
     <RigidBody
       ref={body}
@@ -170,11 +188,7 @@ export function SingularitySeed({
       linearDamping={2.4}
       onCollisionEnter={() => body.current?.setLinvel({ x: 0, y: 0, z: 0 }, true)}
     >
-      <BallCollider
-        args={[spec.size]}
-        collisionGroups={interactionGroups(membership, collidesWith)}
-        mass={0.05}
-      />
+      <BallCollider args={[spec.size]} collisionGroups={spec.collisionGroups} mass={0.05} />
       <group ref={swirl} scale={spec.size}>
         <mesh>
           <icosahedronGeometry args={[1, 0]} />
@@ -219,13 +233,15 @@ function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void 
   const implode = useCallback(() => {
     if (imploded.current) return;
     imploded.current = true;
-    // Host does entity damage; replicas replay VFX + local-player damage only.
+    // Host does entity damage; replicas replay VFX + local-player effects
+    // only. The local wizard is hurt only by a hostile caster's implosion.
     explode({
       position: hole.pos,
       radius: BH_RADIUS,
       damage: hole.damage,
       impulse: 15,
       team: hole.team,
+      source: hole.source,
       color: "#b06bff",
       particles: 34,
       light: 30,
@@ -274,13 +290,20 @@ function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void 
       });
     }
 
-    // The caster is physical too — get too close to your own hole and it tugs.
+    // The local wizard is physical too: get too close to your own hole and it
+    // tugs; a hostile wizard's hole drags you toward its implosion. Allies'
+    // holes leave you be.
     const pb = getPlayerBody();
     const pdx = cx - playerPosition.x;
     const pdy = cy - playerPosition.y;
     const pdz = cz - playerPosition.z;
     const pdist = Math.hypot(pdx, pdy, pdz);
-    if (pb && pdist < BH_RADIUS && pdist > 0.3) {
+    if (
+      pb &&
+      pdist < BH_RADIUS &&
+      pdist > 0.3 &&
+      holePullsLocal(hole.team, hole.source, localWizardId(), isHostileWizard)
+    ) {
       const inv = (BH_PULL * (1 - pdist / BH_RADIUS) * dt * 1.4) / pdist;
       pb.applyImpulse({ x: pdx * inv, y: pdy * inv * 0.3, z: pdz * inv }, true);
     }

@@ -7,16 +7,25 @@ import {
 } from "@react-three/rapier";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MeshStandardMaterial, SphereGeometry } from "three";
-import { GROUPS } from "../core/config";
 import {
   addLightSource,
   removeLightSource,
   type DynamicLightSource,
 } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
+import type { DamageSource } from "../game/damageSource";
+import { isHostileWizard } from "../game/hostility";
 import { nearestHittable } from "../game/registry";
+import {
+  defaultSource,
+  PROJECTILE_GROUPS,
+  relationToLocal,
+  type DamageTeam,
+  type LocalRelation,
+} from "./allegiance";
+import { explode } from "./explosions";
+import { localWizardId } from "./localWizard";
 import { SingularitySeed } from "./singularity";
-import { explode, type DamageTeam } from "./damage";
 
 // Shared across all bolts: allocating geometry/material per shot causes GC
 // churn and a shader compile on the first use of each new material instance.
@@ -44,6 +53,13 @@ function boltMaterial(color: string): MeshStandardMaterial {
 export interface ProjectileSpec {
   id: number;
   team: DamageTeam;
+  /** Who cast it — carried into its explosion (death credit, and whether it
+   * may hurt the local wizard) and, for seeds, whose Collapse activates it. */
+  source: DamageSource;
+  /** Rapier interaction groups, decided ONCE at fire time from the caster's
+   * relation to us (allegiance.ts#PROJECTILE_GROUPS): a pact that forms or
+   * breaks mid-flight doesn't retarget bolts already in the air. */
+  collisionGroups: number;
   position: [number, number, number];
   velocity: [number, number, number];
   damage: number;
@@ -63,6 +79,9 @@ export interface ProjectileSpec {
 
 export interface FireOptions {
   team: DamageTeam;
+  /** Our casts: wizardSource(localWizardId()); replayed peer casts:
+   * wizardSource(casterId); monster bolts ENEMY_SOURCE; trap darts WORLD_SOURCE. */
+  source: DamageSource;
   position: [number, number, number];
   velocity: [number, number, number];
   damage: number;
@@ -80,16 +99,35 @@ const MAX_LIVE = 80;
 let nextProjectileId = 1;
 let enqueue: ((spec: ProjectileSpec) => void) | null = null;
 
-// Dev-only hook for end-to-end tests (mirrors __game / __spawnEnemy).
+/** One pre-built mask per relation — interactionGroups packs bits, so build
+ * each once instead of on every shot. */
+function groupsMask(relation: LocalRelation): number {
+  const g = PROJECTILE_GROUPS[relation];
+  return interactionGroups([...g.membership], [...g.filter]);
+}
+const COLLISION_MASKS: Readonly<Record<LocalRelation, number>> = {
+  own: groupsMask("own"),
+  ally: groupsMask("ally"),
+  hostile: groupsMask("hostile"),
+  dungeon: groupsMask("dungeon"),
+};
+
+// Dev-only hook for end-to-end tests (mirrors __game / __spawnEnemy). Scripts
+// may omit `source`; it defaults by team, like explode() does.
 if (typeof window !== "undefined" && import.meta.env?.DEV) {
-  (window as unknown as Record<string, unknown>).__fireProjectile = (o: FireOptions) =>
-    fireProjectile(o);
+  (window as unknown as Record<string, unknown>).__fireProjectile = (
+    o: Omit<FireOptions, "source"> & { source?: DamageSource },
+  ) => fireProjectile({ ...o, source: o.source ?? defaultSource(o.team, localWizardId()) });
 }
 
 export function fireProjectile(opts: FireOptions): void {
-  enqueue?.({
+  if (!enqueue) return;
+  const relation = relationToLocal(opts.team, opts.source, localWizardId(), isHostileWizard);
+  enqueue({
     id: nextProjectileId++,
     team: opts.team,
+    source: opts.source,
+    collisionGroups: COLLISION_MASKS[relation],
     position: opts.position,
     velocity: opts.velocity,
     damage: opts.damage,
@@ -151,6 +189,7 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
       damage: spec.damage,
       impulse: spec.blastImpulse,
       team: spec.team,
+      source: spec.source,
       color: spec.color,
       particles: 14,
       light: 14,
@@ -231,13 +270,6 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
     }
   });
 
-  const membership =
-    spec.team === "player" ? GROUPS.FRIENDLY_PROJECTILE : GROUPS.ENEMY_PROJECTILE;
-  const collidesWith =
-    spec.team === "player"
-      ? [GROUPS.WORLD, GROUPS.ENEMY, GROUPS.PROP]
-      : [GROUPS.WORLD, GROUPS.PLAYER, GROUPS.PROP];
-
   return (
     <RigidBody
       ref={body}
@@ -249,7 +281,7 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
     >
       <BallCollider
         args={[spec.size]}
-        collisionGroups={interactionGroups(membership, collidesWith)}
+        collisionGroups={spec.collisionGroups}
         mass={0.05}
       />
       <mesh geometry={boltGeometry} material={boltMaterial(spec.color)} scale={spec.size} />
