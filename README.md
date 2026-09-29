@@ -31,6 +31,16 @@ Testing encounters locally: two browser windows only meet ~12% of the time by
 design. Start the server with `ENCOUNTER_CHANCE=1 bun run dev:server` to make
 every same-floor entry meet whoever is already there.
 
+End-to-end smoke test (headless Chromium, two wizards: a full solo run, then
+PvP, a pact, a death, a grave and its plunder — including the server honoring
+the plunder):
+
+```sh
+DATA_FILE=/tmp/wm-e2e.json ENCOUNTER_CHANCE=1 bun server/server.ts &
+bunx vite --port 3000 &
+DATA_FILE=/tmp/wm-e2e.json bun run e2e   # CHROMIUM_PATH=… to pick a browser
+```
+
 ## Controls
 
 | Input | Action |

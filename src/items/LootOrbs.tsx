@@ -94,6 +94,20 @@ function announceOrb(defId: string | null, gold: number, pos: Vec3): void {
   });
 }
 
+// Dev-only hook for end-to-end scripts: the host drops a real orb (item or
+// gold) that goes through the normal granted pickup path.
+if (typeof window !== "undefined" && import.meta.env?.DEV) {
+  (window as unknown as Record<string, unknown>).__spawnOrb = (
+    defId: string | null,
+    gold: number,
+    pos: Vec3,
+  ) => {
+    if (!isHost()) return false;
+    announceOrb(defId, gold, pos);
+    return true;
+  };
+}
+
 /** Roll & drop loot at a position. Authority-only — replicas receive the
  * spawn event instead, so exactly one roll happens per kill/break. The
  * floor's omen scales the odds here, once, for every source (callers pass
