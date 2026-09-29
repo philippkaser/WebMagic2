@@ -12,7 +12,7 @@ import {
   type SlotRef,
 } from "../items/inventory";
 import type { GearSlot, ItemStack } from "../items/types";
-import { WizardModel } from "../render/WizardModel";
+import { WizardModel } from "../render/models/WizardModel";
 import { useGame, type Overlay } from "../state/gameStore";
 import { iconOf, statLines } from "./itemInfo";
 

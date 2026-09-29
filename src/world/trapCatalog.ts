@@ -1,7 +1,7 @@
 import type { TrapKind } from "./types";
 
 /** The trap roster as pure data — the single table of what traps exist and
- * how they're tuned, mirroring items/catalog.ts and combat/enemyStats.ts.
+ * how they're tuned, mirroring items/catalog.ts and enemies/roster.ts.
  * Adding a trap is a row here plus a case in world/traps.tsx (its behaviour)
  * and a weight the generator already reads. Kept free of component imports so
  * the generator and the components can both read it without a cycle. */

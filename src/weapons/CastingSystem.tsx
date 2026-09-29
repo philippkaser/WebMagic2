@@ -9,7 +9,7 @@ import { peerStaffId } from "../net/players";
 import { input } from "../player/input";
 import { defaultEquipment } from "../state/persistence";
 import { getStats, useGame } from "../state/gameStore";
-import { getAbility } from "./abilities";
+import { getAbility } from "./spells";
 
 const UP = new Vector3(0, 1, 0);
 
@@ -40,7 +40,7 @@ const peerCast = peerMessage<CastMsg>("cast", (msg, meta) => {
 /** Reads mouse buttons and casts the equipped staff's abilities. Holding a
  * button keeps casting on cooldown — minute-to-minute combat is about aim,
  * mana budgeting and repositioning, not click spam. */
-export function CombatSystem() {
+export function CastingSystem() {
   const { camera } = useThree();
   const cooldownL = useRef(0);
   const cooldownR = useRef(0);

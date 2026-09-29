@@ -15,7 +15,7 @@ import {
 } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
 import { nearestHittable } from "../game/registry";
-import { SingularitySeed } from "./blackhole";
+import { SingularitySeed } from "./singularity";
 import { explode, type DamageTeam } from "./damage";
 
 // Shared across all bolts: allocating geometry/material per shot causes GC

@@ -1,7 +1,7 @@
 import { Vector3 } from "three";
 import { getPlayerBody } from "../game/player-state";
 import type { DerivedStats, ItemDef } from "../items/types";
-import { activateSingularities } from "./blackhole";
+import { activateSingularities } from "./singularity";
 import { explode } from "./damage";
 import { fireProjectile } from "./projectiles";
 

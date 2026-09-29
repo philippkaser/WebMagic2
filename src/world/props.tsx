@@ -12,7 +12,7 @@ import { Group, MeshStandardMaterial, Vector3 } from "three";
 import { playHit, playPortal } from "../audio/sound";
 import { GROUPS } from "../core/config";
 import { Rng, hashSeed } from "../core/rng";
-import { explode, sanitizeHit, type HitData } from "../combat/damage";
+import { explode, sanitizeHit, type HitData } from "../weapons/damage";
 import {
   addLightSource,
   flashLight,

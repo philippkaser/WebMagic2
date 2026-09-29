@@ -9,7 +9,7 @@ import { resetRegistries } from "../game/registry";
 import { PlayerController } from "../player/PlayerController";
 import { getTextures } from "../render/textures";
 import { useGame } from "../state/gameStore";
-import { SpawnedEnemies } from "../combat/SpawnedEnemies";
+import { SpawnedEnemies } from "../enemies/SpawnedEnemies";
 import { DevSlab, DevSpawns } from "../world/devProps";
 import { Breakable, Portal, Torch } from "../world/props";
 import { Merchant, StorageChest } from "../world/villageProps";

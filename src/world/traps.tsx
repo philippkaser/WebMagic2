@@ -3,7 +3,7 @@ import { useRapier } from "@react-three/rapier";
 import { useMemo, useRef } from "react";
 import { Group, MeshStandardMaterial, Vector3 } from "three";
 import { playHit, playPortal } from "../audio/sound";
-import { enemyCast } from "../combat/remoteEffects";
+import { enemyCast } from "../weapons/hostileEffects";
 import { floorScale } from "../core/config";
 import { gameEvents } from "../core/events";
 import { flashLight } from "../fx/DynamicLights";

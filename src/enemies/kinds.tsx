@@ -22,10 +22,10 @@ import { isHost } from "../net/netStore";
 import { useNetBody, type NetBody } from "../net/NetSystems";
 import { combatActive, getStats, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
-import { sanitizeHit, type HitData } from "./damage";
-import { getEnemyStats } from "./enemyStats";
-import { enemyCast } from "./remoteEffects";
-import { spawnEnemy } from "./spawnedEnemyStore";
+import { sanitizeHit, type HitData } from "../weapons/damage";
+import { getEnemyStats } from "./roster";
+import { enemyCast } from "../weapons/hostileEffects";
+import { spawnEnemy } from "./spawnedStore";
 
 const ENEMY_GROUPS = interactionGroups(GROUPS.ENEMY, [
   GROUPS.WORLD,

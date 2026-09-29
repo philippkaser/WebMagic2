@@ -1,11 +1,11 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { getAbility } from "../combat/abilities";
+import { getAbility } from "../weapons/spells";
 import { floorScale, PLAYER } from "../core/config";
 import { allAffixDefs } from "../items/affixes";
 import { allItemDefs, computeStats } from "../items/catalog";
 import { makeItemId } from "../items/itemId";
 import type { GearSlot, ItemDef } from "../items/types";
-import { ENEMY_DEFS, type EnemyDef } from "../combat/enemyRegistry";
+import { ENEMY_DEFS, type EnemyDef } from "../enemies/registry";
 import { TRAP_DEFS, type TrapDef } from "../world/trapCatalog";
 import { useDevRoom } from "../game/devRoom";
 import { playerPosition } from "../game/player-state";

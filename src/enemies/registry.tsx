@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import type { Vec3 } from "../world/types";
-import { Boss } from "./Boss";
-import { Sentry, Shadow, Slime, Wisp } from "./enemies";
-import { ENEMY_STATS, getEnemyStats, type EnemyId, type EnemyStats } from "./enemyStats";
+import { Boss } from "./Warden";
+import { Sentry, Shadow, Slime, Wisp } from "./kinds";
+import { ENEMY_STATS, getEnemyStats, type EnemyId, type EnemyStats } from "./roster";
 
 /** The mount layer over the enemy roster: pairs each data entry in
  * enemyStats.ts with how to render an instance. Both the dungeon floor and the

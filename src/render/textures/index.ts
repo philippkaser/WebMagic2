@@ -4,7 +4,7 @@ import {
   RepeatWrapping,
   SRGBColorSpace,
 } from "three";
-import { Rng, hashSeed } from "../core/rng";
+import { Rng, hashSeed } from "../../core/rng";
 
 /** Procedural pixel-art textures. Every surface in the game is generated at
  * runtime on small canvases (no binary assets): a color map plus a normal map

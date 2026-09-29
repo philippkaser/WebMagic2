@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { TILE } from "../core/config";
-import { generateFloor, isReachable } from "./dungeonGen";
+import { TILE } from "../../core/config";
+import { generateFloor, isReachable } from ".";
 
 describe("generateFloor", () => {
   test("is deterministic for the same seed", () => {

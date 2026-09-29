@@ -1,7 +1,7 @@
 import { useFrame } from "@react-three/fiber";
 import { Fragment, useEffect, useRef } from "react";
 import { Group, MeshStandardMaterial } from "three";
-import { getEnemyDef } from "../combat/enemyRegistry";
+import { getEnemyDef } from "../enemies/registry";
 import { useDevRoom } from "../game/devRoom";
 import { Trap } from "./traps";
 import { offerInteraction } from "../game/interactions";

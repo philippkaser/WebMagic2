@@ -1,7 +1,7 @@
 import { hostEvent } from "../net/channels";
 import { isHost } from "../net/netStore";
 import type { Vec3 } from "../world/types";
-import type { EnemyId } from "./enemyStats";
+import type { EnemyId } from "./roster";
 
 /** Runtime enemy spawns (slime splits today; nests/summoners later). Mirrors
  * items/LootOrbs: the host alone decides to spawn, and announces it as a host

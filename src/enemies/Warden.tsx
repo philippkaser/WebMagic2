@@ -23,9 +23,9 @@ import { SAVE_FEATHER_ID } from "../items/catalog";
 import { dropGold, dropItem, dropLoot } from "../items/LootOrbs";
 import { combatActive, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
-import { useEnemyNet } from "./enemies";
-import { getEnemyStats } from "./enemyStats";
-import { enemyBoom, enemyCast } from "./remoteEffects";
+import { useEnemyNet } from "./kinds";
+import { getEnemyStats } from "./roster";
+import { enemyBoom, enemyCast } from "../weapons/hostileEffects";
 
 const BOSS_GROUPS = interactionGroups(GROUPS.ENEMY, [
   GROUPS.WORLD,

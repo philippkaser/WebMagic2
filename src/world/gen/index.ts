@@ -1,6 +1,6 @@
-import { DUNGEON, TILE, WALL_HEIGHT, floorScale } from "../core/config";
-import { Rng } from "../core/rng";
-import { TRAP_DEFS } from "./trapCatalog";
+import { DUNGEON, TILE, WALL_HEIGHT, floorScale } from "../../core/config";
+import { Rng } from "../../core/rng";
+import { TRAP_DEFS } from "../trapCatalog";
 import type {
   EnemyKind,
   EnemySpawn,
@@ -10,7 +10,7 @@ import type {
   TrapSpawn,
   Vec3,
   WallBox,
-} from "./types";
+} from "../types";
 
 /** Procedural floor generator. Pure and deterministic: the same (seed, floor)
  * pair always yields an identical layout, which is what lets every player in

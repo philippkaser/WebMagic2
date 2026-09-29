@@ -2,9 +2,9 @@ import { Environment, PointerLockControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { Suspense, useMemo } from "react";
-import { BlackHoles } from "../combat/blackhole";
-import { CombatSystem } from "../combat/CombatSystem";
-import { Projectiles } from "../combat/projectiles";
+import { BlackHoles } from "../weapons/singularity";
+import { CastingSystem } from "../weapons/CastingSystem";
+import { Projectiles } from "../weapons/projectiles";
 import { GRAVITY } from "../core/config";
 import { DynamicLights } from "../fx/DynamicLights";
 import { FxSystems } from "../fx/Particles";
@@ -17,7 +17,7 @@ import { RemoteWizards } from "../net/RemoteWizards";
 import { StaffView } from "../player/StaffView";
 import { Effects } from "../render/Effects";
 import { useGame } from "../state/gameStore";
-import { generateFloor } from "../world/dungeonGen";
+import { generateFloor } from "../world/gen";
 import { DungeonFloor } from "./DungeonFloor";
 import { Village } from "./Village";
 
@@ -65,7 +65,7 @@ export function GameScene() {
         <FxSystems />
         <DynamicLights />
         <StaffView />
-        <CombatSystem />
+        <CastingSystem />
         <InteractionSystem />
         <ConsumableSystem />
         {/* Tiny procedural environment map: gives the wet slabs and metal

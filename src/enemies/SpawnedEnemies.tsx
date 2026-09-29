@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { registerSyncProvider } from "../net/entities";
 import { useGame } from "../state/gameStore";
-import { Slime } from "./enemies";
-import { getEnemyDef } from "./enemyRegistry";
-import { despawnSpawned, spawnHandlers, type SpawnedEnemy } from "./spawnedEnemyStore";
+import { Slime } from "./kinds";
+import { getEnemyDef } from "./registry";
+import { despawnSpawned, spawnHandlers, type SpawnedEnemy } from "./spawnedStore";
 
 /** Renders enemies spawned at runtime (slime children today). Wires the store
  * handlers and a late-join sync provider so a joiner mid-fight sees the current

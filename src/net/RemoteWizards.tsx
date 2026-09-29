@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { CanvasTexture, Group, LinearFilter, Sprite, SpriteMaterial } from "three";
 import { hashSeed } from "../core/rng";
 import { getItemDef } from "../items/catalog";
-import { WizardModel } from "../render/WizardModel";
+import { WizardModel } from "../render/models/WizardModel";
 import { netClock } from "./clock";
 import { INTERP_DELAY_MS } from "./entities";
 import { peerIds, peerName, peerStaffId, samplePeer } from "./players";

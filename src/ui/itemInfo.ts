@@ -1,4 +1,4 @@
-import { getAbility } from "../combat/abilities";
+import { getAbility } from "../weapons/spells";
 import { itemPassives, type ResolvedItem } from "../items/catalog";
 import type { ItemDef, Passives, Slot } from "../items/types";
 
@@ -25,7 +25,7 @@ export interface StatLine {
 
 /** Human-readable stat lines for an item, with optional per-stat comparison
  * arrows against what's currently worn in the same slot. Lives in ui/ (not
- * items/) because it reads ability data from combat/, which depends on items/. */
+ * items/) because it reads ability data from weapons/, which depends on items/. */
 export function statLines(item: ResolvedItem, comparedTo?: ResolvedItem | null): StatLine[] {
   const def = item.def;
   const lines: StatLine[] = [];
