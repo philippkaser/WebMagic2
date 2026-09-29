@@ -7,6 +7,7 @@ import { Trap } from "./traps";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { addLightSource, removeLightSource } from "../fx/DynamicLights";
+import { DevSlabModel } from "../render/models/DevSlabModel";
 import { useGame } from "../state/gameStore";
 import type { Vec3 } from "./types";
 
@@ -46,39 +47,7 @@ export function DevSlab({ position }: { position: Vec3 }) {
 
   return (
     <group position={position}>
-      {/* Base */}
-      <mesh position={[0, 0.15, 0]} receiveShadow>
-        <boxGeometry args={[1.8, 0.3, 1.8]} />
-        <meshStandardMaterial color="#2a3a30" roughness={0.85} />
-      </mesh>
-      {/* Slab */}
-      <mesh position={[0, 1.4, 0]} castShadow receiveShadow>
-        <boxGeometry args={[1.4, 2.4, 0.4]} />
-        <meshStandardMaterial color="#1c2620" roughness={0.7} metalness={0.2} />
-      </mesh>
-      {/* Glowing rune face */}
-      <mesh position={[0, 1.55, 0.22]}>
-        <planeGeometry args={[0.9, 1.6]} />
-        <meshStandardMaterial
-          ref={disc}
-          color="#04120a"
-          emissive={DEV_COLOR}
-          emissiveIntensity={1.8}
-          toneMapped={false}
-        />
-      </mesh>
-      {/* Orbiting mote so it reads as "interactive/magical" at a glance */}
-      <group ref={group} position={[0, 2, 0]}>
-        <mesh position={[0.9, 0, 0]}>
-          <octahedronGeometry args={[0.14]} />
-          <meshStandardMaterial
-            color="#0c0c14"
-            emissive={DEV_COLOR}
-            emissiveIntensity={3}
-            toneMapped={false}
-          />
-        </mesh>
-      </group>
+      <DevSlabModel color={DEV_COLOR} faceRef={disc} moteRef={group} />
     </group>
   );
 }

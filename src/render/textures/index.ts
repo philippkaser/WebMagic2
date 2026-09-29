@@ -1,233 +1,189 @@
-import {
-  CanvasTexture,
-  NearestFilter,
-  RepeatWrapping,
-  SRGBColorSpace,
-} from "three";
-import { Rng, hashSeed } from "../../core/rng";
+import type { CanvasTexture } from "three";
+import { toTexture } from "./canvas";
+import type { SurfaceKind, TextureKind } from "./kinds";
+import { heightToNormal, packRoughness } from "./normalMap";
+import type { Painted, SurfaceHints } from "./paint";
+import { paintGlyphAtlas, paintRuneTablet, RUNE_TABLET_SIZE } from "./painters/glyphs";
+import { DEFAULT_NORMAL_STRENGTH, SURFACE_DEFS, paintSurface } from "./painters";
 
 /** Procedural pixel-art textures. Every surface in the game is generated at
  * runtime on small canvases (no binary assets): a color map plus a normal map
- * derived from a height field, so the chunky pixels still catch light. */
+ * derived from a height field, so the chunky pixels still catch light — and,
+ * for the deeper biomes, emissive maps (magma cracks, crystal veins, runes)
+ * and roughness maps (wet stone that glints).
+ *
+ * Layout:
+ *  - kinds.ts         the surface names (a contract with the biome table)
+ *  - paint.ts         pure buffer toolkit painters share
+ *  - painters/        pure painters by family + the SURFACE_DEFS table
+ *  - normalMap.ts     height → Sobel normal map, roughness packing
+ *  - canvas.ts        the only DOM code: buffer → CanvasTexture
+ *  - index.ts (here)  caching and the public API */
 
-export type TextureKind =
-  | "stone" // dungeon walls — rough bricks
-  | "slab" // dungeon floor — big worn slabs
-  | "dark" // ceiling
-  | "planks" // crates
-  | "barrel"
-  | "ceramic" // pots
-  | "dirt"; // village ground
+export type {
+  CeilingSurface,
+  FloorSurface,
+  GroundSurface,
+  PropSurface,
+  SurfaceKind,
+  TextureKind,
+  WallSurface,
+} from "./kinds";
+export {
+  CEILING_SURFACES,
+  FLOOR_SURFACES,
+  GROUND_SURFACES,
+  PROP_SURFACES,
+  SURFACE_KINDS,
+  WALL_SURFACES,
+} from "./kinds";
+export type { SurfaceHints } from "./paint";
 
 export interface TexturePair {
   map: CanvasTexture;
   normalMap: CanvasTexture;
+  /** Only on kinds with self-lit detail (basalt, ashslab, crystal,
+   * crystalslab, bone, boneslab). Needs a non-black `emissive` on the
+   * material to show — getSurface's hints carry it. */
+  emissiveMap?: CanvasTexture;
+  /** Only on wet kinds (wetstone, wetslab). three.js multiplies it with the
+   * material's `roughness`, so pair it with the hint (1). */
+  roughnessMap?: CanvasTexture;
 }
 
-const SIZE = 64;
-const cache = new Map<string, TexturePair>();
+/** The maps as ready-to-spread meshStandardMaterial props — only the keys
+ * that apply are present, so `<meshStandardMaterial {...s.material} />`
+ * never sets an undefined color or map. */
+export interface SurfaceMaterialProps {
+  map: CanvasTexture;
+  normalMap: CanvasTexture;
+  emissiveMap?: CanvasTexture;
+  roughnessMap?: CanvasTexture;
+  roughness: number;
+  metalness: number;
+  envMapIntensity: number;
+  emissive?: string;
+  emissiveIntensity?: number;
+}
 
-export function getTextures(kind: TextureKind, repeatX = 1, repeatY = 1): TexturePair {
-  const key = `${kind}:${repeatX}:${repeatY}`;
-  const hit = cache.get(key);
-  if (hit) return hit;
+export interface Surface extends TexturePair {
+  /** Recommended material params — the look the painter was tuned under. */
+  hints: SurfaceHints;
+  /** Maps + hints merged, for spreading straight onto a material. */
+  material: SurfaceMaterialProps;
+}
 
-  const rng = new Rng(hashSeed(kind));
-  const { color, height } = PAINTERS[kind](rng);
+/** Painted once per kind; repeat variants are clones that share the base
+ * texture's `Source`, so three.js uploads each image to the GPU once no
+ * matter how many repeat settings the scene asks for. */
+const base = new Map<SurfaceKind, Surface>();
+const variants = new Map<string, Surface>();
 
-  const map = toTexture(color, true, repeatX, repeatY);
-  const normalMap = toTexture(heightToNormal(height, 2.2), false, repeatX, repeatY);
-  const pair = { map, normalMap };
-  cache.set(key, pair);
+function buildSurface(pair: TexturePair, hints: SurfaceHints): Surface {
+  const material: SurfaceMaterialProps = {
+    map: pair.map,
+    normalMap: pair.normalMap,
+    roughness: hints.roughness,
+    metalness: hints.metalness,
+    envMapIntensity: hints.envMapIntensity,
+  };
+  if (pair.emissiveMap) material.emissiveMap = pair.emissiveMap;
+  if (pair.roughnessMap) material.roughnessMap = pair.roughnessMap;
+  if (hints.emissive !== undefined) material.emissive = hints.emissive;
+  if (hints.emissiveIntensity !== undefined) material.emissiveIntensity = hints.emissiveIntensity;
+  return { ...pair, hints, material };
+}
+
+function uploadPainted(p: Painted, normalStrength: number): TexturePair {
+  const pair: TexturePair = {
+    map: toTexture(p.color, p.size, p.size, true),
+    normalMap: toTexture(heightToNormal(p.height, p.size, normalStrength), p.size, p.size, false),
+  };
+  if (p.emissive) pair.emissiveMap = toTexture(p.emissive, p.size, p.size, true);
+  if (p.roughness) pair.roughnessMap = toTexture(packRoughness(p.roughness), p.size, p.size, false);
   return pair;
 }
 
-interface Painted {
-  color: Uint8ClampedArray<ArrayBuffer>; // rgba SIZE*SIZE
-  height: Float32Array; // 0..1
+function baseSurface(kind: SurfaceKind): Surface {
+  const hit = base.get(kind);
+  if (hit) return hit;
+  const def = SURFACE_DEFS[kind];
+  const surface = buildSurface(
+    uploadPainted(paintSurface(kind), def.normalStrength ?? DEFAULT_NORMAL_STRENGTH),
+    def.hints,
+  );
+  base.set(kind, surface);
+  return surface;
 }
 
-type Painter = (rng: Rng) => Painted;
+function repeated(tex: CanvasTexture, repeatX: number, repeatY: number): CanvasTexture {
+  const t = tex.clone();
+  t.repeat.set(repeatX, repeatY);
+  return t;
+}
 
-function blank(): Painted {
-  return {
-    color: new Uint8ClampedArray(SIZE * SIZE * 4),
-    height: new Float32Array(SIZE * SIZE),
+/** A surface's maps plus its recommended material. Cached per
+ * (kind, repeat) — call it freely from render/useMemo. */
+export function getSurface(kind: SurfaceKind, repeatX = 1, repeatY = 1): Surface {
+  const b = baseSurface(kind);
+  if (repeatX === 1 && repeatY === 1) return b;
+  const key = `${kind}:${repeatX}:${repeatY}`;
+  const hit = variants.get(key);
+  if (hit) return hit;
+  const pair: TexturePair = {
+    map: repeated(b.map, repeatX, repeatY),
+    normalMap: repeated(b.normalMap, repeatX, repeatY),
   };
+  if (b.emissiveMap) pair.emissiveMap = repeated(b.emissiveMap, repeatX, repeatY);
+  if (b.roughnessMap) pair.roughnessMap = repeated(b.roughnessMap, repeatX, repeatY);
+  const surface = buildSurface(pair, b.hints);
+  variants.set(key, surface);
+  return surface;
 }
 
-function put(p: Painted, x: number, y: number, r: number, g: number, b: number, h: number) {
-  const i = (y * SIZE + x) * 4;
-  p.color[i] = r;
-  p.color[i + 1] = g;
-  p.color[i + 2] = b;
-  p.color[i + 3] = 255;
-  p.height[y * SIZE + x] = h;
+/** Just the maps (the original API). Same cache as getSurface. */
+export function getTextures(kind: TextureKind, repeatX = 1, repeatY = 1): TexturePair {
+  return getSurface(kind, repeatX, repeatY);
 }
 
-const PAINTERS: Record<TextureKind, Painter> = {
-  stone: (rng) => {
-    const p = blank();
-    const brickH = 8;
-    const brickW = 16;
-    for (let y = 0; y < SIZE; y++) {
-      const row = Math.floor(y / brickH);
-      const offset = (row % 2) * (brickW / 2);
-      for (let x = 0; x < SIZE; x++) {
-        const bx = (x + offset) % brickW;
-        const mortar = y % brickH === 0 || bx === 0;
-        const n = rng.next();
-        if (mortar) {
-          const v = 26 + n * 14;
-          put(p, x, y, v, v * 0.95, v * 1.05, 0.18);
-        } else {
-          const base = 68 + n * 34 + (((row * 7 + Math.floor((x + offset) / brickW)) % 5) - 2) * 9;
-          const crack = n > 0.965;
-          const v = crack ? base * 0.45 : base;
-          put(p, x, y, v * 0.92, v * 0.9, v, crack ? 0.4 : 0.65 + rng.next() * 0.3);
-        }
-      }
-    }
-    return p;
-  },
+// ── Runes ────────────────────────────────────────────────────────────────────
 
-  slab: (rng) => {
-    const p = blank();
-    const cell = 16;
-    for (let y = 0; y < SIZE; y++) {
-      for (let x = 0; x < SIZE; x++) {
-        const gap = x % cell === 0 || y % cell === 0;
-        const n = rng.next();
-        if (gap) {
-          const v = 20 + n * 10;
-          put(p, x, y, v, v, v * 1.1, 0.15);
-        } else {
-          const slabTint = ((Math.floor(x / cell) * 3 + Math.floor(y / cell) * 5) % 4) * 6;
-          const stain = n > 0.93 ? 0.6 : 1;
-          const v = (52 + n * 26 + slabTint) * stain;
-          put(p, x, y, v * 0.9, v * 0.92, v, 0.55 + n * 0.35);
-        }
-      }
-    }
-    return p;
-  },
-
-  dark: (rng) => {
-    const p = blank();
-    for (let y = 0; y < SIZE; y++) {
-      for (let x = 0; x < SIZE; x++) {
-        const n = rng.next();
-        const v = 12 + n * 12;
-        put(p, x, y, v, v, v * 1.15, n);
-      }
-    }
-    return p;
-  },
-
-  planks: (rng) => {
-    const p = blank();
-    const plankW = 10;
-    for (let y = 0; y < SIZE; y++) {
-      for (let x = 0; x < SIZE; x++) {
-        const seam = x % plankW === 0;
-        const n = rng.next();
-        if (seam) {
-          put(p, x, y, 38, 26, 14, 0.2);
-        } else {
-          const plank = Math.floor(x / plankW);
-          const grain = Math.sin(y * 0.7 + plank * 13) > 0.82 ? 0.72 : 1;
-          const v = (108 + n * 26 + (plank % 3) * 10) * grain;
-          put(p, x, y, v, v * 0.66, v * 0.36, 0.5 + n * 0.4);
-        }
-      }
-    }
-    return p;
-  },
-
-  barrel: (rng) => {
-    const p = blank();
-    for (let y = 0; y < SIZE; y++) {
-      const hoop = y % 20 < 3;
-      for (let x = 0; x < SIZE; x++) {
-        const n = rng.next();
-        if (hoop) {
-          const v = 70 + n * 30;
-          put(p, x, y, v, v * 1.02, v * 1.12, 0.85);
-        } else {
-          const stave = Math.floor(x / 8);
-          const v = 96 + n * 22 + (stave % 3) * 8;
-          put(p, x, y, v, v * 0.6, v * 0.32, 0.5 + n * 0.3);
-        }
-      }
-    }
-    return p;
-  },
-
-  ceramic: (rng) => {
-    const p = blank();
-    for (let y = 0; y < SIZE; y++) {
-      for (let x = 0; x < SIZE; x++) {
-        const n = rng.next();
-        const band = y % 24 < 3 ? 0.7 : 1;
-        const speckle = n > 0.94 ? 0.55 : 1;
-        const v = (150 + n * 20) * band * speckle;
-        put(p, x, y, v, v * 0.72, v * 0.5, 0.6 + n * 0.3);
-      }
-    }
-    return p;
-  },
-
-  dirt: (rng) => {
-    const p = blank();
-    for (let y = 0; y < SIZE; y++) {
-      for (let x = 0; x < SIZE; x++) {
-        const n = rng.next();
-        const grass = n > 0.72;
-        const v = 44 + n * 22;
-        if (grass) put(p, x, y, v * 0.7, v * 1.15, v * 0.5, 0.5 + n * 0.4);
-        else put(p, x, y, v * 1.05, v * 0.82, v * 0.55, 0.4 + n * 0.4);
-      }
-    }
-    return p;
-  },
-};
-
-function heightToNormal(height: Float32Array, strength: number): Uint8ClampedArray<ArrayBuffer> {
-  const out = new Uint8ClampedArray(SIZE * SIZE * 4);
-  const h = (x: number, y: number) =>
-    height[((y + SIZE) % SIZE) * SIZE + ((x + SIZE) % SIZE)];
-  for (let y = 0; y < SIZE; y++) {
-    for (let x = 0; x < SIZE; x++) {
-      const dx = (h(x - 1, y) - h(x + 1, y)) * strength;
-      const dy = (h(x, y - 1) - h(x, y + 1)) * strength;
-      const len = Math.hypot(dx, dy, 1);
-      const i = (y * SIZE + x) * 4;
-      out[i] = ((dx / len) * 0.5 + 0.5) * 255;
-      out[i + 1] = ((dy / len) * 0.5 + 0.5) * 255;
-      out[i + 2] = ((1 / len) * 0.5 + 0.5) * 255;
-      out[i + 3] = 255;
-    }
-  }
-  return out;
+export interface RuneTextures {
+  map: CanvasTexture;
+  normalMap: CanvasTexture;
+  /** Grayscale — tint with the material's `emissive` color. */
+  emissiveMap: CanvasTexture;
 }
 
-function toTexture(
-  rgba: Uint8ClampedArray<ArrayBuffer>,
-  srgb: boolean,
-  repeatX: number,
-  repeatY: number,
-): CanvasTexture {
-  const canvas = document.createElement("canvas");
-  canvas.width = SIZE;
-  canvas.height = SIZE;
-  const ctx = canvas.getContext("2d")!;
-  ctx.putImageData(new ImageData(rgba, SIZE, SIZE), 0, 0);
-  const tex = new CanvasTexture(canvas);
-  tex.magFilter = NearestFilter;
-  tex.minFilter = NearestFilter;
-  tex.wrapS = RepeatWrapping;
-  tex.wrapT = RepeatWrapping;
-  tex.repeat.set(repeatX, repeatY);
-  if (srgb) tex.colorSpace = SRGBColorSpace;
+const runes = new Map<string, RuneTextures>();
+
+/** A carved lore-tablet face for `seed` (use the lore fragment id): each seed
+ * gets its own glyph. Cached per seed — the set of fragments is finite. */
+export function getRuneTextures(seed: string): RuneTextures {
+  const hit = runes.get(seed);
+  if (hit) return hit;
+  const p = paintRuneTablet(seed);
+  const S = RUNE_TABLET_SIZE;
+  const tex: RuneTextures = {
+    map: toTexture(p.color, S, S, true),
+    normalMap: toTexture(heightToNormal(p.height, S, 2.4), S, S, false),
+    emissiveMap: toTexture(p.emissive!, S, S, true),
+  };
+  runes.set(seed, tex);
   return tex;
+}
+
+/** Glyph slots in the portal-seal atlas, and each slot's texel size. */
+export const SEAL_GLYPHS = 8;
+export const SEAL_GLYPH_CELL = 16;
+let sealAtlas: CanvasTexture | null = null;
+
+/** A strip of SEAL_GLYPHS rune masks (white on black). Use it as both
+ * alphaMap (with alphaTest) and emissiveMap; pick a glyph by UV (slot k
+ * spans u ∈ [k/SEAL_GLYPHS, (k+1)/SEAL_GLYPHS]). */
+export function getSealGlyphAtlas(): CanvasTexture {
+  if (sealAtlas) return sealAtlas;
+  const { rgba, width, height } = paintGlyphAtlas(SEAL_GLYPHS, SEAL_GLYPH_CELL);
+  sealAtlas = toTexture(rgba, width, height, false);
+  return sealAtlas;
 }

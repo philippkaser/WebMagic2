@@ -34,7 +34,10 @@ import { isHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
 import { useNetBody } from "../net/NetSystems";
 import { useGame } from "../state/gameStore";
-import { getTextures } from "../render/textures";
+import { PEDESTAL_ORB_Y, PedestalModel } from "../render/models/PedestalModel";
+import { PortalModel } from "../render/models/PortalModel";
+import { BarrelModel, CrateModel, PotModel } from "../render/models/PropModels";
+import { TORCH_EMBER_INTENSITY, TorchModel } from "../render/models/TorchModel";
 import type { PropKind, Vec3 } from "./types";
 
 const PROP_GROUPS = interactionGroups(GROUPS.PROP, [
@@ -199,65 +202,31 @@ export function Breakable({
       {kind === "crate" && (
         <>
           <CuboidCollider args={[0.42, 0.42, 0.42]} mass={spec.mass} collisionGroups={PROP_GROUPS} />
-          <CrateMesh />
+          <CrateModel />
         </>
       )}
       {kind === "barrel" && (
         <>
           <CylinderCollider args={[0.48, 0.4]} mass={spec.mass} collisionGroups={PROP_GROUPS} />
-          <BarrelMesh />
+          <BarrelModel />
         </>
       )}
       {kind === "pot" && (
         <>
           <BallCollider args={[0.3]} mass={spec.mass} collisionGroups={PROP_GROUPS} />
-          <PotMesh />
+          <PotModel />
         </>
       )}
     </RigidBody>
   );
 }
 
-function CrateMesh() {
-  const tex = useMemo(() => getTextures("planks"), []);
-  return (
-    <mesh castShadow receiveShadow>
-      <boxGeometry args={[0.84, 0.84, 0.84]} />
-      <meshStandardMaterial map={tex.map} normalMap={tex.normalMap} roughness={0.85} />
-    </mesh>
-  );
-}
-
-function BarrelMesh() {
-  const tex = useMemo(() => getTextures("barrel"), []);
-  return (
-    <mesh castShadow receiveShadow>
-      <cylinderGeometry args={[0.36, 0.4, 0.96, 10]} />
-      <meshStandardMaterial map={tex.map} normalMap={tex.normalMap} roughness={0.75} metalness={0.15} />
-    </mesh>
-  );
-}
-
-function PotMesh() {
-  const tex = useMemo(() => getTextures("ceramic"), []);
-  return (
-    <group>
-      <mesh castShadow receiveShadow scale={[1, 1.15, 1]}>
-        <sphereGeometry args={[0.3, 10, 8]} />
-        <meshStandardMaterial map={tex.map} normalMap={tex.normalMap} roughness={0.6} />
-      </mesh>
-      <mesh position={[0, 0.36, 0]}>
-        <cylinderGeometry args={[0.12, 0.16, 0.12, 8]} />
-        <meshStandardMaterial map={tex.map} roughness={0.6} />
-      </mesh>
-    </group>
-  );
-}
-
 /** Wall torch: flickering warm light (via the dynamic light pool), glowing
- * ember head, drifting sparks. */
+ * ember head, drifting sparks. The look is render/models/TorchModel; this is
+ * the light, the flicker (shared by light and ember) and the sparks. */
 export function Torch({ position }: { position: Vec3 }) {
   const group = useRef<Group>(null);
+  const ember = useRef<MeshStandardMaterial>(null);
   const light = useRef<DynamicLightSource | null>(null);
   const worldPos = useRef(new Vector3(...position));
   const emberClock = useRef(Math.random());
@@ -285,9 +254,12 @@ export function Torch({ position }: { position: Vec3 }) {
 
   useFrame(({ clock }, dt) => {
     const t = clock.elapsedTime + seed;
-    if (light.current) {
-      light.current.intensity =
-        7 + Math.sin(t * 9.3) * 1.4 + Math.sin(t * 23.7) * 0.9 + Math.sin(t * 3.1) * 0.9;
+    const flicker = 7 + Math.sin(t * 9.3) * 1.4 + Math.sin(t * 23.7) * 0.9 + Math.sin(t * 3.1) * 0.9;
+    if (light.current) light.current.intensity = flicker;
+    // The flame breathes with its light (a quarter of the swing, so the
+    // ember never looks like it's going out).
+    if (ember.current) {
+      ember.current.emissiveIntensity = TORCH_EMBER_INTENSITY * (0.75 + (0.25 * flicker) / 7);
     }
     emberClock.current -= dt;
     if (emberClock.current <= 0) {
@@ -309,19 +281,14 @@ export function Torch({ position }: { position: Vec3 }) {
 
   return (
     <group ref={group} position={position}>
-      <mesh position={[0, -0.22, 0]} rotation={[0.22, 0, 0]}>
-        <cylinderGeometry args={[0.03, 0.045, 0.5, 6]} />
-        <meshStandardMaterial color="#3d2c1c" roughness={0.9} />
-      </mesh>
-      <mesh position={[0, 0.08, 0.05]}>
-        <sphereGeometry args={[0.09, 8, 6]} />
-        <meshStandardMaterial color="#200" emissive="#ff8b3d" emissiveIntensity={4.5} toneMapped={false} />
-      </mesh>
+      <TorchModel emberRef={ember} />
     </group>
   );
 }
 
-/** Interactive portal ring. While `locked`, it burns dim and refuses use. */
+/** Interactive portal ring. While `locked`, it burns dim, shows its rune
+ * seal and refuses use. The look is render/models/PortalModel; this is the
+ * light, the sparks, the spin and the prompt. */
 export function Portal({
   position,
   color,
@@ -400,30 +367,7 @@ export function Portal({
 
   return (
     <group position={position}>
-      {/* Steps */}
-      <mesh position={[0, 0.12, 0]} receiveShadow>
-        <boxGeometry args={[3.4, 0.24, 1.6]} />
-        <meshStandardMaterial color="#4a4452" roughness={0.85} />
-      </mesh>
-      <group ref={group} position={[0, 1.5, 0]}>
-        <mesh castShadow>
-          <torusGeometry args={[1.15, 0.13, 8, 24]} />
-          <meshStandardMaterial color="#2c2836" metalness={0.6} roughness={0.35} />
-        </mesh>
-        <mesh>
-          <circleGeometry args={[1.05, 24]} />
-          <meshStandardMaterial
-            ref={disc}
-            color="#05030a"
-            emissive={color}
-            emissiveIntensity={1.9}
-            toneMapped={false}
-            transparent
-            opacity={0.92}
-            side={2}
-          />
-        </mesh>
-      </group>
+      <PortalModel color={color} locked={locked} discRef={disc} ringRef={group} />
     </group>
   );
 }
@@ -530,7 +474,7 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
     if (taken) return;
     const g = orb.current;
     if (g) {
-      g.position.y = 1.45 + Math.sin(clock.elapsedTime * 2) * 0.09;
+      g.position.y = PEDESTAL_ORB_Y + Math.sin(clock.elapsedTime * 2) * 0.09;
       g.rotation.y = clock.elapsedTime * 1.4;
     }
     requested.current -= dt;
@@ -554,23 +498,7 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
 
   return (
     <group position={position}>
-      <mesh position={[0, 0.55, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[0.3, 0.42, 1.1, 8]} />
-        <meshStandardMaterial color="#4e4658" roughness={0.8} />
-      </mesh>
-      {!taken && (
-        <group ref={orb} position={[0, 1.45, 0]}>
-          <mesh castShadow>
-            <octahedronGeometry args={[0.26]} />
-            <meshStandardMaterial
-              color="#0c0c14"
-              emissive={def.color}
-              emissiveIntensity={2.8}
-              toneMapped={false}
-            />
-          </mesh>
-        </group>
-      )}
+      <PedestalModel color={def.color} taken={taken} orbRef={orb} />
     </group>
   );
 }
