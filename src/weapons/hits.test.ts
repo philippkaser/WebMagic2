@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_HIT_DAMAGE, MAX_HIT_IMPULSE, sanitizeHit } from "./hits";
+import { hitCapForFloor, MAX_HIT_DAMAGE, MAX_HIT_IMPULSE, sanitizeHit } from "./hits";
 
 describe("sanitizeHit", () => {
   test("a legit hit passes through unchanged (as a copy)", () => {
@@ -49,5 +49,16 @@ describe("sanitizeHit", () => {
     ]) {
       expect(sanitizeHit(bad)).toBeNull();
     }
+  });
+});
+
+describe("depth-aware hit cap", () => {
+  const imp = { x: 0, y: 0, z: 0 };
+  test("the cap grows with depth, since staff levels scale damage", () => {
+    expect(hitCapForFloor(1)).toBeGreaterThan(100);
+    expect(hitCapForFloor(40)).toBeGreaterThan(hitCapForFloor(10));
+    expect(sanitizeHit({ damage: 1e9, impulse: imp }, 1)!.damage).toBe(hitCapForFloor(1));
+    expect(sanitizeHit({ damage: 1e9, impulse: imp }, 50)!.damage).toBe(hitCapForFloor(50));
+    expect(hitCapForFloor(100)).toBeLessThanOrEqual(MAX_HIT_DAMAGE);
   });
 });

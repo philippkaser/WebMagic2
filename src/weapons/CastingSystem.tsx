@@ -6,6 +6,7 @@ import { gameEvents } from "../core/events";
 import { getItemDef } from "../items/catalog";
 import type { ItemDef } from "../items/types";
 import { peerMessage } from "../net/channels";
+import { estimatePeer } from "../net/players";
 import { input } from "../player/input";
 import { getStats, useGame } from "../state/gameStore";
 import { encodeCastMsg, sanitizeCastMsg, type CastMsg } from "./castMessage";
@@ -28,6 +29,9 @@ const side = new Vector3();
 const muzzle = new Vector3();
 const replayOrigin = new Vector3();
 const replayDir = new Vector3();
+/** Staff tip ≈ 0.7 m from the body; the slack covers a snapshot of movement
+ * (dashes, blasts) between the caster's last pose and the cast. */
+const MAX_CAST_OFFSET_SQ = 6 * 6;
 
 /** Floor-mates' casts replay through the identical ability code with the
  * caster's staff and gear stats — the same visuals and physics, flagged
@@ -37,6 +41,16 @@ const replayDir = new Vector3();
 const peerCast = peerMessage<CastMsg>("cast", (raw, meta) => {
   const msg = sanitizeCastMsg(raw);
   if (!msg) return; // malformed, or a spell from a newer client
+  // A spell must leave from where its caster actually stands — otherwise a
+  // hacked client could rain hostile magic on us from across the floor.
+  const est = estimatePeer(meta.from);
+  if (
+    est &&
+    (msg.origin[0] - est.p[0]) ** 2 + (msg.origin[1] - est.p[1]) ** 2 + (msg.origin[2] - est.p[2]) ** 2 >
+      MAX_CAST_OFFSET_SQ
+  ) {
+    return;
+  }
   getAbility(msg.abilityId).cast({
     origin: replayOrigin.set(...msg.origin),
     dir: replayDir.set(...msg.dir),

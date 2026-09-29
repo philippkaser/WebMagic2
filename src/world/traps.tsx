@@ -131,8 +131,11 @@ function DartTrap({ pos, floor }: { pos: Vec3; floor: number }) {
       damage: def.baseDamage * scale.enemyDamage,
       color: "#ffd24a",
       size: 0.1,
-      blastRadius: 0,
-      blastImpulse: 0,
+      // Bolts only hurt through their burst, so a dart needs a small one —
+      // tight enough that it still has to actually reach you.
+      blastRadius: 0.9,
+      blastImpulse: 4,
+      source: "world",
     });
     flashLight([head.x, head.y, head.z], "#ffd24a", 8);
   });
