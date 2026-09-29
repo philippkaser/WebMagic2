@@ -10,6 +10,7 @@
  *   overlays/      fullscreen phase screens (menu, the Weighing, death,
  *                  loading), each wrapped in overlays/OverlayShell
  *   inventory/     inventory / chest / merchant screen (entry: InventoryScreen.tsx)
+ *   codex/         the lore codex (C) — carvings read so far
  *   devroom/       dev-build test bench (entry: DevRoom.tsx)
  *
  * Adding a HUD widget: create hud/MyWidget.tsx as a self-contained component
@@ -28,6 +29,7 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import { useGame } from "../state/gameStore";
+import { CodexScreen } from "./codex/CodexScreen";
 import { DevRoom } from "./DevRoom";
 import { PerfOverlay } from "./hud/PerfOverlay";
 import { PlayHud } from "./hud/PlayHud";
@@ -64,6 +66,16 @@ export function HUD() {
       } else if (e.code === "KeyO" || e.code === "F4") {
         e.preventDefault();
         useGame.getState().toggleShadows();
+      } else if (e.code === "KeyC") {
+        const state = useGame.getState();
+        if (state.phase !== "village" && state.phase !== "dungeon") return;
+        e.preventDefault();
+        if (state.overlay === "none") {
+          document.exitPointerLock();
+          state.setOverlay("codex");
+        } else if (state.overlay === "codex") {
+          state.setOverlay("none");
+        }
       } else if (e.code === "KeyI" || e.code === "Tab") {
         const state = useGame.getState();
         if (state.phase !== "village" && state.phase !== "dungeon") return;
@@ -89,6 +101,7 @@ export function HUD() {
       {playing && <PlayHud />}
       {playing && overlay === "devroom" && import.meta.env.DEV && <DevRoom />}
       {playing && isInventoryMode(overlay) && <InventoryScreen mode={overlay} />}
+      {playing && overlay === "codex" && <CodexScreen />}
       {phase === "menu" && <MenuOverlay />}
       {phase === "weighing" && <WeighingOverlay />}
       {phase === "dead" && <DeathOverlay />}

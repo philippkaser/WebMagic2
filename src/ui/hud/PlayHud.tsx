@@ -4,6 +4,7 @@ import { EquipmentPanel } from "./EquipmentPanel";
 import { HurtFlash } from "./HurtFlash";
 import { InteractionPrompt } from "./InteractionPrompt";
 import { LocationPanel } from "./LocationPanel";
+import { LoreReader } from "./LoreReader";
 import { MessageFeed } from "./MessageFeed";
 import { PactPrompt } from "./PactPrompt";
 import { PresenceSense } from "./PresenceSense";
@@ -24,6 +25,7 @@ export function PlayHud() {
       <VitalsPanel />
       <EquipmentPanel />
       <PresenceSense />
+      <LoreReader />
       <InteractionPrompt />
       <PactPrompt />
     </>

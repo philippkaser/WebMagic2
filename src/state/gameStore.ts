@@ -39,10 +39,11 @@ import {
  * loading → dungeon → (walk home → village) | (dead → village). */
 export type Phase = "menu" | "village" | "weighing" | "loading" | "dungeon" | "dead";
 
-/** Fullscreen inventory-family overlays. The world keeps simulating (shared
- * floors can't pause), so these are DOM layers, not phases. "devroom" is a
- * dev-only testing panel (see ui/DevRoom) reached from the village dev slab. */
-export type Overlay = "none" | "inventory" | "chest" | "merchant" | "devroom";
+/** Fullscreen in-game screens (inventory family, the lore codex). The world
+ * keeps simulating (shared floors can't pause), so these are DOM layers, not
+ * phases. "devroom" is a dev-only testing panel (see ui/DevRoom) reached from
+ * the village dev slab. */
+export type Overlay = "none" | "inventory" | "chest" | "merchant" | "codex" | "devroom";
 
 /** The current run, while in the dungeon. */
 export interface RunProgress {

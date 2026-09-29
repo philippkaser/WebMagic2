@@ -47,7 +47,7 @@ export function MenuOverlay() {
         SHADOWS: {shadows ? "ON" : "OFF"}
       </button>
       <div style={controlsStyle}>
-        WASD move · Space jump · Left/Right click cast · Shift dash (cloak) · E interact · F pact
+        WASD move · Space jump · Left/Right click cast · Shift dash (cloak) · E interact · F pact · C codex
         <br />
         I inventory · Q/E use belt items · P fps overlay · O shadows
       </div>
