@@ -10,9 +10,10 @@ import { hashSeed } from "../core/rng";
 import { resetNetEntities, setExpectedEntities } from "../net/entities";
 import { useNet } from "../net/netStore";
 import { PlayerController } from "../player/PlayerController";
-import { getTextures } from "../render/textures";
+import { getSurface } from "../render/textures";
 import { floorsUntilExit } from "../run/rules";
 import { useGame } from "../state/gameStore";
+import { LoreRunes } from "../world/loreRunes";
 import { Breakable, Portal, Torch, TreasurePedestal } from "../world/props";
 import { Trap } from "../world/traps";
 import { getBiomeDef } from "../world/biomes";
@@ -85,7 +86,7 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
       <WallsAndFloor layout={layout} />
 
       {layout.torches.map((pos, i) => (
-        <Torch key={i} position={pos} />
+        <Torch key={i} position={pos} color={biome.torchColor} intensity={biome.torchIntensityMult} />
       ))}
       {layout.props.map((prop, i) => (
         <Breakable
@@ -106,6 +107,7 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
           })}
         </Fragment>
       ))}
+      <LoreRunes runes={layout.lore} />
       {layout.traps.map((trap, i) => (
         <Trap key={i} kind={trap.kind} pos={trap.pos} floor={layout.floor} />
       ))}
@@ -151,16 +153,21 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
   );
 }
 
+/** The floor's architecture, dressed in its biome's surfaces: each surface
+ * brings its own maps (normal, and where the painter made them, emissive
+ * cracks/veins and wet roughness) plus the material settings it was tuned
+ * under (render/textures getSurface). */
 function WallsAndFloor({ layout }: { layout: FloorLayout }) {
   const walls = useRef<InstancedMesh>(null);
-  const wallTex = useMemo(() => getTextures("stone"), []);
-  const floorTex = useMemo(
-    () => getTextures("slab", layout.extent / 2, layout.extent / 2),
-    [layout.extent],
+  const surfaces = getBiomeDef(layout.biome).surfaces;
+  const wall = useMemo(() => getSurface(surfaces.wall), [surfaces.wall]);
+  const ground = useMemo(
+    () => getSurface(surfaces.floor, layout.extent / 2, layout.extent / 2),
+    [surfaces.floor, layout.extent],
   );
-  const ceilTex = useMemo(
-    () => getTextures("dark", layout.extent / 2, layout.extent / 2),
-    [layout.extent],
+  const ceiling = useMemo(
+    () => getSurface(surfaces.ceiling, layout.extent / 2, layout.extent / 2),
+    [surfaces.ceiling, layout.extent],
   );
 
   useLayoutEffect(() => {
@@ -207,28 +214,16 @@ function WallsAndFloor({ layout }: { layout: FloorLayout }) {
         receiveShadow
       >
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial
-          map={wallTex.map}
-          normalMap={wallTex.normalMap}
-          roughness={0.88}
-          metalness={0.06}
-          envMapIntensity={0.4}
-        />
+        <meshStandardMaterial {...wall.material} />
       </instancedMesh>
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[layout.extent * 2, layout.extent * 2]} />
-        <meshStandardMaterial
-          map={floorTex.map}
-          normalMap={floorTex.normalMap}
-          roughness={0.6}
-          metalness={0.18}
-          envMapIntensity={0.75}
-        />
+        <meshStandardMaterial {...ground.material} />
       </mesh>
       <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, WALL_HEIGHT, 0]}>
         <planeGeometry args={[layout.extent * 2, layout.extent * 2]} />
-        <meshStandardMaterial map={ceilTex.map} normalMap={ceilTex.normalMap} roughness={0.95} />
+        <meshStandardMaterial {...ceiling.material} />
       </mesh>
     </group>
   );

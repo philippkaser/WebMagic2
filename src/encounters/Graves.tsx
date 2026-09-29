@@ -14,6 +14,7 @@ import { hostCommand, hostEvent } from "../net/channels";
 import { registerSyncProvider } from "../net/entities";
 import { useNet } from "../net/netStore";
 import { session } from "../net/session";
+import { GraveModel } from "../render/models/GraveModel";
 import { useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
 import {
@@ -201,7 +202,6 @@ export function Graves() {
 function GraveChest({ grave }: { grave: LiveGrave }) {
   const group = useRef<Group>(null);
   const requested = useRef(0);
-  const moteClock = useRef(0);
   const empty = graveIsEmpty(grave);
   const count = graveItemCount(grave);
   const [x, y, z] = grave.pos;
@@ -229,23 +229,6 @@ function GraveChest({ grave }: { grave: LiveGrave }) {
     requested.current -= dt;
     if (empty) return;
 
-    // Soul motes drift up while the grave still holds something.
-    moteClock.current -= dt;
-    if (moteClock.current <= 0) {
-      moteClock.current = 0.35;
-      spawnBurst({
-        position: [x + (Math.random() - 0.5) * 0.6, y + 0.7, z + (Math.random() - 0.5) * 0.4],
-        count: 1,
-        color: [grave.color, "#e8e0ff"],
-        speed: 0.2,
-        upward: 0.9,
-        ttl: 1.6,
-        size: 0.05,
-        gravity: 0.3,
-        drag: 0.6,
-      });
-    }
-
     const d2 = (playerPosition.x - x) ** 2 + (playerPosition.z - z) ** 2;
     if (d2 > PROMPT_RANGE_SQ || useGame.getState().phase !== "dungeon") return;
     const state = useGame.getState();
@@ -267,29 +250,7 @@ function GraveChest({ grave }: { grave: LiveGrave }) {
 
   return (
     <group ref={group} position={grave.pos}>
-      <GraveShape color={grave.color} opened={empty} />
-    </group>
-  );
-}
-
-/** Placeholder silhouette until the shared render model lands. */
-function GraveShape({ color, opened }: { color: string; opened: boolean }) {
-  return (
-    <group>
-      <mesh position={[0, 0.3, 0]} castShadow receiveShadow>
-        <boxGeometry args={[1.1, 0.6, 0.62]} />
-        <meshStandardMaterial color="#4a4652" roughness={0.9} />
-      </mesh>
-      <mesh position={[0, 0.66, opened ? -0.18 : 0]} rotation={[opened ? -0.5 : 0, 0, 0]} castShadow>
-        <boxGeometry args={[1.16, 0.12, 0.68]} />
-        <meshStandardMaterial color="#5a5562" roughness={0.85} />
-      </mesh>
-      {!opened && (
-        <mesh position={[0, 0.61, 0]}>
-          <boxGeometry args={[1.02, 0.02, 0.56]} />
-          <meshStandardMaterial color="#000" emissive={color} emissiveIntensity={2.4} toneMapped={false} />
-        </mesh>
-      )}
+      <GraveModel color={grave.color} opened={empty} motes={!empty} castShadow />
     </group>
   );
 }

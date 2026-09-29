@@ -139,7 +139,7 @@ export function Breakable({
     },
     onCommand: (cmd, data) => {
       if (cmd === "hit") {
-        const d = sanitizeHit(data);
+        const d = sanitizeHit(data, floor);
         if (d) applyDamageRef.current(d.damage, d.impulse);
       }
     },
@@ -224,7 +224,17 @@ export function Breakable({
 /** Wall torch: flickering warm light (via the dynamic light pool), glowing
  * ember head, drifting sparks. The look is render/models/TorchModel; this is
  * the light, the flicker (shared by light and ember) and the sparks. */
-export function Torch({ position }: { position: Vec3 }) {
+/** Wall torch. `color`/`intensity` let each depth biome burn its own fire
+ * (teal in the Drowned Halls, small and warm in the Hollow). */
+export function Torch({
+  position,
+  color = "#ff9a4d",
+  intensity = 1,
+}: {
+  position: Vec3;
+  color?: string;
+  intensity?: number;
+}) {
   const group = useRef<Group>(null);
   const ember = useRef<MeshStandardMaterial>(null);
   const light = useRef<DynamicLightSource | null>(null);
@@ -240,8 +250,8 @@ export function Torch({ position }: { position: Vec3 }) {
     g.getWorldPosition(worldPos.current);
     const src = addLightSource({
       position: [worldPos.current.x, worldPos.current.y + 0.25, worldPos.current.z + 0.2],
-      color: "#ff9a4d",
-      intensity: 7,
+      color,
+      intensity: 7 * intensity,
       distance: 10,
       priority: 1,
     });
@@ -250,12 +260,12 @@ export function Torch({ position }: { position: Vec3 }) {
       removeLightSource(src);
       light.current = null;
     };
-  }, [position]);
+  }, [position, color, intensity]);
 
   useFrame(({ clock }, dt) => {
     const t = clock.elapsedTime + seed;
     const flicker = 7 + Math.sin(t * 9.3) * 1.4 + Math.sin(t * 23.7) * 0.9 + Math.sin(t * 3.1) * 0.9;
-    if (light.current) light.current.intensity = flicker;
+    if (light.current) light.current.intensity = flicker * intensity;
     // The flame breathes with its light (a quarter of the swing, so the
     // ember never looks like it's going out).
     if (ember.current) {
@@ -268,7 +278,7 @@ export function Torch({ position }: { position: Vec3 }) {
       spawnBurst({
         position: [w.x, w.y + 0.12, w.z],
         count: 1,
-        color: ["#ffb257", "#ff6b2e"],
+        color: [color, "#ffe2b8"],
         speed: 0.5,
         upward: 1.3,
         ttl: 0.8,
@@ -281,7 +291,7 @@ export function Torch({ position }: { position: Vec3 }) {
 
   return (
     <group ref={group} position={position}>
-      <TorchModel emberRef={ember} />
+      <TorchModel emberRef={ember} emberColor={color} />
     </group>
   );
 }

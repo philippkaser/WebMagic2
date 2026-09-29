@@ -40,6 +40,7 @@ export function GameScene() {
     // installed here, with the layout, rather than in a mount effect (which
     // runs after the children). Idempotent, so a re-render is harmless.
     setFloorRules(next ? omenRules(next.omen) : {});
+    if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__layout = next;
     return next;
   }, [inDungeon, floorSeed, floor]);
   const controlsEnabled = phase === "village" || phase === "dungeon";

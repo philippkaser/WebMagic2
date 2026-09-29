@@ -74,6 +74,9 @@ function RemoteWizard({ playerId }: { playerId: string }) {
   const tag = useRef<Sprite>(null);
   const lastTag = useRef("");
   const robeColor = robeColorOf(playerId);
+  // Sworn allies wear a soft halo — the one thing that tells friend from
+  // stranger at a glance in the dark. Re-renders only when the pact flips.
+  const [ally, setAlly] = useState(() => relationOf(playerId) === "ally");
   const bobT = useMemo(() => ({ t: 0 }), []);
   const pose = useMemo(() => makeSampledPose(), []);
   const staffColor = () => {
@@ -104,6 +107,7 @@ function RemoteWizard({ playerId }: { playerId: string }) {
     // relation tint, and hidden beyond NAME_RANGE unless sworn to us.
     const name = peerName(playerId);
     const relation = relationOf(playerId);
+    if ((relation === "ally") !== ally) setAlly(relation === "ally");
     const t = tag.current;
     if (t) {
       const key = `${relation}:${name}`;
@@ -119,7 +123,12 @@ function RemoteWizard({ playerId }: { playerId: string }) {
   return (
     <group ref={group} visible={false}>
       {/* Body first: the walk bob targets children[0]. */}
-      <WizardModel robeColor={robeColor} staffColor={staffColor()} castShadow />
+      <WizardModel
+        robeColor={robeColor}
+        staffColor={staffColor()}
+        aura={ally ? TAG_COLORS.ally : null}
+        castShadow
+      />
       {/* Name tag */}
       <sprite ref={tag} position={[0, 1.85, 0]} scale={[1.6, 0.3, 1]} material={nameTagMaterial("…")} />
     </group>
