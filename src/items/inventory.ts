@@ -79,6 +79,34 @@ export function markBanked(grid: Grid): Grid {
   return grid.map((s) => (s ? { ...s, runLoot: false } : null));
 }
 
+// ── Pickups ──────────────────────────────────────────────────────────────────
+
+export type AcquireTarget = "equipped" | "belt" | "bag";
+
+/** Where a picked-up item goes — the one routing rule behind every pickup
+ * (loot orbs, treasure, grave chests): gear fills its empty slot, otherwise
+ * the bag; consumables fill the belt first (that's where you'll want them),
+ * then the bag. Returns the new Carried and where the item landed, or null
+ * when there's truly no room. */
+export function routeAcquire(
+  inv: Carried,
+  defId: string,
+  runLoot: boolean,
+): { next: Carried; to: AcquireTarget } | null {
+  const def = getItemDef(defId);
+  if (def.slot === "consumable") {
+    const belt = addToGrid(inv.belt, defId, runLoot);
+    if (belt) return { next: { ...inv, belt }, to: "belt" };
+  } else if (inv.equipment[def.slot] === null) {
+    return {
+      next: { ...inv, equipment: { ...inv.equipment, [def.slot]: { defId, runLoot } } },
+      to: "equipped",
+    };
+  }
+  const bag = addToGrid(inv.bag, defId, runLoot);
+  return bag ? { next: { ...inv, bag }, to: "bag" } : null;
+}
+
 // ── Generic item movement (drag & drop, click-to-move) ──────────────────────
 // One pure function covers every container pair: equipment ↔ bag ↔ belt ↔
 // chest, with swap semantics, consumable stack merging, and the two hard

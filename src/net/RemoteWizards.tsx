@@ -1,7 +1,9 @@
 import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef, useState } from "react";
 import { CanvasTexture, Group, LinearFilter, Sprite, SpriteMaterial } from "three";
-import { hashSeed } from "../core/rng";
+import { playerPosition } from "../game/player-state";
+import { relationOf, type WizardRelation } from "../game/hostility";
+import { NAME_RANGE, robeColorOf, TAG_COLORS } from "../game/wizardLook";
 import { getItemDef } from "../items/catalog";
 import { WizardModel } from "../render/models/WizardModel";
 import { netClock } from "./clock";
@@ -9,11 +11,14 @@ import { INTERP_DELAY_MS } from "./entities";
 import { peerIds, peerName, peerStaffId, samplePeer } from "./players";
 import { makeSampledPose } from "./snapshots";
 
-/** Name tags as canvas sprites — no font downloads, fits the pixel look. */
+/** Name tags as canvas sprites — no font downloads, fits the pixel look.
+ * Tinted by relation: pale for strangers, green for sworn allies, red for
+ * an oathbreaker. */
 const nameTagCache = new Map<string, SpriteMaterial>();
 
-function nameTagMaterial(name: string): SpriteMaterial {
-  const hit = nameTagCache.get(name);
+function nameTagMaterial(name: string, relation: WizardRelation = "stranger"): SpriteMaterial {
+  const key = `${relation}:${name}`;
+  const hit = nameTagCache.get(key);
   if (hit) return hit;
   const canvas = document.createElement("canvas");
   canvas.width = 256;
@@ -25,19 +30,22 @@ function nameTagMaterial(name: string): SpriteMaterial {
   ctx.fillStyle = "rgba(0,0,0,0.55)";
   const width = Math.min(ctx.measureText(name).width + 22, 250);
   ctx.fillRect(128 - width / 2, 6, width, 36);
-  ctx.fillStyle = "#e8dfc8";
-  ctx.fillText(name, 128, 25);
+  ctx.fillStyle = TAG_COLORS[relation];
+  ctx.fillText(relation === "oathbreaker" ? `✗ ${name}` : name, 128, 25);
   const texture = new CanvasTexture(canvas);
   texture.minFilter = LinearFilter;
   const material = new SpriteMaterial({ map: texture, depthWrite: false, transparent: true });
-  nameTagCache.set(name, material);
+  nameTagCache.set(key, material);
   return material;
 }
 
 /** Renders the other wizards sharing this floor instance. Poses come from the
- * net layer's timestamped buffers, sampled ~140 ms in the past — smooth
+ * net layer's timestamped buffers, sampled ~90 ms in the past — smooth
  * motion at any packet jitter. With the loopback transport this renders
- * nothing — it lights up as soon as a real server is plugged in. */
+ * nothing — it lights up as soon as a real server is plugged in.
+ *
+ * A stranger's name only shows once they're within NAME_RANGE: at a
+ * distance, another wizard is just a silhouette with a glowing staff. */
 export function RemoteWizards() {
   const [ids, setIds] = useState<string[]>([]);
   const pollClock = useRef(0);
@@ -61,13 +69,11 @@ export function RemoteWizards() {
   );
 }
 
-const ROBE_COLORS = ["#3d5a8a", "#6a3d8a", "#8a3d50", "#3d8a5f"];
-
 function RemoteWizard({ playerId }: { playerId: string }) {
   const group = useRef<Group>(null);
   const tag = useRef<Sprite>(null);
-  const lastName = useRef("");
-  const robeColor = ROBE_COLORS[hashSeed(playerId) % ROBE_COLORS.length];
+  const lastTag = useRef("");
+  const robeColor = robeColorOf(playerId);
   const bobT = useMemo(() => ({ t: 0 }), []);
   const pose = useMemo(() => makeSampledPose(), []);
   const staffColor = () => {
@@ -94,11 +100,19 @@ function RemoteWizard({ playerId }: { playerId: string }) {
     bobT.t += dt * Math.min(speed, 10);
     g.children[0].position.y = Math.abs(Math.sin(bobT.t * 1.4)) * Math.min(speed * 0.012, 0.06);
 
-    // Keep the name tag fresh (peers can arrive before their hello lands).
+    // Name tag: fresh name (peers can arrive before their hello lands),
+    // relation tint, and hidden beyond NAME_RANGE unless sworn to us.
     const name = peerName(playerId);
-    if (tag.current && name && name !== lastName.current) {
-      lastName.current = name;
-      tag.current.material = nameTagMaterial(name);
+    const relation = relationOf(playerId);
+    const t = tag.current;
+    if (t) {
+      const key = `${relation}:${name}`;
+      if (name && key !== lastTag.current) {
+        lastTag.current = key;
+        t.material = nameTagMaterial(name, relation);
+      }
+      const d2 = playerPosition.distanceToSquared(g.position);
+      t.visible = !!name && (relation === "ally" || d2 < NAME_RANGE * NAME_RANGE);
     }
   });
 

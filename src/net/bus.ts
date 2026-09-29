@@ -12,7 +12,8 @@ export interface NetBusEvents extends Record<string, unknown> {
   /** We were assigned to a floor instance (fresh join or reconnect). */
   assigned: FloorAssignment;
   peerJoined: MemberInfo;
-  peerLeft: { playerId: string };
+  /** `name` is the display name they had (already gone from the roster). */
+  peerLeft: { playerId: string; name: string };
   hostChanged: { hostId: string; epoch: number };
   /** Server asked us (the host) to bring a late joiner up to date. */
   syncRequest: { playerId: string };

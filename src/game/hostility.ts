@@ -1,23 +1,33 @@
-/** Wizard-vs-wizard hostility — the one question every PvP-aware system asks:
- * "may this other wizard's magic hurt me?".
+/** Wizard-vs-wizard relations — the one question every PvP-aware system asks:
+ * "what is that other wizard to me?".
  *
  * Deliberately a tiny seam with no imports: weapons (projectile collision,
- * explosion damage), net (peer collision capsules) and the HUD read it, while
- * the encounters layer (pacts) installs the real answer. Until something
- * installs a resolver, nobody is hostile — the classic co-op behaviour. */
+ * explosion damage), net (peer collision capsules, name tags) and the HUD
+ * read it, while the encounters layer (pacts) installs the real answer.
+ * Until something installs a resolver, every other wizard is an ally — the
+ * classic co-op behaviour, and what offline play and tests see. */
 
-export type HostilityResolver = (wizardId: string) => boolean;
+/** stranger: not sworn to us (hostile) · ally: pact sworn · oathbreaker: broke
+ * a pact with us on this floor (hostile, and marked). */
+export type WizardRelation = "stranger" | "ally" | "oathbreaker";
 
-let resolver: HostilityResolver = () => false;
+export type RelationResolver = (wizardId: string) => WizardRelation;
 
-export function setHostilityResolver(fn: HostilityResolver): () => void {
+const DEFAULT: RelationResolver = () => "ally";
+let resolver: RelationResolver = DEFAULT;
+
+export function setRelationResolver(fn: RelationResolver): () => void {
   resolver = fn;
   return () => {
-    if (resolver === fn) resolver = () => false;
+    if (resolver === fn) resolver = DEFAULT;
   };
+}
+
+export function relationOf(wizardId: string): WizardRelation {
+  return resolver(wizardId);
 }
 
 /** True when the given OTHER wizard's spells can damage the local wizard. */
 export function isHostileWizard(wizardId: string): boolean {
-  return resolver(wizardId);
+  return resolver(wizardId) !== "ally";
 }

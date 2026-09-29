@@ -20,6 +20,13 @@ import { input } from "./input";
 
 const UP = new Vector3(0, 1, 0);
 
+/** Our own capsule: a PLAYER like every wizard, plus the LOCAL_PLAYER bit that
+ * hostile wizards' replayed spells look for (see core/config.ts GROUPS). */
+const LOCAL_PLAYER_GROUPS = interactionGroups(
+  [GROUPS.PLAYER, GROUPS.LOCAL_PLAYER],
+  [GROUPS.WORLD, GROUPS.ENEMY, GROUPS.ENEMY_PROJECTILE, GROUPS.PROP, GROUPS.HOSTILE_SPELL],
+);
+
 /** First-person character controller. A dynamic capsule (so explosions and
  * enemies can shove the player) driven with a quake-ish velocity model:
  * exponential ground acceleration, additive air control with a soft speed cap
@@ -268,12 +275,7 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
         args={[PLAYER.halfHeight, PLAYER.radius]}
         mass={1}
         friction={0}
-        collisionGroups={interactionGroups(GROUPS.PLAYER, [
-          GROUPS.WORLD,
-          GROUPS.ENEMY,
-          GROUPS.ENEMY_PROJECTILE,
-          GROUPS.PROP,
-        ])}
+        collisionGroups={LOCAL_PLAYER_GROUPS}
       />
     </RigidBody>
   );
