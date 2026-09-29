@@ -1,12 +1,25 @@
-/** Floor-instance directory.
+import { ENCOUNTERS } from "../core/config";
+
+/** Floor-instance directory — where the deep decides who meets whom.
  *
- * Core multiplayer rule: entering floor N joins an existing instance of that
- * floor if one has capacity (players share the same generated layout via the
- * instance seed). If every instance of the floor is full — or none exists —
- * a brand-new instance with a fresh seed is created. This is pure logic with
- * no I/O so the exact same code runs in the local loopback "server" today and
- * in the authoritative server later.
- */
+ * Core social rule: only wizards on the SAME floor can ever share an
+ * instance, and they rarely do. Entering floor N rolls an encounter:
+ *
+ *  - success → join an existing instance of floor N that has room (the
+ *    shared seed means both wizards stand in the identical generated world);
+ *  - failure, or nobody else on floor N → a fresh private instance with a
+ *    fresh seed. A later entrant who rolls an encounter can walk into it.
+ *
+ * The odds follow a TENSION CLOCK (core/config.ts ENCOUNTERS): each floor a
+ * wizard enters alone raises their next roll, and a meeting resets it. So
+ * encounters stay uncommon, but every quiet floor makes the next one feel a
+ * little more dangerous.
+ *
+ * Reconnects bypass the roll: `preferInstanceId` puts a dropped wizard back
+ * into the very instance they fell out of, if it still exists.
+ *
+ * Pure logic with injected seed/clock/dice, so the exact same code runs in
+ * the offline loopback, the real server, and the unit tests. */
 
 export interface FloorInstanceRecord {
   id: string;
@@ -16,39 +29,70 @@ export interface FloorInstanceRecord {
   createdAt: number;
 }
 
+export interface EncounterTuning {
+  baseChance: number;
+  perSoloFloor: number;
+  maxChance: number;
+}
+
+export interface JoinOptions {
+  /** Rejoin this instance if it still exists on the floor with room
+   * (reconnect affinity) — no encounter roll. */
+  preferInstanceId?: string;
+}
+
 export class FloorDirectory {
   private instances = new Map<string, FloorInstanceRecord>();
   private playerInstance = new Map<string, string>();
+  /** Consecutive floors each player entered alone — the tension clock. */
+  private soloStreak = new Map<string, number>();
   private nextId = 1;
 
   constructor(
     private maxPerInstance = 4,
     private seedFn: () => number = () => (Math.random() * 0xffffffff) >>> 0,
     private now: () => number = () => Date.now(),
+    private dice: () => number = Math.random,
+    private tuning: EncounterTuning = ENCOUNTERS,
   ) {}
 
-  /** Assign a player to floor `floor`, joining the oldest instance with room
-   * or creating a new one. Removes the player from any previous instance. */
-  join(playerId: string, floor: number): FloorInstanceRecord {
+  /** Chance that this player's next floor entry meets someone (if anyone is
+   * there to meet). */
+  encounterChance(playerId: string): number {
+    const streak = this.soloStreak.get(playerId) ?? 0;
+    return Math.min(this.tuning.maxChance, this.tuning.baseChance + this.tuning.perSoloFloor * streak);
+  }
+
+  /** Assign a player to floor `floor` (see the rules above). Removes them
+   * from any previous instance first. */
+  join(playerId: string, floor: number, opts: JoinOptions = {}): FloorInstanceRecord {
     this.leave(playerId);
-    let best: FloorInstanceRecord | null = null;
-    for (const inst of this.instances.values()) {
-      if (inst.floor !== floor || inst.players.size >= this.maxPerInstance) continue;
-      if (!best || inst.createdAt < best.createdAt) best = inst;
+
+    const preferred = opts.preferInstanceId ? this.instances.get(opts.preferInstanceId) : undefined;
+    if (preferred && preferred.floor === floor && preferred.players.size < this.maxPerInstance) {
+      return this.seat(playerId, preferred);
     }
-    if (!best) {
-      best = {
-        id: `inst_${this.nextId++}`,
-        floor,
-        seed: this.seedFn(),
-        players: new Set(),
-        createdAt: this.now(),
-      };
-      this.instances.set(best.id, best);
+
+    const open = [...this.instances.values()].filter(
+      (i) => i.floor === floor && i.players.size < this.maxPerInstance && i.players.size > 0,
+    );
+    if (open.length > 0 && this.dice() < this.encounterChance(playerId)) {
+      // Which instance is fate's call — nobody can steer into a friend's.
+      const pick = open[Math.min(open.length - 1, Math.floor(this.dice() * open.length))];
+      this.soloStreak.set(playerId, 0);
+      return this.seat(playerId, pick);
     }
-    best.players.add(playerId);
-    this.playerInstance.set(playerId, best.id);
-    return best;
+
+    const fresh: FloorInstanceRecord = {
+      id: `inst_${this.nextId++}`,
+      floor,
+      seed: this.seedFn(),
+      players: new Set(),
+      createdAt: this.now(),
+    };
+    this.instances.set(fresh.id, fresh);
+    this.soloStreak.set(playerId, (this.soloStreak.get(playerId) ?? 0) + 1);
+    return this.seat(playerId, fresh);
   }
 
   /** Remove a player; empty instances are garbage-collected. */
@@ -62,12 +106,28 @@ export class FloorDirectory {
     if (inst.players.size === 0) this.instances.delete(id);
   }
 
+  /** Forget a player entirely (disconnect): their tension clock goes too. */
+  forget(playerId: string): void {
+    this.leave(playerId);
+    this.soloStreak.delete(playerId);
+  }
+
   instanceOf(playerId: string): FloorInstanceRecord | null {
     const id = this.playerInstance.get(playerId);
     return (id && this.instances.get(id)) || null;
   }
 
+  instanceById(id: string): FloorInstanceRecord | null {
+    return this.instances.get(id) ?? null;
+  }
+
   instancesOnFloor(floor: number): FloorInstanceRecord[] {
     return [...this.instances.values()].filter((i) => i.floor === floor);
+  }
+
+  private seat(playerId: string, inst: FloorInstanceRecord): FloorInstanceRecord {
+    inst.players.add(playerId);
+    this.playerInstance.set(playerId, inst.id);
+    return inst;
   }
 }

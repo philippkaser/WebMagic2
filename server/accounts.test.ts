@@ -13,10 +13,10 @@ function inv(partial: Partial<WireInventory> = {}): WireInventory {
 const FEATHER_PRICE = MERCHANT_STOCK.find((w) => w.id === SAVE_FEATHER_ID)!.price;
 
 describe("AccountStore", () => {
-  test("new accounts start with starter gear, no gold, checkpoint 1", () => {
+  test("new accounts start with starter gear, no gold, no depth", () => {
     const store = new AccountStore();
     const acc = store.login(undefined, "Dana");
-    expect(acc.checkpoint).toBe(1);
+    expect(acc.deepest).toBe(0);
     expect(acc.inventory).toEqual(defaultWireInventory());
     expect(acc.token.length).toBeGreaterThan(0);
   });
@@ -25,10 +25,11 @@ describe("AccountStore", () => {
     let json = "";
     const store = new AccountStore((j) => (json = j));
     const acc = store.login(undefined, "Dana");
+    acc.deepest = 10;
+    store.startRun(acc, 11);
+    store.advanceRun(acc, 12);
     store.grant(acc, "ember_staff");
     store.grantGold(acc, 55);
-    acc.checkpoint = 10;
-    store.setRunFloor(acc, 12);
 
     const restored = new AccountStore(null, json);
     const back = restored.get(acc.token)!;
@@ -36,9 +37,23 @@ describe("AccountStore", () => {
     expect(back.runGrants).toEqual(["ember_staff"]);
     expect(back.runGold).toBe(55);
     expect(back.runFloor).toBe(12);
+    expect(back.runFloors).toBe(2);
+    expect(back.deepest).toBe(10);
   });
 
-  test("restores pre-inventory records ({equipment} only) by upgrading them", () => {
+  test("starting a run forfeits an unfinished one", () => {
+    const store = new AccountStore();
+    const acc = store.login(undefined, "Dana");
+    store.startRun(acc, 3);
+    store.grant(acc, "ember_staff");
+    store.grantGold(acc, 20);
+    store.startRun(acc, 1);
+    expect(acc.runGrants).toEqual([]);
+    expect(acc.runGold).toBe(0);
+    expect(acc.runFloors).toBe(1);
+  });
+
+  test("restores pre-inventory, pre-run-rules records by upgrading them", () => {
     const legacy = JSON.stringify([
       {
         token: "old-token",
@@ -51,7 +66,8 @@ describe("AccountStore", () => {
     ]);
     const store = new AccountStore(null, legacy);
     const acc = store.get("old-token")!;
-    expect(acc.checkpoint).toBe(15);
+    expect(acc.deepest).toBe(15); // the old checkpoint becomes the deepest floor
+    expect(acc.runFloors).toBe(0);
     expect(acc.inventory.equipment.staff).toBe("arc_staff");
     expect(acc.inventory.equipment.amulet).toBe("amulet_fury");
     expect(acc.inventory.gold).toBe(0);
@@ -87,7 +103,7 @@ describe("AccountStore", () => {
     // Next run, no new grants — the banked staff is still provably owned.
     const save = store.bank(acc, 10, inv({ equipment: equipped }));
     expect(save.inventory.equipment.staff).toBe("arc_staff");
-    expect(save.checkpoint).toBe(10);
+    expect(save.deepest).toBe(10);
   });
 
   test("bank strips items beyond the owned multiset, per copy", () => {
@@ -148,12 +164,12 @@ describe("AccountStore", () => {
     expect(save.inventory.gold).toBe(0);
   });
 
-  test("bank never lowers the checkpoint", () => {
+  test("bank never lowers the deepest floor", () => {
     const store = new AccountStore();
     const acc = store.login(undefined, "Dana");
-    acc.checkpoint = 20;
+    acc.deepest = 20;
     const save = store.bank(acc, 5, inv());
-    expect(save.checkpoint).toBe(20);
+    expect(save.deepest).toBe(20);
   });
 
   test("malformed bank payloads collapse to safe defaults", () => {
@@ -239,7 +255,7 @@ describe("AccountStore", () => {
     );
     expect(save).not.toBeNull();
     expect(save!.inventory.equipment.staff).toBe("void_staff");
-    expect(save!.checkpoint).toBe(1); // escape never advances the checkpoint
+    expect(save!.deepest).toBe(0); // escape never counts as a deepest
     // The grant is spent — a second escape has no feather to burn.
     expect(store.escape(acc, inv())).toBeNull();
   });

@@ -27,11 +27,27 @@ export const PLAYER = {
 
 export const DUNGEON = {
   maxFloor: 100,
+  /** @deprecated Checkpoints were replaced by run rules (run/rules.ts); kept
+   * only until the generator refactor lands. */
   checkpointInterval: 5,
   baseSize: 36,
   sizePerFloor: 1.5,
   maxSize: 64,
   maxPlayersPerFloor: 4,
+} as const;
+
+/** How often the deep lets wizards meet (net/matchmaking.ts). Entering a
+ * floor rolls an encounter: success joins another wizard's instance of that
+ * same floor, failure opens a private one. Every floor walked alone raises
+ * the odds — a "tension clock" — so meetings stay rare but never impossible,
+ * and a long quiet stretch makes the next floor feel loaded. */
+export const ENCOUNTERS = {
+  /** Encounter chance on the first floor after a meeting (or of a run). */
+  baseChance: 0.12,
+  /** Added per consecutive floor entered alone. */
+  perSoloFloor: 0.12,
+  /** Ceiling — the deep never guarantees company. */
+  maxChance: 0.6,
 } as const;
 
 /** Rapier collision group indices (see interactionGroups).

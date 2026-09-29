@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { FloorDirectory } from "../src/net/matchmaking";
+import { entryFloorFor } from "../src/run/rules";
 import type { ServerMsg } from "../src/net/protocol";
 import { AccountStore, defaultWireInventory } from "./accounts";
 import { Relay, type RelayPeer } from "./relay";
@@ -37,28 +38,42 @@ let now = 50_000;
 beforeEach(() => {
   now = 50_000;
   store = new AccountStore();
-  relay = new Relay(new FloorDirectory(4, () => 1234, () => now), store, () => now);
+  // Dice always 0: every encounter roll succeeds, so wizards sent to the same
+  // floor share an instance (routing tests need company; the tension clock
+  // has its own tests in matchmaking.test.ts).
+  relay = new Relay(new FloorDirectory(4, () => 1234, () => now, () => 0), store, () => now);
   a = makePeer("A");
   b = makePeer("B");
   c = makePeer("C");
   for (const p of [a, b, c]) {
     relay.connect(p);
-    unlock(p); // most tests exercise routing, not progression — open all floors
+    login(p);
   }
 });
 
-/** Log the peer in and raise its checkpoint so floor validation lets it
- * through (progression rules get their own dedicated tests). */
-function unlock(peer: TestPeer, checkpoint = 100): string {
+function login(peer: TestPeer): string {
   relay.handle(peer.id, { t: "login", name: peer.name });
-  const token = lastOf(peer, "loggedIn")!.token;
-  store.get(token)!.checkpoint = checkpoint;
-  return token;
+  return lastOf(peer, "loggedIn")!.token;
 }
 
+function accountOf(peer: TestPeer) {
+  return store.get(lastOf(peer, "loggedIn")!.token)!;
+}
+
+/** Seat a peer on `floor` as if mid-run there (most tests exercise routing,
+ * not progression — run rules get their own dedicated tests below). */
 function join(peer: TestPeer, floor: number) {
   now += 10; // instances get distinct createdAt stamps
+  const acc = accountOf(peer);
+  acc.runFloor = floor;
+  acc.runFloors = Math.max(acc.runFloors, 1);
   relay.handle(peer.id, { t: "enterFloor", floor });
+}
+
+/** Send a raw floor request, exactly as a client would. */
+function enter(peer: TestPeer, floor: number, fresh = false) {
+  now += 10;
+  relay.handle(peer.id, { t: "enterFloor", floor, fresh });
 }
 
 describe("matchmaking + membership", () => {
@@ -149,7 +164,7 @@ describe("channel authority rules", () => {
   test("messages never cross instances", () => {
     const d = makePeer("D");
     relay.connect(d);
-    unlock(d);
+    login(d);
     join(d, 9); // different floor
     relay.handle(b.id, { t: "msg", ch: "p:pose", data: 1 });
     expect(d.inbox.some((m) => m.t === "msg")).toBe(false);
@@ -197,8 +212,8 @@ describe("accounts: identity", () => {
     relay.connect(d);
     relay.handle(d.id, { t: "login", name: "Dana" });
     const first = lastOf(d, "loggedIn")!;
-    expect(first.save.checkpoint).toBe(1);
-    store.get(first.token)!.checkpoint = 15;
+    expect(first.save.deepest).toBe(0);
+    store.get(first.token)!.deepest = 15;
 
     // New connection (e.g. after a restart) with the same token.
     const d2 = makePeer("D2");
@@ -206,45 +221,63 @@ describe("accounts: identity", () => {
     relay.handle(d2.id, { t: "login", name: "Dana", token: first.token });
     const second = lastOf(d2, "loggedIn")!;
     expect(second.token).toBe(first.token);
-    expect(second.save.checkpoint).toBe(15);
+    expect(second.save.deepest).toBe(15);
   });
 });
 
-describe("accounts: floor-entry validation", () => {
-  test("a fresh account cannot skip ahead — forged deep floors land on 1", () => {
-    const d = makePeer("D");
-    relay.connect(d);
-    relay.handle(d.id, { t: "login", name: "Dana" }); // checkpoint 1
-    join(d, 40);
-    expect(lastOf(d, "floorAssigned")!.assignment.floor).toBe(1);
+describe("run rules: the Weighing, continuing runs, reconnects", () => {
+  test("a fresh run lands where the banked gear resonates — the requested floor is ignored", () => {
+    enter(a, 40, true); // starter gear → floor 1, whatever was asked
+    expect(lastOf(a, "floorAssigned")!.assignment.floor).toBe(1);
+    expect(accountOf(a).runFloors).toBe(1);
+
+    const acc = accountOf(b);
+    acc.inventory.equipment = {
+      staff: "ember_staff@20",
+      amulet: "amulet_vigor@20",
+      cloak: "cloak_warden@20",
+      boots: "worn_boots@20",
+    };
+    enter(b, 1, true);
+    expect(lastOf(b, "floorAssigned")!.assignment.floor).toBe(entryFloorFor(20));
   });
 
-  test("descending one floor at a time is allowed; leaping is not", () => {
-    const d = makePeer("D");
-    relay.connect(d);
-    relay.handle(d.id, { t: "login", name: "Dana" });
-    join(d, 1);
-    join(d, 2); // descend — fine
-    expect(lastOf(d, "floorAssigned")!.assignment.floor).toBe(2);
-    join(d, 9); // leap — denied
-    expect(lastOf(d, "floorAssigned")!.assignment.floor).toBe(1);
+  test("a continuing run goes one floor deeper at a time, counting floors", () => {
+    enter(a, 1, true);
+    enter(a, 2);
+    enter(a, 3);
+    expect(lastOf(a, "floorAssigned")!.assignment.floor).toBe(3);
+    expect(accountOf(a).runFloors).toBe(3);
   });
 
-  test("a reconnecting account resumes its run floor", () => {
-    const d = makePeer("D");
-    relay.connect(d);
-    relay.handle(d.id, { t: "login", name: "Dana" });
-    const token = lastOf(d, "loggedIn")!.token;
-    join(d, 1);
-    join(d, 2);
-    join(d, 3);
-    relay.disconnect(d.id); // socket dropped mid-run
+  test("a leap is not a descent: it forfeits the run and starts over at the Weighing", () => {
+    enter(a, 1, true);
+    enter(a, 2);
+    relay.handle(a.id, { t: "grant", playerId: a.id, itemId: "ember_staff" }); // a is host
+    expect(accountOf(a).runGrants).toEqual(["ember_staff"]);
+    enter(a, 9);
+    expect(lastOf(a, "floorAssigned")!.assignment.floor).toBe(1);
+    expect(accountOf(a).runFloors).toBe(1);
+    expect(accountOf(a).runGrants).toEqual([]); // walking away costs what dying costs
+  });
 
-    const d2 = makePeer("D2");
-    relay.connect(d2);
-    relay.handle(d2.id, { t: "login", name: "Dana", token });
-    join(d2, 3); // back to where we were
-    expect(lastOf(d2, "floorAssigned")!.assignment.floor).toBe(3);
+  test("a reconnecting account resumes its run floor, in the same instance", () => {
+    const token = accountOf(a).token;
+    join(c, 3); // someone already down there
+    enter(a, 1, true);
+    enter(a, 2);
+    enter(a, 3); // meets c (dice always succeed)
+    const before = lastOf(a, "floorAssigned")!.assignment.instanceId;
+    relay.disconnect(a.id); // socket dropped mid-run
+
+    const a2 = makePeer("A2");
+    relay.connect(a2);
+    relay.handle(a2.id, { t: "login", name: "A", token });
+    enter(a2, 3); // back to where we were
+    const after = lastOf(a2, "floorAssigned")!.assignment;
+    expect(after.floor).toBe(3);
+    expect(after.instanceId).toBe(before);
+    expect(store.get(token)!.runFloors).toBe(3);
   });
 });
 
@@ -267,13 +300,14 @@ describe("accounts: grants and banking", () => {
     expect(store.get(tokenC)!.runGrants).toEqual([]);
   });
 
-  test("banking keeps granted items, strips forged ones, sets the checkpoint", () => {
+  test("walking home keeps granted items, strips forged ones, records the depth", () => {
     const tokenB = lastOf(b, "loggedIn")!.token;
-    store.get(tokenB)!.checkpoint = 1; // fresh player
-    join(a, 5); // host (a has checkpoint 100)
-    relay.handle(b.id, { t: "enterFloor", floor: 5 });
-    // ...b can't enter 5 as a fresh account — walk down legitimately.
-    for (let f = 1; f <= 5; f++) relay.handle(b.id, { t: "enterFloor", floor: f });
+    join(a, 5); // host, waiting on floor 5
+    enter(b, 1, true); // b plays floors 1→5 legitimately
+    for (let f = 2; f <= 5; f++) enter(b, f);
+    expect(lastOf(b, "floorAssigned")!.assignment.instanceId).toBe(
+      lastOf(a, "floorAssigned")!.assignment.instanceId,
+    );
     relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "ember_staff" });
 
     relay.handle(b.id, {
@@ -286,14 +320,28 @@ describe("accounts: grants and banking", () => {
     const saved = lastOf(b, "saved")!.save;
     expect(saved.inventory.equipment.staff).toBe("ember_staff"); // granted → kept
     expect(saved.inventory.equipment.amulet).toBeNull(); // never granted → stripped
-    expect(saved.checkpoint).toBe(5); // from the ACTUAL instance floor
+    expect(saved.deepest).toBe(5); // from the ACTUAL instance floor
     expect(store.get(tokenB)!.runGrants).toEqual([]); // consumed
+    expect(store.get(tokenB)!.runFloors).toBe(0); // the run is over
   });
 
-  test("banking is refused off checkpoint floors", () => {
-    join(a, 3); // not a multiple of the checkpoint interval
-    relay.handle(a.id, { t: "bank", inventory: defaultWireInventory() });
-    expect(a.inbox.some((m) => m.t === "saved")).toBe(false);
+  test("the way home stays shut until five floors are played (answers with the unchanged save)", () => {
+    enter(a, 1, true);
+    for (let f = 2; f <= 4; f++) enter(a, f);
+    relay.handle(a.id, { t: "grant", playerId: a.id, itemId: "ember_staff" });
+    relay.handle(a.id, {
+      t: "bank",
+      inventory: { ...defaultWireInventory(), equipment: { ...defaultWireInventory().equipment, staff: "ember_staff" } },
+    });
+    const saved = lastOf(a, "saved")!.save;
+    expect(saved.inventory.equipment.staff).toBe("apprentice_staff"); // nothing banked
+    expect(accountOf(a).runGrants).toEqual(["ember_staff"]); // run continues
+    enter(a, 5); // the fifth floor pays the tithe
+    relay.handle(a.id, {
+      t: "bank",
+      inventory: { ...defaultWireInventory(), equipment: { ...defaultWireInventory().equipment, staff: "ember_staff" } },
+    });
+    expect(lastOf(a, "saved")!.save.inventory.equipment.staff).toBe("ember_staff");
   });
 
   test("gold grants are host-only, and stash/buy are refused mid-run", () => {

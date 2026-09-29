@@ -69,7 +69,8 @@ export interface WireInventory {
 
 /** The server-authoritative save. What the client has locally is a cache. */
 export interface ServerSave {
-  checkpoint: number;
+  /** Deepest floor ever walked home from (0 = never). */
+  deepest: number;
   inventory: WireInventory;
 }
 
@@ -77,14 +78,21 @@ export type ClientMsg =
   /** Device identity: no token = new account; the reply carries the token to
    * keep. Also updates the display name. */
   | { t: "login"; name: string; token?: string }
-  | { t: "enterFloor"; floor: number }
+  /** Enter a dungeon floor. `fresh` = a new run from the village portal: the
+   * server ignores the requested floor and casts the wizard to the depth
+   * their banked gear resonates at (run/rules.ts). Otherwise the request must
+   * continue the current run: the same floor (reconnect) or one deeper
+   * (portal, warp rune). Anything else forfeits the run and starts fresh. */
+  | { t: "enterFloor"; floor: number; fresh?: boolean }
   | { t: "leaveDungeon" }
-  /** Checkpoint banking. The server validates every item against what was
-   * actually granted this run (host-attested) and answers with `saved`. */
+  /** Walk home through a way-home portal. Refused until the run has played
+   * RUN.floorsBeforeExit floors; the server validates every item against what
+   * was actually granted this run (host-attested) and answers with `saved`. */
   | { t: "bank"; inventory: WireInventory }
   /** Feather escape: bank from ANY dungeon floor by consuming a Feather of
-   * Safe Passage. Same provenance rules as `bank`, does not move the
-   * checkpoint; the server verifies a feather was actually spent. */
+   * Safe Passage — even before the Tithe of Five is paid. Same provenance
+   * rules as `bank`, never counts as a deepest; the server verifies a feather
+   * was actually spent. */
   | { t: "escape"; inventory: WireInventory }
   /** Village-only inventory rearrangement (chest/bag/belt moves, item
    * discards). Must be a sub-multiset of the current save — nothing new can

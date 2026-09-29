@@ -682,12 +682,12 @@ netBus.on("serverSave", (save) => {
   }
   const inv = fromWireInventory(save.inventory);
   useGame.setState({
-    checkpoint: save.checkpoint,
+    checkpoint: Math.max(1, save.deepest),
     ...inv,
     runGold: 0,
     health: computeStats(inv.equipment).maxHealth,
   });
-  persistCurrent({ checkpoint: save.checkpoint, ...inv });
+  persistCurrent({ checkpoint: Math.max(1, save.deepest), ...inv });
 });
 
 // Reconnect resync: the session re-enters our floor after a dropped socket.

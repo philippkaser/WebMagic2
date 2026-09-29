@@ -1,7 +1,7 @@
 import { DUNGEON } from "../src/core/config";
 import { Rng } from "../src/core/rng";
 import { rollGamble } from "../src/items/loot";
-import { FloorDirectory } from "../src/net/matchmaking";
+import { FloorDirectory, type JoinOptions } from "../src/net/matchmaking";
 import {
   CHANNEL_AUTHORITY,
   CHANNEL_PEER,
@@ -10,6 +10,7 @@ import {
   type MemberInfo,
   type ServerMsg,
 } from "../src/net/protocol";
+import { canLeave, entryFloorForGear } from "../src/run/rules";
 import type { AccountRecord, AccountStore } from "./accounts";
 
 /** The gameplay-blind relay core. Pure logic (I/O injected via `send`), so
@@ -18,8 +19,9 @@ import type { AccountRecord, AccountStore } from "./accounts";
  *
  * Responsibilities — and the complete list, by design:
  *  - identity: device-token login backed by the AccountStore
- *  - matchmaking via FloorDirectory (max 4 wizards per floor instance),
- *    with floor-entry validation against the account's actual progress
+ *  - matchmaking via FloorDirectory (rare same-floor encounters, max 4 per
+ *    instance), with run validation: fresh runs start where the account's
+ *    banked gear resonates, continuing runs only go one floor deeper
  *  - host designation + migration (epoch bumps on every change)
  *  - clock pongs (one shared timeline for interpolation)
  *  - relaying opaque envelopes by channel-prefix rule:
@@ -27,7 +29,8 @@ import type { AccountRecord, AccountStore } from "./accounts";
  *      "h:" anyone → current host only
  *      "p:" anyone → the rest of the instance
  *  - asking the host to world-sync each late joiner
- *  - saves: host-attested item grants, provenance-checked banking, run loss
+ *  - saves: host-attested item grants, provenance-checked banking (only once
+ *    the run has paid the Tithe of Five), run loss
  *
  * Everything else is client-side gameplay code. Adding a networked feature
  * never changes this file. */
@@ -45,6 +48,9 @@ export class Relay {
   private epochs = new Map<string, number>();
   /** peerId → account token (bound at login / first floor entry). */
   private tokens = new Map<string, string>();
+  /** account token → the instance its wizard was last seated in, so a
+   * dropped connection resumes in the same world (not a fresh roll). */
+  private lastInstance = new Map<string, string>();
 
   constructor(
     private directory: FloorDirectory,
@@ -61,8 +67,10 @@ export class Relay {
   disconnect(peerId: string): void {
     const peer = this.peers.get(peerId);
     if (!peer) return;
-    // runFloor/runGrants stay on the account so a reconnect resumes the run.
+    // runFloor/runGrants stay on the account so a reconnect resumes the run
+    // (and lastInstance remembers where, for the same world).
     this.leaveInstance(peer);
+    this.directory.forget(peerId);
     this.peers.delete(peerId);
     this.tokens.delete(peerId);
   }
@@ -85,7 +93,11 @@ export class Relay {
         peer.send({ t: "pong", sent: msg.sent, serverTime: this.now() });
         break;
       case "enterFloor":
-        this.enterFloor(peer, Math.max(1, Math.min(DUNGEON.maxFloor, Math.floor(msg.floor))));
+        this.enterFloor(
+          peer,
+          Math.max(1, Math.min(DUNGEON.maxFloor, Math.floor(Number(msg.floor)) || 1)),
+          msg.fresh === true,
+        );
         break;
       case "leaveDungeon":
         this.leaveInstance(peer);
@@ -93,12 +105,17 @@ export class Relay {
       case "bank": {
         const account = this.accountOf(peer);
         const inst = this.directory.instanceOf(peer.id);
-        // Banking only counts where the portal exists: a checkpoint floor
-        // you are ACTUALLY matchmade into — the floor claim can't be faked.
-        if (!inst || inst.floor % DUNGEON.checkpointInterval !== 0) return;
+        // The way home opens only once the run has paid the Tithe of Five,
+        // counted server-side from floors actually entered — and the floor
+        // recorded is the one you are ACTUALLY matchmade into.
+        if (!inst || !canLeave(account.runFloors)) {
+          peer.send({ t: "saved", save: this.accounts.saveOf(account) });
+          this.log(`${peer.id} refused bank (${account.runFloors} floor(s) played)`);
+          return;
+        }
         const save = this.accounts.bank(account, inst.floor, msg.inventory);
         peer.send({ t: "saved", save });
-        this.log(`${peer.id} banked at floor ${inst.floor}`);
+        this.log(`${peer.id} walked home from floor ${inst.floor}`);
         break;
       }
       case "escape": {
@@ -150,7 +167,7 @@ export class Relay {
         // save so the client's pending state resolves either way.
         const account = this.accountOf(peer);
         if (this.directory.instanceOf(peer.id)) return; // village only
-        const rolled = rollGamble(new Rng((Math.random() * 0xffffffff) >>> 0), account.checkpoint);
+        const rolled = rollGamble(new Rng((Math.random() * 0xffffffff) >>> 0), account.deepest);
         const save = this.accounts.gamble(account, rolled);
         peer.send({ t: "saved", save: save ?? this.accounts.saveOf(account) });
         if (save) this.log(`${peer.id} gambled and drew ${rolled}`);
@@ -201,22 +218,33 @@ export class Relay {
 
   // ── Instances ──────────────────────────────────────────────────────────────
 
-  private enterFloor(peer: RelayPeer, floor: number): void {
+  private enterFloor(peer: RelayPeer, requested: number, fresh: boolean): void {
     const account = this.accountOf(peer);
-    // Progress-validated entry: floor 1, anything you've banked past, one
-    // step deeper than the floor you're on (descending), or your current run
-    // floor again (reconnect resume). No floor-skipping by message forgery.
-    const allowed =
-      floor === 1 ||
-      floor <= account.checkpoint ||
-      (account.runFloor > 0 && floor >= account.runFloor && floor <= account.runFloor + 1);
-    if (!allowed) {
-      this.log(`${peer.id} denied floor ${floor} (checkpoint ${account.checkpoint}, run ${account.runFloor})`);
-      floor = 1;
+    // Run-validated entry — no floor-skipping by message forgery:
+    //  - continuing a run: the same floor (reconnect → back into the same
+    //    instance) or exactly one deeper (portal, warp rune);
+    //  - anything else starts a FRESH run, which forfeits an unfinished one
+    //    and always lands where the banked gear resonates (the Weighing).
+    const inRun = account.runFloor > 0;
+    const opts: JoinOptions = {};
+    let floor: number;
+    if (!fresh && inRun && requested === account.runFloor) {
+      floor = requested;
+      opts.preferInstanceId = this.lastInstance.get(account.token);
+    } else if (!fresh && inRun && requested === account.runFloor + 1) {
+      floor = requested;
+      this.accounts.advanceRun(account, floor);
+    } else {
+      const eq = account.inventory.equipment;
+      floor = entryFloorForGear([eq.staff, eq.amulet, eq.cloak, eq.boots]);
+      if (requested !== floor) {
+        this.log(`${peer.id} asked for floor ${requested}; the Weighing says ${floor}`);
+      }
+      this.accounts.startRun(account, floor);
     }
     this.leaveInstance(peer);
-    const inst = this.directory.join(peer.id, floor);
-    this.accounts.setRunFloor(account, floor);
+    const inst = this.directory.join(peer.id, floor, opts);
+    this.lastInstance.set(account.token, inst.id);
     if (!this.epochs.has(inst.id)) this.epochs.set(inst.id, 1);
     const hostId = this.hostOf(peer.id);
     const members: MemberInfo[] = [...inst.players].map((id) => ({

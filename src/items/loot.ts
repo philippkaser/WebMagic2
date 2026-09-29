@@ -1,7 +1,7 @@
 import type { Rng } from "../core/rng";
 import { allAffixDefs } from "./affixes";
 import { lootPool } from "./catalog";
-import { makeItemId } from "./itemId";
+import { makeItemId, MAX_ITEM_LEVEL } from "./itemId";
 import type { ItemDef, Slot } from "./types";
 
 const SLOT_WEIGHTS: [Slot, number][] = [
@@ -57,23 +57,32 @@ export function rollAffixId(rng: Rng): string {
   return pool[Math.floor(rng.next() * pool.length) % pool.length].id;
 }
 
-/** Roll a full droppable item id: base item + possible enchantment.
- * Consumables never carry affixes. This is what drops and treasure use. */
-export function rollDrop(rng: Rng, floor: number): string {
-  const def = rollLoot(rng, floor);
-  if (def.slot !== "consumable" && rng.next() < affixChance(floor)) {
-    return makeItemId(def.id, rollAffixId(rng));
-  }
-  return def.id;
+/** The level a piece of gear rolls at when found on `floor`: the floor
+ * itself, give or take one — so two drops from the same depth still differ a
+ * little, and a lucky find can nudge your resonance deeper. */
+export function rollItemLevel(rng: Rng, floor: number): number {
+  return Math.max(1, Math.min(MAX_ITEM_LEVEL, Math.round(floor) + rng.int(-1, 1)));
 }
 
-/** Maro's Orb of Fortune: always gear, rolled a couple of floors past your
- * checkpoint, with a juiced enchant chance — gambling IS affix hunting.
+/** Roll a full droppable item id: base item + possible enchantment + level.
+ * Consumables never carry affixes or levels. This is what drops and treasure
+ * use. */
+export function rollDrop(rng: Rng, floor: number): string {
+  const def = rollLoot(rng, floor);
+  if (def.slot === "consumable") return def.id;
+  const affix = rng.next() < affixChance(floor) ? rollAffixId(rng) : null;
+  return makeItemId(def.id, affix, rollItemLevel(rng, floor));
+}
+
+/** Maro's Orb of Fortune: always gear, rolled a couple of floors past the
+ * deepest floor you've come home from, with a juiced enchant chance —
+ * gambling IS affix hunting (and a way to nudge your resonance deeper).
  * Shared pure logic: the server rolls with this exact function online. */
-export function rollGamble(rng: Rng, checkpoint: number): string {
-  const floor = Math.max(checkpoint, 1) + 2;
+export function rollGamble(rng: Rng, deepest: number): string {
+  const floor = Math.max(deepest, 1) + 2;
   const gearSlots: Slot[] = ["staff", "amulet", "cloak", "boots"];
   const slot = gearSlots[Math.floor(rng.next() * gearSlots.length) % gearSlots.length];
   const def = pickWeighted(rng, lootPool(slot, floor), floor);
-  return rng.next() < 0.45 ? makeItemId(def.id, rollAffixId(rng)) : def.id;
+  const affix = rng.next() < 0.45 ? rollAffixId(rng) : null;
+  return makeItemId(def.id, affix, rollItemLevel(rng, floor));
 }
