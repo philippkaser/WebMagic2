@@ -1,14 +1,25 @@
+import { ENEMY_SOURCE, WORLD_SOURCE, type DamageSource } from "../game/damageSource";
 import { hostEvent } from "../net/channels";
 import type { Vec3 } from "../world/types";
-import { explode } from "./damage";
+import { explode } from "./explosions";
 import { fireProjectile } from "./projectiles";
 
-/** Authoritative combat effects (enemy shots, boss slams) as host events.
+/** Authoritative combat effects (enemy shots, boss slams, trap darts) as host
+ * events.
  *
  * One handler covers every machine: on the host (`meta.self`) the effect is
  * real and damages entities; on replicas it replays cosmetically vs entities
  * (host authority — nothing is double-counted) while still hurting and
  * shoving the LOCAL player, so your survival never waits on a round trip. */
+
+/** Who a dungeon effect is blamed on when it hurts a wizard: a monster
+ * ("enemy", the default) or the dungeon itself ("world" — traps). Sent as a
+ * tag rather than a DamageSource so the wire stays a closed, tiny vocabulary. */
+export type DungeonSourceTag = "enemy" | "world";
+
+function dungeonSource(tag: DungeonSourceTag | undefined): DamageSource {
+  return tag === "world" ? WORLD_SOURCE : ENEMY_SOURCE;
+}
 
 export interface EnemyCastData {
   origin: Vec3;
@@ -18,11 +29,14 @@ export interface EnemyCastData {
   size: number;
   blastRadius: number;
   blastImpulse: number;
+  /** Default "enemy"; trap darts send "world". */
+  source?: DungeonSourceTag;
 }
 
 export const enemyCast = hostEvent<EnemyCastData>("enemyCast", (d, meta) => {
   fireProjectile({
     team: "enemy",
+    source: dungeonSource(d.source),
     position: d.origin,
     velocity: d.velocity,
     damage: d.damage,
@@ -40,6 +54,8 @@ export interface BoomData {
   damage: number;
   impulse: number;
   color: string;
+  /** Default "enemy" (boss slams); a trap-triggered blast would send "world". */
+  source?: DungeonSourceTag;
 }
 
 export const enemyBoom = hostEvent<BoomData>("enemyBoom", (d, meta) => {
@@ -49,6 +65,7 @@ export const enemyBoom = hostEvent<BoomData>("enemyBoom", (d, meta) => {
     damage: d.damage,
     impulse: d.impulse,
     team: "enemy",
+    source: dungeonSource(d.source),
     color: d.color,
     particles: 50,
     light: 50,
