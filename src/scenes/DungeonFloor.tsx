@@ -1,8 +1,7 @@
 import { useThree } from "@react-three/fiber";
 import { CuboidCollider, interactionGroups, RigidBody } from "@react-three/rapier";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Color, Fog, InstancedMesh, Object3D } from "three";
-import { startAmbient, stopAmbient } from "../audio/sound";
+import { InstancedMesh, Object3D } from "three";
 import { Boss } from "../enemies/Warden";
 import { getEnemyDef } from "../enemies/registry";
 import { SpawnedEnemies } from "../enemies/SpawnedEnemies";
@@ -17,7 +16,9 @@ import { floorsUntilExit } from "../run/rules";
 import { useGame } from "../state/gameStore";
 import { Breakable, Portal, Torch, TreasurePedestal } from "../world/props";
 import { Trap } from "../world/traps";
+import { getBiomeDef } from "../world/biomes";
 import type { FloorLayout } from "../world/types";
+import { useFloorAtmosphere } from "./floorAtmosphere";
 
 const WORLD_GROUPS = interactionGroups(GROUPS.WORLD, [
   GROUPS.PLAYER,
@@ -40,10 +41,10 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
   const [bossAlive, setBossAlive] = useState(layout.boss !== null);
   const floorsOwed = useGame((s) => floorsUntilExit(s.run?.floorsPlayed ?? 0));
 
+  useFloorAtmosphere(layout);
+  const biome = getBiomeDef(layout.biome);
+
   useEffect(() => {
-    scene.fog = new Fog("#070409", 9, 50);
-    scene.background = new Color("#070409");
-    startAmbient("dungeon");
     // Tell replication which entity ids this floor spawns, so the host can
     // compute the dead set for late joiners.
     setExpectedEntities([
@@ -56,8 +57,6 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
     const warmup = requestAnimationFrame(() => gl.compile(scene, camera));
     return () => {
       cancelAnimationFrame(warmup);
-      scene.fog = null;
-      stopAmbient();
       resetRegistries();
       resetNetEntities();
     };
@@ -82,7 +81,7 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
 
   return (
     <group>
-      <ambientLight intensity={0.14} color="#5a6a9a" />
+      <ambientLight intensity={biome.ambient.intensity} color={biome.ambient.color} />
 
       <WallsAndFloor layout={layout} />
 

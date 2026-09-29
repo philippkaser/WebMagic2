@@ -21,6 +21,7 @@ import { StaffView } from "../player/StaffView";
 import { Effects } from "../render/Effects";
 import { useGame } from "../state/gameStore";
 import { generateFloor } from "../world/gen";
+import { omenRules } from "../world/omens";
 import { DungeonFloor } from "./DungeonFloor";
 import { Village } from "./Village";
 
@@ -36,6 +37,8 @@ export function GameScene() {
     [inDungeon, floorSeed, floor],
   );
   const controlsEnabled = phase === "village" || phase === "dungeon";
+  // The Weightless Hour (and any future omen) bends the world's gravity.
+  const gravityMult = (layout && omenRules(layout.omen).gravityMult) ?? 1;
 
   // dpr 0.35: the game IS pixelated, so rendering at native resolution was
   // pure waste — this one number cut measured frame time ~5x. The browser
@@ -52,7 +55,7 @@ export function GameScene() {
         {/* Fixed timestep: one 1/60 step per frame. NEVER use timeStep="vary"
             here — a long frame (floor load, shader compile) integrates gravity
             over the whole gap in one step and props tunnel through the floor. */}
-        <Physics gravity={[0, GRAVITY, 0]}>
+        <Physics gravity={[0, GRAVITY * gravityMult, 0]}>
           {inDungeon && layout ? (
             <DungeonFloor key={`${instanceId}:${floor}`} layout={layout} />
           ) : (

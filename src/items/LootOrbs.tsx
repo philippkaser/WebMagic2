@@ -9,6 +9,7 @@ import {
   type DynamicLightSource,
 } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
+import { getFloorRules } from "../game/floorRules";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { wizardDistSqTo } from "../game/targets";
@@ -94,10 +95,12 @@ function announceOrb(defId: string | null, gold: number, pos: Vec3): void {
 }
 
 /** Roll & drop loot at a position. Authority-only — replicas receive the
- * spawn event instead, so exactly one roll happens per kill/break. */
+ * spawn event instead, so exactly one roll happens per kill/break. The
+ * floor's omen scales the odds here, once, for every source (callers pass
+ * their base chance). */
 export function dropLoot(position: Vec3, floor: number, chance = 1): void {
   if (!isHost()) return;
-  if (Math.random() > chance) return;
+  if (Math.random() > chance * getFloorRules().lootChanceMult) return;
   // Full item roll: base + possible enchantment (rarity scales with depth).
   const itemId = rollDrop(new Rng((Math.random() * 0xffffffff) >>> 0), floor);
   announceOrb(itemId, 0, position);
@@ -120,12 +123,13 @@ export function dropGold(
   if (!isHost()) return;
   if (Math.random() > chance) return;
   const rng = new Rng((Math.random() * 0xffffffff) >>> 0);
-  const amount =
+  const base =
     source === "boss"
       ? bossGoldAmount(rng, floor)
       : source === "enemy"
         ? enemyGoldAmount(rng, floor)
         : propGoldAmount(rng, floor);
+  const amount = Math.round(base * getFloorRules().goldMult);
   if (amount > 0) announceOrb(null, amount, position);
 }
 
