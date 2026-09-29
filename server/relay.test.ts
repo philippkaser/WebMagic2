@@ -376,3 +376,46 @@ describe("accounts: grants and banking", () => {
     expect(store.get(tokenB)!.runFloor).toBe(0);
   });
 });
+
+describe("graves: plunder is bounded by what the dead were granted", () => {
+  test("a grave grant is refused unless someone who died here was granted it", () => {
+    const tokenC = lastOf(c, "loggedIn")!.token;
+    join(a, 4); // host
+    join(b, 4);
+    join(c, 4);
+    // Nobody has died: a "grave" grant of anything is a forgery.
+    relay.handle(a.id, { t: "grant", playerId: c.id, itemId: "void_staff@90", source: "grave" });
+    expect(store.get(tokenC)!.runGrants).toEqual([]);
+
+    // b legitimately picks up an amulet, then dies with others watching.
+    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "amulet_vigor@4" });
+    relay.handle(a.id, { t: "grantGold", playerId: b.id, amount: 30 });
+    relay.handle(b.id, { t: "died" });
+
+    // c plunders the grave: the amulet once, the gold up to what b carried.
+    relay.handle(a.id, { t: "grant", playerId: c.id, itemId: "amulet_vigor@4", source: "grave" });
+    relay.handle(a.id, { t: "grant", playerId: c.id, itemId: "amulet_vigor@4", source: "grave" });
+    relay.handle(a.id, { t: "grant", playerId: c.id, itemId: "void_staff@90", source: "grave" });
+    relay.handle(a.id, { t: "grantGold", playerId: c.id, amount: 500, source: "grave" });
+    expect(store.get(tokenC)!.runGrants).toEqual(["amulet_vigor@4"]);
+    expect(store.get(tokenC)!.runGold).toBe(30);
+  });
+
+  test("dying alone leaves nothing plunderable", () => {
+    const tokenB = lastOf(b, "loggedIn")!.token;
+    join(a, 6);
+    relay.handle(a.id, { t: "grant", playerId: a.id, itemId: "amulet_vigor" });
+    relay.handle(a.id, { t: "died" }); // alone on the floor
+    join(a, 6);
+    join(b, 6);
+    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "amulet_vigor", source: "grave" });
+    expect(store.get(tokenB)!.runGrants).toEqual([]);
+  });
+
+  test("assignments carry the server's floor count", () => {
+    enter(a, 1, true);
+    expect(lastOf(a, "floorAssigned")!.assignment.runFloors).toBe(1);
+    enter(a, 2);
+    expect(lastOf(a, "floorAssigned")!.assignment.runFloors).toBe(2);
+  });
+});

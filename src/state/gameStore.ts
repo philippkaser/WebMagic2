@@ -219,7 +219,8 @@ export const useGame = create<GameState>((set, get) => ({
       floor: assignment.floor,
       floorSeed: assignment.seed,
       instanceId: assignment.instanceId,
-      run: { startFloor: assignment.floor, floorsPlayed: 1 },
+      // The server's count is the one the way home is judged by.
+      run: { startFloor: assignment.floor, floorsPlayed: assignment.runFloors ?? 1 },
       health: stats.maxHealth,
       mana: PLAYER.maxMana,
       lastDeath: null,
@@ -233,7 +234,7 @@ export const useGame = create<GameState>((set, get) => ({
     if (!run || next > DUNGEON.maxFloor) return;
     set({ phase: "loading", prompt: null, overlay: "none" });
     const assignment = await session.requestFloor(next);
-    const floorsPlayed = run.floorsPlayed + 1;
+    const floorsPlayed = assignment.runFloors ?? run.floorsPlayed + 1;
     set({
       phase: "dungeon",
       floor: assignment.floor,
@@ -687,6 +688,9 @@ netBus.on("serverSave", (save) => {
 netBus.on("assigned", (a) => {
   const state = useGame.getState();
   if (state.phase !== "dungeon") return;
+  if (state.run && a.runFloors !== undefined && a.runFloors !== state.run.floorsPlayed) {
+    useGame.setState({ run: { ...state.run, floorsPlayed: a.runFloors } });
+  }
   if (state.floorSeed === a.seed && state.instanceId === a.instanceId) return;
   useGame.setState({ floor: a.floor, floorSeed: a.seed, instanceId: a.instanceId });
 });

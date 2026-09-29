@@ -5,8 +5,11 @@
  * care read the live values through getFloorRules() at the moment they need
  * them (spawn, hit, drop), so no component has to know what an omen is.
  *
- * The floor scene installs rules on mount and resets them on unmount; the
- * village and tests always see the neutral defaults. */
+ * GameScene installs a floor's rules together with its layout, DURING
+ * render (not in a mount effect): enemies read enemyHealthMult as they
+ * initialize, and effects run after the children. Leaving the dungeon
+ * installs the neutral defaults the same way, so the village and tests
+ * always see them. */
 
 export interface FloorRules {
   /** World gravity multiplier (physics). */

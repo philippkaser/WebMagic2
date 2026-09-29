@@ -127,13 +127,13 @@ export class GameSession {
 
   /** HOST only (the server ignores anyone else): attest that a player
    * legitimately picked up an item, making it bankable for them. */
-  attestGrant(playerId: string, itemId: string): void {
-    this.transport?.send({ t: "grant", playerId, itemId });
+  attestGrant(playerId: string, itemId: string, source?: "grave"): void {
+    this.transport?.send({ t: "grant", playerId, itemId, source });
   }
 
   /** HOST only: attest a gold pickup — gold's provenance path. */
-  attestGold(playerId: string, amount: number): void {
-    this.transport?.send({ t: "grantGold", playerId, amount });
+  attestGold(playerId: string, amount: number, source?: "grave"): void {
+    this.transport?.send({ t: "grantGold", playerId, amount, source });
   }
 
   // ── Connection plumbing ────────────────────────────────────────────────────

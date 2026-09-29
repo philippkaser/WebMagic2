@@ -16,7 +16,10 @@ import { ENCOUNTERS } from "../core/config";
  * little more dangerous.
  *
  * Reconnects bypass the roll: `preferInstanceId` puts a dropped wizard back
- * into the very instance they fell out of, if it still exists.
+ * into the very instance they fell out of. An instance whose last wizard
+ * leaves LINGERS (empty, invisible to encounters) for a minute before it is
+ * garbage-collected, so even a solo wizard's dropped connection comes back
+ * to the same seed — the same world.
  *
  * Pure logic with injected seed/clock/dice, so the exact same code runs in
  * the offline loopback, the real server, and the unit tests. */
@@ -27,7 +30,12 @@ export interface FloorInstanceRecord {
   seed: number;
   players: Set<string>;
   createdAt: number;
+  /** When the last player left (lingering), or null while occupied. */
+  emptySince: number | null;
 }
+
+/** How long an empty instance waits for its wizard to reconnect. */
+export const INSTANCE_LINGER_MS = 60_000;
 
 export interface EncounterTuning {
   baseChance: number;
@@ -54,6 +62,7 @@ export class FloorDirectory {
     private now: () => number = () => Date.now(),
     private dice: () => number = Math.random,
     private tuning: EncounterTuning = ENCOUNTERS,
+    private lingerMs = INSTANCE_LINGER_MS,
   ) {}
 
   /** Chance that this player's next floor entry meets someone (if anyone is
@@ -67,6 +76,7 @@ export class FloorDirectory {
    * from any previous instance first. */
   join(playerId: string, floor: number, opts: JoinOptions = {}): FloorInstanceRecord {
     this.leave(playerId);
+    this.sweep();
 
     const preferred = opts.preferInstanceId ? this.instances.get(opts.preferInstanceId) : undefined;
     if (preferred && preferred.floor === floor && preferred.players.size < this.maxPerInstance) {
@@ -89,21 +99,26 @@ export class FloorDirectory {
       seed: this.seedFn(),
       players: new Set(),
       createdAt: this.now(),
+      emptySince: null,
     };
     this.instances.set(fresh.id, fresh);
     this.soloStreak.set(playerId, (this.soloStreak.get(playerId) ?? 0) + 1);
     return this.seat(playerId, fresh);
   }
 
-  /** Remove a player; empty instances are garbage-collected. */
+  /** Remove a player. An instance left empty lingers (see above) and is
+   * garbage-collected once its linger time is up. */
   leave(playerId: string): void {
     const id = this.playerInstance.get(playerId);
-    if (!id) return;
-    this.playerInstance.delete(playerId);
-    const inst = this.instances.get(id);
-    if (!inst) return;
-    inst.players.delete(playerId);
-    if (inst.players.size === 0) this.instances.delete(id);
+    if (id) {
+      this.playerInstance.delete(playerId);
+      const inst = this.instances.get(id);
+      if (inst) {
+        inst.players.delete(playerId);
+        if (inst.players.size === 0) inst.emptySince = this.now();
+      }
+    }
+    this.sweep();
   }
 
   /** Forget a player entirely (disconnect): their tension clock goes too. */
@@ -127,7 +142,16 @@ export class FloorDirectory {
 
   private seat(playerId: string, inst: FloorInstanceRecord): FloorInstanceRecord {
     inst.players.add(playerId);
+    inst.emptySince = null;
     this.playerInstance.set(playerId, inst.id);
     return inst;
+  }
+
+  /** Garbage-collect instances that stayed empty past their linger time. */
+  private sweep(): void {
+    const now = this.now();
+    for (const [id, inst] of this.instances) {
+      if (inst.emptySince !== null && now - inst.emptySince >= this.lingerMs) this.instances.delete(id);
+    }
   }
 }

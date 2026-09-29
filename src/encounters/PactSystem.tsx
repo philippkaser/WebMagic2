@@ -83,7 +83,10 @@ netBus.on("peerLeft", ({ playerId }) => {
     useEncounters.setState({ relations: rest });
   });
 });
-// A new floor is a new set of strangers — pacts never follow you down.
+// A new floor is a new set of strangers — pacts never follow you down. A
+// reconnect resets too, and that's consistent on both sides: the server
+// hands every connection a fresh player id, so the other wizard sees us as a
+// newcomer (their relation to our old id left with it).
 netBus.on("assigned", () => resetEncounters());
 netBus.on("leftDungeon", () => resetEncounters());
 

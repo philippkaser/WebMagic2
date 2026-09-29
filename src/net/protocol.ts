@@ -31,6 +31,10 @@ export interface FloorAssignment {
   epoch: number;
   /** Everyone currently in the instance, including the recipient. */
   members: MemberInfo[];
+  /** Floors this run has played, counting this one — the server's count is
+   * the one the way home is judged by, so the client adopts it. Absent
+   * offline (the client counts for itself). */
+  runFloors?: number;
 }
 
 /** Opaque gameplay envelope, client → server. */
@@ -113,11 +117,14 @@ export type ClientMsg =
   /** The run is lost — the server discards this run's grants. */
   | { t: "died" }
   /** HOST attestation: `playerId` legitimately picked up `itemId`. The only
-   * path by which an item becomes bankable. Non-host senders are ignored. */
-  | { t: "grant"; playerId: string; itemId: string }
+   * path by which an item becomes bankable. Non-host senders are ignored.
+   * `source: "grave"` = plundered from a grave: honored only against what
+   * wizards who died in that instance were actually granted (their grave
+   * pool), so a forged grave can't mint bankable items. */
+  | { t: "grant"; playerId: string; itemId: string; source?: "grave" }
   /** HOST attestation of a gold pickup — gold's provenance path, mirroring
    * `grant` (server-side sanity caps in items/economy.ts GOLD_RULES). */
-  | { t: "grantGold"; playerId: string; amount: number }
+  | { t: "grantGold"; playerId: string; amount: number; source?: "grave" }
   /** Clock sync probe; `sent` is the sender's local monotonic time. */
   | { t: "ping"; sent: number }
   | ({ t: "msg" } & Envelope);

@@ -49,8 +49,12 @@ export class Relay {
   /** peerId → account token (bound at login / first floor entry). */
   private tokens = new Map<string, string>();
   /** account token → the instance its wizard was last seated in, so a
-   * dropped connection resumes in the same world (not a fresh roll). */
+   * dropped connection resumes in the same world (not a fresh roll). Only
+   * held while the account has a run open. */
   private lastInstance = new Map<string, string>();
+  /** instance id → what wizards who died there were granted this run (the
+   * upper bound on anything plundered from their graves). */
+  private gravePools = new Map<string, { items: Map<string, number>; gold: number }>();
 
   constructor(
     private directory: FloorDirectory,
@@ -114,6 +118,7 @@ export class Relay {
           return;
         }
         const save = this.accounts.bank(account, inst.floor, msg.inventory);
+        this.lastInstance.delete(account.token);
         peer.send({ t: "saved", save });
         this.log(`${peer.id} walked home from floor ${inst.floor}`);
         break;
@@ -125,6 +130,7 @@ export class Relay {
         if (!this.directory.instanceOf(peer.id)) return;
         const save = this.accounts.escape(account, msg.inventory);
         if (!save) return; // no feather to spend — nothing banked
+        this.lastInstance.delete(account.token);
         peer.send({ t: "saved", save });
         this.log(`${peer.id} escaped by feather`);
         break;
@@ -173,9 +179,21 @@ export class Relay {
         if (save) this.log(`${peer.id} gambled and drew ${rolled}`);
         break;
       }
-      case "died":
-        this.accounts.endRun(this.accountOf(peer));
+      case "died": {
+        const account = this.accountOf(peer);
+        const inst = this.directory.instanceOf(peer.id);
+        // Died where others stood witness: what this run was granted may
+        // lie in a grave now, so it becomes plunderable — and nothing else.
+        if (inst && inst.players.size > 1) {
+          const pool = this.gravePools.get(inst.id) ?? { items: new Map(), gold: 0 };
+          for (const id of account.runGrants) pool.items.set(id, (pool.items.get(id) ?? 0) + 1);
+          pool.gold += account.runGold;
+          this.gravePools.set(inst.id, pool);
+        }
+        this.accounts.endRun(account);
+        this.lastInstance.delete(account.token);
         break;
+      }
       case "grant": {
         // Only the instance host may attest pickups, and only for members of
         // its own instance — loot provenance mirrors loot authority.
@@ -185,6 +203,15 @@ export class Relay {
         if (!inst || !inst.players.has(msg.playerId)) return;
         const target = this.peers.get(msg.playerId);
         if (!target) return;
+        if (msg.source === "grave") {
+          const pool = this.gravePools.get(inst.id);
+          const left = pool?.items.get(msg.itemId) ?? 0;
+          if (!pool || left < 1) {
+            this.log(`refused grave grant of ${msg.itemId} in ${inst.id} (not in any grave)`);
+            return;
+          }
+          pool.items.set(msg.itemId, left - 1);
+        }
         this.accounts.grant(this.accountOf(target), msg.itemId);
         break;
       }
@@ -196,7 +223,14 @@ export class Relay {
         if (!inst || !inst.players.has(msg.playerId)) return;
         const target = this.peers.get(msg.playerId);
         if (!target) return;
-        this.accounts.grantGold(this.accountOf(target), msg.amount);
+        let amount = msg.amount;
+        if (msg.source === "grave") {
+          const pool = this.gravePools.get(inst.id);
+          amount = Math.min(amount, pool?.gold ?? 0);
+          if (!pool || amount <= 0) return;
+          pool.gold -= amount;
+        }
+        this.accounts.grantGold(this.accountOf(target), amount);
         break;
       }
       case "msg":
@@ -260,6 +294,7 @@ export class Relay {
         hostId,
         epoch: this.epochs.get(inst.id)!,
         members,
+        runFloors: account.runFloors,
       },
     });
     const member: MemberInfo = { id: peer.id, name: peer.name };
@@ -280,10 +315,8 @@ export class Relay {
     const remaining = this.mates(peer.id);
     for (const m of remaining) m.send({ t: "peerLeft", playerId: peer.id });
     this.directory.leave(peer.id);
-    if (this.directory.instancesOnFloor(inst.floor).every((i) => i.id !== inst.id)) {
-      this.epochs.delete(inst.id); // instance was garbage-collected
-      return;
-    }
+    this.pruneGone();
+    if (!this.directory.instanceById(inst.id)) return; // garbage-collected
     // Host migration: promote the next-oldest member, bump the epoch.
     if (wasHost && remaining.length > 0) {
       const hostId = this.hostOf(remaining[0].id);
@@ -341,6 +374,15 @@ export class Relay {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+
+  /** Drop per-instance bookkeeping for instances the directory has let go
+   * (empty ones linger briefly for reconnects, then vanish). */
+  private pruneGone(): void {
+    for (const id of this.epochs.keys()) if (!this.directory.instanceById(id)) this.epochs.delete(id);
+    for (const id of this.gravePools.keys()) {
+      if (!this.directory.instanceById(id)) this.gravePools.delete(id);
+    }
+  }
 
   /** Simulation host = first (oldest) member of the instance's player set. */
   private hostOf(playerId: string): string {

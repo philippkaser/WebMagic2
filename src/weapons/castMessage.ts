@@ -30,7 +30,9 @@ export interface CastMsg {
 /** Plausible ranges for replayed gear stats. Generous against legit gear
  * stacking, but a hacked client can't send a 1000× volley. */
 export const CAST_STAT_LIMITS = {
-  damageMult: { min: 0, max: 8 },
+  // Deep staffs alone reach ~9× (items/power.ts staffPotency at level 120)
+  // before amulets and affixes; the ceiling sits above every legit build.
+  damageMult: { min: 0, max: 16 },
   extraProjectiles: { min: 0, max: 4 },
   homing: { min: 0, max: 2 },
 } as const;

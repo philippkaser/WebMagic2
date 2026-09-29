@@ -10,6 +10,7 @@ import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { wizardDistSqTo } from "../game/targets";
 import { robeColorOf } from "../game/wizardLook";
+import { netBus } from "../net/bus";
 import { hostCommand, hostEvent } from "../net/channels";
 import { registerSyncProvider } from "../net/entities";
 import { useNet } from "../net/netStore";
@@ -140,9 +141,11 @@ const lootGrave = hostCommand<GraveLootMsg>("lootGrave", (d, meta) => {
   if (picks.length === 0 && !gold) return;
   const { taken, gold: goldTaken } = takeFromGrave(grave, picks, gold);
   graveLooted.announce({ graveId: grave.id, by: meta.from, picks, gold });
-  // Plunder is a pickup like any other: bankable only by host attestation.
-  for (const t of taken) for (let n = 0; n < t.qty; n++) session.attestGrant(meta.from, t.id);
-  if (goldTaken > 0) session.attestGold(meta.from, goldTaken);
+  // Plunder is a pickup like any other: bankable only by host attestation —
+  // and the server honors grave grants only against what the dead were
+  // actually granted in this instance (a forged grave mints nothing).
+  for (const t of taken) for (let n = 0; n < t.qty; n++) session.attestGrant(meta.from, t.id, "grave");
+  if (goldTaken > 0) session.attestGold(meta.from, goldTaken, "grave");
 });
 
 function announceFall(g: LiveGrave): void {
@@ -175,6 +178,7 @@ gameEvents.on("wizardFell", ({ items, gold, killerId, shared }) => {
 export function Graves() {
   const graves = useGraves((s) => s.graves);
   const floorSeed = useGame((s) => s.floorSeed);
+  const phase = useGame((s) => s.phase);
 
   useEffect(
     () =>
@@ -187,8 +191,11 @@ export function Graves() {
     [],
   );
 
-  // Graves belong to their floor.
+  // Graves belong to their floor — gone with a new floor, and gone the
+  // moment we leave the dungeon (walking home, a feather, our own death).
   useEffect(() => useGraves.setState({ graves: [] }), [floorSeed]);
+  useEffect(() => netBus.on("leftDungeon", () => useGraves.setState({ graves: [] })), []);
+  if (phase !== "dungeon") return null;
 
   return (
     <>

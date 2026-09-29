@@ -44,8 +44,9 @@ describe("FloorDirectory — sharing (encounter rolls succeed)", () => {
     const f1 = dir.join("alice", 1);
     dir.join("alice", 2);
     expect(dir.instanceOf("alice")!.floor).toBe(2);
-    expect(dir.instancesOnFloor(1)).toHaveLength(0);
     expect(f1.players.size).toBe(0);
+    // The emptied instance lingers (for reconnects), invisible to encounters.
+    expect(f1.emptySince).not.toBeNull();
   });
 
   test("host is the first joiner and migrates in join order", () => {
@@ -132,5 +133,44 @@ describe("FloorDirectory — reconnect affinity", () => {
     expect(back.id).not.toBe(on5.id);
     const ghost = dir.join("carol", 5, { preferInstanceId: "inst_999" });
     expect(ghost.id).not.toBe(on5.id);
+  });
+});
+
+describe("FloorDirectory — lingering instances", () => {
+  function clocked(lingerMs = 1000) {
+    let now = 0;
+    let seed = 1;
+    const dir = new FloorDirectory(4, () => seed++, () => now, () => 0, undefined, lingerMs);
+    return { dir, tick: (ms: number) => (now += ms) };
+  }
+
+  test("a solo wizard who drops comes back to the same world", () => {
+    const { dir, tick } = clocked();
+    const before = dir.join("alice", 7);
+    dir.forget("alice"); // socket dropped
+    tick(500);
+    const after = dir.join("alice2", 7, { preferInstanceId: before.id });
+    expect(after.id).toBe(before.id);
+    expect(after.seed).toBe(before.seed);
+  });
+
+  test("strangers never walk into an empty lingering instance", () => {
+    const { dir } = clocked();
+    const alone = dir.join("alice", 7);
+    dir.leave("alice");
+    const bob = dir.join("bob", 7); // dice always succeed, but nobody is there
+    expect(bob.id).not.toBe(alone.id);
+  });
+
+  test("empty instances are garbage-collected after their linger time", () => {
+    const { dir, tick } = clocked(1000);
+    const gone = dir.join("alice", 3);
+    dir.leave("alice");
+    tick(999);
+    dir.join("bob", 9);
+    expect(dir.instanceById(gone.id)).not.toBeNull();
+    tick(1);
+    dir.join("carol", 9);
+    expect(dir.instanceById(gone.id)).toBeNull();
   });
 });

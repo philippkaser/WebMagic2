@@ -54,8 +54,12 @@ export interface PactStep {
   notice: PactNotice | null;
 }
 
-/** How long an unanswered offer stands. */
+/** How long an unanswered offer stands (the offerer's clock). */
 export const PACT_OFFER_MS = 20_000;
+/** The invitee's window closes this much earlier, so an accept always lands
+ * while the offer still stands on the other side (each side times the offer
+ * on its own clock, a network hop apart). */
+export const PACT_ACCEPT_MARGIN_MS = 3_000;
 
 export function newRelation(): PactRelation {
   return { state: "wary", expiresAt: 0, oathbreaker: false };
@@ -69,7 +73,12 @@ export function pactStep(rel: PactRelation, event: PactEvent, now: number): Pact
   const next = (state: PactState, extra: Partial<PactRelation> = {}): PactRelation => ({
     ...rel,
     state,
-    expiresAt: state === "offered" || state === "invited" ? now + PACT_OFFER_MS : 0,
+    expiresAt:
+      state === "offered"
+        ? now + PACT_OFFER_MS
+        : state === "invited"
+          ? now + PACT_OFFER_MS - PACT_ACCEPT_MARGIN_MS
+          : 0,
     ...extra,
   });
   const stay: PactStep = { relation: rel, send: null, notice: null };

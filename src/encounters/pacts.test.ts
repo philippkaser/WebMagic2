@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   isHostileRelation,
   newRelation,
+  PACT_ACCEPT_MARGIN_MS,
   PACT_OFFER_MS,
   pactPrompt,
   pactStep,
@@ -61,8 +62,10 @@ describe("pacts", () => {
     const lapsed = pactStep(offered, tick, 1000 + PACT_OFFER_MS);
     expect(lapsed.relation.state).toBe("wary");
     expect(lapsed.notice).toBe("lapsed");
+    // The invitee's window closes first, so a last-second accept can never
+    // arrive after the offerer has given up.
     const invited = pactStep(newRelation(), got("offer"), 0).relation;
-    expect(pactStep(invited, tick, PACT_OFFER_MS).relation.state).toBe("wary");
+    expect(pactStep(invited, tick, PACT_OFFER_MS - PACT_ACCEPT_MARGIN_MS).relation.state).toBe("wary");
   });
 
   test("unsolicited accepts and stray breaks change nothing", () => {

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { MAX_ITEM_LEVEL } from "../items/itemId";
+import { staffPotency } from "../items/power";
 import { BASIC_STAFF_ID } from "../items/catalog";
 import { makeItemId } from "../items/itemId";
 import {
@@ -110,10 +112,12 @@ describe("sanitizeCastStats", () => {
     });
   });
 
-  test("damageMult is clamped to [0, 8]", () => {
-    expect(CAST_STAT_LIMITS.damageMult).toEqual({ min: 0, max: 8 });
-    expect(sanitizeCastStats({ damageMult: 1000 }).damageMult).toBe(8);
+  test("damageMult is clamped to [0, 16] — above the deepest legit staff", () => {
+    expect(CAST_STAT_LIMITS.damageMult).toEqual({ min: 0, max: 16 });
+    expect(sanitizeCastStats({ damageMult: 1000 }).damageMult).toBe(16);
     expect(sanitizeCastStats({ damageMult: -3 }).damageMult).toBe(0);
+    // A level-120 staff with a fury amulet and a keen affix still fits.
+    expect(staffPotency(MAX_ITEM_LEVEL) * 1.3 * 1.12).toBeLessThan(16);
   });
 
   test("extraProjectiles is an integer in [0, 4]", () => {
