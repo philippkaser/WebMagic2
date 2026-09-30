@@ -108,17 +108,22 @@ async function waitPhase(w, phase, timeout = 30000) {
   await sleep(3000);
   const idA = await state(a, () => window.__session.playerId);
   const idB = await state(b, () => window.__session.playerId);
-  // PvP: A stands 5 m from B and shoots.
+  // PvP: A stands a few metres from B and shoots. Rooms have pillars now, so
+  // a single fixed offset can put one in the line of fire: try the four
+  // sides until a volley lands (the check is about damage, not geometry).
   const hpBefore = (await game(b)).health;
   const target = await b.page.evaluate(() => window.__playerPos?.());
   if (target) {
-    await a.page.evaluate(([x, y, z]) => window.__teleport(x + 5, y + 0.5, z), target);
-    await sleep(600);
-    for (let i = 0; i < 4; i++) {
-      await a.page.evaluate(([x, y, z]) => window.__castAt(x, y, z), target);
-      await sleep(350);
+    for (const [dx, dz] of [[4, 0], [-4, 0], [0, 4], [0, -4]]) {
+      await a.page.evaluate(([x, y, z]) => window.__teleport(x, y + 0.5, z), [target[0] + dx, target[1], target[2] + dz]);
+      await sleep(600);
+      for (let i = 0; i < 4; i++) {
+        await a.page.evaluate(([x, y, z]) => window.__castAt(x, y, z), target);
+        await sleep(350);
+      }
+      await sleep(1200);
+      if ((await game(b)).health < hpBefore) break;
     }
-    await sleep(1200);
   }
   const hpAfter = (await game(b)).health;
   check("a stranger's bolts hurt (victim-side PvP damage)", hpAfter < hpBefore, `${hpBefore} → ${hpAfter}`);
@@ -162,7 +167,7 @@ async function waitPhase(w, phase, timeout = 30000) {
   check("the fallen-to-be picks up host-granted loot", mira.equipment.amulet?.defId === "amulet_vigor@3",
     JSON.stringify(mira.equipment.amulet));
   await b.page.evaluate((killer) => window.__game.getState().takeDamage(10_000, { kind: "wizard", id: killer }), idA);
-  await waitPhase(b, "dead", 5000);
+  await waitPhase(b, "dead", 20000) // the death dissolve plays first;
   const death = (await game(b)).lastDeath;
   check("death names the killer and leaves a grave", death?.killer === "Oswin" && death?.grave === true,
     JSON.stringify(death));
