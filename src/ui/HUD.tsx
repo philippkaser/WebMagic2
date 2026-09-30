@@ -9,7 +9,6 @@
  *                  is mounted here instead, since it works in menus too)
  *   overlays/      fullscreen phase screens (menu, the Weighing, death,
  *                  loading), each wrapped in overlays/OverlayShell
- *   inventory/     inventory / chest / merchant screen (entry: InventoryScreen.tsx)
  *   codex/         the lore codex (C) — carvings read so far
  *   devroom/       dev-build test bench (entry: DevRoom.tsx)
  *
@@ -33,7 +32,6 @@ import { CodexScreen } from "./codex/CodexScreen";
 import { DevRoom } from "./DevRoom";
 import { PerfOverlay } from "./hud/PerfOverlay";
 import { PlayHud } from "./hud/PlayHud";
-import { InventoryScreen, isInventoryMode } from "./InventoryScreen";
 import { DeathOverlay } from "./overlays/DeathOverlay";
 import { LoadingOverlay } from "./overlays/LoadingOverlay";
 import { MenuOverlay } from "./overlays/MenuOverlay";
@@ -100,7 +98,6 @@ export function HUD() {
       {showPerf && <PerfOverlay />}
       {playing && <PlayHud />}
       {playing && overlay === "devroom" && import.meta.env.DEV && <DevRoom />}
-      {playing && isInventoryMode(overlay) && <InventoryScreen mode={overlay} />}
       {playing && overlay === "codex" && <CodexScreen />}
       {phase === "menu" && <MenuOverlay />}
       {phase === "weighing" && <WeighingOverlay />}

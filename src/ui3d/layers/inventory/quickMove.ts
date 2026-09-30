@@ -1,9 +1,9 @@
-import { getItemDef } from "../../items/catalog";
-import { readSlot, type Carried, type Grid, type SlotRef } from "../../items/inventory";
-import type { GearSlot } from "../../items/types";
+import { getItemDef } from "../../../items/catalog";
+import { readSlot, type Carried, type Grid, type SlotRef } from "../../../items/inventory";
+import type { GearSlot } from "../../../items/types";
 
-/** Where a plain click on a cell sends its item — the "obvious" move, so
- * drag & drop is never required:
+/** Where a shift-click (or double-click) on a socket sends its item — the
+ * "obvious" move, so drag & drop is never required:
  *  - bag, with the chest open in the village → first free chest cell
  *  - chest → first free bag cell
  *  - bag consumable → first free belt slot (else swaps into Q)

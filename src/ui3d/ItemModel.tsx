@@ -279,11 +279,14 @@ export interface ItemModelProps {
   spin?: boolean;
   /** Extra aura intensity (hover/selection glow), added to the enchant aura. */
   highlight?: number;
+  /** Like `highlight`, but read every frame — for glows that animate
+   * (a hover easing in) without re-rendering the model. Added to it. */
+  highlightRef?: { readonly current: number };
   position?: readonly [number, number, number];
   rotation?: readonly [number, number, number];
 }
 
-export function ItemModel({ itemId, scale = 1, spin = false, highlight = 0, position, rotation }: ItemModelProps) {
+export function ItemModel({ itemId, scale = 1, spin = false, highlight = 0, highlightRef, position, rotation }: ItemModelProps) {
   const item = useMemo(() => resolveItem(itemId), [itemId]);
   const parts = useMemo(() => partsFor(item.def), [item.def]);
   const aura = useMemo(() => auraMaterial(item.affix ? ENCHANT_COLOR : item.def.color), [item.affix, item.def.color]);
@@ -298,8 +301,9 @@ export function ItemModel({ itemId, scale = 1, spin = false, highlight = 0, posi
     if (outer.current && spin) outer.current.rotation.y += dt * 0.8;
     if (inner.current) inner.current.rotation.y = t * 1.4;
     const base = item.affix ? 0.55 + Math.sin(t * 2.2) * 0.15 : 0;
-    aura.uniforms.uIntensity!.value = base + highlight;
-    if (auraMesh.current) auraMesh.current.visible = base + highlight > 0.01;
+    const glow = base + highlight + (highlightRef?.current ?? 0);
+    aura.uniforms.uIntensity!.value = glow;
+    if (auraMesh.current) auraMesh.current.visible = glow > 0.01;
   });
 
   return (
