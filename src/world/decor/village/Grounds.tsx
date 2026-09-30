@@ -70,7 +70,7 @@ export function Grounds({ cottages }: { cottages: Cottage[] }) {
           new CylinderGeometry(0.03, 0.06, 1.1, 4).rotateX(0.8).translate(0, 2.9, 0.35),
           new CylinderGeometry(0.02, 0.04, 0.7, 4).rotateZ(0.4).translate(-0.1, 3.4, 0),
         ]),
-        stone: new BoxGeometry(0.85, 1, 0.45).translate(0, 0.5, 0),
+        stone: monolith(),
         post: new BoxGeometry(0.12, 1.1, 0.12).translate(0, 0.55, 0),
         rail: new BoxGeometry(1, 0.07, 0.05),
         lanternPost: merge([
@@ -89,7 +89,7 @@ export function Grounds({ cottages }: { cottages: Cottage[] }) {
       mat: {
         bark: new MeshStandardMaterial({ map: bark.map, normalMap: bark.normalMap, roughness: 0.95 }),
         needles: new MeshStandardMaterial({ color: "#132218", roughness: 0.95, flatShading: true }),
-        stone: new MeshStandardMaterial({ map: rune.map, normalMap: rune.normalMap, color: "#a8b0c8", emissive: "#06201c", roughness: 0.8 }),
+        stone: new MeshStandardMaterial({ map: rune.map, normalMap: rune.normalMap, color: "#9a96a2", emissive: "#06201c", roughness: 0.85, flatShading: true }),
         wood: new MeshStandardMaterial({ map: planks.map, color: "#5a4a3a", roughness: 0.95 }),
         iron: new MeshStandardMaterial({ color: "#1e1c1e", roughness: 0.6, metalness: 0.6 }),
         lantern: new MeshStandardMaterial({ color: "#301800", emissive: "#ffb050", emissiveIntensity: 3, toneMapped: false }),
@@ -262,4 +262,23 @@ function scatter(cottages: Cottage[]) {
   for (const [x, , z] of LANTERNS) solids.push([x, z, 0.15]);
   solids.push([WELL[0], WELL[2], 1.05]);
   return { pines, dead, stones, posts, rails, tufts, lanterns, solids };
+}
+
+/** A weathered menhir: a five-sided slab, flattened, tapering to a slanted
+ * top, with every vertex nudged (deterministically) so no two faces are flat
+ * to the same plane — reads as hewn rock, not a box. */
+function monolith(): BufferGeometry {
+  const g = new CylinderGeometry(0.3, 0.46, 1, 5, 3).translate(0, 0.5, 0);
+  const rng = new Rng(0x57a4e);
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    pos.setXYZ(
+      i,
+      pos.getX(i) * 1.35 + (rng.next() - 0.5) * 0.08,
+      y + (y > 0.99 ? pos.getX(i) * 0.18 : (rng.next() - 0.5) * 0.04),
+      pos.getZ(i) * 0.7 + (rng.next() - 0.5) * 0.08,
+    );
+  }
+  return g.toNonIndexed();
 }
