@@ -1,20 +1,23 @@
 /** Every paintable surface, grouped by where it goes.
  *
  * The names are a contract: the biome table (world/biomes.ts) picks one wall,
- * one floor and one ceiling kind per depth band by these exact strings.
- * "stone"/"slab"/"dark" are the catacombs set; each deeper biome adds its own
- * wall + floor, and the void ceiling is shared by the deep bands.
+ * one floor and one ceiling kind per depth band by these exact strings (a
+ * ceiling may also be a wall kind — a vault is coursed stone too).
  *
- * Wall painters assume one texture spans a wall face floor-to-ceiling
- * (repeatY = 1 on a TILE × WALL_HEIGHT face, so texels are twice as tall in
- * the world as they are wide). That's why vertical features — the drowned
- * waterline, forge heat rising from below — sit at the texture's bottom. */
+ * Architecture surfaces (walls, floors, ceilings) are 128² and mapped from
+ * WORLD position at ARCHITECTURE.texMetres per repeat in both directions
+ * (see render/models/architectureMesh.ts), so a texel is square in the world
+ * on every face, courses run on unbroken from one wall tile to the next, and
+ * nothing may assume "the bottom of the texture is the floor" — a painter
+ * that wants height-dependent wear leaves it to the wall material's damp
+ * band (render/models/wallMaterial.ts) instead. */
 
-export const WALL_SURFACES = ["stone", "wetstone", "basalt", "crystal", "bone"] as const;
-export const FLOOR_SURFACES = ["slab", "wetslab", "ashslab", "crystalslab", "boneslab"] as const;
-export const CEILING_SURFACES = ["dark", "void"] as const;
-/** Breakable props and village fixtures. */
-export const PROP_SURFACES = ["planks", "barrel", "ceramic"] as const;
+export const WALL_SURFACES = ["tomb", "wetstone", "basalt", "slate", "palestone"] as const;
+export const FLOOR_SURFACES = ["flagstone", "wetslab", "obsidian", "polished", "ashflag"] as const;
+export const CEILING_SURFACES = ["void"] as const;
+/** Breakable props and fixtures (pedestal, portal ring, graves, rune
+ * tablets, village huts) — 64², mapped per object. */
+export const PROP_SURFACES = ["planks", "barrel", "ceramic", "stone", "slab"] as const;
 /** Outdoor ground (village). */
 export const GROUND_SURFACES = ["dirt"] as const;
 
@@ -32,6 +35,13 @@ export type SurfaceKind = WallSurface | FloorSurface | CeilingSurface | PropSurf
 
 /** Kept for existing call sites: `getTextures(kind)`. */
 export type TextureKind = SurfaceKind;
+
+/** The dungeon's architecture surfaces — 128², world-mapped, mipmapped. */
+export const ARCH_SURFACES: readonly SurfaceKind[] = [
+  ...WALL_SURFACES,
+  ...FLOOR_SURFACES,
+  ...CEILING_SURFACES,
+];
 
 export const SURFACE_KINDS: readonly SurfaceKind[] = [
   ...WALL_SURFACES,

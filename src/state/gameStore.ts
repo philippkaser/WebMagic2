@@ -94,6 +94,10 @@ export interface GameState {
   /** Quality toggle: the staff/moon shadow costs several extra scene renders
    * per frame, so it's opt-in. */
   shadows: boolean;
+  /** Quality toggle: planar reflections on the dungeon floors (one extra
+   * low-res scene render per frame). On by default — the wet, glossy
+   * floors are half the look — but persisted, so weak GPUs can opt out. */
+  reflections: boolean;
   /** Display name shown to floor-mates. */
   playerName: string;
 
@@ -139,10 +143,12 @@ export interface GameState {
   respawn(): void;
   setPrompt(prompt: string | null, at?: [number, number, number] | null): void;
   toggleShadows(): void;
+  toggleReflections(): void;
   setPlayerName(name: string): void;
 }
 
 const SHADOWS_KEY = "webmagic.shadows.v1";
+const REFLECTIONS_KEY = "webmagic.reflections.v1";
 const NAME_KEY = "webmagic.name.v1";
 
 function loadShadowSetting(): boolean {
@@ -150,6 +156,15 @@ function loadShadowSetting(): boolean {
     return localStorage.getItem(SHADOWS_KEY) === "1";
   } catch {
     return false;
+  }
+}
+
+function loadReflectionSetting(): boolean {
+  try {
+    // Default ON: only an explicit "0" turns them off.
+    return localStorage.getItem(REFLECTIONS_KEY) !== "0";
+  } catch {
+    return true;
   }
 }
 
@@ -198,6 +213,7 @@ export const useGame = create<GameState>((set, get) => ({
   promptAt: null,
   lastDeath: null,
   shadows: loadShadowSetting(),
+  reflections: loadReflectionSetting(),
   playerName: loadPlayerName(),
 
   startGame: () => set({ phase: "village" }),
@@ -544,6 +560,17 @@ export const useGame = create<GameState>((set, get) => ({
       // Setting is session-only without storage.
     }
     gameEvents.emit("message", `Shadows ${shadows ? "on" : "off"}`);
+  },
+
+  toggleReflections: () => {
+    const reflections = !get().reflections;
+    set({ reflections });
+    try {
+      localStorage.setItem(REFLECTIONS_KEY, reflections ? "1" : "0");
+    } catch {
+      // Setting is session-only without storage.
+    }
+    gameEvents.emit("message", `Reflections ${reflections ? "on" : "off"}`);
   },
 
   setPlayerName: (name) => {

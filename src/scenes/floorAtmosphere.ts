@@ -7,11 +7,12 @@ import { getBiomeDef } from "../world/biomes";
 import { getOmenDef, omenGenMods } from "../world/omens";
 import type { BiomeId, FloorLayout } from "../world/types";
 
-/** How a floor FEELS, applied while it's mounted: the biome's fog, backdrop
- * and ambient drone, and the omen's arrival whisper. The layout decides WHAT
- * is on the floor; this decides the mood it's seen and heard in. (The omen's
- * rule bends are installed by GameScene alongside the layout, before any
- * enemy renders.) Everything here is undone on unmount. */
+/** How a floor FEELS, applied while it's mounted: the biome's fog, backdrop,
+ * environment-map strength and ambient drone, and the omen's arrival
+ * whisper. The layout decides WHAT is on the floor; this decides the mood
+ * it's seen and heard in. (The omen's rule bends are installed by GameScene
+ * alongside the layout, before any enemy renders.) Everything here is
+ * undone on unmount. */
 
 /** Each band hums in its own key. */
 const BIOME_MOODS: Record<BiomeId, AmbientMood> = {
@@ -43,6 +44,8 @@ export function useFloorAtmosphere(layout: FloorLayout): void {
     const { biome, fog } = atmosphereOf(layout);
     scene.fog = new Fog(fog.color, fog.near, fog.far);
     scene.background = new Color(biome.background);
+    const envBefore = scene.environmentIntensity;
+    scene.environmentIntensity = biome.envIntensity;
     startAmbient("dungeon", BIOME_MOODS[layout.biome]);
 
     let omenTimer: ReturnType<typeof setTimeout> | null = null;
@@ -56,6 +59,7 @@ export function useFloorAtmosphere(layout: FloorLayout): void {
     return () => {
       if (omenTimer !== null) clearTimeout(omenTimer);
       scene.fog = null;
+      scene.environmentIntensity = envBefore;
       stopAmbient();
     };
   }, [scene, layout]);

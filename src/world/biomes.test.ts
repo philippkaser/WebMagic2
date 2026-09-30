@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { BIOME_DEFS, BIOME_SURFACE_IDS, type BiomeSurfaceId, biomeForFloor, getBiomeDef } from "./biomes";
+import { SURFACE_KINDS } from "../render/textures/kinds";
 import type { BiomeId, EnemyKind } from "./types";
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -31,24 +32,13 @@ describe("biomes", () => {
     expect(biomeForFloor(101)).toBe("hollow");
   });
 
-  test("the Catacombs keep the dungeon's original look", () => {
-    const c = getBiomeDef("catacombs");
-    expect(c.fog).toEqual({ color: "#070409", near: 9, far: 50 });
-    expect(c.background).toBe("#070409");
-    expect(c.ambient).toEqual({ color: "#5a6a9a", intensity: 0.14 });
-    expect(c.torchColor).toBe("#ff9a4d");
-    expect(c.torchIntensityMult).toBe(1);
-    expect(c.surfaces).toEqual({ wall: "stone", floor: "slab", ceiling: "dark" });
-    expect(c.enemyWeights).toEqual({});
-  });
-
   test("every surface is one of the fixed texture ids, exactly as agreed", () => {
     const expected: Record<BiomeId, BiomeSurfaceId[]> = {
-      catacombs: ["stone", "slab", "dark"],
-      drowned: ["wetstone", "wetslab", "dark"],
-      forge: ["basalt", "ashslab", "dark"],
-      crystal: ["crystal", "crystalslab", "dark"],
-      hollow: ["bone", "boneslab", "void"],
+      catacombs: ["tomb", "flagstone", "tomb"],
+      drowned: ["wetstone", "wetslab", "wetstone"],
+      forge: ["basalt", "obsidian", "basalt"],
+      crystal: ["slate", "polished", "slate"],
+      hollow: ["palestone", "ashflag", "void"],
     };
     const allowed = new Set<string>(BIOME_SURFACE_IDS);
     for (const def of BIOME_DEFS) {
@@ -56,6 +46,46 @@ describe("biomes", () => {
       for (const id of [wall, floor, ceiling]) expect(allowed.has(id)).toBe(true);
       expect([wall, floor, ceiling]).toEqual(expected[def.id]);
     }
+  });
+
+  test("every biome names a texture that render/textures actually paints", () => {
+    const painted = new Set<string>(SURFACE_KINDS);
+    for (const id of BIOME_SURFACE_IDS) expect(painted.has(id)).toBe(true);
+  });
+
+  test("looks are well-formed: damp band, vault fade, shafts, mirror", () => {
+    for (const def of BIOME_DEFS) {
+      const { stone, reflection, shaft, seams } = def.look;
+      expect(stone.dampTint).toMatch(HEX);
+      expect(stone.dampHeight).toBeGreaterThanOrEqual(0);
+      expect(stone.dampHeight).toBeLessThan(3);
+      expect(stone.dampGloss).toBeGreaterThan(0);
+      expect(stone.dampGloss).toBeLessThanOrEqual(1);
+      expect(stone.vaultShade).toBeGreaterThan(0);
+      expect(stone.vaultShade).toBeLessThanOrEqual(1);
+      expect(shaft.color).toMatch(HEX);
+      expect(shaft.strength).toBeGreaterThan(0);
+      expect(shaft.strength).toBeLessThan(1);
+      if (reflection) {
+        expect(reflection.strength).toBeGreaterThan(0);
+        expect(reflection.blur).toBeGreaterThanOrEqual(0);
+      }
+      if (seams) {
+        expect(seams.color).toMatch(HEX);
+        // Accents, not wallpaper.
+        expect(seams.chance).toBeGreaterThan(0);
+        expect(seams.chance).toBeLessThan(0.25);
+      }
+    }
+  });
+
+  test("the Hollow is the one dull floor; only the Forge's walls glow at the foot", () => {
+    for (const def of BIOME_DEFS) {
+      expect(def.look.reflection === null).toBe(def.id === "hollow");
+      expect(def.look.seams !== undefined).toBe(def.id === "forge");
+    }
+    // The Forge's heat rises; every other shaft is light falling.
+    expect(getBiomeDef("forge").look.shaft.rising).toBe(true);
   });
 
   test("every biome is well-formed and distinct", () => {
@@ -70,6 +100,8 @@ describe("biomes", () => {
       expect(def.fog.near).toBeGreaterThan(0);
       expect(def.fog.far).toBeGreaterThan(def.fog.near);
       expect(def.ambient.intensity).toBeGreaterThan(0);
+      expect(def.envIntensity).toBeGreaterThanOrEqual(0);
+      expect(def.envIntensity).toBeLessThanOrEqual(1);
       expect(def.torchIntensityMult).toBeGreaterThan(0);
       for (const [kind, w] of Object.entries(def.enemyWeights)) {
         expect(ENEMY_KINDS).toContain(kind as EnemyKind);
