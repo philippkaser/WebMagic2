@@ -47,6 +47,56 @@ export interface WallBox {
   half: Vec3;
 }
 
+/** A free-standing column in a big room (world position of its foot). It
+ * has a collider, so the generator keeps it off paths and landmarks. */
+export interface PillarSpawn {
+  pos: Vec3;
+}
+
+/** A transverse arch rib spanning a room wall to wall under the ceiling,
+ * resting on an engaged pier at each end. */
+export interface RibSpawn {
+  /** Axis the rib spans along ("x": from the west wall to the east wall). */
+  axis: "x" | "z";
+  /** World coordinate of the rib's centre line on the OTHER axis. */
+  at: number;
+  /** World coordinates of the two wall faces it springs from (min, max). */
+  from: number;
+  to: number;
+}
+
+/** A shaft of light falling from a crack in the ceiling to the floor. */
+export interface LightShaftSpawn {
+  /** Where it lands (floor level). */
+  pos: Vec3;
+  /** Radius of the pool of light on the floor (m). */
+  radius: number;
+}
+
+/** A cluster of glowing crystals growing out of a room corner (Crystal
+ * Deep). Each one is a real light source. */
+export interface CrystalSpawn {
+  /** Foot of the cluster (floor level). */
+  pos: Vec3;
+  /** Yaw the cluster leans toward (radians) — out of its corner. */
+  facing: number;
+  /** Overall size multiplier. */
+  scale: number;
+  /** 0 = violet, 1 = cyan. */
+  hue: 0 | 1;
+}
+
+/** The floor's architecture: what makes a room a hall. Purely a function of
+ * the carved layout and its own seed stream (world/gen/architecture.ts), so
+ * it can grow without moving a single room, prop or enemy. */
+export interface FloorArchitecture {
+  pillars: PillarSpawn[];
+  ribs: RibSpawn[];
+  shafts: LightShaftSpawn[];
+  /** Only on Crystal Deep floors; empty elsewhere. */
+  crystals: CrystalSpawn[];
+}
+
 export interface FloorLayout {
   floor: number;
   seed: number;
@@ -75,10 +125,15 @@ export interface FloorLayout {
   props: PropSpawn[];
   enemies: EnemySpawn[];
   traps: TrapSpawn[];
-  /** One entry per visible wall cube (world position of cube center). */
+  /** One entry per visible wall cube (world position of cube center). The
+   * renderer no longer draws cubes — it builds world-mapped faces from
+   * `tiles` (render/models/architectureMesh.ts) — but the list stays for
+   * tools and tests that reason about wall tiles. */
   wallInstances: Vec3[];
   /** Greedy-merged physics colliders covering all wall tiles. */
   wallBoxes: WallBox[];
   /** World-space half-extent of the whole grid (for floor/ceiling planes). */
   extent: number;
+  /** Pillars, arch ribs, light shafts and crystal clusters. */
+  architecture: FloorArchitecture;
 }

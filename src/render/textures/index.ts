@@ -8,9 +8,9 @@ import { DEFAULT_NORMAL_STRENGTH, SURFACE_DEFS, paintSurface } from "./painters"
 
 /** Procedural pixel-art textures. Every surface in the game is generated at
  * runtime on small canvases (no binary assets): a color map plus a normal map
- * derived from a height field, so the chunky pixels still catch light — and,
- * for the deeper biomes, emissive maps (magma cracks, crystal veins, runes)
- * and roughness maps (wet stone that glints).
+ * derived from a height field, so the chunky pixels still catch light — and
+ * roughness maps on all the architecture (wet, polished and glassy stone
+ * that glints), plus emissive maps where a painter asks for one (runes).
  *
  * Layout:
  *  - kinds.ts         the surface names (a contract with the biome table)
@@ -42,12 +42,12 @@ export type { SurfaceHints } from "./paint";
 export interface TexturePair {
   map: CanvasTexture;
   normalMap: CanvasTexture;
-  /** Only on kinds with self-lit detail (basalt, ashslab, crystal,
-   * crystalslab, bone, boneslab). Needs a non-black `emissive` on the
-   * material to show — getSurface's hints carry it. */
+  /** Only on kinds whose painter makes a glow layer. Needs a non-black
+   * `emissive` on the material to show — getSurface's hints carry it. */
   emissiveMap?: CanvasTexture;
-  /** Only on wet kinds (wetstone, wetslab). three.js multiplies it with the
-   * material's `roughness`, so pair it with the hint (1). */
+  /** On every architecture kind (walls, floors, ceilings). three.js
+   * multiplies it with the material's `roughness`, so pair it with the
+   * hint (1). */
   roughnessMap?: CanvasTexture;
 }
 
@@ -94,13 +94,13 @@ function buildSurface(pair: TexturePair, hints: SurfaceHints): Surface {
   return { ...pair, hints, material };
 }
 
-function uploadPainted(p: Painted, normalStrength: number): TexturePair {
+function uploadPainted(p: Painted, normalStrength: number, mipmaps: boolean): TexturePair {
   const pair: TexturePair = {
-    map: toTexture(p.color, p.size, p.size, true),
-    normalMap: toTexture(heightToNormal(p.height, p.size, normalStrength), p.size, p.size, false),
+    map: toTexture(p.color, p.size, p.size, true, mipmaps),
+    normalMap: toTexture(heightToNormal(p.height, p.size, normalStrength), p.size, p.size, false, mipmaps),
   };
-  if (p.emissive) pair.emissiveMap = toTexture(p.emissive, p.size, p.size, true);
-  if (p.roughness) pair.roughnessMap = toTexture(packRoughness(p.roughness), p.size, p.size, false);
+  if (p.emissive) pair.emissiveMap = toTexture(p.emissive, p.size, p.size, true, mipmaps);
+  if (p.roughness) pair.roughnessMap = toTexture(packRoughness(p.roughness), p.size, p.size, false, mipmaps);
   return pair;
 }
 
@@ -109,7 +109,7 @@ function baseSurface(kind: SurfaceKind): Surface {
   if (hit) return hit;
   const def = SURFACE_DEFS[kind];
   const surface = buildSurface(
-    uploadPainted(paintSurface(kind), def.normalStrength ?? DEFAULT_NORMAL_STRENGTH),
+    uploadPainted(paintSurface(kind), def.normalStrength ?? DEFAULT_NORMAL_STRENGTH, def.mipmaps ?? false),
     def.hints,
   );
   base.set(kind, surface);

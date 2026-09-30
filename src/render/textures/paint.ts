@@ -7,9 +7,16 @@ import type { Rng } from "../../core/rng";
  * That split is what makes the art unit-testable under `bun test` — the only
  * code that needs a real canvas is textures/canvas.ts. */
 
-/** Edge length of every surface texture. 64×64 is the art style: chunky
+/** Edge length of prop and fixture textures. 64×64 is the art style: chunky
  * texels that still catch light through their Sobel normal map. */
 export const TEX_SIZE = 64;
+
+/** Edge length of the architecture surfaces (dungeon walls, floors,
+ * ceilings). They are mapped from world position at ARCHITECTURE.texMetres
+ * (4 m) per repeat, so 128 texels keep the same 32-texels-per-metre chunk
+ * as a prop texture while the pattern only repeats every 4 m — big stones,
+ * no obvious 2 m grid. */
+export const ARCH_SIZE = 128;
 
 /** RGBA bytes, row-major, row 0 = top of the image (canvas convention). */
 export type RGBA = Uint8ClampedArray<ArrayBuffer>;
@@ -54,6 +61,12 @@ export interface SurfaceDef {
   hints: SurfaceHints;
   /** Normal-map strength (Sobel slope multiplier). Default 2.2. */
   normalStrength?: number;
+  /** Mipmapped minification. Architecture surfaces are seen far away and at
+   * grazing angles, where one low-res pixel covers dozens of texels: without
+   * mips every mortar line and puddle edge sparkles into noise — exactly the
+   * "clutter" a calm dungeon must avoid. Magnification stays Nearest, so up
+   * close the texels are as chunky as ever. */
+  mipmaps?: boolean;
 }
 
 export function blank(
@@ -226,6 +239,104 @@ export function blockField(
     c0 += ch;
   });
   return { id, edge, across };
+}
+
+/** Irregular ashlar: courses of offset stones like `blockField`, but some
+ * stones are split into two shorter ones, so no course line runs unbroken
+ * for long and the pattern reads as hand-laid rather than as a brick grid.
+ *  - `id`: unique per stone (feed it to blockTone for per-stone tone).
+ *  - `edge`: 0 on a joint, else distance (texels) to the stone's nearest
+ *    edge, capped at 6 — bevels, wear and seep key off it.
+ *  - `u`, `v`: 0..1 position inside the stone (left→right, top→bottom), for
+ *    doming, dishing and wear that follows the stone's shape.
+ * `vertical` turns courses into columns (columnar basalt). Tiles on the
+ * torus like every other field. */
+export interface AshlarField {
+  id: Int32Array;
+  edge: Uint8Array;
+  u: Float32Array;
+  v: Float32Array;
+}
+
+export function ashlarField(
+  rng: Rng,
+  size: number,
+  course: [number, number],
+  block: [number, number],
+  splitChance: number,
+  vertical = false,
+): AshlarField {
+  const n = size * size;
+  const id = new Int32Array(n);
+  const edge = new Uint8Array(n);
+  const u = new Float32Array(n);
+  const v = new Float32Array(n);
+  const courses = splitSpan(rng, size, course[0], course[1]);
+  let c0 = 0;
+  courses.forEach((ch, ci) => {
+    const blocks = splitSpan(rng, size, block[0], block[1]);
+    const shift = rng.int(0, size - 1);
+    const starts: number[] = [];
+    // Row (within the course) where each block splits in two, or 0 = whole.
+    const splits: number[] = [];
+    let acc = 0;
+    for (const w of blocks) {
+      starts.push(acc);
+      acc += w;
+      // Only tall courses split — halving a short one leaves slivers that
+      // read as a double joint line, not as two stones.
+      const canSplit = ch >= Math.max(22, course[0] * 1.3);
+      splits.push(canSplit && rng.chance(splitChance) ? rng.int(Math.floor(ch * 0.4), Math.ceil(ch * 0.6)) : 0);
+    }
+    for (let a = 0; a < ch; a++) {
+      for (let b = 0; b < size; b++) {
+        const local = wrap(b - shift, size);
+        let bi = 0;
+        while (bi + 1 < starts.length && starts[bi + 1] <= local) bi++;
+        const pos = local - starts[bi];
+        const w = blocks[bi];
+        const split = splits[bi];
+        const lower = split > 0 && a >= split;
+        const top = lower ? split : 0;
+        const h = split > 0 ? (lower ? ch - split : split) : ch;
+        const dy = a - top;
+        const x = vertical ? c0 + a : b;
+        const y = vertical ? b : c0 + a;
+        const i = y * size + x;
+        id[i] = ci * 4096 + bi * 2 + (lower ? 1 : 0);
+        edge[i] = Math.min(6, dy, h - dy, pos, w - pos);
+        // In column mode "across the course" is x, so swap the axes back.
+        const across = h > 1 ? dy / (h - 1) : 0.5;
+        const along = w > 1 ? pos / (w - 1) : 0.5;
+        u[i] = vertical ? across : along;
+        v[i] = vertical ? along : across;
+      }
+    }
+    c0 += ch;
+  });
+  return { id, edge, u, v };
+}
+
+/** Several tileNoise octaves summed and renormalised to 0..1 — soft,
+ * low-frequency variation (damp, grime, ash drifts) with a little finer
+ * break-up so it never looks like a blurred blob. `layers` are
+ * [lattice cells, weight] pairs. */
+export function layeredNoise(rng: Rng, size: number, layers: [number, number][]): Float32Array {
+  const out = new Float32Array(size * size);
+  let total = 0;
+  for (const [cells, weight] of layers) {
+    const n = tileNoise(rng, cells, size);
+    for (let i = 0; i < out.length; i++) out[i] += n[i] * weight;
+    total += weight;
+  }
+  for (let i = 0; i < out.length; i++) out[i] /= total;
+  return out;
+}
+
+/** Smooth 0..1 ramp between two edges (GLSL smoothstep). */
+export function smooth(e0: number, e1: number, x: number): number {
+  const t = clamp01((x - e0) / (e1 - e0));
+  return t * t * (3 - 2 * t);
 }
 
 /** Deterministic per-block tone in -1..1 without consuming painter RNG. */

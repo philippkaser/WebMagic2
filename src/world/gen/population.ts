@@ -18,7 +18,10 @@ const TORCH_CAP = 16;
 /** The fewest torches any floor may have: even a lightless floor must give a
  * wizard something to navigate by. */
 const MIN_TORCHES = 2;
-const TORCH_HEIGHT = 2.6;
+/** Mounted well above head height: under a 7 m vault a torch at 3.1 m throws
+ * its light up the wall as well as down across the floor, and its
+ * reflection lands further out on the wet flags. */
+const TORCH_HEIGHT = 3.1;
 /** Pushes a torch from its tile centre toward the wall it's mounted on. */
 const TORCH_INSET = TILE * 0.42;
 

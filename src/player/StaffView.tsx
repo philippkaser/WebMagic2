@@ -6,6 +6,7 @@ import { createStaffGlowMaterial } from "../fx/staffGlow";
 import { getItemDef } from "../items/catalog";
 import { playerVelocity } from "../game/player-state";
 import { useGame } from "../state/gameStore";
+import { biomeForFloor, getBiomeDef } from "../world/biomes";
 
 /** First-person staff viewmodel: follows the camera with sway, bob and recoil,
  * and carries the player's personal light (warm torchlight + staff tint) —
@@ -20,6 +21,11 @@ export function StaffView() {
 
   const staffDefId = useGame((s) => s.equipment.staff.defId);
   const shadows = useGame((s) => s.shadows);
+  // Down in the dungeon the personal light takes the band's lantern tint
+  // (world/biomes.ts): it lights everything near you, so it sets the mood.
+  const lantern = useGame((s) =>
+    s.floor > 0 && s.phase !== "village" ? getBiomeDef(biomeForFloor(s.floor)).lantern : null,
+  );
   const staff = getItemDef(staffDefId);
   // The crystal's aura + cast flash (fx/staffGlow). Parented to the
   // viewmodel, so the flash is glued to the tip however fast we move.
@@ -63,8 +69,8 @@ export function StaffView() {
       {/* Personal light — anchored just above the staff. */}
       <pointLight
         position={[-0.1, 0.5, 0.1]}
-        color="#ffb877"
-        intensity={26}
+        color={lantern?.color ?? "#ffb877"}
+        intensity={lantern?.intensity ?? 26}
         distance={17}
         decay={1.7}
         castShadow={shadows}

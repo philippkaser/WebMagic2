@@ -3,6 +3,7 @@ import { Rng } from "../../core/rng";
 import { biomeForFloor, getBiomeDef } from "../biomes";
 import { omenGenMods, rollOmen } from "../omens";
 import type { FloorLayout, Vec3 } from "../types";
+import { planArchitecture } from "./architecture";
 import { connectRooms } from "./corridors";
 import { Grid, floodFill, gridSize, worldToTile } from "./grid";
 import { placeLore } from "./lorePlacement";
@@ -21,6 +22,7 @@ import { buildWalls } from "./walls";
  *
  *   omen (own stream) → rooms → corridors → walls → points of interest
  *   → torches → props & enemies → traps → lore runes (own stream)
+ *   → architecture (own stream)
  *
  * Stages sharing the layout stream run in a fixed order and each draws the
  * same numbers whatever the biome or omen (those only scale counts and
@@ -49,6 +51,20 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
   });
   const traps = placeTraps(rng, rooms, pois, floor, size);
   const lore = placeLore({ grid, seed, floor, rooms, pois, torchTiles: torches.tiles });
+  const architecture = planArchitecture({
+    grid,
+    seed,
+    floor,
+    biome: biome.id,
+    rooms,
+    pois,
+    torches: torches.torches,
+    lore,
+    props,
+    enemies,
+    traps,
+    lightMult: mods.torchMult,
+  });
 
   return {
     floor,
@@ -71,6 +87,7 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     wallInstances,
     wallBoxes,
     extent: (size * TILE) / 2,
+    architecture,
   };
 }
 
