@@ -159,7 +159,8 @@ function RemoteWizard({ playerId }: { playerId: string }) {
           staffId={staffId}
           motion={motion}
         />
-        <sprite ref={tag} position={[0, 1.4, 0]} material={unknownTag()} scale={unknownTag().userData.size.concat(1)} />
+        {/* Sized on its first update, once we know which tag it shows. */}
+        <sprite ref={tag} position={[0, 1.4, 0]} material={unknownTag()} scale={0} />
       </group>
     </>
   );
