@@ -5,6 +5,8 @@ import { playRuneWrite } from "../../audio/uiSounds";
 import { gameEvents } from "../../core/events";
 import { placeInFront, pxFor } from "../anchors";
 import { uiNow } from "../clock";
+import { useGame } from "../../state/gameStore";
+import { isInventoryMode } from "./inventory/layout";
 import { RuneText } from "../text/RuneText";
 
 /** The message feed, in the air: every `message` event burns itself into the
@@ -37,6 +39,8 @@ export function WorldMessages() {
   useEffect(
     () =>
       gameEvents.on("message", (text) => {
+        // With the altar open, its own voice writes the message above it.
+        if (isInventoryMode(useGame.getState().overlay)) return;
         playRuneWrite();
         setEntries((prev) => {
           const next = [...prev, { id: nextId++, text, shown: true, expires: uiNow() + 4.2 + text.length * 0.035 }];

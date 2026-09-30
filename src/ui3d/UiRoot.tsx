@@ -3,6 +3,7 @@ import { ViewAnchor, pxFor } from "./anchors";
 import { ItemModel } from "./ItemModel";
 import { Hud } from "./layers/hud/Hud";
 import { Menus } from "./layers/menus/Menus";
+import { InventoryLayer } from "./layers/inventory/InventoryLayer";
 import { WorldMessages } from "./layers/WorldMessages";
 import { WorldPrompts } from "./layers/WorldPrompts";
 import { UiPresence } from "./presence";
@@ -21,6 +22,7 @@ export function UiRoot() {
       <WorldPrompts />
       <Hud />
       <Menus />
+      <InventoryLayer />
       {import.meta.env.DEV && <DevShowcase />}
     </>
   );

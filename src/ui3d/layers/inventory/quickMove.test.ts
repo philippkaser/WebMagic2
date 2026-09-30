@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { emptyGrid, type Carried } from "../../items/inventory";
-import type { ItemStack } from "../../items/types";
+import { emptyGrid, type Carried } from "../../../items/inventory";
+import type { ItemStack } from "../../../items/types";
 import { quickMoveTarget } from "./quickMove";
 
 const stack = (defId: string, qty = 1): ItemStack => ({ defId, qty, runLoot: false });
@@ -20,7 +20,7 @@ function carried(over: Partial<Carried> = {}): Carried {
   };
 }
 
-describe("quickMoveTarget (click-to-move in the inventory screen)", () => {
+describe("quickMoveTarget (shift/double-click in the inventory)", () => {
   test("empty cell → nothing to move", () => {
     expect(quickMoveTarget(carried(), { container: "bag", index: 0 }, false)).toBeNull();
   });
