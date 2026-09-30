@@ -46,9 +46,12 @@ interface ToneOptions {
   dur: number;
   vol?: number;
   delay?: number;
+  /** Seconds to reach full volume (default: a click-free 8 ms). Long attacks
+   * make swells — rushes and risers rather than hits. */
+  attack?: number;
 }
 
-function tone({ type = "sine", freq, freqEnd, dur, vol = 0.2, delay = 0 }: ToneOptions): void {
+function tone({ type = "sine", freq, freqEnd, dur, vol = 0.2, delay = 0, attack = 0.008 }: ToneOptions): void {
   if (!ctx || !master) return;
   const t0 = ctx.currentTime + delay;
   const osc = ctx.createOscillator();
@@ -57,7 +60,7 @@ function tone({ type = "sine", freq, freqEnd, dur, vol = 0.2, delay = 0 }: ToneO
   if (freqEnd !== undefined) osc.frequency.exponentialRampToValueAtTime(Math.max(freqEnd, 1), t0 + dur);
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(vol, t0 + 0.008);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + Math.min(attack, dur * 0.95));
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   osc.connect(g).connect(master);
   osc.start(t0);
@@ -72,9 +75,20 @@ interface NoiseOptions {
   q?: number;
   delay?: number;
   type?: BiquadFilterType;
+  /** Seconds to reach full volume (default 12 ms); see ToneOptions.attack. */
+  attack?: number;
 }
 
-function noise({ dur, vol = 0.2, filterFreq, filterEnd, q = 0.8, delay = 0, type = "lowpass" }: NoiseOptions): void {
+function noise({
+  dur,
+  vol = 0.2,
+  filterFreq,
+  filterEnd,
+  q = 0.8,
+  delay = 0,
+  type = "lowpass",
+  attack = 0.012,
+}: NoiseOptions): void {
   if (!ctx || !master || !noiseBuffer) return;
   const t0 = ctx.currentTime + delay;
   const src = ctx.createBufferSource();
@@ -88,7 +102,7 @@ function noise({ dur, vol = 0.2, filterFreq, filterEnd, q = 0.8, delay = 0, type
   if (filterEnd !== undefined) filter.frequency.exponentialRampToValueAtTime(Math.max(filterEnd, 20), t0 + dur);
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(vol, t0 + 0.012);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + Math.min(attack, dur * 0.95));
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   src.connect(filter).connect(g).connect(master);
   src.start(t0);
@@ -207,6 +221,145 @@ export function playWeighing(): void {
   for (let i = 0; i < 4; i++) {
     tone({ type: "sine", freq: 220 * (1 + i * 0.5), freqEnd: 110 * (1 + i * 0.5), dur: 1.4, vol: 0.05, delay: i * 0.1 });
   }
+}
+
+// ── Travel: portals, the tunnel, death and the way back ─────────────────────
+// (transition/TransitionSystem plays these on the journey's stage changes.)
+
+/** Being pulled into a portal: a rush of air swelling into a whistle, a
+ * chord bending upward, and a sub "thoom" as the vortex closes over you.
+ * `bright` 0…1 lifts the pitch — cyan descents sit lower than gold homecomings. */
+export function playPortalEnter(bright = 0.5): void {
+  noise({ dur: 1, vol: 0.17, filterFreq: 240, filterEnd: 3600, type: "bandpass", q: 1.4, attack: 0.75 });
+  noise({ dur: 0.9, vol: 0.05, filterFreq: 1800, filterEnd: 7200, type: "bandpass", q: 6, delay: 0.15, attack: 0.6 });
+  const base = 170 + bright * 90;
+  tone({ type: "sine", freq: base, freqEnd: base * 3.2, dur: 0.95, vol: 0.07, attack: 0.6 });
+  tone({ type: "triangle", freq: base * 1.5, freqEnd: base * 4.6, dur: 0.9, vol: 0.03, delay: 0.05, attack: 0.55 });
+  tone({ type: "sine", freq: 96, freqEnd: 30, dur: 0.7, vol: 0.22, delay: 0.84 });
+}
+
+/** The tunnel: rushing air swept by a slow LFO over a low two-voice drone
+ * with a little vibrato. Loops until the returned stop() (which fades out).
+ * `pitch` is the drone's root in Hz; `air` scales the rush (0 = drone only). */
+export function startTunnelRush(pitch = 55, air = 1): () => void {
+  if (!ctx || !master || !noiseBuffer) return () => {};
+  const c = ctx;
+  const now = c.currentTime;
+  const out = c.createGain();
+  out.gain.setValueAtTime(0.0001, now);
+  out.gain.exponentialRampToValueAtTime(1, now + 0.2);
+  out.connect(master);
+
+  const rush = c.createBufferSource();
+  rush.buffer = noiseBuffer;
+  rush.loop = true;
+  const band = c.createBiquadFilter();
+  band.type = "bandpass";
+  band.frequency.value = 900;
+  band.Q.value = 0.8;
+  const sweep = c.createOscillator();
+  sweep.frequency.value = 0.8;
+  const sweepDepth = c.createGain();
+  sweepDepth.gain.value = 500;
+  sweep.connect(sweepDepth).connect(band.frequency);
+  const rushGain = c.createGain();
+  rushGain.gain.value = 0.1 * air;
+  rush.connect(band).connect(rushGain).connect(out);
+
+  const low = c.createBiquadFilter();
+  low.type = "lowpass";
+  low.frequency.value = 520;
+  const droneGain = c.createGain();
+  droneGain.gain.value = 0.035;
+  low.connect(droneGain).connect(out);
+  const vib = c.createOscillator();
+  vib.frequency.value = 5.5;
+  const vibDepth = c.createGain();
+  vibDepth.gain.value = pitch * 0.012;
+  vib.connect(vibDepth);
+  const voices: OscillatorNode[] = [];
+  for (const mult of [1, 1.5]) {
+    const o = c.createOscillator();
+    o.type = "sawtooth";
+    o.frequency.value = pitch * mult;
+    vibDepth.connect(o.frequency);
+    o.connect(low);
+    voices.push(o);
+  }
+
+  const sources = [rush, sweep, vib, ...voices];
+  for (const s of sources) s.start(now);
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    const t = c.currentTime;
+    out.gain.cancelScheduledValues(t);
+    out.gain.setValueAtTime(Math.max(out.gain.value, 0.0001), t);
+    out.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+    for (const s of sources) s.stop(t + 0.4);
+    setTimeout(() => out.disconnect(), 500);
+  };
+}
+
+/** Spat out the other side: a pop of air, a landing thump, a chord blooming.
+ * `bright` as in playPortalEnter. */
+export function playPortalArrive(bright = 0.5): void {
+  noise({ dur: 0.55, vol: 0.12, filterFreq: 3200, filterEnd: 180 });
+  tone({ type: "sine", freq: 74, freqEnd: 38, dur: 0.45, vol: 0.2 });
+  const root = 294 + bright * 98;
+  const chord = [1, 1.26, 1.5, 2];
+  for (let i = 0; i < chord.length; i++) {
+    tone({ type: "sine", freq: root * chord[i], dur: 1.3, vol: 0.04, delay: 0.03 * i, attack: 0.05 });
+  }
+}
+
+/** Falling: a long sinking tone, a breath let go, and a heart that slows. */
+export function playDeathFade(): void {
+  tone({ type: "sine", freq: 110, freqEnd: 34, dur: 1.4, vol: 0.16, attack: 0.05 });
+  tone({ type: "triangle", freq: 220, freqEnd: 66, dur: 1.1, vol: 0.045 });
+  noise({ dur: 1.4, vol: 0.08, filterFreq: 900, filterEnd: 110, attack: 0.3 });
+  for (const at of [0.15, 0.95]) {
+    tone({ type: "sine", freq: 62, freqEnd: 40, dur: 0.14, vol: 0.17, delay: at });
+    tone({ type: "sine", freq: 55, freqEnd: 36, dur: 0.12, vol: 0.12, delay: at + 0.19 });
+  }
+}
+
+/** The way back from death: an airy shimmer rising out of the dark. */
+export function playRespawnRise(): void {
+  for (let i = 0; i < 3; i++) {
+    const f = 262 * (1 + i * 0.5);
+    tone({ type: "sine", freq: f, freqEnd: f * 2, dur: 1.1, vol: 0.04, delay: i * 0.06, attack: 0.35 });
+  }
+  noise({ dur: 1, vol: 0.05, filterFreq: 1200, filterEnd: 4200, type: "bandpass", q: 3, attack: 0.45 });
+}
+
+/** A Feather of Safe Passage lifts you: a soft updraft and wind chimes. */
+export function playFeatherLift(): void {
+  noise({ dur: 1.1, vol: 0.09, filterFreq: 500, filterEnd: 2400, type: "bandpass", q: 1.8, attack: 0.4 });
+  const chimes = [880, 1175, 1480, 1760, 2349];
+  for (let i = 0; i < chimes.length; i++) {
+    tone({ type: "sine", freq: chimes[i], dur: 0.9, vol: 0.03, delay: 0.08 + i * 0.09 });
+  }
+}
+
+/** A sealed portal refuses you: a dull knock, and the seal's glass rings. */
+export function playSealedTouch(): void {
+  tone({ type: "sine", freq: 124, freqEnd: 70, dur: 0.18, vol: 0.16 });
+  noise({ dur: 0.12, vol: 0.07, filterFreq: 520, filterEnd: 110 });
+  tone({ type: "sine", freq: 1568, dur: 0.7, vol: 0.022, delay: 0.03 });
+  tone({ type: "sine", freq: 2349, dur: 0.5, vol: 0.012, delay: 0.05 });
+}
+
+/** A seal breaks (the Warden has fallen): glass shatters, and the portal
+ * breathes open. */
+export function playSealBreak(): void {
+  noise({ dur: 0.4, vol: 0.14, filterFreq: 5200, filterEnd: 1400, type: "bandpass", q: 0.9 });
+  for (let i = 0; i < 6; i++) {
+    tone({ type: "sine", freq: 1800 + Math.random() * 2600, dur: 0.2 + Math.random() * 0.35, vol: 0.025, delay: i * 0.035 });
+  }
+  tone({ type: "sine", freq: 196, freqEnd: 392, dur: 1.3, vol: 0.06, delay: 0.1, attack: 0.3 });
+  noise({ dur: 1.2, vol: 0.05, filterFreq: 400, filterEnd: 1800, type: "bandpass", q: 2, delay: 0.1, attack: 0.4 });
 }
 
 // ── Ambient beds ─────────────────────────────────────────────────────────────

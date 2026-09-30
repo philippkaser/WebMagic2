@@ -19,6 +19,7 @@ import { PeerBodies } from "../net/PeerBodies";
 import { RemoteWizards } from "../net/RemoteWizards";
 import { StaffView } from "../player/StaffView";
 import { Effects } from "../render/Effects";
+import { TransitionSystem } from "../transition/TransitionSystem";
 import { useGame } from "../state/gameStore";
 import { WorldCameraBridge } from "../ui3d/bridge";
 import { generateFloor } from "../world/gen";
@@ -44,7 +45,10 @@ export function GameScene() {
     if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__layout = next;
     return next;
   }, [inDungeon, floorSeed, floor]);
-  const controlsEnabled = phase === "village" || phase === "dungeon";
+  // Mouse-look stays live through a portal journey (phase "loading"): the
+  // lock survives the tunnel, and a controls instance remounted mid-lock
+  // would never see a pointerlockchange and ignore the mouse.
+  const controlsEnabled = phase === "village" || phase === "dungeon" || phase === "loading";
   // The Weightless Hour (and any future omen) bends the world's gravity.
   const gravityMult = (layout && omenRules(layout.omen).gravityMult) ?? 1;
 
@@ -87,6 +91,9 @@ export function GameScene() {
         <InteractionSystem />
         <ConsumableSystem />
         <WorldCameraBridge />
+        {/* Portal journeys: camera pull/FOV/roll and the vortex tunnel that
+            covers every scene switch (transition/). */}
+        <TransitionSystem />
         {/* Tiny procedural environment map: gives the wet slabs and metal
             trims something interesting to reflect without external assets. */}
         <Environment resolution={64} frames={1}>

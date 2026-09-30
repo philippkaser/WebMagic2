@@ -7,8 +7,8 @@
  *   itemInfo.ts    item glyphs + stat lines (also used outside ui/)
  *   hud/           in-game widgets; hud/PlayHud.tsx lists them (PerfOverlay
  *                  is mounted here instead, since it works in menus too)
- *   overlays/      fullscreen phase screens (menu, the Weighing, death,
- *                  loading), each wrapped in overlays/OverlayShell
+ *   overlays/      fullscreen phase screens (menu, the Weighing, death),
+ *                  wrapped in overlays/OverlayShell
  *   inventory/     inventory / chest / merchant screen (entry: InventoryScreen.tsx)
  *   codex/         the lore codex (C) — carvings read so far
  *   devroom/       dev-build test bench (entry: DevRoom.tsx)
@@ -35,13 +35,13 @@ import { PerfOverlay } from "./hud/PerfOverlay";
 import { PlayHud } from "./hud/PlayHud";
 import { InventoryScreen, isInventoryMode } from "./InventoryScreen";
 import { DeathOverlay } from "./overlays/DeathOverlay";
-import { LoadingOverlay } from "./overlays/LoadingOverlay";
 import { MenuOverlay } from "./overlays/MenuOverlay";
 import { WeighingOverlay } from "./overlays/WeighingOverlay";
 import { globalCss, styles } from "./theme";
 
 /** All DOM UI: the in-game HUD, the inventory-family screens, and the
- * fullscreen overlays for menu / the Weighing / death / loading. */
+ * fullscreen overlays for menu / the Weighing / death. (Loading is the
+ * portal tunnel now — transition/.) */
 export function HUD() {
   const phase = useGame((s) => s.phase);
   const overlay = useGame((s) => s.overlay);
@@ -49,8 +49,10 @@ export function HUD() {
 
   // Leaving gameplay or opening an overlay always releases the pointer.
   useEffect(() => {
-    const playing = phase === "village" || phase === "dungeon";
-    if ((!playing || overlay !== "none") && document.pointerLockElement) {
+    // A portal journey ("loading": the vortex tunnel) keeps the lock — you
+    // fly through the tunnel still looking around, and land in control.
+    const holdsLock = phase === "village" || phase === "dungeon" || phase === "loading";
+    if ((!holdsLock || overlay !== "none") && document.pointerLockElement) {
       document.exitPointerLock();
     }
   }, [phase, overlay]);
@@ -105,7 +107,6 @@ export function HUD() {
       {phase === "menu" && <MenuOverlay />}
       {phase === "weighing" && <WeighingOverlay />}
       {phase === "dead" && <DeathOverlay />}
-      {phase === "loading" && <LoadingOverlay />}
     </div>
   );
 }
