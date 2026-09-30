@@ -7,9 +7,9 @@ import { addLightSource, removeLightSource, type DynamicLightSource } from "../.
 import { spawnBurst } from "../../fx/Particles";
 import { offerInteraction } from "../../game/interactions";
 import { playerPosition } from "../../game/player-state";
+import { RIP_FRAG, RIP_VERT } from "../../render/shaders/rift";
 import { getTextures } from "../../render/textures";
 import type { Vec3 } from "../types";
-import { RIP_FRAG, RIP_VERT } from "../../render/shaders/rift";
 
 /** Fancy motes swirling around the rip: a swarm of glowing shards that spiral
  * inward as if pulled through the tear, respawning at the rim — pure eye-candy,

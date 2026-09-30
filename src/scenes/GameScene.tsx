@@ -56,8 +56,8 @@ export function GameScene() {
           )}
           <Projectiles />
           <LootOrbs />
+          <RemoteWizards />
         </Physics>
-        <RemoteWizards />
         <ReplicationSystem />
         <FxSystems />
         <DynamicLights />

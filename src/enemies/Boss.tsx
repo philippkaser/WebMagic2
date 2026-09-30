@@ -1,14 +1,11 @@
 import { useFrame } from "@react-three/fiber";
-import {
-  BallCollider,
-  interactionGroups,
-  RigidBody,
-  type RapierRigidBody,
-} from "@react-three/rapier";
+import { BallCollider, RigidBody, type RapierRigidBody } from "@react-three/rapier";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, MeshStandardMaterial, Vector3 } from "three";
 import { playBossRoar } from "../audio/sound";
-import { floorScale, GROUPS } from "../core/config";
+import { explode } from "../combat/damage";
+import { fireProjectile } from "../combat/projectiles";
+import { floorScale } from "../core/config";
 import { gameEvents } from "../core/events";
 import {
   addLightSource,
@@ -22,19 +19,12 @@ import { nearestPlayerTo } from "../game/targets";
 import { dropLoot } from "../items/LootOrbs";
 import { isHost, selectIsHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
+import { COLLISION } from "../physics/groups";
 import { useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
-import { explode } from "../combat/damage";
 import { useEnemyNet } from "./useEnemyNet";
-import { fireProjectile } from "../combat/projectiles";
 
-const BOSS_GROUPS = interactionGroups(GROUPS.ENEMY, [
-  GROUPS.WORLD,
-  GROUPS.PLAYER,
-  GROUPS.ENEMY,
-  GROUPS.PROP,
-  GROUPS.FRIENDLY_PROJECTILE,
-]);
+const BOSS_GROUPS = COLLISION.enemy;
 
 const BOSS_ID = "boss";
 const BOSS_NAME = "WARDEN OF THE DEEP";
@@ -108,8 +98,8 @@ export function Boss({
         playBossRoar();
         if (isHost()) {
           // Guaranteed rich drops for the whole party.
-          dropLoot([t.x - 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
-          dropLoot([t.x + 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
+          dropLoot([t.x - 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor, 1, 2);
+          dropLoot([t.x + 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor, 1, 2);
           session.sendEntityEvent({ k: "death", id: BOSS_ID });
         }
         gameEvents.emit("message", "The Warden falls. The seal breaks.");

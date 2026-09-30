@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { playMindDive, playWarp } from "../audio/sound";
-import { useGame } from "../state/gameStore";
 import { TRANSITION_FRAG, createShaderQuad, type ShaderQuad } from "../render/shaders/shaderCanvas";
+import { useGame } from "../state/gameStore";
 
 /** Fullscreen in-world transitions, driven by one choreographed GLSL shader
  * (see shaderCanvas). Each transition is a fixed-length, eased timeline so it

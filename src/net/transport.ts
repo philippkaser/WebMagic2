@@ -1,6 +1,5 @@
-import { DUNGEON } from "../core/config";
-import { FloorDirectory } from "./matchmaking";
 import type { ClientMsg, ServerMsg } from "./protocol";
+import { GameServerCore } from "./serverCore";
 
 /** Transport abstraction. The session prefers WebSocketTransport (real
  * multiplayer via server/server.ts) and falls back to LocalTransport
@@ -101,47 +100,23 @@ function defaultWsUrl(): string {
   return `${proto}://${location.host}/ws`;
 }
 
-/** Single-player loopback: a miniature in-process "server" that speaks the
- * real protocol and reuses the real matchmaking logic. */
+/** Single-player loopback: the real GameServerCore running in-process with
+ * one client — offline play exercises the exact server rules (matchmaking,
+ * death chests, remains of your past lives) with zero network. */
 export class LocalTransport implements Transport {
   private listeners = new Set<(msg: ServerMsg) => void>();
-  private directory = new FloorDirectory(DUNGEON.maxPlayersPerFloor);
-  private playerId = "local_player";
+  private static core: GameServerCore | null = null;
+  private readonly playerId = "local_player";
 
   async connect(): Promise<void> {
-    this.deliver({ t: "welcome", playerId: this.playerId });
+    // One core per page session: remains of earlier deaths survive re-entry.
+    LocalTransport.core ??= new GameServerCore();
+    LocalTransport.core.disconnect(this.playerId);
+    LocalTransport.core.connect(this.playerId, (msg) => this.deliver(msg));
   }
 
   send(msg: ClientMsg): void {
-    switch (msg.t) {
-      case "hello":
-        break;
-      case "enterFloor": {
-        const inst = this.directory.join(this.playerId, msg.floor);
-        this.deliver({
-          t: "floorAssigned",
-          assignment: {
-            instanceId: inst.id,
-            floor: inst.floor,
-            seed: inst.seed,
-            playerCount: inst.players.size,
-            hostId: this.playerId,
-          },
-        });
-        break;
-      }
-      case "leaveDungeon":
-        this.directory.leave(this.playerId);
-        break;
-      case "state":
-      case "castAbility":
-      case "entity":
-      case "entityEvent":
-      case "hit":
-      case "takeOrb":
-        // No peers in single-player.
-        break;
-    }
+    LocalTransport.core?.receive(this.playerId, msg);
   }
 
   onMessage(cb: (msg: ServerMsg) => void): () => void {

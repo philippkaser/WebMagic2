@@ -92,12 +92,17 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
   const exit = tileToWorld(exitTile, size, 0);
   const boss: Vec3 | null = isBossFloor ? tileToWorld(exitCenter, size, 1.8) : null;
   const treasure = tileToWorld(center(treasureRoom), size, 0);
-  const isCheckpoint = floor % DUNGEON.checkpointInterval === 0;
-  let leave: Vec3 | null = null;
-  if (isCheckpoint) {
-    const lx = Math.min(exitTile[0] + 2, exitRoom.x + exitRoom.w - 2);
-    leave = tileToWorld([lx, exitTile[1]], size, 0);
+  const hx = Math.min(exitTile[0] + 2, exitRoom.x + exitRoom.w - 2);
+  const homeward = tileToWorld([hx === exitTile[0] ? exitTile[0] - 2 : hx, exitTile[1]], size, 0);
+
+  // Remains slots: quiet corners of rooms that are neither spawn nor exit —
+  // a dead wizard's chest should be *found*, not tripped over.
+  const remainsSlots: Vec3[] = [];
+  for (const room of rng.shuffle(rooms.filter((r) => r !== spawnRoom && r !== exitRoom))) {
+    if (remainsSlots.length >= 3) break;
+    remainsSlots.push(tileToWorld([room.x + 1, room.y + room.h - 2], size, 0));
   }
+  while (remainsSlots.length < 3) remainsSlots.push(treasure);
 
   // ── Torches along room walls ───────────────────────────────────────────────
   const torches: Vec3[] = [];
@@ -150,7 +155,8 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     rooms,
     spawn,
     exit,
-    leave,
+    homeward,
+    remainsSlots,
     treasure,
     boss,
     torches,

@@ -2,10 +2,12 @@ import { type RapierRigidBody } from "@react-three/rapier";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Vector3 } from "three";
 import { playHit } from "../audio/sound";
+import { gameEvents } from "../core/events";
 import { allocId, registerHittable } from "../game/registry";
 import { isHost } from "../net/netStore";
 import { registerEntity } from "../net/replication";
 import { session } from "../net/session";
+import { useGame } from "../state/gameStore";
 
 /** Shared host/replica plumbing for one enemy: hittable registration with
  * authority routing, replication registration, and kinematic interpolation
@@ -44,6 +46,20 @@ export function useEnemyNet(opts: {
   } = opts;
   const target = useMemo(() => new Vector3(), []);
   const hasSnap = useRef(false);
+  /** When our own spell last touched it — for kill credit. */
+  const lastLocalHit = useRef(-1e9);
+
+  const kill = useCallback(
+    (silent?: boolean) => {
+      if (deadRef.current) return;
+      if (!silent && performance.now() - lastLocalHit.current < 5000) {
+        useGame.getState().recordKill();
+        gameEvents.emit("hitConfirm", { kind: "enemy", killed: true });
+      }
+      onKill(silent);
+    },
+    [deadRef, onKill],
+  );
 
   const applyDamage = useCallback(
     (damage: number, impulse: { x: number; y: number; z: number }) => {
@@ -61,9 +77,9 @@ export function useEnemyNet(opts: {
       );
       onSnap?.(hp.current);
       onDamaged?.();
-      if (hp.current <= 0) onKill();
+      if (hp.current <= 0) kill();
     },
-    [body, deadRef, flash, hp, knockTimer, knockbackScale, onKill, onDamaged, onSnap],
+    [body, deadRef, flash, hp, knockTimer, knockbackScale, kill, onDamaged, onSnap],
   );
 
   useEffect(() => {
@@ -75,6 +91,8 @@ export function useEnemyNet(opts: {
       hit: (damage, impulse) => {
         if (deadRef.current) return;
         flash.current = 1;
+        lastLocalHit.current = performance.now();
+        gameEvents.emit("hitConfirm", { kind: "enemy" });
         playHit();
         hitFeedback?.();
         if (isHost()) applyDamage(damage, impulse);
@@ -98,14 +116,14 @@ export function useEnemyNet(opts: {
         }
       },
       onEvent: (ev) => {
-        if (ev.k === "death") onKill(ev.silent);
+        if (ev.k === "death") kill(ev.silent);
       },
     });
     return () => {
       unregisterHit();
       unregisterEntity();
     };
-  }, [dead, entityId, applyDamage, body, deadRef, flash, hp, target, onKill, hitFeedback]);
+  }, [dead, entityId, applyDamage, body, deadRef, flash, hp, target, kill, hitFeedback]);
 
   /** Replica movement: glide the kinematic body toward the latest snapshot. */
   const interpolate = useCallback(

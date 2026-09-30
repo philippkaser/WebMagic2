@@ -1,35 +1,42 @@
+import { DUNGEON } from "../core/config";
 import type { Rng } from "../core/rng";
 import { lootPool } from "./catalog";
-import type { ItemDef, Slot } from "./types";
+import { rarityWeights } from "./rarity";
+import type { ItemInstance, Rarity, Slot } from "./types";
 
 const SLOT_WEIGHTS: [Slot, number][] = [
   ["staff", 22],
-  ["amulet", 30],
-  ["cloak", 24],
-  ["boots", 24],
+  ["amulet", 28],
+  ["cloak", 25],
+  ["boots", 25],
 ];
 
-/** Roll a random item appropriate for the given floor. Higher tiers get more
- * likely the deeper you are. */
-export function rollLoot(rng: Rng, floor: number): ItemDef {
-  const total = SLOT_WEIGHTS.reduce((s, [, w]) => s + w, 0);
+function weighted<T>(rng: Rng, entries: [T, number][]): T {
+  const total = entries.reduce((s, [, w]) => s + w, 0);
   let r = rng.next() * total;
-  let slot: Slot = "amulet";
-  for (const [s, w] of SLOT_WEIGHTS) {
+  for (const [value, w] of entries) {
     r -= w;
-    if (r <= 0) {
-      slot = s;
-      break;
-    }
+    if (r <= 0) return value;
   }
-  const pool = lootPool(slot, floor);
-  // Weight toward higher tiers as floors increase.
-  const weights = pool.map((d) => 1 + d.tier * Math.min(floor / 6, 2.5));
-  const sum = weights.reduce((a, b) => a + b, 0);
-  let pick = rng.next() * sum;
-  for (let i = 0; i < pool.length; i++) {
-    pick -= weights[i];
-    if (pick <= 0) return pool[i];
-  }
-  return pool[pool.length - 1];
+  return entries[entries.length - 1][0];
+}
+
+/** A globally unique-enough item id. Items travel between players (death
+ * chests), so ids must never collide across clients. */
+export function newItemUid(rng: Rng): string {
+  const a = Math.floor(rng.next() * 0xffffffff).toString(36);
+  const b = Math.floor(rng.next() * 0xffffffff).toString(36);
+  return `i${a}${b}`;
+}
+
+/** Roll a random item for a floor. Level tracks the floor (±), deeper floors
+ * shift rarity odds upward. `bonus` raises both (bosses, treasure). */
+export function rollItem(rng: Rng, floor: number, bonus = 0): ItemInstance {
+  const slot = weighted(rng, SLOT_WEIGHTS);
+  const pool = lootPool(slot, floor + bonus);
+  const def = weighted(rng, pool.map((d) => [d, d.weight ?? 1] as [typeof d, number]));
+  const level = Math.max(1, Math.min(DUNGEON.maxFloor, floor + bonus + rng.int(-1, 2)));
+  let rarity: Rarity = weighted(rng, rarityWeights(floor + bonus * 6));
+  if (bonus > 0 && rarity === "common") rarity = "rare";
+  return { uid: newItemUid(rng), defId: def.id, level, rarity, runLoot: true };
 }

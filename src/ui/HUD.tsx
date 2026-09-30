@@ -2,11 +2,15 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
 import { Rng, hashSeed } from "../core/rng";
-import { computeStats, getItemDef } from "../items/catalog";
-import type { Slot } from "../items/types";
+import { getItemDef } from "../items/catalog";
+import { itemTitle } from "../items/inventory";
+import { computeStats, gearLevel } from "../items/stats";
+import type { ItemInstance, Slot } from "../items/types";
 import { selectIsHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
+import { canExtract, floorsUntilExtract } from "../progression/progression";
 import { useGame } from "../state/gameStore";
+import { useSettings } from "../state/settings";
 import { TransitionLayer } from "./Transitions";
 
 /** All DOM UI: crosshair, bars, prompts, message feed, the splash screen and
@@ -39,9 +43,14 @@ export function HUD() {
       if (e.code === "KeyP" || e.code === "F3") {
         e.preventDefault();
         setShowPerf((v) => !v);
+      } else if (e.code === "Tab" || e.code === "KeyI") {
+        e.preventDefault();
+        const g = useGame.getState();
+        g.setInventoryOpen(!g.inventoryOpen);
+        if (!g.inventoryOpen) document.exitPointerLock();
       } else if (e.code === "KeyO" || e.code === "F4") {
         e.preventDefault();
-        useGame.getState().toggleShadows();
+        useSettings.getState().toggleShadows();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -68,7 +77,7 @@ function PlayHud() {
   const phase = useGame((s) => s.phase);
   const floor = useGame((s) => s.floor);
   const instanceId = useGame((s) => s.instanceId);
-  const checkpoint = useGame((s) => s.checkpoint);
+  const run = useGame((s) => s.run);
   const health = useGame((s) => s.health);
   const mana = useGame((s) => s.mana);
   const equipment = useGame((s) => s.equipment);
@@ -99,7 +108,12 @@ function PlayHud() {
         ) : (
           <div style={styles.heading}>THE VILLAGE</div>
         )}
-        <div style={styles.dim}>checkpoint: floor {checkpoint}</div>
+        <div style={styles.dim}>power {gearLevel(equipment)}</div>
+        {run && (
+          <div style={{ ...styles.dim, color: canExtract(run) ? "#ffd44f" : "#7d7566" }}>
+            {canExtract(run) ? "the way home is open" : `${floorsUntilExtract(run)} more floor(s) to the way home`}
+          </div>
+        )}
         <div style={{ ...styles.dim, color: session.mode === "online" ? "#4fd08a" : "#7d7566" }}>
           {session.mode === "online"
             ? `◉ online${amHost && phase === "dungeon" ? " · host" : ""}`
@@ -119,10 +133,10 @@ function PlayHud() {
 
       {/* Bottom-right: equipment */}
       <div className="wm-panel" style={{ bottom: 16, right: 14, textAlign: "right" }}>
-        <EquipRow slot="staff" defId={equipment.staff.defId} runLoot={equipment.staff.runLoot} />
-        <EquipRow slot="amulet" defId={equipment.amulet?.defId} runLoot={equipment.amulet?.runLoot} />
-        <EquipRow slot="cloak" defId={equipment.cloak?.defId} runLoot={equipment.cloak?.runLoot} />
-        <EquipRow slot="boots" defId={equipment.boots.defId} runLoot={equipment.boots.runLoot} />
+        <EquipRow slot="staff" item={equipment.staff} />
+        <EquipRow slot="amulet" item={equipment.amulet} />
+        <EquipRow slot="cloak" item={equipment.cloak} />
+        <EquipRow slot="boots" item={equipment.boots} />
       </div>
 
       {/* Interaction prompt / lock hint */}
@@ -164,14 +178,15 @@ function Bar({ label, value, max, color }: { label: string; value: number; max: 
 
 const SLOT_ICONS: Record<Slot, string> = { staff: "⚚", amulet: "◈", cloak: "▲", boots: "⬢" };
 
-function EquipRow({ slot, defId, runLoot }: { slot: Slot; defId?: string; runLoot?: boolean }) {
-  const def = defId ? getItemDef(defId) : null;
+function EquipRow({ slot, item }: { slot: Slot; item: ItemInstance | null }) {
+  const def = item ? getItemDef(item.defId) : null;
+  const runLoot = item?.runLoot;
   return (
     <div style={{ fontSize: 12, marginBottom: 4, color: def ? "#ded5c2" : "#55505a", textShadow: "1px 1px 0 #000" }}>
       {def ? (
         <>
           {runLoot && <span style={{ color: "#c8a23c" }} title="Lost on death until banked">◦ </span>}
-          <span>{def.name}</span>{" "}
+          <span>{itemTitle(item!)} · {item!.level}</span>{" "}
           <span style={{ color: def.color }}>{SLOT_ICONS[slot]}</span>
         </>
       ) : (
@@ -292,10 +307,10 @@ function Overlay({ children }: { children: ReactNode }) {
 
 function MenuOverlay() {
   const startGame = useGame((s) => s.startGame);
-  const shadows = useGame((s) => s.shadows);
-  const toggleShadows = useGame((s) => s.toggleShadows);
-  const playerName = useGame((s) => s.playerName);
-  const setPlayerName = useGame((s) => s.setPlayerName);
+  const shadows = useSettings((s) => s.shadows);
+  const toggleShadows = useSettings((s) => s.toggleShadows);
+  const playerName = useSettings((s) => s.playerName);
+  const setPlayerName = useSettings((s) => s.setPlayerName);
   return (
     <Overlay>
       <div className="wm-title" style={styles.title}>WEBMAGIC</div>
@@ -349,10 +364,10 @@ function DeathOverlay() {
         YOU DIED
       </div>
       <div style={styles.subtitle}>on floor {lastDeath?.floor ?? "?"}</div>
-      {lastDeath && lastDeath.lostItems.length > 0 ? (
+      {lastDeath && lastDeath.items.length > 0 ? (
         <p style={styles.blurb}>
           The dungeon keeps what you carried:{" "}
-          <span style={{ color: "#c8a23c" }}>{lastDeath.lostItems.join(", ")}</span>
+          <span style={{ color: "#c8a23c" }}>{lastDeath.items.map(itemTitle).join(", ")}</span>
         </p>
       ) : (
         <p style={styles.blurb}>You carried nothing the dungeon could take.</p>

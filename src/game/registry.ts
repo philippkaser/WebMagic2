@@ -15,7 +15,7 @@ export interface PhysBody {
   applyImpulse(impulse: Vec3Tuple, wakeUp: boolean): void;
 }
 
-export type HitTeam = "enemy" | "prop";
+export type HitTeam = "enemy" | "prop" | "wizard";
 
 export interface Hittable {
   id: number;

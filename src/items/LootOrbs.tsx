@@ -14,10 +14,13 @@ import { playerPosition } from "../game/player-state";
 import { isHost, useNet } from "../net/netStore";
 import { setOrbProvider } from "../net/replication";
 import { session } from "../net/session";
-import { getItemDef } from "./catalog";
-import { rollLoot } from "./loot";
 import { useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
+import { getItemDef } from "./catalog";
+import { itemTitle } from "./inventory";
+import { rollItem } from "./loot";
+import { RARITIES } from "./rarity";
+import type { ItemInstance } from "./types";
 
 /** Dropped-loot manager under host authority: the floor host rolls drops and
  * broadcasts spawns; pickups are granted by the host so an orb can never be
@@ -25,7 +28,7 @@ import type { Vec3 } from "../world/types";
 
 interface Orb {
   id: string;
-  defId: string;
+  item: ItemInstance;
   position: Vec3;
 }
 
@@ -35,17 +38,17 @@ let takeOrbLocal: ((orbId: string, by: string) => void) | null = null;
 
 /** Roll & drop loot at a position. Host-only — replicas receive the spawn
  * event instead, so exactly one roll happens per kill/break. */
-export function dropLoot(position: Vec3, floor: number, chance = 1): void {
+export function dropLoot(position: Vec3, floor: number, chance = 1, bonus = 0): void {
   if (!isHost()) return;
   if (Math.random() > chance) return;
-  const def = rollLoot(new Rng((Math.random() * 0xffffffff) >>> 0), floor);
+  const item = rollItem(new Rng((Math.random() * 0xffffffff) >>> 0), floor, bonus);
   const orb: Orb = {
     id: `orb_${orbCounter++}_${Math.random().toString(36).slice(2, 6)}`,
-    defId: def.id,
+    item,
     position,
   };
   pushOrb?.(orb);
-  session.sendEntityEvent({ k: "orbSpawn", orbId: orb.id, defId: def.id, pos: position });
+  session.sendEntityEvent({ k: "orbSpawn", orb: { orbId: orb.id, item, pos: position } });
 }
 
 export function LootOrbs() {
@@ -57,7 +60,7 @@ export function LootOrbs() {
   // Late-join state sync: give the host access to the live orb list.
   useEffect(() => {
     setOrbProvider(() =>
-      orbsRef.current.map((o) => ({ orbId: o.id, defId: o.defId, pos: o.position })),
+      orbsRef.current.map((o) => ({ orbId: o.id, item: o.item, pos: o.position })),
     );
     return () => setOrbProvider(null);
   }, []);
@@ -69,12 +72,12 @@ export function LootOrbs() {
         const orb = prev.find((o) => o.id === orbId);
         if (!orb) return prev;
         if (by === useNet.getState().playerId || by === "self") {
-          useGame.getState().equipItem(orb.defId);
+          useGame.getState().pickUpItem(orb.item);
         }
         spawnBurst({
           position: [orb.position[0], orb.position[1] + 0.5, orb.position[2]],
           count: 18,
-          color: [getItemDef(orb.defId).color, "#ffffff"],
+          color: [getItemDef(orb.item.defId).color, RARITIES[orb.item.rarity].color, "#ffffff"],
           speed: 3.5,
           ttl: 0.6,
           size: 0.07,
@@ -93,7 +96,7 @@ export function LootOrbs() {
   useEffect(
     () =>
       gameEvents.on("entityEvent", (ev) => {
-        if (ev.k === "orbSpawn") pushOrb?.({ id: ev.orbId, defId: ev.defId, position: ev.pos });
+        if (ev.k === "orbSpawn") pushOrb?.({ id: ev.orb.orbId, item: ev.orb.item, position: ev.orb.pos });
         else if (ev.k === "orbTaken") takeOrbLocal?.(ev.orbId, ev.by);
       }),
     [],
@@ -130,7 +133,8 @@ function LootOrb({ orb }: { orb: Orb }) {
   const group = useRef<Group>(null);
   const light = useRef<DynamicLightSource | null>(null);
   const requested = useRef(0);
-  const def = getItemDef(orb.defId);
+  const def = getItemDef(orb.item.defId);
+  const rarity = RARITIES[orb.item.rarity];
   const [x, y, z] = orb.position;
 
   useEffect(() => {
@@ -160,7 +164,7 @@ function LootOrb({ orb }: { orb: Orb }) {
 
     const d2 = playerPosition.distanceToSquared(g.position);
     if (d2 < 5.5) {
-      offerInteraction(`E — Take ${def.name}  (${def.desc})`, d2, () => {
+      offerInteraction(`E — Take ${itemTitle(orb.item)} · Lv ${orb.item.level}  (${def.desc})`, d2, () => {
         if (isHost()) {
           session.sendEntityEvent({
             k: "orbTaken",
@@ -186,6 +190,11 @@ function LootOrb({ orb }: { orb: Orb }) {
           emissiveIntensity={3.4}
           toneMapped={false}
         />
+      </mesh>
+      {/* Rarity halo */}
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.34, 0.025, 4, 12]} />
+        <meshBasicMaterial color={rarity.color} toneMapped={false} />
       </mesh>
     </group>
   );

@@ -25,15 +25,18 @@ describe("generateFloor", () => {
       const layout = generateFloor(seed, floor);
       expect(isReachable(layout, layout.spawn, layout.exit)).toBe(true);
       expect(isReachable(layout, layout.spawn, layout.treasure)).toBe(true);
-      if (layout.leave) expect(isReachable(layout, layout.spawn, layout.leave)).toBe(true);
+      expect(isReachable(layout, layout.spawn, layout.homeward)).toBe(true);
+      for (const slot of layout.remainsSlots) expect(isReachable(layout, layout.spawn, slot)).toBe(true);
     }
   });
 
-  test("checkpoint floors have a leave portal, others do not", () => {
-    expect(generateFloor(99, 5).leave).not.toBeNull();
-    expect(generateFloor(99, 10).leave).not.toBeNull();
-    expect(generateFloor(99, 3).leave).toBeNull();
-    expect(generateFloor(99, 7).leave).toBeNull();
+  test("every floor has a homeward rift spot beside (not on) the exit, and remains slots", () => {
+    for (let f = 1; f <= 30; f++) {
+      const layout = generateFloor(1234 + f, f);
+      expect(layout.homeward).not.toEqual(layout.exit);
+      expect(Math.hypot(layout.homeward[0] - layout.exit[0], layout.homeward[2] - layout.exit[2])).toBeLessThan(6);
+      expect(layout.remainsSlots.length).toBe(3);
+    }
   });
 
   test("merged wall colliders cover every visible wall cube", () => {

@@ -7,16 +7,21 @@ import { addLightSource, flashLight, removeLightSource } from "../../fx/DynamicL
 import { spawnBurst } from "../../fx/Particles";
 import { offerInteraction } from "../../game/interactions";
 import { playerPosition } from "../../game/player-state";
-import { rollLoot } from "../../items/loot";
+import { getItemDef } from "../../items/catalog";
+import { itemTitle } from "../../items/inventory";
+import { rollItem } from "../../items/loot";
 import { isHost, useNet } from "../../net/netStore";
 import { setTreasureProvider } from "../../net/replication";
 import { session } from "../../net/session";
 import { useGame } from "../../state/gameStore";
 import type { Vec3 } from "../types";
+
 /** Guaranteed floor treasure — the item is rolled deterministically from the
  * floor seed, so everyone in a shared instance sees the same reward. */
 export function TreasurePedestal({ position, floor, seed }: { position: Vec3; floor: number; seed: number }) {
-  const def = useMemo(() => rollLoot(new Rng((seed ^ 0x9c67f3a1) >>> 0), floor), [seed, floor]);
+  // A treasure is a cut above ordinary drops.
+  const item = useMemo(() => rollItem(new Rng((seed ^ 0x9c67f3a1) >>> 0), floor, 1), [seed, floor]);
+  const def = getItemDef(item.defId);
   const [taken, setTaken] = useState(false);
   const takenRef = useRef(false);
   const requested = useRef(0);
@@ -27,7 +32,7 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
       if (takenRef.current) return;
       takenRef.current = true;
       setTaken(true);
-      if (byMe) useGame.getState().equipItem(def.id);
+      if (byMe) useGame.getState().pickUpItem(item);
       if (!silent) {
         spawnBurst({
           position: [position[0], position[1] + 1.5, position[2]],
@@ -40,7 +45,7 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
         flashLight([position[0], position[1] + 1.5, position[2]], def.color, 18);
       }
     },
-    [def, position],
+    [item, def, position],
   );
 
   // Late-join state sync: tell the host whether the treasure is gone.
@@ -94,7 +99,7 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
     const d2 =
       (playerPosition.x - position[0]) ** 2 + (playerPosition.z - position[2]) ** 2;
     if (d2 < 6) {
-      offerInteraction(`E — Take ${def.name}  (${def.desc})`, d2, () => {
+      offerInteraction(`E — Take ${itemTitle(item)} · Lv ${item.level}  (${def.desc})`, d2, () => {
         if (takenRef.current) return;
         if (isHost()) {
           session.sendEntityEvent({

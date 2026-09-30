@@ -56,6 +56,18 @@ export interface GameEvents extends Record<string, unknown> {
   stateRequest: { playerId: string };
   /** The host sent us the authoritative floor state (we're a late joiner). */
   stateSync: import("../net/protocol").FloorSyncState;
+  /** Another wizard's spell hit us (their client decided it landed). */
+  pvpHit: { fromId: string; damage: number; impulse: { x: number; y: number; z: number } };
+  /** A wizard arrived on / left our floor. Arrivals are deliberately vague. */
+  presence: { kind: "arrived"; playerId: string } | { kind: "left"; playerId: string; name: string };
+  /** A floor-mate fell. */
+  peerDied: { playerId: string; name: string; killerId: string | null; killerName: string | null };
+  chestSpawn: import("../net/protocol").ChestInfo;
+  chestOpened: { chestId: string; by: string };
+  /** We claimed a death chest: its items are ours now. */
+  chestGrant: { chestId: string; items: import("../items/types").ItemInstance[] };
+  /** Our spell damaged something — for hit markers. */
+  hitConfirm: { kind: "enemy" | "wizard"; killed?: boolean };
 }
 
 export const gameEvents = new Emitter<GameEvents>();

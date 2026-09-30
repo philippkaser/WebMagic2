@@ -1,57 +1,88 @@
-/** Floor-instance directory.
+/** Floor-instance directory — the encounter rules.
  *
- * Core multiplayer rule: entering floor N joins an existing instance of that
- * floor if one has capacity (players share the same generated layout via the
- * instance seed). If every instance of the floor is full — or none exists —
- * a brand-new instance with a fresh seed is created. This is pure logic with
- * no I/O so the exact same code runs in the local loopback "server" today and
- * in the authoritative server later.
+ * Entering floor N either drops you into a fresh instance of your own, or —
+ * with probability `joinChance` — into an instance of floor N someone is
+ * already exploring. Only wizards on the same floor number ever meet. Pact
+ * partners are placed together whenever there is room. Pure logic with
+ * injected randomness/clock, so the rules are unit-tested and the exact same
+ * code runs in the Bun server and the offline loopback.
  */
 
 export interface FloorInstanceRecord {
   id: string;
   floor: number;
   seed: number;
+  /** Insertion-ordered: the first member is the simulation host. */
   players: Set<string>;
   createdAt: number;
+}
+
+export interface DirectoryOptions {
+  maxPerInstance: number;
+  joinChance: number;
+  random?: () => number;
+  seedFn?: () => number;
+  now?: () => number;
+}
+
+export interface JoinResult {
+  instance: FloorInstanceRecord;
+  /** Dropped into an instance that already had wizards in it. */
+  joinedExisting: boolean;
+  /** Freshly created instance. */
+  created: boolean;
 }
 
 export class FloorDirectory {
   private instances = new Map<string, FloorInstanceRecord>();
   private playerInstance = new Map<string, string>();
   private nextId = 1;
+  private readonly random: () => number;
+  private readonly seedFn: () => number;
+  private readonly now: () => number;
 
-  constructor(
-    private maxPerInstance = 4,
-    private seedFn: () => number = () => (Math.random() * 0xffffffff) >>> 0,
-    private now: () => number = () => Date.now(),
-  ) {}
+  /** Called when the last wizard leaves an instance, before it is dropped. */
+  onDispose: ((inst: FloorInstanceRecord) => void) | null = null;
 
-  /** Assign a player to floor `floor`, joining the oldest instance with room
-   * or creating a new one. Removes the player from any previous instance. */
-  join(playerId: string, floor: number): FloorInstanceRecord {
+  constructor(private opts: DirectoryOptions) {
+    this.random = opts.random ?? Math.random;
+    this.seedFn = opts.seedFn ?? (() => (Math.random() * 0xffffffff) >>> 0);
+    this.now = opts.now ?? Date.now;
+  }
+
+  /** Place a player on floor `floor`, leaving any previous instance. */
+  join(playerId: string, floor: number, allies: Iterable<string> = []): JoinResult {
     this.leave(playerId);
-    let best: FloorInstanceRecord | null = null;
-    for (const inst of this.instances.values()) {
-      if (inst.floor !== floor || inst.players.size >= this.maxPerInstance) continue;
-      if (!best || inst.createdAt < best.createdAt) best = inst;
+    const open = [...this.instances.values()].filter(
+      (i) => i.floor === floor && i.players.size < this.opts.maxPerInstance,
+    );
+
+    // 1. Travel with your pact.
+    const allySet = new Set(allies);
+    let target = open.find((i) => [...i.players].some((p) => allySet.has(p))) ?? null;
+    // 2. The encounter roll.
+    if (!target && open.length > 0 && this.random() < this.opts.joinChance) {
+      target = open[Math.floor(this.random() * open.length)];
     }
-    if (!best) {
-      best = {
+    let created = false;
+    if (!target) {
+      target = {
         id: `inst_${this.nextId++}`,
         floor,
         seed: this.seedFn(),
         players: new Set(),
         createdAt: this.now(),
       };
-      this.instances.set(best.id, best);
+      this.instances.set(target.id, target);
+      created = true;
     }
-    best.players.add(playerId);
-    this.playerInstance.set(playerId, best.id);
-    return best;
+    const joinedExisting = target.players.size > 0;
+    target.players.add(playerId);
+    this.playerInstance.set(playerId, target.id);
+    return { instance: target, joinedExisting, created };
   }
 
-  /** Remove a player; empty instances are garbage-collected. */
+  /** Remove a player; empty instances are disposed. */
   leave(playerId: string): void {
     const id = this.playerInstance.get(playerId);
     if (!id) return;
@@ -59,7 +90,10 @@ export class FloorDirectory {
     const inst = this.instances.get(id);
     if (!inst) return;
     inst.players.delete(playerId);
-    if (inst.players.size === 0) this.instances.delete(id);
+    if (inst.players.size === 0) {
+      this.onDispose?.(inst);
+      this.instances.delete(id);
+    }
   }
 
   instanceOf(playerId: string): FloorInstanceRecord | null {
@@ -69,5 +103,10 @@ export class FloorDirectory {
 
   instancesOnFloor(floor: number): FloorInstanceRecord[] {
     return [...this.instances.values()].filter((i) => i.floor === floor);
+  }
+
+  /** Simulation host = oldest member. */
+  hostOf(inst: FloorInstanceRecord): string {
+    return inst.players.values().next().value ?? "";
   }
 }

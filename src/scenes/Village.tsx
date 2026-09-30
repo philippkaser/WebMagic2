@@ -1,24 +1,21 @@
 import { Stars } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
-import { CuboidCollider, interactionGroups, RigidBody } from "@react-three/rapier";
+import { CuboidCollider, RigidBody } from "@react-three/rapier";
 import { useEffect, useMemo } from "react";
 import { Color, Fog } from "three";
 import { startAmbient, stopAmbient } from "../audio/sound";
-import { GROUPS } from "../core/config";
 import { resetRegistries } from "../game/registry";
+import { gearLevel } from "../items/stats";
+import { COLLISION } from "../physics/groups";
 import { PlayerController } from "../player/PlayerController";
+import { entryRange } from "../progression/progression";
 import { getTextures } from "../render/textures";
-import { entryFloors, useGame } from "../state/gameStore";
+import { useGame } from "../state/gameStore";
+import { useSettings } from "../state/settings";
 import { Breakable, Portal, Torch, Waystone } from "../world/props";
 import type { Vec3 } from "../world/types";
 
-const WORLD_GROUPS = interactionGroups(GROUPS.WORLD, [
-  GROUPS.PLAYER,
-  GROUPS.ENEMY,
-  GROUPS.FRIENDLY_PROJECTILE,
-  GROUPS.ENEMY_PROJECTILE,
-  GROUPS.PROP,
-]);
+const WORLD_GROUPS = COLLISION.world;
 
 const HUTS: { pos: Vec3; rot: number; size: number }[] = [
   { pos: [-11, 0, -6], rot: 0.5, size: 4 },
@@ -34,9 +31,9 @@ const SPAWN: Vec3 = [0, 1.2, 10];
  * at its center is the way down. */
 export function Village() {
   const scene = useThree((s) => s.scene);
-  const shadows = useGame((s) => s.shadows);
-  const checkpoint = useGame((s) => s.checkpoint);
-  const entryFloor = useGame((s) => s.entryFloor);
+  const shadows = useSettings((s) => s.shadows);
+  const gear = useGame((s) => gearLevel(s.equipment));
+  const range = useMemo(() => entryRange(gear), [gear]);
   const groundTex = useMemo(() => getTextures("dirt", 22, 22), []);
   const wallTex = useMemo(() => getTextures("stone"), []);
 
@@ -51,9 +48,9 @@ export function Village() {
     };
   }, [scene]);
 
-  // Stepping through is diegetic: the waystone slab picks the destination,
-  // the rift takes you there — no menu in between.
-  const stepThrough = () => void useGame.getState().enterDungeon(entryFloor);
+  // Stepping through is diegetic: the rift reads your gear and throws you
+  // as deep as it says you belong — no menu in between.
+  const stepThrough = () => void useGame.getState().enterDungeon();
 
   return (
     <group>
@@ -108,18 +105,12 @@ export function Village() {
       <Portal
         position={[0, 0, 0]}
         color="#46ffd0"
-        prompt={`E — Step through the rift (floor ${entryFloor})`}
+        prompt={`E — Step through the rift (it will cast you to floor ${range[0]}–${range[1]})`}
         onUse={stepThrough}
       />
 
-      {/* The waystone slab attunes where the rift leads: floor 1, 5, 10… */}
-      <Waystone
-        position={[-4.2, 0, 1.8]}
-        rotation={0.7}
-        floors={entryFloors(checkpoint)}
-        selected={entryFloor}
-        onCycle={useGame.getState().cycleEntryFloor}
-      />
+      {/* The waystone reads your gear and foretells your depth. */}
+      <Waystone position={[-4.2, 0, 1.8]} rotation={0.7} gear={gear} range={range} />
 
       <PlayerController spawn={SPAWN} />
     </group>

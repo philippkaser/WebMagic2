@@ -2,9 +2,10 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import { Group, MeshStandardMaterial } from "three";
 import { gameEvents } from "../core/events";
-import { getItemDef } from "../items/catalog";
 import { playerVelocity } from "../game/player-state";
+import { getItemDef } from "../items/catalog";
 import { useGame } from "../state/gameStore";
+import { useSettings } from "../state/settings";
 
 /** First-person staff viewmodel: follows the camera with sway, bob and recoil,
  * and carries the player's personal light (warm torchlight + staff tint) —
@@ -18,7 +19,7 @@ export function StaffView() {
   const bobT = useRef(0);
 
   const staffDefId = useGame((s) => s.equipment.staff.defId);
-  const shadows = useGame((s) => s.shadows);
+  const shadows = useSettings((s) => s.shadows);
   const staff = getItemDef(staffDefId);
 
   useEffect(() => gameEvents.on("staffKick", (v) => {

@@ -3,16 +3,19 @@ import { useEffect, useMemo, useRef } from "react";
 import { Vector3 } from "three";
 import { playCast } from "../audio/sound";
 import { gameEvents } from "../core/events";
-import { computeStats, getItemDef } from "../items/catalog";
+import { getItemDef, hasItemDef } from "../items/catalog";
+import { defaultEquipment } from "../items/inventory";
+import { computeStats } from "../items/stats";
 import { session } from "../net/session";
 import { input } from "../player/input";
-import { defaultEquipment } from "../state/persistence";
 import { getStats, useGame } from "../state/gameStore";
 import { getAbility } from "./abilities";
 import { explode } from "./damage";
 import { fireProjectile } from "./projectiles";
 
 const UP = new Vector3(0, 1, 0);
+/** Replayed peer casts are cosmetic here, so their stats barely matter. */
+const PEER_STATS = computeStats(defaultEquipment());
 
 /** Reads mouse buttons and casts the equipped staff's abilities. Holding a
  * button keeps casting on cooldown — minute-to-minute combat is about aim,
@@ -65,13 +68,13 @@ export function CombatSystem() {
       gameEvents.on("peerCast", ({ abilityId, origin: o, dir: d, playerId }) => {
         try {
           const peer = session.peers.get(playerId);
-          const staff = getItemDef(peer?.staffId ?? "apprentice_staff");
+          const staffId = peer && hasItemDef(peer.staffId) ? peer.staffId : "apprentice_staff";
           getAbility(abilityId).cast({
             origin: new Vector3(o.x, o.y, o.z),
             dir: new Vector3(d.x, d.y, d.z),
-            stats: computeStats(defaultEquipment()),
-            staff,
-            remote: true,
+            stats: PEER_STATS,
+            staff: getItemDef(staffId),
+            casterId: playerId,
           });
         } catch {
           // Unknown ability/staff from a newer client — ignore.
@@ -85,7 +88,7 @@ export function CombatSystem() {
     cooldownR.current -= dt;
     const state = useGame.getState();
     if (state.phase !== "dungeon" && state.phase !== "village") return;
-    if (!document.pointerLockElement) return;
+    if (!document.pointerLockElement || state.inventoryOpen) return;
 
     const staff = getItemDef(state.equipment.staff.defId);
     const tryCast = (abilityId: string | undefined, cd: { current: number }) => {

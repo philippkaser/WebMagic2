@@ -36,8 +36,11 @@ export interface FloorLayout {
   rooms: Rect[];
   spawn: Vec3;
   exit: Vec3;
-  /** Present only on checkpoint floors (5, 10, 15, …). */
-  leave: Vec3 | null;
+  /** Where the homeward rift opens beside the exit — shown only to wizards
+   * whose run has survived enough floors (see progression). */
+  homeward: Vec3;
+  /** Deterministic spots for inherited death chests ("remains"). */
+  remainsSlots: Vec3[];
   /** Guaranteed loot pedestal. */
   treasure: Vec3;
   /** Boss arena spawn — present every 10th floor. The floor's portals stay

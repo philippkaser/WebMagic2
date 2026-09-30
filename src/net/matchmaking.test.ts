@@ -1,88 +1,92 @@
 import { describe, expect, test } from "bun:test";
 import { FloorDirectory } from "./matchmaking";
 
-function makeDirectory() {
+/** Directory with a scripted "random": each call pops the next value. */
+function makeDirectory(rolls: number[] = [], joinChance = 0.3, max = 3) {
   let seed = 1;
   let now = 0;
-  return new FloorDirectory(4, () => seed++, () => now++);
+  const dir = new FloorDirectory({
+    maxPerInstance: max,
+    joinChance,
+    random: () => rolls.shift() ?? 0.99,
+    seedFn: () => seed++,
+    now: () => now++,
+  });
+  return dir;
 }
 
-describe("FloorDirectory", () => {
-  test("players entering the same floor share an instance (and its seed)", () => {
-    const dir = makeDirectory();
+describe("FloorDirectory — encounters", () => {
+  test("a failed encounter roll gives you a floor of your own", () => {
+    const dir = makeDirectory([0.9]);
     const a = dir.join("alice", 3);
     const b = dir.join("bob", 3);
-    expect(b.id).toBe(a.id);
-    expect(b.seed).toBe(a.seed);
-    expect(a.players.size).toBe(2);
+    expect(b.instance.id).not.toBe(a.instance.id);
+    expect(b.joinedExisting).toBe(false);
+    expect(b.instance.seed).not.toBe(a.instance.seed);
   });
 
-  test("a fifth player overflows into a brand-new instance with a fresh seed", () => {
-    const dir = makeDirectory();
-    const first = dir.join("p1", 3);
-    dir.join("p2", 3);
-    dir.join("p3", 3);
-    dir.join("p4", 3);
-    const overflow = dir.join("p5", 3);
-    expect(overflow.id).not.toBe(first.id);
-    expect(overflow.seed).not.toBe(first.seed);
-    expect(overflow.players.size).toBe(1);
-    // And a sixth joins the overflow instance, not another new one.
-    const sixth = dir.join("p6", 3);
-    expect(sixth.id).toBe(overflow.id);
+  test("a successful roll drops you into someone's floor (same seed)", () => {
+    const dir = makeDirectory([0.1, 0]);
+    const a = dir.join("alice", 3);
+    const b = dir.join("bob", 3);
+    expect(b.instance.id).toBe(a.instance.id);
+    expect(b.instance.seed).toBe(a.instance.seed);
+    expect(b.joinedExisting).toBe(true);
   });
 
-  test("different floors never share instances", () => {
-    const dir = makeDirectory();
+  test("only wizards on the same floor number ever meet", () => {
+    const dir = makeDirectory([], 1);
     const a = dir.join("alice", 1);
     const b = dir.join("bob", 2);
-    expect(a.id).not.toBe(b.id);
+    expect(a.instance.id).not.toBe(b.instance.id);
   });
 
-  test("descending moves the player and frees their old slot", () => {
+  test("full instances are never joined", () => {
+    const dir = makeDirectory([], 1, 2);
+    dir.join("p1", 4);
+    dir.join("p2", 4);
+    const third = dir.join("p3", 4);
+    expect(third.joinedExisting).toBe(false);
+    expect(third.instance.players.size).toBe(1);
+  });
+
+  test("pact partners travel together regardless of the roll", () => {
+    const dir = makeDirectory([], 0);
+    const a = dir.join("alice", 6);
+    const b = dir.join("bob", 6, ["alice"]);
+    expect(b.instance.id).toBe(a.instance.id);
+  });
+
+  test("encounter rate converges on joinChance", () => {
+    const dir = new FloorDirectory({ maxPerInstance: 99, joinChance: 0.3 });
+    dir.join("anchor", 9);
+    let met = 0;
+    for (let i = 0; i < 4000; i++) {
+      const r = dir.join(`p${i}`, 9);
+      if (r.joinedExisting) met++;
+      dir.leave(`p${i}`);
+    }
+    expect(met / 4000).toBeGreaterThan(0.26);
+    expect(met / 4000).toBeLessThan(0.34);
+  });
+
+  test("descending frees the old slot; empty instances are disposed", () => {
     const dir = makeDirectory();
+    const disposed: string[] = [];
+    dir.onDispose = (i) => disposed.push(i.id);
     const f1 = dir.join("alice", 1);
     dir.join("alice", 2);
     expect(dir.instanceOf("alice")!.floor).toBe(2);
-    // Old instance was emptied and garbage-collected.
     expect(dir.instancesOnFloor(1)).toHaveLength(0);
-    expect(f1.players.size).toBe(0);
+    expect(disposed).toEqual([f1.instance.id]);
   });
 
-  test("leaving frees capacity for the next entrant", () => {
-    const dir = makeDirectory();
-    const inst = dir.join("p1", 5);
-    dir.join("p2", 5);
-    dir.join("p3", 5);
-    dir.join("p4", 5);
-    dir.leave("p2");
-    const rejoin = dir.join("p5", 5);
-    expect(rejoin.id).toBe(inst.id);
-  });
-
-  test("host is the first joiner and migrates in join order", () => {
-    const dir = makeDirectory();
-    const inst = dir.join("p1", 3);
-    dir.join("p2", 3);
-    dir.join("p3", 3);
-    const first = () => inst.players.values().next().value;
-    expect(first()).toBe("p1");
-    dir.leave("p1"); // host leaves → next-oldest member becomes first
-    expect(first()).toBe("p2");
-    dir.leave("p3"); // non-host leaving doesn't change the head
-    expect(first()).toBe("p2");
-  });
-
-  test("oldest instance with room fills first", () => {
-    const dir = makeDirectory();
-    const first = dir.join("p1", 7);
-    dir.join("p2", 7);
-    dir.join("p3", 7);
-    dir.join("p4", 7); // first is now full
-    const second = dir.join("p5", 7); // new instance
-    dir.leave("p1"); // room opens in the oldest again
-    const next = dir.join("p6", 7);
-    expect(next.id).toBe(first.id);
-    expect(second.id).not.toBe(first.id);
+  test("host is the oldest member and migrates on leave", () => {
+    const dir = makeDirectory([0, 0], 1);
+    const a = dir.join("alice", 5);
+    dir.join("bob", 5);
+    expect(dir.hostOf(a.instance)).toBe("alice");
+    dir.leave("alice");
+    expect(dir.hostOf(a.instance)).toBe("bob");
   });
 });

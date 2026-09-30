@@ -1,12 +1,5 @@
-import { interactionGroups } from "@react-three/rapier";
-import { GROUPS } from "../core/config";
+import { COLLISION } from "../physics/groups";
 
-export const ENEMY_GROUPS = interactionGroups(GROUPS.ENEMY, [
-  GROUPS.WORLD,
-  GROUPS.PLAYER,
-  GROUPS.ENEMY,
-  GROUPS.PROP,
-  GROUPS.FRIENDLY_PROJECTILE,
-]);
+export const ENEMY_GROUPS = COLLISION.enemy;
 
 export const LOOT_DROP_CHANCE = 0.24;

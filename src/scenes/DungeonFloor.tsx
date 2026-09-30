@@ -1,28 +1,26 @@
 import { useThree } from "@react-three/fiber";
-import { CuboidCollider, interactionGroups, RigidBody } from "@react-three/rapier";
+import { CuboidCollider, RigidBody } from "@react-three/rapier";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Color, Fog, InstancedMesh, Object3D } from "three";
 import { startAmbient, stopAmbient } from "../audio/sound";
-import { Boss } from "../enemies/Boss";
-import { Sentry, Wisp } from "../enemies";
-import { GROUPS, TILE, WALL_HEIGHT } from "../core/config";
-import { resetRegistries } from "../game/registry";
+import { TILE, WALL_HEIGHT } from "../core/config";
+import { gameEvents } from "../core/events";
 import { hashSeed } from "../core/rng";
+import { Sentry, Wisp } from "../enemies";
+import { Boss } from "../enemies/Boss";
+import { resetRegistries } from "../game/registry";
+import type { ChestInfo } from "../net/protocol";
 import { resetReplication, setExpectedEntities } from "../net/replication";
 import { session } from "../net/session";
+import { COLLISION } from "../physics/groups";
 import { PlayerController } from "../player/PlayerController";
+import { canExtract } from "../progression/progression";
 import { getTextures } from "../render/textures";
 import { useGame } from "../state/gameStore";
-import { Breakable, Portal, Torch, TreasurePedestal } from "../world/props";
+import { Breakable, DeathChest, Portal, Torch, TreasurePedestal } from "../world/props";
 import type { FloorLayout } from "../world/types";
 
-const WORLD_GROUPS = interactionGroups(GROUPS.WORLD, [
-  GROUPS.PLAYER,
-  GROUPS.ENEMY,
-  GROUPS.FRIENDLY_PROJECTILE,
-  GROUPS.ENEMY_PROJECTILE,
-  GROUPS.PROP,
-]);
+const WORLD_GROUPS = COLLISION.world;
 
 /** Renders one generated dungeon floor: instanced walls with greedy-merged
  * colliders, torches, physics props, enemies, treasure and portals. */
@@ -68,7 +66,9 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
 
   const descend = () => void useGame.getState().descend();
   // Pointer lock survives the warp home — arrival in the village is seamless.
-  const bankAndLeave = () => void useGame.getState().bankAndLeave();
+  const extract = () => void useGame.getState().extract();
+  const homewardOpen = useGame((s) => canExtract(s.run));
+  const chests = useFloorChests();
 
   return (
     <group>
@@ -110,16 +110,24 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
         locked={bossAlive}
         lockedPrompt="Sealed — the Warden of the Deep still lives"
       />
-      {layout.leave && (
+      {homewardOpen && (
         <Portal
-          position={layout.leave}
+          position={layout.homeward}
           color="#ffd44f"
-          prompt="E — Return to the village (bank your loot)"
-          onUse={bankAndLeave}
+          prompt="E — Escape homeward (keep everything you carry)"
+          onUse={extract}
           locked={bossAlive}
           lockedPrompt="Sealed — the Warden of the Deep still lives"
         />
       )}
+
+      {chests.map((chest) => (
+        <DeathChest
+          key={chest.id}
+          chest={chest}
+          position={chest.pos ?? layout.remainsSlots[(chest.slot ?? 0) % layout.remainsSlots.length]}
+        />
+      ))}
 
       <PlayerController spawn={spawnPoint} />
     </group>
@@ -207,4 +215,21 @@ function WallsAndFloor({ layout }: { layout: FloorLayout }) {
       </mesh>
     </group>
   );
+}
+
+/** Death chests on this floor: the server's list at arrival, then live
+ * spawns (a floor-mate fell) and claims (someone opened one). */
+function useFloorChests(): ChestInfo[] {
+  const [chests, setChests] = useState<ChestInfo[]>(() => session.chests);
+  useEffect(() => {
+    const offSpawn = gameEvents.on("chestSpawn", (chest) => setChests((prev) => [...prev, chest]));
+    const offOpen = gameEvents.on("chestOpened", ({ chestId }) =>
+      setChests((prev) => prev.filter((c) => c.id !== chestId)),
+    );
+    return () => {
+      offSpawn();
+      offOpen();
+    };
+  }, []);
+  return chests;
 }

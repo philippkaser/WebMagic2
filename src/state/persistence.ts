@@ -1,22 +1,38 @@
-import { BASIC_BOOTS_ID, BASIC_STAFF_ID } from "../items/catalog";
-import type { Equipment } from "../items/types";
+import { BASIC_BOOTS_ID, BASIC_STAFF_ID, hasItemDef } from "../items/catalog";
+import { defaultEquipment, starterItem } from "../items/inventory";
+import type { Equipment, ItemInstance } from "../items/types";
 
-/** Saved between sessions: checkpoint progress and banked equipment.
- * (When the authoritative server exists this moves server-side.) */
+/** Saved between sessions: banked equipment, the stash and lifetime records.
+ * Only ever written from a safe state (village, death, extraction) — closing
+ * the tab mid-run forfeits that run's loot, exactly like dying would.
+ * (When accounts exist this moves server-side; this file is the one seam.) */
 export interface SaveData {
-  checkpoint: number;
+  version: 2;
   equipment: Equipment;
+  stash: ItemInstance[];
+  records: {
+    deepest: number;
+    runs: number;
+    extractions: number;
+    deaths: number;
+    wizardsSlain: number;
+  };
 }
 
-const KEY = "webmagic.save.v1";
+const KEY = "webmagic.save.v2";
+const LEGACY_KEY = "webmagic.save.v1";
 
-export function defaultEquipment(): Equipment {
+export function freshSave(): SaveData {
   return {
-    staff: { defId: BASIC_STAFF_ID, runLoot: false },
-    amulet: null,
-    cloak: null,
-    boots: { defId: BASIC_BOOTS_ID, runLoot: false },
+    version: 2,
+    equipment: defaultEquipment(),
+    stash: [],
+    records: { deepest: 0, runs: 0, extractions: 0, deaths: 0, wizardsSlain: 0 },
   };
+}
+
+function valid(item: ItemInstance | null | undefined): item is ItemInstance {
+  return !!item && typeof item.uid === "string" && hasItemDef(item.defId) && item.level >= 1;
 }
 
 export function loadSave(): SaveData {
@@ -24,12 +40,44 @@ export function loadSave(): SaveData {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const data = JSON.parse(raw) as SaveData;
-      if (data.checkpoint >= 1 && data.equipment?.staff) return data;
+      const e = data.equipment;
+      if (data.version === 2 && valid(e?.staff) && valid(e?.boots)) {
+        return {
+          ...freshSave(),
+          ...data,
+          equipment: {
+            staff: e.staff,
+            boots: e.boots,
+            amulet: valid(e.amulet) ? e.amulet : null,
+            cloak: valid(e.cloak) ? e.cloak : null,
+          },
+          stash: (data.stash ?? []).filter(valid),
+        };
+      }
     }
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy) return migrateV1(JSON.parse(legacy));
   } catch {
     // Corrupt save — fall through to defaults.
   }
-  return { checkpoint: 1, equipment: defaultEquipment() };
+  return freshSave();
+}
+
+/** v1 stored bare def ids per slot; they become level-1 commons. */
+function migrateV1(v1: { checkpoint?: number; equipment?: Record<string, { defId: string } | null> }): SaveData {
+  const save = freshSave();
+  const conv = (slot: string, fallback: string | null) => {
+    const id = v1.equipment?.[slot]?.defId;
+    return id && hasItemDef(id) ? starterItem(id) : fallback ? starterItem(fallback) : null;
+  };
+  save.equipment = {
+    staff: conv("staff", BASIC_STAFF_ID)!,
+    amulet: conv("amulet", null),
+    cloak: conv("cloak", null),
+    boots: conv("boots", BASIC_BOOTS_ID)!,
+  };
+  save.records.deepest = v1.checkpoint ?? 0;
+  return save;
 }
 
 export function persistSave(data: SaveData): void {

@@ -9,6 +9,10 @@ export interface NetState {
   mode: "connecting" | "online" | "offline";
   /** Players on this floor including us. */
   floorPlayers: number;
+  /** Wizards we share a pact with (run-scoped). */
+  allies: string[];
+  /** Wizards who offered us a pact we haven't answered. */
+  pactOffers: string[];
 }
 
 export const useNet = create<NetState>(() => ({
@@ -16,7 +20,13 @@ export const useNet = create<NetState>(() => ({
   hostId: "",
   mode: "connecting",
   floorPlayers: 1,
+  allies: [],
+  pactOffers: [],
 }));
+
+export function isAlly(playerId: string): boolean {
+  return useNet.getState().allies.includes(playerId);
+}
 
 /** Are we the simulation authority? Offline single-player is always host, so
  * the host code path is exactly the classic single-player path. */

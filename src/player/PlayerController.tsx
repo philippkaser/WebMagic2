@@ -1,19 +1,15 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import {
-  CapsuleCollider,
-  interactionGroups,
-  RigidBody,
-  useRapier,
-  type RapierRigidBody,
-} from "@react-three/rapier";
+import { CapsuleCollider, RigidBody, useRapier, type RapierRigidBody } from "@react-three/rapier";
 import { useEffect, useMemo, useRef } from "react";
 import { Vector3 } from "three";
 import { playDash, playJump } from "../audio/sound";
-import { EYE_HEIGHT, GROUPS, PLAYER } from "../core/config";
+import { EYE_HEIGHT, PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
 import { spawnBurst } from "../fx/Particles";
 import { playerPosition, playerVelocity, setPlayerBody } from "../game/player-state";
+import { gearLevel } from "../items/stats";
 import { session } from "../net/session";
+import { COLLISION } from "../physics/groups";
 import { getStats, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
 import { input } from "./input";
@@ -245,6 +241,8 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
         { x: t.x, y: t.y, z: t.z },
         Math.atan2(fwd.x, fwd.z),
         state.equipment.staff.defId,
+        state.health / stats.maxHealth,
+        gearLevel(state.equipment),
       );
     }
 
@@ -268,12 +266,7 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
         args={[PLAYER.halfHeight, PLAYER.radius]}
         mass={1}
         friction={0}
-        collisionGroups={interactionGroups(GROUPS.PLAYER, [
-          GROUPS.WORLD,
-          GROUPS.ENEMY,
-          GROUPS.ENEMY_PROJECTILE,
-          GROUPS.PROP,
-        ])}
+        collisionGroups={COLLISION.player}
       />
     </RigidBody>
   );

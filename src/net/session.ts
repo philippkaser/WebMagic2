@@ -1,12 +1,15 @@
 import { gameEvents } from "../core/events";
+import type { ItemInstance } from "../items/types";
 import { useNet } from "./netStore";
 import type {
   EntityEvent,
   EntitySnap,
+  ChestInfo,
   FloorAssignment,
   FloorSyncState,
   PeerState,
   ServerMsg,
+  Tuple3,
   Vec3Like,
 } from "./protocol";
 import { LocalTransport, WebSocketTransport, type Transport } from "./transport";
@@ -20,6 +23,8 @@ export class GameSession {
   playerId = "";
   mode: SessionMode = "connecting";
   readonly peers = new Map<string, PeerState>();
+  /** Death chests on the current floor (server-owned). */
+  chests: ChestInfo[] = [];
 
   private transport: Transport | null = null;
   private unsubscribe: (() => void) | null = null;
@@ -66,12 +71,41 @@ export class GameSession {
 
   leaveDungeon(): void {
     this.peers.clear();
+    useNet.setState({ allies: [], pactOffers: [], floorPlayers: 1 });
     this.transport?.send({ t: "leaveDungeon" });
   }
 
   /** Broadcast our transform to floor-mates. Callers throttle (~10 Hz). */
-  sendState(position: Vec3Like, yaw: number, staffId: string): void {
-    this.transport?.send({ t: "state", position, yaw, staffId });
+  sendState(position: Vec3Like, yaw: number, staffId: string, hp: number, gear: number): void {
+    this.transport?.send({ t: "state", position, yaw, staffId, hp, gear });
+  }
+
+  /** Our spell hit another wizard (shooter-authoritative). */
+  sendPvpHit(targetId: string, damage: number, impulse: Vec3Like): void {
+    this.transport?.send({ t: "pvpHit", targetId, damage, impulse });
+  }
+
+  offerPact(targetId: string): void {
+    this.transport?.send({ t: "pactOffer", targetId });
+  }
+
+  breakPact(): void {
+    this.transport?.send({ t: "pactBreak" });
+  }
+
+  /** We fell: the server turns what we lost into a chest (and ends our run). */
+  sendDeath(pos: Tuple3, items: ItemInstance[], killerId: string | null): void {
+    this.peers.clear();
+    useNet.setState({ allies: [], pactOffers: [], floorPlayers: 1 });
+    this.transport?.send({ t: "died", pos, items, killerId });
+  }
+
+  openChest(chestId: string): void {
+    this.transport?.send({ t: "openChest", chestId });
+  }
+
+  peerName(playerId: string): string {
+    return this.peers.get(playerId)?.name ?? "a wizard";
   }
 
   /** Tell floor-mates about a cast so they can replay it locally. */
@@ -123,22 +157,71 @@ export class GameSession {
         useNet.setState({
           hostId: msg.assignment.hostId,
           floorPlayers: msg.assignment.playerCount,
+          pactOffers: [],
         });
+        this.chests = msg.assignment.chests;
         this.pendingAssignment?.(msg.assignment);
         this.pendingAssignment = null;
         break;
       case "peerJoined":
         this.peers.set(msg.peer.playerId, msg.peer);
         useNet.setState({ floorPlayers: this.peers.size + 1 });
-        gameEvents.emit("message", `${msg.peer.name} entered the floor`);
+        gameEvents.emit("presence", { kind: "arrived", playerId: msg.peer.playerId });
         break;
       case "peerLeft": {
         const peer = this.peers.get(msg.playerId);
         this.peers.delete(msg.playerId);
-        useNet.setState({ floorPlayers: this.peers.size + 1 });
-        if (peer) gameEvents.emit("message", `${peer.name} left the floor`);
+        useNet.setState({
+          floorPlayers: this.peers.size + 1,
+          pactOffers: useNet.getState().pactOffers.filter((id) => id !== msg.playerId),
+        });
+        if (peer) gameEvents.emit("presence", { kind: "left", playerId: msg.playerId, name: peer.name });
         break;
       }
+      case "pvpHit":
+        gameEvents.emit("pvpHit", { fromId: msg.fromId, damage: msg.damage, impulse: msg.impulse });
+        break;
+      case "pactOffered": {
+        const net = useNet.getState();
+        if (!net.pactOffers.includes(msg.fromId)) useNet.setState({ pactOffers: [...net.pactOffers, msg.fromId] });
+        gameEvents.emit("message", `${this.peerName(msg.fromId)} offers you a pact — find them and accept`);
+        break;
+      }
+      case "pactFormed": {
+        const net = useNet.getState();
+        useNet.setState({
+          allies: [...net.allies.filter((id) => id !== msg.allyId), msg.allyId],
+          pactOffers: net.pactOffers.filter((id) => id !== msg.allyId),
+        });
+        gameEvents.emit("message", `A pact is sealed with ${this.peerName(msg.allyId)}. Your spells spare each other.`);
+        break;
+      }
+      case "pactBroken": {
+        const net = useNet.getState();
+        if (!net.allies.includes(msg.allyId)) break;
+        useNet.setState({ allies: net.allies.filter((id) => id !== msg.allyId) });
+        gameEvents.emit("message", `Your pact with ${this.peerName(msg.allyId)} is broken`);
+        break;
+      }
+      case "peerDied":
+        gameEvents.emit("peerDied", {
+          playerId: msg.playerId,
+          name: msg.name,
+          killerId: msg.killerId,
+          killerName: msg.killerName,
+        });
+        break;
+      case "chestSpawn":
+        this.chests = [...this.chests, msg.chest];
+        gameEvents.emit("chestSpawn", msg.chest);
+        break;
+      case "chestOpened":
+        this.chests = this.chests.filter((c) => c.id !== msg.chestId);
+        gameEvents.emit("chestOpened", { chestId: msg.chestId, by: msg.by });
+        break;
+      case "chestGrant":
+        gameEvents.emit("chestGrant", { chestId: msg.chestId, items: msg.items });
+        break;
       case "hostChanged":
         useNet.setState({ hostId: msg.hostId });
         if (msg.hostId === this.playerId) {

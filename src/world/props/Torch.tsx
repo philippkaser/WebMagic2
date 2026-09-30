@@ -5,6 +5,7 @@ import { hashSeed } from "../../core/rng";
 import { addLightSource, removeLightSource, type DynamicLightSource } from "../../fx/DynamicLights";
 import { spawnBurst } from "../../fx/Particles";
 import type { Vec3 } from "../types";
+
 /** Wall torch: flickering warm light (via the dynamic light pool), glowing
  * ember head, drifting sparks. */
 export function Torch({ position }: { position: Vec3 }) {

@@ -52,6 +52,10 @@ export interface ProjectileSpec {
   gravityScale: number;
   /** Replayed peer/replicated projectile: explosion skips entity damage. */
   cosmetic: boolean;
+  /** Wall bounces left before it detonates. */
+  bounces: number;
+  /** Floor-mate who cast it (replayed peer spell), if any. */
+  ownerId: string | null;
 }
 
 export interface FireOptions {
@@ -65,6 +69,9 @@ export interface FireOptions {
   size?: number;
   gravityScale?: number;
   cosmetic?: boolean;
+  bounces?: number;
+  /** Set for replayed floor-mate spells — implies cosmetic. */
+  ownerId?: string;
 }
 
 const MAX_LIVE = 80;
@@ -83,7 +90,9 @@ export function fireProjectile(opts: FireOptions): void {
     color: opts.color ?? "#7fd4ff",
     size: opts.size ?? 0.13,
     gravityScale: opts.gravityScale ?? 0,
-    cosmetic: opts.cosmetic ?? false,
+    cosmetic: (opts.cosmetic ?? false) || !!opts.ownerId,
+    bounces: opts.bounces ?? 0,
+    ownerId: opts.ownerId ?? null,
   });
 }
 
@@ -116,6 +125,8 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
   const detonated = useRef(false);
   const trailClock = useRef(0);
   const light = useRef<DynamicLightSource | null>(null);
+
+  const bouncesLeft = useRef(spec.bounces);
 
   const detonate = useCallback(() => {
     if (detonated.current) return;
@@ -185,12 +196,17 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
     }
   });
 
-  const membership =
-    spec.team === "player" ? GROUPS.FRIENDLY_PROJECTILE : GROUPS.ENEMY_PROJECTILE;
-  const collidesWith =
-    spec.team === "player"
-      ? [GROUPS.WORLD, GROUPS.ENEMY, GROUPS.PROP]
-      : [GROUPS.WORLD, GROUPS.PLAYER, GROUPS.PROP];
+  const { membership, collidesWith } = projectileGroups(spec);
+
+  // Ricochet: walls eat a bounce; anything else (or the last bounce) bursts it.
+  const onCollide = (other: { collider: { collisionGroups(): number } }) => {
+    const hitWorld = ((other.collider.collisionGroups() >>> 16) & (1 << GROUPS.WORLD)) !== 0;
+    if (hitWorld && bouncesLeft.current > 0) {
+      bouncesLeft.current--;
+      return;
+    }
+    detonate();
+  };
 
   return (
     <RigidBody
@@ -199,14 +215,37 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
       gravityScale={spec.gravityScale}
       ccd
       colliders={false}
-      onCollisionEnter={detonate}
+      onCollisionEnter={({ other }) => onCollide(other)}
     >
       <BallCollider
         args={[spec.size]}
+        restitution={spec.bounces > 0 ? 0.9 : 0}
         collisionGroups={interactionGroups(membership, collidesWith)}
         mass={0.05}
       />
       <mesh geometry={boltGeometry} material={boltMaterial(spec.color)} scale={spec.size} />
     </RigidBody>
   );
+}
+
+/** Who a projectile can touch. Replayed floor-mate spells get their own group
+ * so they splash on *us* (visually — their client decides damage) without
+ * our own bolts ever colliding with our own capsule. */
+function projectileGroups(spec: ProjectileSpec): { membership: number; collidesWith: number[] } {
+  if (spec.team === "enemy") {
+    return {
+      membership: GROUPS.ENEMY_PROJECTILE,
+      collidesWith: [GROUPS.WORLD, GROUPS.PLAYER, GROUPS.PROP, GROUPS.PEER],
+    };
+  }
+  if (spec.ownerId) {
+    return {
+      membership: GROUPS.PEER_PROJECTILE,
+      collidesWith: [GROUPS.WORLD, GROUPS.PLAYER, GROUPS.PROP, GROUPS.ENEMY, GROUPS.PEER],
+    };
+  }
+  return {
+    membership: GROUPS.FRIENDLY_PROJECTILE,
+    collidesWith: [GROUPS.WORLD, GROUPS.ENEMY, GROUPS.PROP, GROUPS.PEER],
+  };
 }

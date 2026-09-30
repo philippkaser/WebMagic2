@@ -2,6 +2,7 @@ import { useFrame } from "@react-three/fiber";
 import { CuboidCollider, RigidBody, useRapier, type RapierRigidBody } from "@react-three/rapier";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Group, MeshStandardMaterial, Vector3 } from "three";
+import { fireProjectile } from "../combat/projectiles";
 import { floorScale } from "../core/config";
 import { flashLight } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
@@ -12,7 +13,6 @@ import { isHost, selectIsHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
 import { useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
-import { fireProjectile } from "../combat/projectiles";
 import { ENEMY_GROUPS, LOOT_DROP_CHANCE } from "./shared";
 import { useEnemyNet } from "./useEnemyNet";
 

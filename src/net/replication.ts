@@ -95,7 +95,7 @@ gameEvents.on("stateSync", (state) => {
   }
   for (const snap of state.ents) entities.get(snap.id)?.applySnap(snap);
   for (const orb of state.orbs) {
-    gameEvents.emit("entityEvent", { k: "orbSpawn", orbId: orb.orbId, defId: orb.defId, pos: orb.pos });
+    gameEvents.emit("entityEvent", { k: "orbSpawn", orb });
   }
   if (state.treasureTaken) {
     gameEvents.emit("entityEvent", { k: "treasureTaken", by: "", silent: true });

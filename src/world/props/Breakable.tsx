@@ -1,16 +1,8 @@
 import { useFrame } from "@react-three/fiber";
-import {
-  BallCollider,
-  CuboidCollider,
-  CylinderCollider,
-  interactionGroups,
-  RigidBody,
-  type RapierRigidBody,
-} from "@react-three/rapier";
+import { BallCollider, CuboidCollider, CylinderCollider, RigidBody, type RapierRigidBody } from "@react-three/rapier";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Vector3 } from "three";
 import { playHit } from "../../audio/sound";
-import { GROUPS } from "../../core/config";
 import { explode } from "../../combat/damage";
 import { spawnBurst } from "../../fx/Particles";
 import { allocId, registerDynamicBody, registerHittable } from "../../game/registry";
@@ -18,17 +10,11 @@ import { dropLoot } from "../../items/LootOrbs";
 import { isHost, selectIsHost, useNet } from "../../net/netStore";
 import { registerEntity } from "../../net/replication";
 import { session } from "../../net/session";
+import { COLLISION } from "../../physics/groups";
 import { getTextures } from "../../render/textures";
 import type { PropKind, Vec3 } from "../types";
 
-const PROP_GROUPS = interactionGroups(GROUPS.PROP, [
-  GROUPS.WORLD,
-  GROUPS.PLAYER,
-  GROUPS.ENEMY,
-  GROUPS.FRIENDLY_PROJECTILE,
-  GROUPS.ENEMY_PROJECTILE,
-  GROUPS.PROP,
-]);
+const PROP_GROUPS = COLLISION.prop;
 
 interface PropSpec {
   hp: number;

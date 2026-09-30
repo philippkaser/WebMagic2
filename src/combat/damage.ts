@@ -57,15 +57,18 @@ export function explode(opts: ExplosionOptions): void {
 
   if (!opts.remote) {
     forEachHittable((h) => {
-      const hurtEnemies = team === "player" || team === "neutral";
-      if (h.team === "enemy" && !hurtEnemies) return;
+      // Enemies never hurt each other; only our own spells touch other wizards
+      // (their client applies it — see RemoteWizards).
+      if (h.team === "enemy" && team === "enemy") return;
+      if (h.team === "wizard" && team !== "player") return;
       const p = h.getPosition();
       tmp.set(p.x - center.x, p.y - center.y, p.z - center.z);
       const dist = tmp.length();
       if (dist > radius) return;
       const falloff = 1 - dist / radius;
       tmp.normalize().multiplyScalar(impulse * falloff);
-      tmp.y += impulse * falloff * 0.35; // lift things — more satisfying
+      // Lift things — more satisfying. (Negative impulse = implosion: pull in.)
+      tmp.y += Math.abs(impulse) * falloff * 0.35;
       h.hit(damage * falloff, { x: tmp.x, y: tmp.y, z: tmp.z });
     });
   }
@@ -80,7 +83,9 @@ export function explode(opts: ExplosionOptions): void {
       useGame.getState().takeDamage(damage * falloff);
     }
     const body = getPlayerBody();
-    if (body) {
+    if (body && !(team === "player" && opts.remote)) {
+      // A floor-mate's replayed blast doesn't shove us here: their client
+      // decides whether it landed and sends the impulse with the hit.
       const push = impulse * falloff * (team === "player" ? 0.16 : 0.32);
       tmp.normalize().multiplyScalar(push);
       body.applyImpulse({ x: tmp.x, y: tmp.y + push * 0.5, z: tmp.z }, true);
