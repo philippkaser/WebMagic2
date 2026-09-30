@@ -166,6 +166,36 @@ export function playBossRoar(): void {
   noise({ dur: 0.9, vol: 0.12, filterFreq: 500, filterEnd: 80 });
 }
 
+// ── UI & tension ─────────────────────────────────────────────────────────────
+
+/** Soft stone "tock" for buttons and equipping. */
+export function playUiClick(): void {
+  tone({ type: "triangle", freq: 740, freqEnd: 420, dur: 0.05, vol: 0.06 });
+  noise({ dur: 0.04, vol: 0.03, filterFreq: 2400, type: "bandpass", q: 3 });
+}
+
+/** Satchel opened / closed: a leathery rustle. */
+export function playSatchel(open: boolean): void {
+  noise({ dur: 0.16, vol: 0.07, filterFreq: open ? 900 : 1600, filterEnd: open ? 1900 : 700, type: "bandpass", q: 1.2 });
+  tone({ type: "sine", freq: open ? 180 : 150, freqEnd: open ? 240 : 110, dur: 0.12, vol: 0.04 });
+}
+
+/** Another wizard entered the floor: a low, detuned swell with a tritone
+ * bell on top — felt more than heard, so it unsettles without pointing. */
+export function playPresenceSting(): void {
+  tone({ type: "sawtooth", freq: 55, freqEnd: 49, dur: 2.2, vol: 0.07 });
+  tone({ type: "sawtooth", freq: 55.8, freqEnd: 46, dur: 2.4, vol: 0.06 });
+  tone({ type: "sine", freq: 311, dur: 1.6, vol: 0.035, delay: 0.25 });
+  tone({ type: "sine", freq: 440, dur: 1.4, vol: 0.03, delay: 0.32 });
+  noise({ dur: 2, vol: 0.05, filterFreq: 140, filterEnd: 600, type: "bandpass", q: 4 });
+}
+
+/** A pact was offered or sealed: two consonant chimes. */
+export function playPactChime(): void {
+  tone({ type: "sine", freq: 523, dur: 0.5, vol: 0.06 });
+  tone({ type: "sine", freq: 784, dur: 0.7, vol: 0.05, delay: 0.12 });
+}
+
 // ── Ambient beds ─────────────────────────────────────────────────────────────
 
 export function startAmbient(kind: "village" | "dungeon"): void {

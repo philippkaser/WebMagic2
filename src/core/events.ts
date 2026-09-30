@@ -71,3 +71,8 @@ export interface GameEvents extends Record<string, unknown> {
 }
 
 export const gameEvents = new Emitter<GameEvents>();
+
+// Dev-only hook: end-to-end scripts emit HUD events (hits, presence, boss).
+if (typeof window !== "undefined" && import.meta.env?.DEV) {
+  (window as unknown as Record<string, unknown>).__events = gameEvents;
+}
