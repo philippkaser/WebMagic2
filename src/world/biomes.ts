@@ -119,13 +119,13 @@ export const BIOMES: readonly Biome[] = [
     fog: { color: "#08061c", near: 7, far: 50 },
     ambient: { color: "#6a5aff", intensity: 0.22 },
     torchColor: "#a58cff",
-    glow: { intensity: 1.0, pulse: 0.15 },
+    glow: { intensity: 0.75, pulse: 0.15 },
     grade: { shadows: "#0c0634", highlights: "#d8f4ff", saturation: 1.1, contrast: 1.06 },
     motes: { kind: "glint", color: "#bfe8ff" },
     style: { growth: "crystal", pool: "water", beam: "stone", accent: "#7ad8ff" },
     decor: {
       pillars: 0.3, beams: 0, arches: 0.35, rubble: 0.5, bones: 0.15, webs: 0,
-      chains: 0, growth: 1, pools: 0.25, braziers: 0.1, runes: 0.45, stalactites: 0.95,
+      chains: 0, growth: 0.6, pools: 0.25, braziers: 0.1, runes: 0.45, stalactites: 0.7,
     },
   },
   {

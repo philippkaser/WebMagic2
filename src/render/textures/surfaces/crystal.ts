@@ -16,7 +16,7 @@ export const crystal: SurfaceSet = {
   wall(rng, variant) {
     const p = blank(64, 128, { rough: true, emit: true });
     strata(p, rng, 151 + variant);
-    veins(p, 152 + variant, variant === 2 ? PINK : CRYSTAL, 0.955);
+    veins(p, 152 + variant, variant === 2 ? PINK : CRYSTAL, 0.965);
     if (variant === 1) geode(p, rng, 32, 60, 13);
     if (variant === 2) for (let i = 0; i < 3; i++) geode(p, rng, rng.int(8, 56), rng.int(20, 110), rng.int(5, 8));
     return p;
@@ -34,7 +34,9 @@ export const crystal: SurfaceSet = {
         putRgb(p, x, y, ROCK(t), edge < 0.05 ? 0.1 : 0.5 + n * 0.2);
         setRough(p, x, y, edge < 0.05 ? 0.9 : 0.25 + n * 0.25);
       }
-    veins(p, 163, CRYSTAL, 0.975);
+    // Sparse on the floor: it tiles across the whole level, so dense veins
+    // turn into a wall of glowing noise.
+    veins(p, 163, CRYSTAL, 0.988, 0.62);
     return p;
   },
 
@@ -65,10 +67,16 @@ function strata(p: Painted, rng: Rng, seed: number) {
 
 /** Ridged-noise crystal veins: bright, glossy and emissive. A low-frequency
  * mask keeps them to a few seams per surface so the rock still reads. */
-function veins(p: Painted, seed: number, tone: (t: number) => [number, number, number], threshold: number) {
+function veins(
+  p: Painted,
+  seed: number,
+  tone: (t: number) => [number, number, number],
+  threshold: number,
+  mask = 0.5,
+) {
   for (let y = 0; y < p.h; y++)
     for (let x = 0; x < p.w; x++) {
-      if (fbm(x, y, p.w, p.h, 2, seed + 50, 2) < 0.5) continue;
+      if (fbm(x, y, p.w, p.h, 2, seed + 50, 2) < mask) continue;
       const r = ridge(x, y, p.w, p.h, 2, seed);
       if (r < threshold) {
         if (r > threshold - 0.04) tint(p, x, y, tone(0.1), 0.35); // mineral halo
