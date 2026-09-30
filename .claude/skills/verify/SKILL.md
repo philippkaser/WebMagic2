@@ -39,10 +39,21 @@ resolves (or cwd into the repo) — plain `node` won't find playwright-core.
   under pointer lock. Instead:
   `page.evaluate(() => document.dispatchEvent(new MouseEvent("mousemove", { movementX: 220 })))`.
 - **Pointer lock**: click the canvas center first (`page.mouse.click(640, 360)`).
-- **Dev state hook**: `window.__game` (zustand store) is exposed in dev — read
-  `getState().phase/.prompt/.floor` to know where you are, `setState({checkpoint: 10})`
-  to unlock waystone floors. Prefer real inputs for the flow under test; use the
-  hook for assertions and setup.
+- **Dev hooks** (dev builds only): `window.__game` (game store — read
+  `getState().phase/.prompt/.floor/.run`, `setState` for setup), `window.__net`
+  (net store: allies, pactOffers, floorPlayers), `window.__session`,
+  `window.__events` (gameEvents), `window.__entryFloor = N` (set *before*
+  `enterDungeon()` to force the rift's floor — it's lost on reload),
+  `window.__teleport(x,y,z)`, `window.__hittables()`,
+  `window.__dropLoot(defId, rarity, [x,y,z])`, `window.__bestiary.look(x,y,z)` /
+  `.calm(true)` (aim the camera, pause enemy brains for model shots). Prefer real
+  inputs for the flow under test; use the hooks for assertions and setup.
+- **Poll, don't sleep**: floor entry and peer discovery vary a lot under
+  swiftshader. Wait on a condition (`phase === "dungeon"`, peer position known)
+  instead of fixed sleeps.
+- **Remains are real**: unclaimed death chests from earlier runs are inherited
+  by later instances of that floor (server lifetime). Filter
+  `__session.chests` by owner/`pos` in tests.
 - **Capturing transitions mid-flight**: `enterDungeon`/`descend` return a
   Promise that only resolves once the warp finishes. `await page.evaluate(
   () => window.__game.getState().enterDungeon(1))` blocks for the whole warp, so
@@ -66,8 +77,10 @@ resolves (or cwd into the repo) — plain `node` won't find playwright-core.
   time — you'll overshoot).
 - E at the rift → phase `loading` (warp canvas) → `dungeon`, floor 1; pointer
   lock must survive the whole trip.
-- Waystone: `setState({checkpoint: 10})`, turn left ~300px-equivalent, walk to
-  the slab at `[-4.2, 1.8]`, E cycles 1→5→10.
-- Multiplayer (hooded wizard models): start `dev:server`, boot two pages, both
-  enter floor 1 (they share an instance), spin one camera in 8×45° steps and
-  screenshot each — one frame will contain the peer.
+- Waystone at `[-4.2, 1.8]`: E reads your gear level and the rift's floor band.
+- Satchel/stash: Tab toggles `inventoryOpen` (releases pointer lock).
+- Run loop and PvP are scripted: `bun scripts/e2e/run.mjs [shotDir]` and
+  `WEBMAGIC_JOIN_CHANCE=1 bun server/server.ts & bun scripts/e2e/pvp.mjs [shotDir]`
+  (encounters are 30% by default — the env var forces everyone together).
+- Multiplayer visuals: boot two pages on the same forced floor, teleport one
+  2–3 m in front of the other, spin a camera in 8×45° steps and screenshot each.

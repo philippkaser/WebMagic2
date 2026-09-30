@@ -1,118 +1,109 @@
 # WebMagic — Dungeon of the Hundred Floors
 
 A first-person spellcaster dungeon crawler for the browser. Wizards descend
-through 100 procedurally generated floors for glory, fame, riches — and to
-find god at the bottom.
+through a hundred procedurally generated floors for glory, riches — and to
+find god at the bottom. Other wizards walk the same halls. Some of them will
+want what you carry.
 
-Built with **Bun + Vite + React Three Fiber + drei + Rapier physics**.
-
-![stack](https://img.shields.io/badge/bun-%E2%9C%93-black) ![stack](https://img.shields.io/badge/react--three--fiber-9-blue) ![stack](https://img.shields.io/badge/rapier-physics-orange)
+Built with **Bun + Vite + React Three Fiber + drei + Rapier physics**. Zero
+binary assets: every texture is painted on a canvas at startup, every model is
+built from code, every sound is synthesized.
 
 ## Quickstart
 
 ```sh
 bun install
 bun run dev:full   # game server + vite → http://localhost:3000 (multiplayer)
-bun test           # deterministic logic tests (worldgen, matchmaking, rng)
+bun test           # deterministic logic tests (items, progression, worldgen, net rules)
 bun run build      # typecheck + production build
 bun run start      # production: serves dist/ + websocket on port 80 (PORT=… to override)
 ```
 
-`bun dev` alone also works — without the game server the client detects it and
-plays offline (the HUD shows ○ offline instead of ◉ online). To run the two
-processes in separate terminals: `bun run dev:server` and `bun dev`.
+`bun dev` alone also works — without the game server the client plays offline
+against an in-process copy of the same server rules (the HUD shows offline).
+
+End-to-end checks drive real headless browsers:
+
+```sh
+WEBMAGIC_JOIN_CHANCE=1 bun server/server.ts &   # force every wizard together
+bun scripts/e2e/run.mjs    # loot → survive 5 floors → extract / die
+bun scripts/e2e/pvp.mjs    # two wizards: kill → death chest → claim
+```
 
 ## Controls
 
 | Input | Action |
 | --- | --- |
-| WASD | Move |
-| Mouse | Look |
-| Left / Right click | Staff primary / secondary ability |
-| Space | Jump (double-jump / hover with the right boots) |
-| Shift | Blink-dash (requires Cloak of Blinking) |
-| E | Interact (rifts, waystone, loot, treasure) |
-| P (or F3) | FPS / frame-time overlay |
-| O (or F4) | Toggle shadows (quality option, off by default) |
-
-The current build id (`b<n> · <sha>`) is always shown in the bottom-right
-corner — check it against the latest commit when testing.
+| WASD / Mouse | Move / look |
+| Left / Right click | Staff primary / secondary spell |
+| Space | Jump (double jump / hover with the right boots) |
+| Shift | Blink-dash (blinking cloaks) |
+| E | Interact — rifts, loot, chests, the waystone, *other wizards* (pacts) |
+| Tab / I | Satchel (dungeon) · Stash (village) |
+| P / O | FPS overlay / shadows |
 
 ## The game
 
-- **The village** sits above the dungeon. Portals are rips in the fabric of
-  space; attune the **waystone slab** beside the village rift to pick your
-  entry floor (1, 5, 10, … — any checkpoint you've banked), then step
-  through. Everything is in-world — no menus — and travel is a warp through
-  space and time that never drops pointer lock.
-- **Floors are seeded**: every floor is generated from an instance seed, so
-  everyone sharing a floor instance sees the identical world.
-- **Leave only at checkpoints** (floors 5, 10, 15, …) via the golden rift —
-  leaving banks your loot and unlocks that floor as a future entry point.
-- **Death loses the run**: anything you picked up since entering is gone.
-- **Loot** defines your kit: the staff sets both click abilities, amulets add
-  passives, cloaks add defense/utility (including the dash), boots change your
-  jump (double jump, hover).
-- **Everything is physical**: crates, barrels and pots tumble, shatter and
-  explode; enemies get knocked around; force-blast at your feet to blast-jump.
-- **Bosses every 10th floor**: the Warden of the Deep holds the exit room and
-  seals the floor's portals until it falls — volleys, rings, charges and
-  slams, with guaranteed rich drops.
-- **Procedural audio**: every sound (casts, blasts, hits, pickups, portals,
-  ambient drones) is synthesized with WebAudio — still zero binary assets.
-
-### Multiplayer
-
-A real Bun WebSocket server (`server/server.ts`) owns matchmaking: entering
-floor *N* joins an existing instance of that floor if one has room (max
-**4 wizards per floor**); otherwise a fresh instance with a fresh seed is
-created — and the next entrant joins *that* one, and so on. Everyone in an
-instance generates the identical floor from the shared seed, sees each other
-as animated wizards, and sees each other's spellcasts replayed (bolts, blasts
-and their physics knockback included).
-
-Shared floors are truly shared: each instance has a **simulation host**
-(first joiner, migrates seamlessly if they leave) whose enemies, props, boss
-and loot are authoritative. Replicas interpolate entity snapshots at 10 Hz,
-replay deaths/breaks/boss attacks as events, and request damage/pickups from
-the host — so everyone fights the same wisps, sees the same crates fly, and
-an orb can never be looted twice. Your own health is always decided locally.
-Set your name on the title screen; floor-mates see it over your head. See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
+- **Gear decides depth.** Every item has a level and a rarity. Your *gear
+  level* is the mean power of your four slots, and the village rift throws you
+  in near a matching floor — with a little chaos. The waystone reads your
+  power and foretells the band.
+- **Survive five floors to go home.** On the fifth floor of a run a golden
+  homeward rift opens beside the exit. Take it and everything you found is
+  yours for good. Die before that, and the dungeon keeps every item you picked
+  up this run (gear you brought in survives).
+- **Satchel and stash.** Loot goes into the satchel you carry; the stash waits
+  in the village. Swap gear mid-run in the satchel screen — the dungeon does
+  not pause.
+- **Other wizards.** Entering a floor has a small chance of dropping you into an
+  instance someone else is already exploring — only ever on the same floor
+  number. A presence eye tells you you're not alone, and pulses faster as they
+  close in, but never *where*. Fight: spells hurt other wizards, and a fallen
+  wizard leaves a chest holding everything they lost. Or walk up and press E to
+  offer a pact: allies' spells spare each other, and pact partners travel to
+  the next floor together.
+- **Remains.** An unclaimed death chest outlives its floor: later instances of
+  that floor inherit it, tucked in a quiet corner, marked with the dead
+  wizard's name.
+- **Five biomes** — the Bone Catacombs, the Drowned Crypts, the Ember Forge, the
+  Crystal Hollows and the Abyssal Throne — each with its own architecture,
+  light, grade and bestiary: skitters that leap, drowned brutes with anchors,
+  blinking shades, fireball imps, shielded crystal golems, and mimics that look
+  exactly like a dead wizard's chest. Bosses every tenth floor seal the exits.
+- **Everything is physical.** Crates tumble, barrels explode, enemies are
+  thrown around; a gravity well yanks everything — wizards included — into a
+  pile before it pops. Force-blast the floor to blast-jump.
 
 ## Project layout
 
 ```
 src/
-  core/      config (tuning), seeded RNG, typed event bus
-  items/     item catalog, loot tables, loot-orb pickups
-  world/     dungeon generator (pure + tested), props, layout types
-  net/       protocol, floor-instance matchmaking, transport, remote wizards
-  state/     zustand game store, save persistence
-  player/    input, first-person controller, staff viewmodel
-  combat/    abilities, projectiles, explosions, enemies, floor bosses
-  fx/        pooled particle system + flash lights
-  audio/     procedural WebAudio synth (sfx + ambient beds)
-  render/    procedural pixel textures (+normal maps), post-processing
-  scenes/    village, dungeon floor, canvas composition
-  ui/        HUD and overlays
-  game/      cross-system registries (hittables, interactions, player state)
+  core/        config & tuning, seeded RNG, typed event bus
+  items/       catalog (data + lore), rarity, stats scaling, loot rolls,
+               inventory rules (satchel/stash/death/extraction) — pure + tested
+  progression/ entry floor from gear, the extraction rule — pure + tested
+  world/
+    gen/       floor generator + decor placement — pure, deterministic, tested
+    biomes.ts  depth bands: fog, light, grade, decor style, lore
+    decor/     instanced dressing (pillars, arches, pools, runes…) + the village
+    props/     breakables, torches, rifts, waystone, treasure, death chests
+  enemies/     one file per enemy (+ models/, ai/, fx/, bosses/), spawn table,
+               registry; useEnemy/useEnemyNet own the host/replica plumbing
+  combat/      spells (the weapon system), projectiles, explosions
+  net/         protocol, GameServerCore (shared by server + offline), matchmaking,
+               session, replication, remote wizards
+  physics/     every collision filter in one table
+  player/      input, first-person controller, staff viewmodel
+  render/      textures/ (procedural painters per biome), models/ (staffs,
+               wizards, loot, props), shaders/, post-processing
+  fx/          pooled particles + the dynamic light pool
+  audio/       procedural WebAudio synth
+  state/       game flow store, settings, save persistence
+  ui/          design system (theme, pixel art, components), hud/, screens/
+  scenes/      village, dungeon floor, canvas composition
+server/        Bun WebSocket plumbing around GameServerCore
+scripts/e2e/   headless-browser end-to-end checks
 ```
 
-Design rules that keep it future-proof:
-
-- **World gen is pure and deterministic** — no rendering, no physics imports,
-  fully unit-tested (connectivity, checkpoints, collider coverage).
-- **Game code talks to a `Transport` interface**, never to a socket — swap
-  `LocalTransport` for a WebSocket transport to go online.
-- **Data-driven items/abilities** — a new staff, amulet or boot is a catalog
-  entry; a new spell is one entry in `combat/abilities.ts`.
-- **Performance by construction** — instanced wall rendering, greedy-merged
-  physics colliders, pooled particles/projectiles, one shadow-casting light.
-
-## Roadmap
-
-- Authoritative server (the protocol, matchmaking, state broadcasting and
-  remote-wizard rendering are all in place — implement a WebSocket `Transport`)
-- Shared floor combat events (`peerCast` replay is specced in the protocol)
-- More enemy archetypes, unique boss per depth tier, staff modifiers
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design, the
+authority model and how to extend each system.
