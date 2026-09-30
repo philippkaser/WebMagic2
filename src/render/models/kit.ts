@@ -3,6 +3,7 @@ import {
   BufferGeometry,
   Color,
   DoubleSide,
+  FrontSide,
   Group,
   LatheGeometry,
   Material,
@@ -60,7 +61,7 @@ export function std(color: string, o: StdOpts = {}): MeshStandardMaterial {
     roughness: o.roughness ?? 0.85,
     metalness: o.metalness ?? 0,
     flatShading: o.flatShading ?? false,
-    side: o.doubleSide ? DoubleSide : undefined,
+    side: o.doubleSide ? DoubleSide : FrontSide,
   });
   if (o.emissive) {
     m.emissive = new Color(o.emissive);

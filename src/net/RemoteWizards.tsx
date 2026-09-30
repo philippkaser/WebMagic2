@@ -47,7 +47,7 @@ export function RemoteWizards() {
 const ROBE_COLORS = ["#3d5a8a", "#6a3d8a", "#8a3d50", "#3d8a5f", "#8a6a3d"];
 /** Name tags only resolve up close: a distant silhouette is just "someone". */
 const TAG_RANGE = 16;
-const PACT_RANGE_SQ = 9;
+const PACT_RANGE_SQ = 3.5 * 3.5;
 /** Eye glow: pact allies burn green, strangers red. */
 const ALLY_EYES = "#7dffa0";
 const STRANGER_EYES = "#ff6b5a";
