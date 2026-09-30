@@ -46,8 +46,13 @@ export function RuneButton({
   const show = useUiShow();
   const [hover, setHover] = useState(false);
   const [down, setDown] = useState(false);
+  // The press is judged from a ref: a fast click (or a touch tap) can
+  // deliver pointerup before React re-renders from pointerdown, and the
+  // handler would still see `down === false`.
+  const downRef = useRef(false);
   const group = useRef<Group>(null);
-  const lift = useRef(0);
+  // Mounted hidden = already sunk away (not "sinking now").
+  const lift = useRef(show ? 0 : -0.02);
   const glow = useRef(0);
   const layout = useMemo(() => layoutText(label), [label]);
   const w = width ?? layout.width * px + px * 16;
@@ -70,6 +75,7 @@ export function RuneButton({
     if (!active) {
       setHover(false);
       setDown(false);
+      downRef.current = false;
     }
   }, [active]);
   useEffect(() => {
@@ -88,7 +94,10 @@ export function RuneButton({
     lift.current += (targetLift - lift.current) * k;
     glow.current += ((hover ? 2.6 : disabled ? 0.1 : 0.5) - glow.current) * k;
     g.position.z = lift.current;
-    g.scale.setScalar(show ? 1 : Math.max(0.001, 1 + lift.current * 20));
+    // Hidden, the plaque sinks and shrinks to nothing (lift → −0.02 m).
+    const s = show ? 1 : Math.max(0.001, 1 + lift.current * 50);
+    g.scale.setScalar(s);
+    g.visible = s > 0.002;
     seam.emissiveIntensity = glow.current;
   });
 
@@ -115,15 +124,18 @@ export function RuneButton({
           onPointerOut={() => {
             setHover(false);
             setDown(false);
+            downRef.current = false;
           }}
           onPointerDown={(e) => {
             e.stopPropagation();
             if (!active) return;
+            downRef.current = true;
             setDown(true);
           }}
           onPointerUp={(e) => {
             e.stopPropagation();
-            if (!active || !down) return;
+            if (!active || !downRef.current) return;
+            downRef.current = false;
             setDown(false);
             playUiPress();
             onPress();

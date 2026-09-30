@@ -46,10 +46,14 @@ export function WorldPrompts() {
   const prompt = useGame((s) => s.prompt);
   const promptAt = useGame((s) => s.promptAt);
   const overlay = useGame((s) => s.overlay);
+  const phase = useGame((s) => s.phase);
   const locked = usePointerLocked();
   const [entries, setEntries] = useState<Entry[]>([]);
 
-  const text = locked ? prompt : overlay === "none" ? "Click to take control — WASD move · Space jump · Mouse casts" : null;
+  // The hint belongs to play only: menus (title, the Weighing, death) have
+  // no pointer to take.
+  const playing = phase === "village" || phase === "dungeon";
+  const text = locked ? prompt : overlay === "none" && playing ? "Click to take control — WASD move · Space jump · Mouse casts" : null;
   const at: Anchor = locked ? promptAt : null;
   const key = text ? `${text}@${at ? at.map((v) => v.toFixed(1)).join(",") : "view"}` : null;
 
