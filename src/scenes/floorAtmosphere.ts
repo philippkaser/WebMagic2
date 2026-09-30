@@ -2,9 +2,8 @@ import { useThree } from "@react-three/fiber";
 import { useEffect } from "react";
 import { Color, Fog } from "three";
 import { playOmen, startAmbient, stopAmbient, type AmbientMood } from "../audio/sound";
-import { gameEvents } from "../core/events";
 import { getBiomeDef } from "../world/biomes";
-import { getOmenDef, omenGenMods } from "../world/omens";
+import { omenGenMods } from "../world/omens";
 import type { BiomeId, FloorLayout } from "../world/types";
 
 /** How a floor FEELS, applied while it's mounted: the biome's fog, backdrop,
@@ -50,11 +49,9 @@ export function useFloorAtmosphere(layout: FloorLayout): void {
 
     let omenTimer: ReturnType<typeof setTimeout> | null = null;
     if (layout.omen) {
-      const omen = getOmenDef(layout.omen);
-      omenTimer = setTimeout(() => {
-        playOmen();
-        gameEvents.emit("message", `${omen.name} — ${omen.whisper}`);
-      }, OMEN_DELAY_MS);
+      // The omen's name and whisper are written into the arrival title (the
+      // HUD's Location); here it only announces itself in sound.
+      omenTimer = setTimeout(playOmen, OMEN_DELAY_MS);
     }
     return () => {
       if (omenTimer !== null) clearTimeout(omenTimer);

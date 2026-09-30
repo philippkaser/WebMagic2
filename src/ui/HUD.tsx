@@ -5,18 +5,15 @@
  *   theme.ts       FONT, palette, shared style objects, the one global stylesheet
  *   hooks.ts       small DOM hooks (pointer lock state, Escape-closes-screen)
  *   itemInfo.ts    item glyphs + stat lines (also used outside ui/)
- *   hud/           in-game widgets; hud/PlayHud.tsx lists them (PerfOverlay
- *                  is mounted here instead, since it works in menus too)
+ *   hud/           the perf overlay (mounted here: it works in menus too). The
+ *                  in-game HUD itself lives in the world — ui3d/layers/hud/
  *   (the menu, the Weighing, death, the codex and loading are in-world
  *    now — see ui3d/layers/menus/ and transition/)
  *   inventory/     inventory / chest / merchant screen (entry: InventoryScreen.tsx)
  *   devroom/       dev-build test bench (entry: DevRoom.tsx)
  *
- * Adding a HUD widget: create hud/MyWidget.tsx as a self-contained component
- * — it reads its own state (useGame / useNet selectors, or a gameEvents
- * subscription), positions itself absolutely (spread `styles.panel` from
- * theme.ts for the standard framed box) — then add one `<MyWidget />` line to
- * hud/PlayHud.tsx. No props flow down from here, on purpose.
+ * Adding a HUD widget: the HUD is in-world now — see ui3d/layers/hud/Hud.tsx
+ * (one file per piece in that folder, one line in its list).
  *
  * Adding a screen: screens are in-world now — see ui3d/layers/menus/ (a
  * file per screen, listed in Menus.tsx). The condition is a `phase` for
@@ -29,11 +26,10 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { useGame } from "../state/gameStore";
 import { DevRoom } from "./DevRoom";
 import { PerfOverlay } from "./hud/PerfOverlay";
-import { PlayHud } from "./hud/PlayHud";
 import { InventoryScreen, isInventoryMode } from "./InventoryScreen";
 import { globalCss, styles } from "./theme";
 
-/** All DOM UI that isn't part of the fiction yet: the in-game HUD, the
+/** All DOM UI that isn't part of the fiction yet: the
  * inventory-family screens, the dev room, the perf overlay and the build
  * stamp. (The menu, the Weighing, death and the codex live in the world —
  * ui3d/layers/menus/ — and loading is the portal tunnel, transition/.) */
@@ -95,7 +91,6 @@ export function HUD() {
       <style>{globalCss}</style>
       <div style={buildStampStyle}>{__BUILD_INFO__}</div>
       {showPerf && <PerfOverlay />}
-      {playing && <PlayHud />}
       {playing && overlay === "devroom" && import.meta.env.DEV && <DevRoom />}
       {playing && isInventoryMode(overlay) && <InventoryScreen mode={overlay} />}
     </div>
