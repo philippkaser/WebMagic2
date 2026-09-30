@@ -9,15 +9,21 @@ import { gearLevel } from "../items/stats";
 import { COLLISION } from "../physics/groups";
 import { PlayerController } from "../player/PlayerController";
 import { entryRange } from "../progression/progression";
+import { setGrade } from "../render/Effects";
 import { getTextures } from "../render/textures";
 import { useGame } from "../state/gameStore";
 import { useSettings } from "../state/settings";
+import type { Grade } from "../world/biomes";
+import { Motes } from "../world/decor/Motes";
+import { Cottages, type Cottage } from "../world/decor/village/Cottages";
+import { Grounds } from "../world/decor/village/Grounds";
+import { HORIZON, MOON_DIR, Sky } from "../world/decor/village/Sky";
 import { Breakable, Portal, Torch, Waystone } from "../world/props";
 import type { Vec3 } from "../world/types";
 
 const WORLD_GROUPS = COLLISION.world;
 
-const HUTS: { pos: Vec3; rot: number; size: number }[] = [
+const COTTAGES: Cottage[] = [
   { pos: [-11, 0, -6], rot: 0.5, size: 4 },
   { pos: [11, 0, -7], rot: -0.6, size: 4.6 },
   { pos: [-13, 0, 5], rot: 1.4, size: 3.6 },
@@ -26,20 +32,24 @@ const HUTS: { pos: Vec3; rot: number; size: number }[] = [
 ];
 
 const SPAWN: Vec3 = [0, 1.2, 10];
+/** Moonlit blue night, warm windows kept warm. */
+const VILLAGE_GRADE: Grade = { shadows: "#0c1438", highlights: "#ffe0b0", saturation: 0.9, contrast: 1.06 };
 
-/** The wizards' village: a quiet night-time hub above the dungeon. The portal
- * at its center is the way down. */
+/** The wizards' village: a moonlit hamlet in a ring of pines, standing
+ * stones around the rift at its heart. The rift is the way down. */
 export function Village() {
   const scene = useThree((s) => s.scene);
   const shadows = useSettings((s) => s.shadows);
   const gear = useGame((s) => gearLevel(s.equipment));
   const range = useMemo(() => entryRange(gear), [gear]);
-  const groundTex = useMemo(() => getTextures("dirt", 22, 22), []);
-  const wallTex = useMemo(() => getTextures("timber"), []);
+  // Ground reaches past the playfield so the treeline stands on something.
+  const groundTex = useMemo(() => getTextures("dirt", 60, 60), []);
+  const moonLight = useMemo(() => MOON_DIR.clone().multiplyScalar(30).toArray(), []);
 
   useEffect(() => {
-    scene.fog = new Fog("#0a0d18", 18, 70);
-    scene.background = new Color("#0a0d18");
+    scene.fog = new Fog(HORIZON, 20, 80);
+    scene.background = new Color(HORIZON);
+    setGrade(VILLAGE_GRADE);
     startAmbient("village");
     return () => {
       scene.fog = null;
@@ -54,11 +64,11 @@ export function Village() {
 
   return (
     <group>
-      <ambientLight intensity={0.22} color="#7a86b8" />
+      <ambientLight intensity={0.26} color="#6a78b8" />
       <directionalLight
-        position={[14, 22, 8]}
-        intensity={0.5}
-        color="#9fb0e8"
+        position={moonLight}
+        intensity={0.65}
+        color="#a8b8f0"
         castShadow={shadows}
         shadow-mapSize={[1024, 1024]}
         shadow-camera-left={-28}
@@ -66,7 +76,9 @@ export function Village() {
         shadow-camera-top={28}
         shadow-camera-bottom={-28}
       />
-      <Stars radius={90} depth={40} count={2400} factor={4} saturation={0} fade speed={0.6} />
+      <Sky />
+      <Stars radius={100} depth={20} count={2000} factor={4} saturation={0} fade speed={0.6} />
+      <Motes kind="firefly" color="#c8ff7a" height={3.2} />
 
       {/* Ground + invisible perimeter */}
       <RigidBody type="fixed" colliders={false}>
@@ -77,13 +89,12 @@ export function Village() {
         <CuboidCollider args={[0.5, 3, 26]} position={[25, 3, 0]} collisionGroups={WORLD_GROUPS} />
       </RigidBody>
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[52, 52]} />
+        <planeGeometry args={[140, 140]} />
         <meshStandardMaterial map={groundTex.map} normalMap={groundTex.normalMap} roughness={0.95} />
       </mesh>
 
-      {HUTS.map((hut, i) => (
-        <Hut key={i} {...hut} wallTex={wallTex} />
-      ))}
+      <Cottages cottages={COTTAGES} />
+      <Grounds cottages={COTTAGES} />
 
       {/* A few crates to kick around — the sandbox starts at home. */}
       <Breakable kind="crate" position={[4, 1, 6]} floor={1} entityId="v0" />
@@ -113,44 +124,6 @@ export function Village() {
       <Waystone position={[-4.2, 0, 1.8]} rotation={0.7} gear={gear} range={range} />
 
       <PlayerController spawn={SPAWN} />
-    </group>
-  );
-}
-
-function Hut({
-  pos,
-  rot,
-  size,
-  wallTex,
-}: {
-  pos: Vec3;
-  rot: number;
-  size: number;
-  wallTex: ReturnType<typeof getTextures>;
-}) {
-  const height = size * 0.7;
-  return (
-    <group position={pos} rotation={[0, rot, 0]}>
-      <RigidBody type="fixed" colliders={false}>
-        <CuboidCollider
-          args={[size / 2, height / 2, size / 2]}
-          position={[0, height / 2, 0]}
-          collisionGroups={WORLD_GROUPS}
-        />
-      </RigidBody>
-      <mesh position={[0, height / 2, 0]} castShadow receiveShadow>
-        <boxGeometry args={[size, height, size]} />
-        <meshStandardMaterial map={wallTex.map} normalMap={wallTex.normalMap} roughness={0.9} />
-      </mesh>
-      <mesh position={[0, height + size * 0.28, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
-        <coneGeometry args={[size * 0.82, size * 0.56, 4]} />
-        <meshStandardMaterial color="#2c2030" roughness={0.9} />
-      </mesh>
-      {/* Warm window */}
-      <mesh position={[0, height * 0.55, size / 2 + 0.01]}>
-        <planeGeometry args={[0.5, 0.6]} />
-        <meshStandardMaterial color="#100800" emissive="#ffb355" emissiveIntensity={1.6} toneMapped={false} />
-      </mesh>
     </group>
   );
 }

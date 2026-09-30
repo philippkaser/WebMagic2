@@ -1,7 +1,6 @@
 import { useFrame } from "@react-three/fiber";
 import { CuboidCollider, RigidBody } from "@react-three/rapier";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { InstancedMesh, Object3D, type BufferGeometry, type Material } from "three";
+import { useEffect, useMemo, useRef } from "react";
 import { WALL_HEIGHT } from "../../core/config";
 import { addLightSource, removeLightSource, type DynamicLightSource } from "../../fx/DynamicLights";
 import { spawnBurst } from "../../fx/Particles";
@@ -10,10 +9,9 @@ import { setGrade } from "../../render/Effects";
 import type { Biome } from "../biomes";
 import type { DecorItem, DecorKind, FloorLayout } from "../types";
 import { geometry } from "./geometries";
+import { InstancedParts, trs, type Part } from "./Instanced";
 import { biomeMaterials, type BiomeMaterials } from "./materials";
 import { Motes } from "./Motes";
-
-type Part = [BufferGeometry, Material];
 
 /** A floor's set dressing: every decor kind is one instanced draw call per
  * part, plus static colliders for pillars and braziers, brazier light
@@ -29,6 +27,10 @@ export function Decor({ layout, biome }: { layout: FloorLayout; biome: Biome }) 
     }
     return out;
   }, [layout]);
+  const matrices = useMemo(
+    () => [...byKind].map(([kind, items]) => [kind, items.map((d) => trs(d.pos, d.rot, d.scale))] as const),
+    [byKind],
+  );
   const parts = useMemo(() => partsFor(biome, mats), [biome, mats]);
 
   useEffect(() => setGrade(biome.grade), [biome]);
@@ -37,8 +39,8 @@ export function Decor({ layout, biome }: { layout: FloorLayout; biome: Biome }) 
 
   return (
     <group>
-      {[...byKind].map(([kind, items]) => (
-        <InstancedDecor key={kind} items={items} parts={parts[kind]} />
+      {matrices.map(([kind, m]) => (
+        <InstancedParts key={kind} matrices={m} parts={parts[kind]} />
       ))}
       {solid.length > 0 && (
         <RigidBody type="fixed" colliders={false}>
@@ -104,41 +106,6 @@ function partsFor(biome: Biome, m: BiomeMaterials): Record<DecorKind, Part[]> {
     // Crystal caves drip glowing crystal instead of stone.
     stalactite: [[geometry.stalactite(), biome.style.growth === "crystal" ? m.growthGlow : stone]],
   };
-}
-
-/** One instanced mesh per part, all sharing the items' transforms. */
-function InstancedDecor({ items, parts }: { items: DecorItem[]; parts: Part[] }) {
-  const meshes = useRef<(InstancedMesh | null)[]>([]);
-  useLayoutEffect(() => {
-    const dummy = new Object3D();
-    for (const mesh of meshes.current) {
-      if (!mesh) continue;
-      items.forEach((d, i) => {
-        dummy.position.set(...d.pos);
-        dummy.rotation.set(0, d.rot, 0);
-        dummy.scale.set(...d.scale);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(i, dummy.matrix);
-      });
-      mesh.instanceMatrix.needsUpdate = true;
-      // Frustum culling needs bounds over all instances, not the template.
-      mesh.computeBoundingSphere();
-    }
-  }, [items, parts]);
-  return (
-    <>
-      {parts.map(([geo, mat], p) => (
-        <instancedMesh
-          key={p}
-          ref={(m) => {
-            meshes.current[p] = m;
-          }}
-          args={[geo, mat, items.length]}
-          receiveShadow
-        />
-      ))}
-    </>
-  );
 }
 
 /** Brazier fires: pooled light sources with a shared flicker, and a spark
