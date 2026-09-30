@@ -129,6 +129,8 @@ const TOGGLE_STEP = 0.062;
 function NameWing() {
   const shadows = useGame((s) => s.shadows);
   const toggleShadows = useGame((s) => s.toggleShadows);
+  const reflections = useGame((s) => s.reflections);
+  const toggleReflections = useGame((s) => s.toggleReflections);
   const [editing, setEditing] = useState(false);
   return (
     <group position={[-WING_X * U, WING_Y * U, -0.02]} rotation={[0, WING_TURN, 0]}>
@@ -144,6 +146,7 @@ function NameWing() {
         />
         <RuneText text="· ◇ ·" px={px(0.016)} position={[0, -0.022 * U, 0]} color={MENU_INK.faint} glow={0.4} />
         <SettingToggle row={0} label="SHADOWS" on={shadows} onToggle={toggleShadows} />
+        <SettingToggle row={1} label="REFLECTIONS" on={reflections} onToggle={toggleReflections} />
       </Tablet>
     </group>
   );

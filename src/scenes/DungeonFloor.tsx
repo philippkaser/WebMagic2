@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { getEnemyDef } from "../enemies/registry";
 import { SpawnedEnemies } from "../enemies/SpawnedEnemies";
 import { ARCHITECTURE, GROUPS, WALL_HEIGHT } from "../core/config";
+import { AmbientParticles } from "../fx/AmbientParticles";
 import { addLightSource, removeLightSource, type DynamicLightSource } from "../fx/DynamicLights";
 import { resetRegistries } from "../game/registry";
 import { hashSeed } from "../core/rng";
@@ -87,6 +88,8 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
       <ambientLight intensity={biome.ambient.intensity} color={biome.ambient.color} />
 
       <WallsAndFloor layout={layout} />
+      {/* The air itself: dust, spores, embers, glitter or ash per biome. */}
+      <AmbientParticles biome={layout.biome} omen={layout.omen} ceiling={WALL_HEIGHT} />
 
       {layout.torches.map((pos, i) => (
         <Torch key={i} position={pos} color={biome.torchColor} intensity={biome.torchIntensityMult} />
