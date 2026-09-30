@@ -7,25 +7,25 @@ import { addLightSource, removeLightSource } from "../../fx/DynamicLights";
 import { spawnBurst } from "../../fx/Particles";
 import { offerInteraction } from "../../game/interactions";
 import { playerPosition } from "../../game/player-state";
-import { getTextures } from "../../render/textures";
+import { WAYSTONE_FACE, WaystoneModel } from "../../render/models/AltarModels";
+import { drawPixelText, textWidth } from "../../render/models/pixelLabel";
 import type { Vec3 } from "../types";
 
 /** Chunky pixel glyph plate: the power the stone reads in you, and the band
- * of floors the rift will throw you into. */
+ * of floors the rift will throw you into — in the same pixel font as every
+ * other carved word in the world. */
 function waystoneFace(gear: number, range: [number, number]): CanvasTexture {
+  const S = 48;
   const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 64;
+  canvas.width = S;
+  canvas.height = S;
   const ctx = canvas.getContext("2d")!;
-  ctx.clearRect(0, 0, 64, 64);
-  ctx.fillStyle = "#46ffd0";
-  ctx.textAlign = "center";
-  ctx.font = "bold 10px 'Courier New', monospace";
-  ctx.fillText("POWER", 32, 12);
-  ctx.font = "bold 28px 'Courier New', monospace";
-  ctx.fillText(String(gear), 32, 38);
-  ctx.font = "bold 10px 'Courier New', monospace";
-  ctx.fillText(`▼ ${range[0]}-${range[1]}`, 32, 56);
+  const center = (text: string, y: number, scale = 1) =>
+    drawPixelText(ctx, text, Math.floor((S - textWidth(text, scale)) / 2), y, "#46ffd0", scale);
+  center("POWER", 3);
+  const num = String(gear);
+  center(num, 14, num.length > 3 ? 1 : 2);
+  center(`▼${range[0]}-${range[1]}`, 37);
   const tex = new CanvasTexture(canvas);
   tex.magFilter = NearestFilter;
   tex.minFilter = NearestFilter;
@@ -47,7 +47,6 @@ export function Waystone({
   range: [number, number];
 }) {
   const tex = useMemo(() => waystoneFace(gear, range), [gear, range]);
-  const slabTex = useMemo(() => getTextures("runestone"), []);
   const glow = useRef<MeshBasicMaterial>(null);
 
   useEffect(() => {
@@ -89,26 +88,12 @@ export function Waystone({
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
-      {/* Base step */}
-      <mesh position={[0, 0.15, 0]} receiveShadow castShadow>
-        <boxGeometry args={[1.8, 0.3, 1.1]} />
-        <meshStandardMaterial map={slabTex.map} normalMap={slabTex.normalMap} roughness={0.9} />
-      </mesh>
-      {/* The slab itself, leaning back a little — ancient, half-sunk */}
-      <group rotation={[-0.08, 0, 0.02]}>
-        <mesh position={[0, 1.25, 0]} castShadow receiveShadow>
-          <boxGeometry args={[1.15, 2.0, 0.32]} />
-          <meshStandardMaterial map={slabTex.map} normalMap={slabTex.normalMap} roughness={0.85} />
-        </mesh>
-        {/* Glowing carved destination */}
-        <mesh position={[0, 1.45, 0.168]}>
-          <planeGeometry args={[0.82, 0.82]} />
+      {/* The slab leans back a little — ancient, half-sunk */}
+      <group rotation={[-0.06, 0, 0.02]}>
+        <WaystoneModel />
+        <mesh position={[0, WAYSTONE_FACE.y, WAYSTONE_FACE.z]}>
+          <planeGeometry args={[WAYSTONE_FACE.size, WAYSTONE_FACE.size]} />
           <meshBasicMaterial ref={glow} map={tex} transparent toneMapped={false} />
-        </mesh>
-        {/* Faint rune strip below */}
-        <mesh position={[0, 0.62, 0.168]}>
-          <planeGeometry args={[0.82, 0.1]} />
-          <meshStandardMaterial color="#0c1a16" emissive="#2a8f76" emissiveIntensity={0.8} toneMapped={false} />
         </mesh>
       </group>
     </group>
