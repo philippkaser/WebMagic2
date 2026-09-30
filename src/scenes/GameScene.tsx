@@ -20,6 +20,7 @@ import { RemoteWizards } from "../net/RemoteWizards";
 import { StaffView } from "../player/StaffView";
 import { Effects } from "../render/Effects";
 import { useGame } from "../state/gameStore";
+import { WorldCameraBridge } from "../ui3d/bridge";
 import { generateFloor } from "../world/gen";
 import { omenRules } from "../world/omens";
 import { setFloorRules } from "../game/floorRules";
@@ -53,6 +54,7 @@ export function GameScene() {
   // the pixel-art look (no pixelation post-pass needed).
   return (
     <Canvas
+      id="wm-world"
       shadows
       dpr={0.35}
       gl={{ antialias: false, powerPreference: "high-performance" }}
@@ -84,6 +86,7 @@ export function GameScene() {
         <CastingSystem />
         <InteractionSystem />
         <ConsumableSystem />
+        <WorldCameraBridge />
         {/* Tiny procedural environment map: gives the wet slabs and metal
             trims something interesting to reflect without external assets. */}
         <Environment resolution={64} frames={1}>
@@ -102,11 +105,12 @@ export function GameScene() {
         </Environment>
         <Effects />
       </Suspense>
-      {/* selector="canvas" is load-bearing: without it drei binds its
-          click-to-lock handler to the whole DOCUMENT, so clicking inventory/
-          merchant buttons would instantly re-lock the pointer. Scoped to the
-          canvas, overlay clicks (which cover the canvas) can never lock. */}
-      {controlsEnabled && <PointerLockControls makeDefault selector="canvas" />}
+      {/* The selector is load-bearing: without it drei binds its click-to-
+          lock handler to the whole DOCUMENT, so clicking a menu button would
+          instantly re-lock the pointer. Scoped to the WORLD canvas (not the
+          in-world UI canvas stacked above it, which only takes clicks while
+          a menu is up), menu clicks can never lock. */}
+      {controlsEnabled && <PointerLockControls makeDefault selector="#wm-world canvas" />}
     </Canvas>
   );
 }

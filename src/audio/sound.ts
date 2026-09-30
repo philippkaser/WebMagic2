@@ -95,6 +95,11 @@ function noise({ dur, vol = 0.2, filterFreq, filterEnd, q = 0.8, delay = 0, type
   src.stop(t0 + dur + 0.05);
 }
 
+/** The two synth voices, for sound banks kept in their own modules
+ * (audio/uiSounds.ts) — same master bus, same zero-asset rule. */
+export { noise as synthNoise, tone as synthTone };
+export type { NoiseOptions, ToneOptions };
+
 // ── Game sounds ──────────────────────────────────────────────────────────────
 
 export function playCast(): void {
