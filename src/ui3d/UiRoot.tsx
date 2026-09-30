@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { ViewAnchor, pxFor } from "./anchors";
 import { ItemModel } from "./ItemModel";
+import { Menus } from "./layers/menus/Menus";
 import { WorldMessages } from "./layers/WorldMessages";
 import { WorldPrompts } from "./layers/WorldPrompts";
 import { UiPresence } from "./presence";
@@ -17,6 +18,7 @@ export function UiRoot() {
     <>
       <WorldMessages />
       <WorldPrompts />
+      <Menus />
       {import.meta.env.DEV && <DevShowcase />}
     </>
   );

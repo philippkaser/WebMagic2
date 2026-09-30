@@ -293,18 +293,22 @@ export function Tablet({
   const pointer = useThree((s) => s.pointer);
   const tiltRef = useRef({ x: 0, y: 0 });
 
+  const wasOpen = useRef(open);
   useEffect(() => {
     if (open) {
       tOpen.current = uiNow();
       tClose.current = null;
       settled.current = false;
       if (!quiet) playTabletBuild();
-    } else {
+    } else if (wasOpen.current) {
+      // Only a tablet that WAS open breaks apart; one mounted hidden (a
+      // delayed wing, a closed screen) stays as it is — nothing.
       tClose.current = uiNow();
       settled.current = false;
       setContentShown(false);
       if (!quiet) setTimeout(playTabletBreak, 200);
     }
+    wasOpen.current = open;
   }, [open, quiet]);
 
   useFrame((_, dt) => {

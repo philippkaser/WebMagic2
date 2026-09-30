@@ -7,10 +7,9 @@
  *   itemInfo.ts    item glyphs + stat lines (also used outside ui/)
  *   hud/           in-game widgets; hud/PlayHud.tsx lists them (PerfOverlay
  *                  is mounted here instead, since it works in menus too)
- *   overlays/      fullscreen phase screens (menu, the Weighing, death),
- *                  wrapped in overlays/OverlayShell
+ *   (the menu, the Weighing, death, the codex and loading are in-world
+ *    now — see ui3d/layers/menus/ and transition/)
  *   inventory/     inventory / chest / merchant screen (entry: InventoryScreen.tsx)
- *   codex/         the lore codex (C) — carvings read so far
  *   devroom/       dev-build test bench (entry: DevRoom.tsx)
  *
  * Adding a HUD widget: create hud/MyWidget.tsx as a self-contained component
@@ -19,29 +18,25 @@
  * theme.ts for the standard framed box) — then add one `<MyWidget />` line to
  * hud/PlayHud.tsx. No props flow down from here, on purpose.
  *
- * Adding an overlay: create overlays/MyOverlay.tsx rendering its content
- * inside `<OverlayShell>` (reuse `styles.title/subtitle/blurb/button`), then
- * add one `{condition && <MyOverlay />}` line in the JSX below. The condition
- * is a `phase` for fullscreen phases, or an `overlay` kind (add it to the
- * store's Overlay union) for in-game screens that keep the world running;
- * those screens release the pointer automatically, and can close on Escape
- * with useEscapeClosesOverlay() from hooks.ts. */
+ * Adding a screen: screens are in-world now — see ui3d/layers/menus/ (a
+ * file per screen, listed in Menus.tsx). The condition is a `phase` for
+ * fullscreen phases, or an `overlay` kind (add it to the store's Overlay
+ * union) for in-game screens that keep the world running; those screens
+ * release the pointer automatically (below), and can close on Escape with
+ * useEscapeClosesOverlay() from hooks.ts. */
 
 import { useEffect, useState, type CSSProperties } from "react";
 import { useGame } from "../state/gameStore";
-import { CodexScreen } from "./codex/CodexScreen";
 import { DevRoom } from "./DevRoom";
 import { PerfOverlay } from "./hud/PerfOverlay";
 import { PlayHud } from "./hud/PlayHud";
 import { InventoryScreen, isInventoryMode } from "./InventoryScreen";
-import { DeathOverlay } from "./overlays/DeathOverlay";
-import { MenuOverlay } from "./overlays/MenuOverlay";
-import { WeighingOverlay } from "./overlays/WeighingOverlay";
 import { globalCss, styles } from "./theme";
 
-/** All DOM UI: the in-game HUD, the inventory-family screens, and the
- * fullscreen overlays for menu / the Weighing / death. (Loading is the
- * portal tunnel now — transition/.) */
+/** All DOM UI that isn't part of the fiction yet: the in-game HUD, the
+ * inventory-family screens, the dev room, the perf overlay and the build
+ * stamp. (The menu, the Weighing, death and the codex live in the world —
+ * ui3d/layers/menus/ — and loading is the portal tunnel, transition/.) */
 export function HUD() {
   const phase = useGame((s) => s.phase);
   const overlay = useGame((s) => s.overlay);
@@ -103,10 +98,6 @@ export function HUD() {
       {playing && <PlayHud />}
       {playing && overlay === "devroom" && import.meta.env.DEV && <DevRoom />}
       {playing && isInventoryMode(overlay) && <InventoryScreen mode={overlay} />}
-      {playing && overlay === "codex" && <CodexScreen />}
-      {phase === "menu" && <MenuOverlay />}
-      {phase === "weighing" && <WeighingOverlay />}
-      {phase === "dead" && <DeathOverlay />}
     </div>
   );
 }
