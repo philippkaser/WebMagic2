@@ -177,7 +177,7 @@ export function Drowned({ position, floor, entityId }: EnemyProps) {
             0.3,
             t.z + Math.cos(yaw.current) * SLAM_REACH,
           ];
-          const damage = 15 * scale.enemyDamage;
+          const damage = 13 * scale.enemyDamage;
           explode({ position: pos, radius: SLAM_RADIUS, damage, impulse: 30, team: "enemy", color: SEA, particles: 30, light: 24 });
           session.sendEntityEvent({ k: "boom", pos, radius: SLAM_RADIUS, damage, impulse: 30, color: SEA });
           spawnBurst({ position: pos, count: 24, color: ["#c8fff2", "#3fe0c0", "#1e2a26"], speed: 5, upward: 5, ttl: 0.8, size: 0.09 });
