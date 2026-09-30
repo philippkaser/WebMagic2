@@ -85,7 +85,8 @@ if (dead.lastDeath?.killerName !== "Alda") fail(`kill should be attributed to Al
 if (dead.lastDeath?.items.length !== 2) fail("Brom should have lost both run items");
 ok("Brom was slain by Alda and lost his run loot");
 
-const chest = (await A.evaluate(() => window.__session.chests))[0];
+// (Other chests may be "remains" inherited from earlier aborted runs.)
+const chest = (await A.evaluate(() => window.__session.chests)).find((c) => c.owner === "Brom" && c.pos);
 if (!chest || chest.itemCount !== 2) fail("a 2-item death chest should appear for Alda");
 ok(`${chest.owner}'s chest appeared`);
 if (OUT) await A.screenshot({ path: `${OUT}/pvp-2-chest.png` });
