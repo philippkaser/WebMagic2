@@ -89,7 +89,8 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
     flash.current = Math.max(0, flash.current - dt * 4);
     if (breakT.current > 0) breakT.current = Math.min(1, breakT.current + dt * 1.2);
     const brk = breakT.current;
-    const tell = slamTell.current > 0 ? 1 - slamTell.current / SLAM_TELL : 0;
+    if (host) b.tell.current = slamTell.current > 0 ? 1 - slamTell.current / SLAM_TELL : 0;
+    const tell = b.tell.current; // replicated, so every wizard sees the clamp
     const pulse = enraged ? 0.5 + Math.sin(time * 8) * 0.4 : 0;
     hot.set(EMBER).lerp(seamTarget, brk);
     seams.emissive.copy(hot);

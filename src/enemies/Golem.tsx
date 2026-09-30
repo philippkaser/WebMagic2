@@ -127,12 +127,16 @@ export function Golem({ position, floor, entityId }: EnemyProps) {
     // ── Look ────────────────────────────────────────────────────────────────
     flash.current = Math.max(0, flash.current - dt * 4);
     heartFlash.current = Math.max(0, heartFlash.current - dt * 3);
-    const winding =
-      attack.current === "stomp"
-        ? 1 - attackTimer.current / STOMP_WINDUP
-        : attack.current === "volley"
-          ? 1 - attackTimer.current / VOLLEY_WINDUP
-          : 0;
+    // Replicated wind-up: positive = stomp, negative = shard volley.
+    if (host) {
+      e.tell.current =
+        attack.current === "stomp"
+          ? 1 - attackTimer.current / STOMP_WINDUP
+          : attack.current === "volley"
+            ? -(1 - attackTimer.current / VOLLEY_WINDUP)
+            : 0;
+    }
+    const winding = Math.abs(e.tell.current);
     eye.emissiveIntensity = 2.2 + flash.current * 3 + winding * 5;
     heart.emissiveIntensity = 2.4 + Math.sin(time * 3) * 0.6 + heartFlash.current * 8;
     if (facing.current) facing.current.rotation.y = yaw.current;
@@ -141,8 +145,8 @@ export function Golem({ position, floor, entityId }: EnemyProps) {
     const swing = Math.sin(gait.current);
     if (rig.legL) rig.legL.rotation.x = swing * 0.35 * stride;
     if (rig.legR) rig.legR.rotation.x = -swing * 0.35 * stride;
-    const stomp = attack.current === "stomp" ? winding : 0;
-    const volley = attack.current === "volley" ? winding : 0;
+    const stomp = Math.max(0, e.tell.current);
+    const volley = Math.max(0, -e.tell.current);
     if (rig.torso) {
       rig.torso.rotation.z = swing * 0.05 * stride;
       rig.torso.rotation.x = -stomp * 0.3 + (attack.current === "recover" ? 0.25 : 0);

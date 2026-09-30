@@ -72,7 +72,8 @@ export function Imp({ position, floor, entityId }: EnemyProps) {
 
     // ── Look ────────────────────────────────────────────────────────────────
     flash.current = Math.max(0, flash.current - dt * 5);
-    const charge = windup.current > 0 ? 1 - windup.current / WINDUP : 0;
+    if (host) e.tell.current = windup.current > 0 ? 1 - windup.current / WINDUP : 0;
+    const charge = e.tell.current; // replicated wind-up
     ember.emissiveIntensity = 2.2 + Math.sin(time * 10 + phase) * 0.4 + flash.current * 5 + charge * 3;
     eyes.emissiveIntensity = 2.4 + flash.current * 5;
     yaw.current = turnToward(yaw.current, Math.atan2(playerPosition.x - t.x, playerPosition.z - t.z), dt * 8);

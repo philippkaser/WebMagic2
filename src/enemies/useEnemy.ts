@@ -54,6 +54,8 @@ export function useEnemy(opts: {
   const flash = useRef(0);
   const aggro = useRef(false);
   const knockTimer = useRef(0);
+  /** Attack wind-up 0..1 — the host brain writes it, every model reads it. */
+  const tell = useRef(0);
   // Latest style/callbacks without re-registering the hittable every render.
   const live = useRef(opts);
   live.current = opts;
@@ -117,7 +119,8 @@ export function useEnemy(opts: {
     hitFeedback,
     damageFilter,
     onDamaged,
+    tell,
   });
 
-  return { body, host, scale, hp, maxHp, deadRef, dead, flash, aggro, knockTimer, interpolate };
+  return { body, host, scale, hp, maxHp, deadRef, dead, flash, aggro, knockTimer, tell, interpolate };
 }

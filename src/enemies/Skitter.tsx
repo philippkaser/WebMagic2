@@ -66,7 +66,8 @@ export function Skitter({ position, floor, entityId }: EnemyProps) {
 
     // ── Look ────────────────────────────────────────────────────────────────
     flash.current = Math.max(0, flash.current - dt * 5);
-    const crouch = mode.current === "crouch" ? 1 - modeTimer.current / CROUCH : 0;
+    if (host) e.tell.current = mode.current === "crouch" ? 1 - modeTimer.current / CROUCH : 0;
+    const crouch = e.tell.current; // replicated, so replicas see the tell too
     glow.emissiveIntensity = 2 + flash.current * 6 + crouch * 5;
     if (motion.speed > 0.6) {
       yaw.current = turnToward(yaw.current, Math.atan2(motion.vx, motion.vz), dt * 10);

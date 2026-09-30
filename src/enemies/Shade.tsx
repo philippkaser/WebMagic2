@@ -94,7 +94,8 @@ export function Shade({ position, floor, entityId }: EnemyProps) {
     if (mode.current === "fadeOut") vis = Math.max(0, modeTimer.current / FADE);
     const flicker = Math.sin(time * 23 + phase) > 0.92 ? 0.4 : 1;
     cloth.opacity = 0.86 * vis * flicker;
-    const casting = mode.current === "cast" ? 1 - modeTimer.current / CAST : 0;
+    if (host) e.tell.current = mode.current === "cast" ? 1 - modeTimer.current / CAST : 0;
+    const casting = e.tell.current; // replicated wind-up
     glow.emissiveIntensity = (2.2 + flash.current * 6 + casting * 6) * vis;
     if (root.current) root.current.scale.setScalar(0.6 + vis * 0.4);
     yaw.current = turnToward(yaw.current, Math.atan2(playerPosition.x - t.x, playerPosition.z - t.z), dt * 4);

@@ -74,7 +74,8 @@ export function Drowned({ position, floor, entityId }: EnemyProps) {
 
     // ── Look ────────────────────────────────────────────────────────────────
     flash.current = Math.max(0, flash.current - dt * 4);
-    const raising = attack.current === "raise" ? 1 - attackTimer.current / RAISE : 0;
+    if (host) e.tell.current = attack.current === "raise" ? 1 - attackTimer.current / RAISE : 0;
+    const raising = e.tell.current; // replicated wind-up
     eyes.emissiveIntensity = 2.2 + flash.current * 5 + raising * 5;
     lure.emissiveIntensity = 2.6 + Math.sin(time * 2.3) * 0.8 + raising * 6;
     if (!host && motion.speed > 0.3) {
@@ -92,7 +93,7 @@ export function Drowned({ position, floor, entityId }: EnemyProps) {
       rig.torso.position.y = -0.2 + Math.abs(Math.cos(gait.current)) * 0.05 * stride;
     }
     let armX = -0.35 + Math.sin(gait.current + 0.6) * 0.25 * stride;
-    if (attack.current === "raise") armX = -0.35 - raising * 2.5;
+    if (raising > 0) armX = -0.35 - raising * 2.5;
     else if (attack.current === "strike") armX = -1.1;
     else if (attack.current === "recover") armX = -1.1 + (1 - attackTimer.current / RECOVER) * 0.75;
     if (rig.armL) rig.armL.rotation.x = armX - Math.sin(gait.current) * 0.15 * stride;

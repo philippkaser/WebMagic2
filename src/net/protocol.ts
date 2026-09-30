@@ -47,6 +47,9 @@ export interface EntitySnap {
   id: string;
   p: Tuple3;
   hp?: number;
+  /** Attack wind-up 0..1 (crouch, raised anchor, charging fireball…) — so
+   * replicas see the same telegraphs the host's brain is playing. */
+  a?: number;
 }
 
 /** A rolled loot item on the floor. */

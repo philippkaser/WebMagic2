@@ -6,6 +6,7 @@ import { gameEvents } from "../core/events";
 import { allocId, registerHittable } from "../game/registry";
 import { isHost } from "../net/netStore";
 import { registerEntity } from "../net/replication";
+import type { EntitySnap } from "../net/protocol";
 import { session } from "../net/session";
 import { useGame } from "../state/gameStore";
 
@@ -39,6 +40,9 @@ export function useEnemyNet(opts: {
   onDamaged?: () => void;
   /** Replica: called after each authoritative snapshot (e.g. boss HP bar). */
   onSnap?: (hp: number) => void;
+  /** Attack wind-up 0..1: written by the host brain, replicated to replicas,
+   * read by the model on every client. */
+  tell?: React.MutableRefObject<number>;
 }) {
   const {
     entityId,
@@ -54,6 +58,7 @@ export function useEnemyNet(opts: {
     damageFilter,
     onDamaged,
     onSnap,
+    tell,
   } = opts;
   const target = useMemo(() => new Vector3(), []);
   const hasSnap = useRef(false);
@@ -115,12 +120,17 @@ export function useEnemyNet(opts: {
       snap: () => {
         if (deadRef.current) return null;
         const t = body.current?.translation();
-        return t ? { id: entityId, p: [t.x, t.y, t.z], hp: hp.current } : null;
+        if (!t) return null;
+        const snap: EntitySnap = { id: entityId, p: [t.x, t.y, t.z], hp: hp.current };
+        // Quantized so an idle wind-up value doesn't defeat the delta filter.
+        if (tell) snap.a = Math.round(tell.current * 20) / 20;
+        return snap;
       },
       applyHit: applyDamage,
       applySnap: (s) => {
         target.set(s.p[0], s.p[1], s.p[2]);
         hasSnap.current = true;
+        if (tell && s.a !== undefined) tell.current = s.a;
         if (s.hp !== undefined) {
           hp.current = s.hp;
           onSnap?.(s.hp);

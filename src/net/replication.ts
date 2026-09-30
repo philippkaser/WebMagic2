@@ -135,6 +135,7 @@ interface LastSent {
   y: number;
   z: number;
   hp: number;
+  a: number;
 }
 
 const lastSent = new Map<string, LastSent>();
@@ -157,16 +158,18 @@ export function ReplicationSystem() {
       const prev = lastSent.get(snap.id);
       const [x, y, z] = snap.p;
       const hp = snap.hp ?? 0;
+      const a = snap.a ?? 0;
       if (prev) {
         const moved =
           (prev.x - x) ** 2 + (prev.y - y) ** 2 + (prev.z - z) ** 2 > POS_EPSILON_SQ;
-        if (!moved && prev.hp === hp) continue;
+        if (!moved && prev.hp === hp && prev.a === a) continue;
         prev.x = x;
         prev.y = y;
         prev.z = z;
         prev.hp = hp;
+        prev.a = a;
       } else {
-        lastSent.set(snap.id, { x, y, z, hp });
+        lastSent.set(snap.id, { x, y, z, hp, a });
       }
       batch.push(snap);
     }

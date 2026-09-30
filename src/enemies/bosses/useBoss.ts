@@ -114,6 +114,9 @@ export function useBoss(opts: {
     [name, maxHp, wake],
   );
 
+  /** Attack wind-up 0..1 — the host brain writes it, every model reads it. */
+  const tell = useRef(0);
+
   const { interpolate } = useEnemyNet({
     entityId: BOSS_ID,
     body,
@@ -124,10 +127,11 @@ export function useBoss(opts: {
     knockbackScale: 0.25,
     onKill: kill,
     onSnap: onHp,
+    tell,
   });
 
   // Hide the HUD bar if the floor unmounts mid-fight.
   useEffect(() => () => gameEvents.emit("bossHp", null), []);
 
-  return { body, host, scale, maxHp, hp, deadRef, dead, awake, phase2, flash, light, wake, interpolate };
+  return { body, host, scale, maxHp, hp, deadRef, dead, awake, phase2, flash, light, wake, tell, interpolate };
 }

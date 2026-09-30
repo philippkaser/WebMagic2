@@ -59,7 +59,8 @@ export function Wisp({ position, floor, entityId }: EnemyProps) {
 
     // ── Look: flicker, swell before a lunge, stare at our wizard ────────────
     flash.current = Math.max(0, flash.current - dt * 5);
-    const windup = lunge.current > 0 ? 1 - lunge.current / TELEGRAPH : 0;
+    if (host) e.tell.current = lunge.current > 0 ? 1 - lunge.current / TELEGRAPH : 0;
+    const windup = e.tell.current; // replicated wind-up
     glow.emissiveIntensity =
       1.6 + Math.sin(time * 9 + phase) * 0.25 + flash.current * 6 + windup * 4;
     if (rig.body) {

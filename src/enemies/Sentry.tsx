@@ -66,7 +66,8 @@ export function Sentry({ position, floor, entityId }: EnemyProps) {
     flash.current = Math.max(0, flash.current - dt * 5);
     if (host) fireTimer.current -= dt;
     // Replicas don't know the host's timer: they idle-glow and see the bolt.
-    const charge = host && fireTimer.current < CHARGE ? 1 - Math.max(fireTimer.current, 0) / CHARGE : 0;
+    if (host) e.tell.current = fireTimer.current < CHARGE ? 1 - Math.max(fireTimer.current, 0) / CHARGE : 0;
+    const charge = e.tell.current; // replicated wind-up
     glow.emissiveIntensity = 1.3 + Math.sin(time * 2.2) * 0.2 + flash.current * 6 + charge * 5;
 
     // Head tracking is cosmetic — every client tracks its own wizard.
