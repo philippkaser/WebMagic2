@@ -9,12 +9,12 @@ import {
   Vector3,
 } from "three";
 import { uiNow } from "../clock";
-import { RUNE_COUNT, RUNE_BASE, GLYPH_H, GLYPH_W } from "../font/glyphs";
+import { getFace, type Face, type FontId } from "../font/faces";
 import { layoutText, type Align, type TextInput, type TextLayout } from "../font/layout";
 import { useUiShow } from "../presence";
 import { useUiTextStyle } from "../style";
 import { emitUiSparks } from "../UiSparks";
-import { createRuneTextMaterial, NEVER, type RuneTextMaterial } from "./runeTextMaterial";
+import { applyFace, createRuneTextMaterial, NEVER, type RuneTextMaterial } from "./runeTextMaterial";
 
 /** Text that lives in the world: pixel-font glyphs that materialize out of
  * the dark as burning runes, settle into letters, and burn away into embers.
@@ -28,13 +28,20 @@ import { createRuneTextMaterial, NEVER, type RuneTextMaterial } from "./runeText
  * text while shown re-writes only the glyphs that changed — a ticking gold
  * counter flickers its last digit, a new prompt writes itself anew.
  *
- * Sizes are in world units per font pixel (`px`). A glyph is 5×7 font
- * pixels, a line 10; `metrics(text, px)` measures a block before placing it. */
+ * Faces (`font`): "body" (Tiny5, default), "title" (Jacquard 12 blackletter),
+ * "label" (Silkscreen caps), "pixel" (the hand-set fallback) — font/faces.ts.
+ *
+ * Size (`px`) is a seventh of the capital height in world units, whatever
+ * the face — so `pxFor(distance, screenFraction)` sizes any face alike, and
+ * switching a line to the title face keeps its cap height. `measureText`
+ * measures a block before placing it. */
 
 export interface RuneTextProps {
   text: TextInput;
-  /** World size of one font pixel. */
+  /** A seventh of the capital height, world units (see pxFor). */
   px?: number;
+  /** Typeface (default: the ambient style's, else "body"). */
+  font?: FontId;
   /** Default colour (spans can override). */
   color?: string;
   align?: Align;
@@ -74,10 +81,22 @@ export interface RuneTextProps {
   rotation?: readonly [number, number, number];
 }
 
+/** World size of one font pixel of `face` at size `px`. */
+export function fontPixel(face: Face, px: number): number {
+  return (px * 7) / face.capHeight;
+}
+
 /** Block size in world units, for layout by callers (tablets, rows). */
-export function measureText(text: TextInput, px: number, maxCols?: number): { width: number; height: number; lines: number } {
-  const l = layoutText(text, { maxCols });
-  return { width: l.width * px, height: l.height * px, lines: l.lines };
+export function measureText(
+  text: TextInput,
+  px: number,
+  maxCols?: number,
+  font: FontId = "body",
+): { width: number; height: number; lines: number } {
+  const face = getFace(font);
+  const l = layoutText(text, { maxCols }, face);
+  const k = fontPixel(face, px);
+  return { width: l.width * k, height: l.height * k, lines: l.lines };
 }
 
 let baseQuad: PlaneGeometry | null = null;
@@ -97,7 +116,13 @@ function seedOf(x: number, y: number, slot: number): number {
 /** Build the instance attributes for a layout. Glyphs that are identical to
  * the previous layout (same slot, place and colour) keep their birth time,
  * so they don't re-materialize. */
-function buildGeometry(layout: TextLayout, defaultColor: string, prev: InstancedBufferGeometry | null, bornAt: number): InstancedBufferGeometry {
+function buildGeometry(
+  layout: TextLayout,
+  face: Face,
+  defaultColor: string,
+  prev: InstancedBufferGeometry | null,
+  bornAt: number,
+): InstancedBufferGeometry {
   const n = layout.glyphs.length;
   const cell = new Float32Array(n * 2);
   const slots = new Float32Array(n * 2);
@@ -130,7 +155,7 @@ function buildGeometry(layout: TextLayout, defaultColor: string, prev: Instanced
     cell[i * 2] = g.x;
     cell[i * 2 + 1] = g.y;
     slots[i * 2] = g.slot;
-    slots[i * 2 + 1] = RUNE_BASE + Math.floor(seed * RUNE_COUNT);
+    slots[i * 2 + 1] = face.runeBase + Math.floor(seed * face.runeCount);
     colors[i * 3] = tmpColor.r;
     colors[i * 3 + 1] = tmpColor.g;
     colors[i * 3 + 2] = tmpColor.b;
@@ -158,6 +183,7 @@ function buildGeometry(layout: TextLayout, defaultColor: string, prev: Instanced
 export function RuneText({
   text,
   px: pxProp,
+  font: fontProp,
   color: colorProp,
   align = "center",
   maxCols,
@@ -181,20 +207,22 @@ export function RuneText({
   rotation,
 }: RuneTextProps) {
   const style = useUiTextStyle();
-  const px = pxProp ?? style.px ?? 0.006;
+  const face = getFace(fontProp ?? style.font ?? "body");
+  const px = fontPixel(face, pxProp ?? style.px ?? 0.006);
   const color = colorProp ?? style.color ?? "#e8dfc8";
   const glow = glowProp ?? style.glow ?? 1;
   const outline = outlineProp ?? style.outline ?? 0.75;
   const depth = depthProp ?? style.depth ?? 1;
   // Visible only while the enclosing tablet/presence is (presence.tsx).
   const show = useUiShow() && showProp;
-  const material = useMemo<RuneTextMaterial>(() => createRuneTextMaterial(), []);
+  const material = useMemo<RuneTextMaterial>(() => createRuneTextMaterial(face), []);
+  useLayoutEffect(() => applyFace(material, face), [material, face]);
   const mesh = useMemo(() => {
     const m = new Mesh(new InstancedBufferGeometry(), material);
     m.frustumCulled = false; // glyph quads are placed in the shader
     return m;
   }, [material]);
-  const layout = useMemo(() => layoutText(text, { maxCols, align }), [text, maxCols, align]);
+  const layout = useMemo(() => layoutText(text, { maxCols, align }, face), [text, maxCols, align, face]);
   const hiddenFired = useRef(!show);
   // Mounted hidden = already gone (long ago), not "dissolving now".
   const vanishAt = useRef(show ? NEVER : -NEVER);
@@ -210,7 +238,7 @@ export function RuneText({
   useLayoutEffect(() => {
     const prev = mesh.geometry as InstancedBufferGeometry;
     const now = uiNow();
-    const next = buildGeometry(layout, color, prev.instanceCount > 0 ? prev : null, now + delay);
+    const next = buildGeometry(layout, face, color, prev.instanceCount > 0 ? prev : null, now + delay);
     mesh.geometry = next;
     prev.dispose();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -280,8 +308,8 @@ export function RuneText({
       const k = Math.min(1, elapsed / total);
       const g = layout.glyphs[Math.min(layout.glyphs.length - 1, Math.floor((k * 0.8 + Math.random() * 0.3) * layout.glyphs.length))]!;
       tmpVec.set(
-        (g.x + GLYPH_W / 2 - layout.width * anchor[0]) * px,
-        -(g.y + GLYPH_H / 2 - layout.height * anchor[1]) * px,
+        (g.x + face.halfGlyphW - layout.width * anchor[0]) * px,
+        -(g.y + face.halfGlyphH - layout.height * anchor[1]) * px,
         0,
       );
       mesh.localToWorld(tmpVec);

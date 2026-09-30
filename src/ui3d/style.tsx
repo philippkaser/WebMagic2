@@ -1,4 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
+import type { FontId } from "./font/faces";
 
 /** Ambient defaults for RuneText inside a container. A tablet, for example,
  * wants its text to settle ONTO the stone from in front (depth < 0) rather
@@ -6,6 +7,7 @@ import { createContext, useContext, type ReactNode } from "react";
  * that once here instead of every caller remembering it. Explicit props
  * always win. */
 export interface UiTextStyle {
+  font?: FontId;
   depth?: number;
   px?: number;
   color?: string;

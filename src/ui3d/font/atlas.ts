@@ -25,53 +25,66 @@ export const ATLAS_H = ATLAS_ROWS * CELL_H;
 const HALO_RADIUS = 3;
 const HALO_SIGMA = 1.25;
 
-/** Raw atlas bytes, row 0 = top of the first cell row (the shader indexes
- * texels with texelFetch, so no flipping or filtering is involved). */
-export function buildAtlasData(): Uint8Array {
-  const data = new Uint8Array(ATLAS_W * ATLAS_H * 4);
-  const ink = new Float32Array(CELL_W * CELL_H);
-  // Normalizer: the halo value at a pixel whose whole neighbourhood is ink.
+/** Turn a 1-bit ink map (one byte per atlas texel, row 0 = top) into the
+ * atlas's RGBA layers: R the ink, G a gaussian halo, B the ink dilated by a
+ * pixel (the outline). Works for any cell grid as long as each cell pads its
+ * glyph by ≥ HALO_RADIUS + 1 texels, so no halo bleeds into a neighbour. */
+export function inkToAtlas(ink: Uint8Array, width: number, height: number): Uint8Array {
+  const data = new Uint8Array(width * height * 4);
   let full = 0;
   for (let dy = -HALO_RADIUS; dy <= HALO_RADIUS; dy++)
     for (let dx = -HALO_RADIUS; dx <= HALO_RADIUS; dx++)
       full += Math.exp(-(dx * dx + dy * dy) / (2 * HALO_SIGMA * HALO_SIGMA));
-
-  for (let slot = 0; slot < GLYPH_COUNT; slot++) {
-    const bmp = glyphBitmap(slot);
-    ink.fill(0);
-    for (let y = 0; y < GLYPH_H; y++)
-      for (let x = 0; x < GLYPH_W; x++) if (bmp[y]![x]) ink[(y + ATLAS_PAD) * CELL_W + x + ATLAS_PAD] = 1;
-
-    const ox = (slot % ATLAS_COLS) * CELL_W;
-    const oy = Math.floor(slot / ATLAS_COLS) * CELL_H;
-    for (let y = 0; y < CELL_H; y++) {
-      for (let x = 0; x < CELL_W; x++) {
-        let halo = 0;
-        let outline = 0;
-        for (let dy = -HALO_RADIUS; dy <= HALO_RADIUS; dy++) {
-          const yy = y + dy;
-          if (yy < 0 || yy >= CELL_H) continue;
-          for (let dx = -HALO_RADIUS; dx <= HALO_RADIUS; dx++) {
-            const xx = x + dx;
-            if (xx < 0 || xx >= CELL_W) continue;
-            const v = ink[yy * CELL_W + xx]!;
-            if (v === 0) continue;
-            halo += Math.exp(-(dx * dx + dy * dy) / (2 * HALO_SIGMA * HALO_SIGMA));
-            if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) outline = 1;
-          }
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let halo = 0;
+      let outline = 0;
+      for (let dy = -HALO_RADIUS; dy <= HALO_RADIUS; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= height) continue;
+        for (let dx = -HALO_RADIUS; dx <= HALO_RADIUS; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= width || ink[yy * width + xx] === 0) continue;
+          halo += Math.exp(-(dx * dx + dy * dy) / (2 * HALO_SIGMA * HALO_SIGMA));
+          if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) outline = 1;
         }
-        // A sparse glyph never approaches `full`; lift it so thin strokes
-        // still glow, then clamp.
-        const h = Math.min(1, (halo / full) * 3.2);
-        const i = ((oy + y) * ATLAS_W + ox + x) * 4;
-        data[i] = ink[y * CELL_W + x]! * 255;
-        data[i + 1] = Math.round(h * 255);
-        data[i + 2] = outline * 255;
-        data[i + 3] = 255;
       }
+      // A sparse glyph never approaches `full`; lift it so thin strokes
+      // still glow, then clamp.
+      const h = Math.min(1, (halo / full) * 3.2);
+      const i = (y * width + x) * 4;
+      data[i] = ink[y * width + x] ? 255 : 0;
+      data[i + 1] = Math.round(h * 255);
+      data[i + 2] = outline * 255;
+      data[i + 3] = 255;
     }
   }
   return data;
+}
+
+/** Raw bytes of the hand-set fallback font's atlas, row 0 = top of the
+ * first cell row (the shader indexes texels with texelFetch, so no flipping
+ * or filtering is involved). */
+export function buildAtlasData(): Uint8Array {
+  const ink = new Uint8Array(ATLAS_W * ATLAS_H);
+  for (let slot = 0; slot < GLYPH_COUNT; slot++) {
+    const bmp = glyphBitmap(slot);
+    const ox = (slot % ATLAS_COLS) * CELL_W + ATLAS_PAD;
+    const oy = Math.floor(slot / ATLAS_COLS) * CELL_H + ATLAS_PAD;
+    for (let y = 0; y < GLYPH_H; y++)
+      for (let x = 0; x < GLYPH_W; x++) if (bmp[y]![x]) ink[(oy + y) * ATLAS_W + ox + x] = 1;
+  }
+  return inkToAtlas(ink, ATLAS_W, ATLAS_H);
+}
+
+/** An atlas texture over raw RGBA bytes: nearest, no mips — texelFetch'd. */
+export function atlasTexture(data: Uint8Array, width: number, height: number): DataTexture {
+  const t = new DataTexture(data, width, height, RGBAFormat, UnsignedByteType);
+  t.magFilter = NearestFilter;
+  t.minFilter = NearestFilter;
+  t.generateMipmaps = false;
+  t.needsUpdate = true;
+  return t;
 }
 
 let atlas: DataTexture | null = null;
@@ -79,10 +92,6 @@ let atlas: DataTexture | null = null;
 /** The shared atlas texture (built on first use). */
 export function glyphAtlas(): DataTexture {
   if (atlas) return atlas;
-  atlas = new DataTexture(buildAtlasData(), ATLAS_W, ATLAS_H, RGBAFormat, UnsignedByteType);
-  atlas.magFilter = NearestFilter;
-  atlas.minFilter = NearestFilter;
-  atlas.generateMipmaps = false;
-  atlas.needsUpdate = true;
+  atlas = atlasTexture(buildAtlasData(), ATLAS_W, ATLAS_H);
   return atlas;
 }

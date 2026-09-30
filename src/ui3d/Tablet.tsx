@@ -1,24 +1,22 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  AdditiveBlending,
   BoxGeometry,
-  BufferGeometry,
   Color,
-  Float32BufferAttribute,
   Group,
   InstancedMesh,
   Matrix4,
   Mesh,
   MeshStandardMaterial,
   Quaternion,
-  ShaderMaterial,
   Vector3,
   Euler,
 } from "three";
 import { playTabletBreak, playTabletBuild } from "../audio/uiSounds";
 import { uiNow } from "./clock";
 import { stoneMaterial } from "./materials";
+import { PixelFrame } from "./PixelFrame";
+import { frameFor, type FrameKind } from "./theme";
 import { UiShow, useUiShow } from "./presence";
 import { UiTextStyleProvider } from "./style";
 import { emitUiSparks } from "./UiSparks";
@@ -27,9 +25,9 @@ import { emitUiSparks } from "./UiSparks";
  *
  * It doesn't fade in — it BUILDS. Fitted stones fly in out of the dark
  * behind it, tumbling, and lock together from the centre outward with a
- * little overshoot; then a rune channel burns its way around the rim from
- * the bottom, both ways, meeting at the top; only then do the words write
- * themselves onto the stone. Closing runs it backwards: the words burn off,
+ * little overshoot; then its brass trim (PixelFrame) forges itself around
+ * the rim from the bottom, both ways, meeting at the top; only then do the
+ * words write themselves onto the stone. Closing runs it backwards: the words burn off,
  * the stones break loose and fall away.
  *
  * Visibility comes from the enclosing `<UiPresence>` (presence.tsx), so a
@@ -75,7 +73,7 @@ function buildStones(width: number, height: number, thickness: number, tile: num
   const rows = Math.max(1, Math.round(height / tile));
   const tw = width / cols;
   const th = height / rows;
-  const gap = Math.min(tw, th) * 0.035;
+  const gap = Math.min(tw, th) * 0.02;
   const maxDist = Math.hypot(width / 2, height / 2) || 1;
   const stones: Stone[] = [];
   let k = seed * 131;
@@ -110,87 +108,6 @@ function backOut(t: number): number {
   return 1 + u * u * ((s + 1) * u + s);
 }
 
-// ── The rune channel around the rim ──────────────────────────────────────────
-
-const RIM_VERT = /* glsl */ `
-attribute float aAlong;
-attribute float aAcross;
-varying float vAlong;
-varying float vAcross;
-void main() {
-  vAlong = aAlong;
-  vAcross = aAcross;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}
-`;
-
-const RIM_FRAG = /* glsl */ `
-uniform vec3 uColor;
-uniform float uProgress;
-uniform float uFade;
-uniform float uTime;
-varying float vAlong;
-varying float vAcross;
-void main() {
-  float d = abs(vAcross);
-  float core = smoothstep(0.34, 0.16, d);
-  float glow = exp(-d * d * 7.0) * 0.55;
-  float drawn = step(vAlong, uProgress);
-  float head = exp(-abs(vAlong - uProgress) * 45.0) * step(uProgress, 0.999) * step(0.001, uProgress);
-  float pulse = 0.8 + 0.2 * sin(uTime * 2.1 - vAlong * 18.0);
-  vec3 col = uColor * (core * 1.6 + glow) * drawn * pulse + vec3(1.0, 0.95, 0.85) * head * (core + glow) * 3.0;
-  gl_FragColor = vec4(col * uFade, 0.0);
-  #include <colorspace_fragment>
-  gl_FragColor.a = 0.0;
-}
-`;
-
-/** A rectangular strip around the rim. `aAlong` runs 0 → 1 from the bottom
- * centre up both sides to the top centre, so the channel burns both ways at
- * once and meets at the top. */
-function rimGeometry(width: number, height: number, inset: number, stripWidth: number): BufferGeometry {
-  const W = width - inset * 2;
-  const H = height - inset * 2;
-  const P = W + H; // half perimeter
-  const w = stripWidth / 2;
-  const pos: number[] = [];
-  const along: number[] = [];
-  const across: number[] = [];
-  const index: number[] = [];
-  // A straight segment from a to b (with along values sa → sb), extruded
-  // sideways by ±w and lengthened by w at both ends so corners overlap.
-  const segment = (ax: number, ay: number, bx: number, by: number, sa: number, sb: number) => {
-    const dx = bx - ax;
-    const dy = by - ay;
-    const len = Math.hypot(dx, dy) || 1;
-    const ux = dx / len;
-    const uy = dy / len;
-    const nx = -uy * w;
-    const ny = ux * w;
-    const ax2 = ax - ux * w;
-    const ay2 = ay - uy * w;
-    const bx2 = bx + ux * w;
-    const by2 = by + uy * w;
-    const base = pos.length / 3;
-    pos.push(ax2 + nx, ay2 + ny, 0, ax2 - nx, ay2 - ny, 0, bx2 + nx, by2 + ny, 0, bx2 - nx, by2 - ny, 0);
-    along.push(sa, sa, sb, sb);
-    across.push(1, -1, 1, -1);
-    index.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
-  };
-  for (const side of [1, -1]) {
-    const x = (W / 2) * side;
-    segment(0, -H / 2, x, -H / 2, 0, W / 2 / P);
-    segment(x, -H / 2, x, H / 2, W / 2 / P, (W / 2 + H) / P);
-    segment(x, H / 2, 0, H / 2, (W / 2 + H) / P, 1);
-  }
-  const g = new BufferGeometry();
-  g.setAttribute("position", new Float32BufferAttribute(pos, 3));
-  g.setAttribute("aAlong", new Float32BufferAttribute(along, 1));
-  g.setAttribute("aAcross", new Float32BufferAttribute(across, 1));
-  g.setIndex(index);
-  return g;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 const unitBox = new BoxGeometry(1, 1, 1);
@@ -214,6 +131,11 @@ export interface TabletProps {
   tile?: number;
   /** Stone tint. */
   tint?: string;
+  /** The trim: a named frame (brass, arcane, iron, blood, gold, violet) or
+   * any colour. */
+  frame?: FrameKind | string;
+  /** World size of one frame texel (the trim is 4 texels deep). */
+  frameTexel?: number;
   /** Rune channel colour. */
   accent?: string;
   /** Idle hover bob. */
@@ -232,8 +154,10 @@ export function Tablet({
   height,
   thickness = 0.045,
   tile = 0.13,
-  tint = "#4f4b5a",
-  accent = "#46ffd0",
+  tint = "#3a3342",
+  accent,
+  frame,
+  frameTexel,
   float = true,
   tilt = false,
   seed = 1,
@@ -248,33 +172,17 @@ export function Tablet({
     stones.forEach((s, i) => m.setColorAt(i, tmpColor.setScalar(s.tint)));
     return m;
   }, [stones, tint]);
-  const rim = useMemo(() => {
-    const material = new ShaderMaterial({
-      uniforms: {
-        uColor: { value: new Color(accent) },
-        uProgress: { value: 0 },
-        uFade: { value: 1 },
-        uTime: { value: 0 },
-      },
-      vertexShader: RIM_VERT,
-      fragmentShader: RIM_FRAG,
-      transparent: true,
-      depthWrite: false,
-      blending: AdditiveBlending,
-      premultipliedAlpha: true,
-    });
-    const m = new Mesh(rimGeometry(width, height, Math.min(width, height) * 0.06, Math.min(width, height) * 0.05), material);
-    m.position.z = 0.0015;
-    m.renderOrder = 5;
-    return m;
-  }, [width, height, accent]);
+  // The trim: `frame` wins; older callers pass an `accent` colour.
+  const trim = frame ?? accent ?? "brass";
+  const sparkColor = frameFor(trim).light;
+  const texel = frameTexel ?? Math.min(0.0065, Math.min(width, height) * 0.03);
+  const forge = useRef(0);
+  const fade = useRef(1);
   useEffect(
     () => () => {
       mesh.dispose();
-      rim.geometry.dispose();
-      (rim.material as ShaderMaterial).dispose();
     },
-    [mesh, rim],
+    [mesh],
   );
 
   // Dark mortar behind the stones: the gaps read as depth, not as holes
@@ -323,18 +231,16 @@ export function Tablet({
       tiltRef.current.y += (ty - tiltRef.current.y) * k;
       g.rotation.set(tiltRef.current.x + (float ? Math.sin(now * 0.9 + seed) * 0.006 : 0), tiltRef.current.y, 0);
     }
-    const rimMat = rim.material as ShaderMaterial;
-    rimMat.uniforms.uTime!.value = now;
 
     const closing = tClose.current !== null;
     const t = closing ? now - tClose.current! : now - tOpen.current;
     if (!closing) {
-      rimMat.uniforms.uProgress!.value = Math.min(1, Math.max(0, (t - RIM_START) / RIM_TIME));
-      rimMat.uniforms.uFade!.value = 1;
+      forge.current = Math.min(1, Math.max(0, (t - RIM_START) / RIM_TIME));
+      fade.current = 1;
       if (!contentShown && t >= CONTENT_AT) setContentShown(true);
       if (settled.current) return;
     } else {
-      rimMat.uniforms.uFade!.value = Math.max(0, 1 - t * 3);
+      fade.current = Math.max(0, 1 - t * 3);
       if (settled.current) return;
     }
 
@@ -376,7 +282,7 @@ export function Tablet({
         // The break sheds a few embers from the rim.
         if (q > 0 && q < dt * 1.5 && Math.random() < 0.5 && g) {
           tmpP.applyMatrix4(g.matrixWorld);
-          emitUiSparks({ position: [tmpP.x, tmpP.y, tmpP.z], color: accent, count: 3, speed: 0.2, size: 0.01 });
+          emitUiSparks({ position: [tmpP.x, tmpP.y, tmpP.z], color: sparkColor, count: 3, speed: 0.2, size: 0.01 });
         }
       }
       mesh.setMatrixAt(i, tmpM);
@@ -389,7 +295,15 @@ export function Tablet({
     <group ref={group}>
       <primitive object={backing} />
       <primitive object={mesh} />
-      <primitive object={rim} />
+      <PixelFrame
+        width={width + texel * 2}
+        height={height + texel * 2}
+        frame={trim}
+        texel={texel}
+        progressRef={forge}
+        fadeRef={fade}
+        position={[0, 0, 0.004]}
+      />
       <UiTextStyleProvider value={{ depth: -0.35 }}>
         <group position={[0, 0, 0.003]}>
           <UiShow show={contentShown && open}>{children}</UiShow>
