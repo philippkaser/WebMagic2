@@ -5,19 +5,16 @@
  *   theme.ts       FONT, palette, shared style objects, the one global stylesheet
  *   hooks.ts       small DOM hooks (pointer lock state, Escape-closes-screen)
  *   itemInfo.ts    item glyphs + stat lines (also used outside ui/)
- *   hud/           in-game widgets; hud/PlayHud.tsx lists them (PerfOverlay
- *                  is mounted here instead, since it works in menus too)
+ *   hud/           the perf overlay (mounted here: it works in menus too). The
+ *                  in-game HUD itself lives in the world — ui3d/layers/hud/
  *   overlays/      fullscreen phase screens (menu, the Weighing, death,
  *                  loading), each wrapped in overlays/OverlayShell
  *   inventory/     inventory / chest / merchant screen (entry: InventoryScreen.tsx)
  *   codex/         the lore codex (C) — carvings read so far
  *   devroom/       dev-build test bench (entry: DevRoom.tsx)
  *
- * Adding a HUD widget: create hud/MyWidget.tsx as a self-contained component
- * — it reads its own state (useGame / useNet selectors, or a gameEvents
- * subscription), positions itself absolutely (spread `styles.panel` from
- * theme.ts for the standard framed box) — then add one `<MyWidget />` line to
- * hud/PlayHud.tsx. No props flow down from here, on purpose.
+ * Adding a HUD widget: the HUD is in-world now — see ui3d/layers/hud/Hud.tsx
+ * (one file per piece in that folder, one line in its list).
  *
  * Adding an overlay: create overlays/MyOverlay.tsx rendering its content
  * inside `<OverlayShell>` (reuse `styles.title/subtitle/blurb/button`), then
@@ -32,7 +29,6 @@ import { useGame } from "../state/gameStore";
 import { CodexScreen } from "./codex/CodexScreen";
 import { DevRoom } from "./DevRoom";
 import { PerfOverlay } from "./hud/PerfOverlay";
-import { PlayHud } from "./hud/PlayHud";
 import { InventoryScreen, isInventoryMode } from "./InventoryScreen";
 import { DeathOverlay } from "./overlays/DeathOverlay";
 import { LoadingOverlay } from "./overlays/LoadingOverlay";
@@ -98,7 +94,6 @@ export function HUD() {
       <style>{globalCss}</style>
       <div style={buildStampStyle}>{__BUILD_INFO__}</div>
       {showPerf && <PerfOverlay />}
-      {playing && <PlayHud />}
       {playing && overlay === "devroom" && import.meta.env.DEV && <DevRoom />}
       {playing && isInventoryMode(overlay) && <InventoryScreen mode={overlay} />}
       {playing && overlay === "codex" && <CodexScreen />}
