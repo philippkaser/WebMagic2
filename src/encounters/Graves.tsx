@@ -245,14 +245,19 @@ function GraveChest({ grave }: { grave: LiveGrave }) {
     );
     const whose = grave.ownerId === selfId() ? "your own" : `${grave.ownerName}'s`;
     if (picks.length === 0 && grave.gold <= 0) {
-      offerInteraction(`Your pack is full — ${whose} grave keeps its ${lootText}`, d2, () => {});
+      offerInteraction(`Your pack is full — ${whose} grave keeps its ${lootText}`, d2, () => {}, [x, y + 1.3, z]);
       return;
     }
-    offerInteraction(`E — Plunder ${whose} grave (${lootText})`, d2, () => {
-      if (requested.current > 0) return;
-      requested.current = 0.6; // throttle while the grant round-trips
-      lootGrave.request({ graveId: grave.id, picks, gold: grave.gold > 0 });
-    });
+    offerInteraction(
+      `E — Plunder ${whose} grave (${lootText})`,
+      d2,
+      () => {
+        if (requested.current > 0) return;
+        requested.current = 0.6; // throttle while the grant round-trips
+        lootGrave.request({ graveId: grave.id, picks, gold: grave.gold > 0 });
+      },
+      [x, y + 1.3, z],
+    );
   });
 
   return (

@@ -260,15 +260,20 @@ function ItemOrb({ orb }: { orb: Orb }) {
       // A full inventory blocks the request client-side, BEFORE the grant —
       // a granted orb is gone forever, so never ask for what can't be held.
       if (!useGame.getState().canAcquire(orb.defId!)) {
-        offerInteraction(`Inventory full — can't take ${item.name}`, d2, () => {});
+        offerInteraction(`Inventory full — can't take ${item.name}`, d2, () => {}, [
+          g.position.x,
+          g.position.y + 0.7,
+          g.position.z,
+        ]);
         return;
       }
       const desc = item.affix ? `${item.affix.desc} · ${def.desc}` : def.desc;
+      const at: [number, number, number] = [g.position.x, g.position.y + 0.7, g.position.z];
       offerInteraction(`E — Take ${item.name}  (${desc})`, d2, () => {
         if (requested.current > 0) return;
         requested.current = 0.6; // throttle re-requests while awaiting grant
         takeOrb.request({ orbId: orb.id });
-      });
+      }, at);
     }
   });
 

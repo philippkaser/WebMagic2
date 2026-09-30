@@ -89,12 +89,17 @@ function LoreRune({ rune }: { rune: LoreSpawn }) {
 
     const d2 = (playerPosition.x - out[0]) ** 2 + (playerPosition.z - out[2]) ** 2;
     if (d2 < READ_RANGE_SQ) {
-      offerInteraction(`E — Read the ${known ? "familiar " : ""}carving: “${fragment.title}”`, d2, () => {
-        if (cooldown.current > 0) return;
-        cooldown.current = 1;
-        playWhisper();
-        gameEvents.emit("loreRead", { fragmentId: fragment.id });
-      });
+      offerInteraction(
+        `E — Read the ${known ? "familiar " : ""}carving: “${fragment.title}”`,
+        d2,
+        () => {
+          if (cooldown.current > 0) return;
+          cooldown.current = 1;
+          playWhisper();
+          gameEvents.emit("loreRead", { fragmentId: fragment.id });
+        },
+        [out[0], out[1] + 0.75, out[2]],
+      );
     }
   });
 

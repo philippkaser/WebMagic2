@@ -38,10 +38,15 @@ export function DevSlab({ position }: { position: Vec3 }) {
 
     const d2 = (playerPosition.x - position[0]) ** 2 + (playerPosition.z - position[2]) ** 2;
     if (d2 < 8) {
-      offerInteraction("E — Dev Room (test bench)", d2, () => {
-        document.exitPointerLock();
-        useGame.getState().setOverlay("devroom");
-      });
+      offerInteraction(
+        "E — Dev Room (test bench)",
+        d2,
+        () => {
+          document.exitPointerLock();
+          useGame.getState().setOverlay("devroom");
+        },
+        [position[0], position[1] + 1.6, position[2]],
+      );
     }
   });
 

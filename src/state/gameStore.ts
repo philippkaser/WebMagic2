@@ -86,8 +86,10 @@ export interface GameState {
   /** Gold gathered this run — lost on death, banked with the rest. */
   runGold: number;
   overlay: Overlay;
-  /** Contextual interaction prompt shown by the HUD ("E — Descend…"). */
+  /** Contextual interaction prompt ("E — Descend…") and where in the world
+   * it belongs (null = in front of the player). */
   prompt: string | null;
+  promptAt: [number, number, number] | null;
   lastDeath: DeathRecord | null;
   /** Quality toggle: the staff/moon shadow costs several extra scene renders
    * per frame, so it's opt-in. */
@@ -135,7 +137,7 @@ export interface GameState {
   spendMana(cost: number): boolean;
   regenMana(dt: number): void;
   respawn(): void;
-  setPrompt(prompt: string | null): void;
+  setPrompt(prompt: string | null, at?: [number, number, number] | null): void;
   toggleShadows(): void;
   setPlayerName(name: string): void;
 }
@@ -193,6 +195,7 @@ export const useGame = create<GameState>((set, get) => ({
   runGold: 0,
   overlay: "none",
   prompt: null,
+  promptAt: null,
   lastDeath: null,
   shadows: loadShadowSetting(),
   playerName: loadPlayerName(),
@@ -520,8 +523,16 @@ export const useGame = create<GameState>((set, get) => ({
     });
   },
 
-  setPrompt: (prompt) => {
-    if (get().prompt !== prompt) set({ prompt });
+  setPrompt: (prompt, at = null) => {
+    const prev = get();
+    // Same prompt, anchor moved by less than a hand's width: no store churn
+    // (floating loot bobs every frame).
+    const moved =
+      (at === null) !== (prev.promptAt === null) ||
+      (at !== null &&
+        prev.promptAt !== null &&
+        (at[0] - prev.promptAt[0]) ** 2 + (at[1] - prev.promptAt[1]) ** 2 + (at[2] - prev.promptAt[2]) ** 2 > 0.01);
+    if (prev.prompt !== prompt || moved) set({ prompt, promptAt: at });
   },
 
   toggleShadows: () => {

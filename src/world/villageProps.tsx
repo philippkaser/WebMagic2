@@ -23,10 +23,15 @@ function useOverlayInteraction(
     const d2 =
       (playerPosition.x - position[0]) ** 2 + (playerPosition.z - position[2]) ** 2;
     if (d2 < 7) {
-      offerInteraction(prompt, d2, () => {
-        document.exitPointerLock();
-        useGame.getState().setOverlay(overlay);
-      });
+      offerInteraction(
+        prompt,
+        d2,
+        () => {
+          document.exitPointerLock();
+          useGame.getState().setOverlay(overlay);
+        },
+        [position[0], position[1] + 2, position[2]],
+      );
     }
   });
 }

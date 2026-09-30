@@ -364,13 +364,19 @@ export function Portal({
     const d2 =
       (playerPosition.x - position[0]) ** 2 + (playerPosition.z - position[2]) ** 2;
     if (d2 < 7) {
+      const above: [number, number, number] = [position[0], position[1] + 3, position[2]];
       if (locked) {
-        offerInteraction(lockedPrompt, d2, () => {});
+        offerInteraction(lockedPrompt, d2, () => {}, above);
       } else {
-        offerInteraction(prompt, d2, () => {
-          playPortal();
-          onUse();
-        });
+        offerInteraction(
+          prompt,
+          d2,
+          () => {
+            playPortal();
+            onUse();
+          },
+          above,
+        );
       }
     }
   });
@@ -494,15 +500,24 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
       // Gate on inventory space BEFORE requesting — a granted treasure that
       // can't be held would be lost.
       if (!useGame.getState().canAcquire(item.itemId)) {
-        offerInteraction(`Inventory full — can't take ${item.name}`, d2, () => {});
+        offerInteraction(`Inventory full — can't take ${item.name}`, d2, () => {}, [
+          position[0],
+          position[1] + 2.1,
+          position[2],
+        ]);
         return;
       }
       const desc = item.affix ? `${item.affix.desc} · ${def.desc}` : def.desc;
-      offerInteraction(`E — Take ${item.name}  (${desc})`, d2, () => {
-        if (takenRef.current || requested.current > 0) return;
-        requested.current = 0.6; // throttle re-requests while awaiting grant
-        takeTreasure.request({});
-      });
+      offerInteraction(
+        `E — Take ${item.name}  (${desc})`,
+        d2,
+        () => {
+          if (takenRef.current || requested.current > 0) return;
+          requested.current = 0.6; // throttle re-requests while awaiting grant
+          takeTreasure.request({});
+        },
+        [position[0], position[1] + 2.1, position[2]],
+      );
     }
   });
 
