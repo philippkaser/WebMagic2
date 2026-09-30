@@ -24,9 +24,9 @@ import { isHost, selectIsHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
 import { useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
-import { explode } from "./damage";
-import { useEnemyNet } from "./enemies";
-import { fireProjectile } from "./projectiles";
+import { explode } from "../combat/damage";
+import { useEnemyNet } from "./useEnemyNet";
+import { fireProjectile } from "../combat/projectiles";
 
 const BOSS_GROUPS = interactionGroups(GROUPS.ENEMY, [
   GROUPS.WORLD,

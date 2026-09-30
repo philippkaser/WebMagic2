@@ -1,6 +1,6 @@
-import { DUNGEON, TILE, WALL_HEIGHT, floorScale } from "../core/config";
-import { Rng } from "../core/rng";
-import type { EnemySpawn, FloorLayout, PropSpawn, Rect, Vec3, WallBox } from "./types";
+import { DUNGEON, TILE, WALL_HEIGHT, floorScale } from "../../core/config";
+import { Rng } from "../../core/rng";
+import type { EnemySpawn, FloorLayout, PropSpawn, Rect, Vec3, WallBox } from "../types";
 
 /** Procedural floor generator. Pure and deterministic: the same (seed, floor)
  * pair always yields an identical layout, which is what lets every player in

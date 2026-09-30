@@ -14,7 +14,7 @@ import { ReplicationSystem } from "../net/replication";
 import { StaffView } from "../player/StaffView";
 import { Effects } from "../render/Effects";
 import { useGame } from "../state/gameStore";
-import { generateFloor } from "../world/dungeonGen";
+import { generateFloor } from "../world/gen/dungeonGen";
 import { DungeonFloor } from "./DungeonFloor";
 import { Village } from "./Village";
 

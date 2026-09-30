@@ -8,7 +8,7 @@ import {
   Vector2,
   WebGLRenderer,
 } from "three";
-import { GLSL_NOISE } from "../render/shaderLib";
+import { GLSL_NOISE } from "./noise";
 
 /** A tiny standalone full-screen fragment-shader canvas — its own WebGL
  * context, independent of the R3F scene, used for the in-world transitions

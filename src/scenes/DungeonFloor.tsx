@@ -3,8 +3,8 @@ import { CuboidCollider, interactionGroups, RigidBody } from "@react-three/rapie
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Color, Fog, InstancedMesh, Object3D } from "three";
 import { startAmbient, stopAmbient } from "../audio/sound";
-import { Boss } from "../combat/Boss";
-import { Sentry, Wisp } from "../combat/enemies";
+import { Boss } from "../enemies/Boss";
+import { Sentry, Wisp } from "../enemies";
 import { GROUPS, TILE, WALL_HEIGHT } from "../core/config";
 import { resetRegistries } from "../game/registry";
 import { hashSeed } from "../core/rng";

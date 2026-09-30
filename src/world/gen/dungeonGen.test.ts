@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { TILE } from "../core/config";
+import { TILE } from "../../core/config";
 import { generateFloor, isReachable } from "./dungeonGen";
 
 describe("generateFloor", () => {
