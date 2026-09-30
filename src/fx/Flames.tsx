@@ -1,0 +1,231 @@
+import { useFrame } from "@react-three/fiber";
+import { useEffect, useMemo, useRef } from "react";
+import {
+  BufferAttribute,
+  Color,
+  CustomBlending,
+  DynamicDrawUsage,
+  InstancedBufferAttribute,
+  InstancedBufferGeometry,
+  Mesh,
+  OneFactor,
+  OneMinusSrcAlphaFactor,
+  ShaderMaterial,
+  UniformsLib,
+  UniformsUtils,
+} from "three";
+import { fxUniforms } from "./fxUniforms";
+import { FOG_GLSL, NOISE_GLSL } from "./glsl";
+
+/** Living flames: every torch's fire is a procedural shader flame — fbm
+ * noise scrolling up through a teardrop mask, licking sideways, white-hot at
+ * the root and cooling to the torch's colour and a deep red tip, with a soft
+ * halo that feeds bloom. All flames share ONE instanced draw call; owners
+ * register a handle and mutate it (intensity for flicker) like a light
+ * source.
+ *
+ * Why a shader and not only particles: a convincing flame needs a continuous
+ * body, and a body built from particles costs ~20 live sprites per torch
+ * forever. The shader flame is one quad; particles are spent where they're
+ * worth it — the embers and sparks it sheds. */
+
+const MAX_FLAMES = 128;
+
+export interface FlameHandle {
+  x: number;
+  y: number;
+  z: number;
+  /** Height of the flame body in metres (width follows). */
+  scale: number;
+  /** Brightness multiplier — drive it with the owner's flicker. */
+  intensity: number;
+  /** Linear RGB of the fire's mid tone. */
+  r: number;
+  g: number;
+  b: number;
+  /** @internal */
+  _seed: number;
+}
+
+const flames: FlameHandle[] = [];
+let seedCounter = 0;
+const tmpColor = new Color();
+
+export function addFlame(opts: {
+  position: readonly [number, number, number] | { x: number; y: number; z: number };
+  color: string;
+  scale?: number;
+  intensity?: number;
+}): FlameHandle {
+  const p = opts.position;
+  const [x, y, z] = "x" in p ? [p.x, p.y, p.z] : p;
+  tmpColor.set(opts.color);
+  const h: FlameHandle = {
+    x,
+    y,
+    z,
+    scale: opts.scale ?? 0.42,
+    intensity: opts.intensity ?? 1,
+    r: tmpColor.r,
+    g: tmpColor.g,
+    b: tmpColor.b,
+    _seed: (seedCounter = (seedCounter + 0.6180339) % 1),
+  };
+  if (flames.length < MAX_FLAMES) flames.push(h);
+  return h;
+}
+
+export function removeFlame(h: FlameHandle): void {
+  const i = flames.indexOf(h);
+  if (i >= 0) flames.splice(i, 1);
+}
+
+const VERT = /* glsl */ `
+attribute vec4 aFlame;   // xyz base of the flame, w height
+attribute vec4 aTint;    // rgb mid colour, w intensity
+attribute float aSeed;
+varying vec2 vUv;
+varying vec4 vTint;
+varying float vSeed;
+#include <fog_pars_vertex>
+void main() {
+  // Cylindrical billboard: faces the camera around the vertical axis only,
+  // so the flame always stands upright.
+  vec3 base = aFlame.xyz;
+  vec3 toCam = cameraPosition - base;
+  vec3 right = normalize(vec3(toCam.z, 0.0, -toCam.x) + vec3(1e-5, 0.0, 0.0));
+  float h = aFlame.w;
+  // Quad spans x ±0.5·w, y from −0.25·h (halo below the root) to 1.1·h.
+  vec3 world = base + right * position.x * h * 0.9 + vec3(0.0, 1.0, 0.0) * (position.y * 1.35 - 0.25) * h;
+  vUv = vec2(position.x + 0.5, position.y);
+  vTint = aTint;
+  vSeed = aSeed;
+  vec4 mvPosition = modelViewMatrix * vec4(world, 1.0);
+  gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
+}
+`;
+
+const FRAG = /* glsl */ `
+uniform float uTime;
+varying vec2 vUv;
+varying vec4 vTint;
+varying float vSeed;
+#include <fog_pars_fragment>
+${NOISE_GLSL}
+${FOG_GLSL}
+void main() {
+  // Flame space: x in flame heights, y = 0 at the root, 1 at the nominal tip.
+  float y = vUv.y * 1.35 - 0.25;
+  float x = (vUv.x - 0.5) * 0.9;
+  float t = uTime + vSeed * 17.0;
+  float hy = clamp(y, 0.0, 1.2);
+  float n = fxFbm(vec2(x * 6.0 + vSeed * 9.0, y * 3.0 - t * 3.8));
+  // Lick: the body sways more the higher up it is.
+  float sway = (n - 0.5) * 0.16 * hy + sin(t * 5.7 + y * 4.0) * 0.03 * hy;
+  float width = mix(0.19, 0.03, clamp(y, 0.0, 1.0));
+  float d = abs(x - sway) / width;
+  float root = smoothstep(-0.18, 0.05, y);
+  // Heat: hottest low in the middle; noise tears tongues off the edges.
+  float heat = (1.0 - d) * mix(1.0, 0.42, clamp(y, 0.0, 1.0)) + (n - 0.5) * 0.55;
+  heat *= root * (1.0 - smoothstep(0.7, 1.15, y + (n - 0.5) * 0.3));
+  heat = clamp(heat, 0.0, 1.0);
+  // Posterised into four bands — a pixel-art flame that stays crisp at
+  // dpr 0.35 instead of blooming into a blob.
+  vec3 tint = vTint.rgb;
+  vec3 col = vec3(0.0);
+  if (heat > 0.62) col = mix(tint, vec3(1.0, 0.97, 0.88), 0.72) * 1.7;
+  else if (heat > 0.4) col = mix(tint, vec3(1.0), 0.3) * 1.25;
+  else if (heat > 0.2) col = tint * 1.0;
+  else if (heat > 0.07) col = tint * vec3(0.75, 0.38, 0.28) * 0.8;
+  // Halo: a soft ball of light around the root for bloom to pick up.
+  vec2 hp = vec2(x * 1.3, y - 0.22);
+  col += tint * exp(-dot(hp, hp) * 12.0) * 0.2;
+  col *= vTint.a;
+  if (col.r + col.g + col.b < 0.004) discard;
+  gl_FragColor = fxApplyFog(col, 1.0, 1.0);
+  #include <colorspace_fragment>
+}
+`;
+
+/** Upload only the live prefix of a streaming attribute. */
+export function markRange(attr: InstancedBufferAttribute, floats: number): void {
+  attr.clearUpdateRanges();
+  if (floats > 0) attr.addUpdateRange(0, floats);
+  attr.needsUpdate = floats > 0;
+}
+
+/** Renders every registered flame (mounted once by FxSystems). */
+export function FlameSprites() {
+  const mesh = useRef<Mesh>(null);
+  const { geometry, flameAttr, tintAttr, seedAttr } = useMemo(() => {
+    const g = new InstancedBufferGeometry();
+    g.setAttribute(
+      "position",
+      new BufferAttribute(new Float32Array([-0.5, 0, 0, 0.5, 0, 0, 0.5, 1, 0, -0.5, 1, 0]), 3),
+    );
+    g.setIndex([0, 1, 2, 0, 2, 3]);
+    const flameAttr = new InstancedBufferAttribute(new Float32Array(MAX_FLAMES * 4), 4);
+    const tintAttr = new InstancedBufferAttribute(new Float32Array(MAX_FLAMES * 4), 4);
+    const seedAttr = new InstancedBufferAttribute(new Float32Array(MAX_FLAMES), 1);
+    flameAttr.setUsage(DynamicDrawUsage);
+    tintAttr.setUsage(DynamicDrawUsage);
+    seedAttr.setUsage(DynamicDrawUsage);
+    g.setAttribute("aFlame", flameAttr);
+    g.setAttribute("aTint", tintAttr);
+    g.setAttribute("aSeed", seedAttr);
+    g.instanceCount = 0;
+    return { geometry: g, flameAttr, tintAttr, seedAttr };
+  }, []);
+  const material = useMemo(
+    () =>
+      new ShaderMaterial({
+        uniforms: { ...UniformsUtils.clone(UniformsLib.fog), uTime: fxUniforms.uTime },
+        vertexShader: VERT,
+        fragmentShader: FRAG,
+        transparent: true,
+        depthWrite: false,
+        fog: true,
+        toneMapped: false,
+        blending: CustomBlending,
+        blendSrc: OneFactor,
+        blendDst: OneMinusSrcAlphaFactor,
+        blendSrcAlpha: OneFactor,
+        blendDstAlpha: OneMinusSrcAlphaFactor,
+      }),
+    [],
+  );
+  useEffect(
+    () => () => {
+      geometry.dispose();
+      material.dispose();
+    },
+    [geometry, material],
+  );
+
+  useFrame(() => {
+    const n = Math.min(flames.length, MAX_FLAMES);
+    const fa = flameAttr.array as Float32Array;
+    const ta = tintAttr.array as Float32Array;
+    const sa = seedAttr.array as Float32Array;
+    for (let i = 0; i < n; i++) {
+      const f = flames[i];
+      fa[i * 4] = f.x;
+      fa[i * 4 + 1] = f.y;
+      fa[i * 4 + 2] = f.z;
+      fa[i * 4 + 3] = f.scale;
+      ta[i * 4] = f.r;
+      ta[i * 4 + 1] = f.g;
+      ta[i * 4 + 2] = f.b;
+      ta[i * 4 + 3] = f.intensity;
+      sa[i] = f._seed;
+    }
+    markRange(flameAttr, n * 4);
+    markRange(tintAttr, n * 4);
+    markRange(seedAttr, n);
+    geometry.instanceCount = n;
+    if (mesh.current) mesh.current.visible = n > 0;
+  });
+
+  return <mesh ref={mesh} geometry={geometry} material={material} frustumCulled={false} renderOrder={2} />;
+}

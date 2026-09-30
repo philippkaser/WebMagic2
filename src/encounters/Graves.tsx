@@ -5,7 +5,7 @@ import type { Group } from "three";
 import { playGraveRise } from "../audio/sound";
 import { gameEvents } from "../core/events";
 import { addLightSource, flashLight, removeLightSource } from "../fx/DynamicLights";
-import { spawnBurst } from "../fx/Particles";
+import { soulRiseFx } from "../fx/effects";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { wizardDistSqTo } from "../game/targets";
@@ -98,16 +98,8 @@ const graveLooted = hostEvent<GraveLootedMsg>("graveLooted", (d) => {
     for (const t of taken) for (let n = 0; n < t.qty; n++) game.acquireItem(t.id);
     if (gold > 0) game.addGold(gold);
   }
-  spawnBurst({
-    position: [grave.pos[0], grave.pos[1] + 0.8, grave.pos[2]],
-    count: 14,
-    color: [grave.color, "#e8e0ff"],
-    speed: 2.5,
-    upward: 1.2,
-    ttl: 0.9,
-    size: 0.07,
-    gravity: -1,
-  });
+  // What was left behind rises out of the grave as soul-light.
+  soulRiseFx([grave.pos[0], grave.pos[1] + 0.8, grave.pos[2]], grave.color, 20);
 });
 
 /** Host: raise a grave for a wizard who just fell on this floor. */
@@ -161,6 +153,7 @@ function announceFall(g: LiveGrave): void {
   gameEvents.emit("message", text);
   playGraveRise();
   flashLight([g.pos[0], g.pos[1] + 1, g.pos[2]], g.color, 24);
+  soulRiseFx([g.pos[0], g.pos[1] + 0.5, g.pos[2]], g.color, 26);
 }
 
 // The dying wizard's side: raise the grave while still on the floor.

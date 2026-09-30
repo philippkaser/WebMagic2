@@ -1,7 +1,8 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Group, MeshStandardMaterial } from "three";
 import { gameEvents } from "../core/events";
+import { createStaffGlowMaterial } from "../fx/staffGlow";
 import { getItemDef } from "../items/catalog";
 import { playerVelocity } from "../game/player-state";
 import { useGame } from "../state/gameStore";
@@ -20,9 +21,15 @@ export function StaffView() {
   const staffDefId = useGame((s) => s.equipment.staff.defId);
   const shadows = useGame((s) => s.shadows);
   const staff = getItemDef(staffDefId);
+  // The crystal's aura + cast flash (fx/staffGlow). Parented to the
+  // viewmodel, so the flash is glued to the tip however fast we move.
+  const aura = useMemo(() => createStaffGlowMaterial(staff.color), [staff.color]);
+  useEffect(() => () => aura.dispose(), [aura]);
+  const flare = useRef(0);
 
   useEffect(() => gameEvents.on("staffKick", (v) => {
     kick.current = Math.min(1, kick.current + v);
+    flare.current = 1;
   }), []);
 
   // Runs after the PlayerController (-2) has positioned the camera.
@@ -47,6 +54,8 @@ export function StaffView() {
     if (tipMat.current) {
       tipMat.current.emissiveIntensity = 1.8 + kick.current * 6 + Math.sin(bobT.current * 3) * 0.25;
     }
+    flare.current *= Math.exp(-dt * 13);
+    aura.uniforms.uFlash.value = flare.current;
   }, -1);
 
   return (
@@ -86,6 +95,10 @@ export function StaffView() {
             metalness={0.3}
             roughness={0.2}
           />
+        </mesh>
+        {/* Aura + cast flash, on the tip, facing the camera with the rig. */}
+        <mesh position={[0, 0.33, -0.07]} scale={0.46} material={aura} renderOrder={4}>
+          <planeGeometry args={[1, 1]} />
         </mesh>
       </group>
     </group>

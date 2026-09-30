@@ -341,9 +341,9 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   control under a soft cap (momentum tech survives), coyote time, jump buffer.
 - **Everything damageable registers a `Hittable`** (id, position, hit(dmg,
   impulse)). Explosions iterate the registry — no physics queries, no React.
-- Projectiles are real CCD rigid bodies capped at a fixed pool size; particles
-  are one instanced mesh (3072 quads) with a ring-buffer allocator; explosion
-  lights come from a pool of 6 reusable point lights.
+- Projectiles are real CCD rigid bodies capped at a fixed pool size; their
+  VFX (trails, flares, blasts) go through `fx/effects.ts` (see Rendering →
+  Particles); explosion light comes from the dynamic light pool (`flashLight`).
 
 ## Rendering
 
@@ -374,6 +374,24 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   browser upscales it with `image-rendering: pixelated`. That one decision
   cut measured frame time ~5× — every light, normal map and post pass pays
   ~1/8th the fragments — and replaced the pixelation post-pass outright.
+- **Particles** (`fx/`): one CPU simulation (`particleSim.ts`, pure and
+  unit-tested: a dense struct-of-floats pool of 8192, swap-remove, zero
+  per-frame allocation) streams four instanced attributes into ONE draw call
+  (`particleMaterial.ts`). Premultiplied-alpha blending lets additive light
+  (glows, velocity-stretched sparks, embers, flares, shockwave rings) and
+  alpha-blended matter (smoke, dust, lit debris chunks) share that call.
+  Smoke, dust and debris are lit by the same pooled lights as the walls
+  (`fxUniforms.ts` mirrors the pool), everything respects fog, and the
+  shader never draws a particle below ~1.6 px (it pads it and gives back the
+  alpha) so sparks stay steady at dpr 0.35. Gameplay code calls named effects
+  (`effects.ts`: `explosionFx`, `shockwaveFx`, `castFlareFx`, `boltTrailFx`,
+  `blackHoleFx`, `hitSparksFx`, `soulDissolveFx`, `shatterFx`, …), which
+  thin themselves out as the pool fills; `spawnBurst()` remains for simple
+  bursts (`style` picks the look). Torch fire is a procedural shader flame
+  (`Flames.tsx`, one instanced call for every torch); the air of each biome
+  is `AmbientParticles.tsx` — seeds animated entirely on the GPU in a box that
+  follows the camera (dust, spores and drips, embers and ash, glints, falling
+  ash, village fireflies; the Weightless Hour makes it all float up).
 - **Post chain**: bloom → film grain → vignette (`render/Effects.tsx`).
 - **Shadows are a quality toggle** (F4 / main menu, persisted, default off):
   a shadow-casting point light re-renders the scene six times per frame,

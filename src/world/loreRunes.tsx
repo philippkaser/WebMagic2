@@ -4,7 +4,7 @@ import type { MeshStandardMaterial } from "three";
 import { playWhisper } from "../audio/sound";
 import { gameEvents } from "../core/events";
 import { addLightSource, removeLightSource, type DynamicLightSource } from "../fx/DynamicLights";
-import { spawnBurst } from "../fx/Particles";
+import { moteFx, soulRiseFx } from "../fx/effects";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { LoreRuneModel } from "../render/models/LoreRuneModel";
@@ -21,6 +21,8 @@ import type { LoreSpawn } from "./types";
  * Purely local: reading is personal, nothing is networked or granted. */
 
 const READ_RANGE_SQ = 2.6 * 2.6;
+/** Scratch spawn point for rune motes (effects copy it). */
+const moteAt: [number, number, number] = [0, 0, 0];
 const RUNE_COLOR = "#b89cff";
 
 export function LoreRunes({ runes }: { runes: LoreSpawn[] }) {
@@ -72,18 +74,11 @@ function LoreRune({ rune }: { rune: LoreSpawn }) {
     if (!known) {
       moteClock.current -= dt;
       if (moteClock.current <= 0) {
-        moteClock.current = 0.45;
-        spawnBurst({
-          position: [out[0] + (Math.random() - 0.5) * 0.4, out[1] - 0.2, out[2]],
-          count: 1,
-          color: [RUNE_COLOR, "#ffffff"],
-          speed: 0.15,
-          upward: 0.5,
-          ttl: 1.4,
-          size: 0.04,
-          gravity: 0.2,
-          drag: 0.6,
-        });
+        moteClock.current = 0.3 + Math.random() * 0.2;
+        moteAt[0] = out[0] + (Math.random() - 0.5) * 0.5;
+        moteAt[1] = out[1] - 0.3 + Math.random() * 0.4;
+        moteAt[2] = out[2];
+        moteFx(moteAt, RUNE_COLOR, { rise: 0.35, size: 0.03, life: 2 });
       }
     }
 
@@ -96,6 +91,8 @@ function LoreRune({ rune }: { rune: LoreSpawn }) {
           if (cooldown.current > 0) return;
           cooldown.current = 1;
           playWhisper();
+          // The words lift off the stone as light.
+          soulRiseFx(out, RUNE_COLOR, 18);
           gameEvents.emit("loreRead", { fragmentId: fragment.id });
         },
         [out[0], out[1] + 0.75, out[2]],

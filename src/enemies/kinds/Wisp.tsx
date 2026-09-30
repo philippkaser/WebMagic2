@@ -16,8 +16,10 @@ import {
 } from "../useEnemy";
 
 const DEATH_FX: EnemyDeathFx = {
-  burst: { count: 30, color: ["#b46bff", "#ffffff", "#4a2a7a"], speed: 7, ttl: 0.8, size: 0.1 },
+  // It comes apart as light: sparks flung wide, then the soul rises.
+  burst: { count: 26, color: ["#b46bff", "#ffffff", "#8a4dff"], speed: 8, ttl: 0.7, size: 0.08, style: "spark", endColor: "#4a2a7a", upward: 2 },
   light: { color: "#b46bff", intensity: 22 },
+  soul: "#c89cff",
 };
 const DROPS: EnemyDrops = { lootChance: ENEMY_LOOT_CHANCE, minY: 0.6 };
 

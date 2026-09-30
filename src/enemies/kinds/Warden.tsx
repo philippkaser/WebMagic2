@@ -10,7 +10,7 @@ import {
   removeLightSource,
   type DynamicLightSource,
 } from "../../fx/DynamicLights";
-import { spawnBurst } from "../../fx/Particles";
+import { castFlareFx, chargeBurstFx, explosionFx, soulDissolveFx, telegraphFx } from "../../fx/effects";
 import { getFloorRules } from "../../game/floorRules";
 import { nearestWizardTo } from "../../game/targets";
 import { SAVE_FEATHER_ID } from "../../items/catalog";
@@ -39,6 +39,9 @@ import { ENEMY_GROUPS, useContactDamage, useEnemy } from "../useEnemy";
 const BOSS_ID = "boss";
 const BOSS_NAME = "WARDEN OF THE DEEP";
 const EMBER = "#ff8b3d";
+/** The slam's blast radius (before the floor's explosion rule). */
+const WARDEN_SLAM_RADIUS = 5.2;
+const UP_AXIS: Vec3 = [0, 1, 0];
 
 /** Warden of the Deep — the floor boss (every 10th floor). The authority runs
  * its brain (brains/warden.ts); the replication framework moves its body on
@@ -62,18 +65,20 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
     entityId: BOSS_ID,
     position,
     floor,
+    hitColor: "#ff8a5a",
     knockbackScale: 0.25,
     flashDecay: 4,
     onDeathFx: (t) => {
+      // The boss comes apart in stages: a rolling chain of blasts through
+      // its shell, then its soul tears loose and rises.
+      const at: Vec3 = [t.x, t.y, t.z];
+      soulDissolveFx(at, WARDEN_COLOR, 2.6);
       for (let i = 0; i < 3; i++) {
-        spawnBurst({
-          position: [t.x + (Math.random() - 0.5), t.y + (Math.random() - 0.5), t.z + (Math.random() - 0.5)],
-          count: 40,
-          color: [WARDEN_COLOR, "#ffd9a8", "#2a0d0a"],
-          speed: 8,
-          ttl: 1.1,
-          size: 0.13,
-        });
+        const p: Vec3 = [t.x + (Math.random() - 0.5) * 1.6, t.y + (Math.random() - 0.5) * 1.2, t.z + (Math.random() - 0.5) * 1.6];
+        setTimeout(() => {
+          explosionFx(p, 2.4, i === 1 ? "#ffd9a8" : WARDEN_COLOR, 1.2);
+          flashLight(p, WARDEN_COLOR, 30);
+        }, i * 170);
       }
       flashLight([t.x, t.y, t.z], WARDEN_COLOR, 60);
       playBossRoar();
@@ -171,7 +176,7 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
     const action = tickWardenAttack(brain, dist, enraged, dt);
     if (!action) return;
     if (action === "boom") {
-      enemyBoom.announce({ pos: [t.x, t.y, t.z], radius: 5.2, damage: e.damage(20), impulse: 46, color: WARDEN_COLOR });
+      enemyBoom.announce({ pos: [t.x, t.y, t.z], radius: WARDEN_SLAM_RADIUS, damage: e.damage(20), impulse: 46, color: WARDEN_COLOR });
       return;
     }
     const origin: Vec3 = [t.x, t.y + WARDEN.aimLift, t.z];
@@ -203,17 +208,21 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
           cast(damage, EMBER, 0.15);
         }
         flashLight(origin, EMBER, 24);
+        castFlareFx(origin, UP_AXIS, EMBER, undefined, 4);
         break;
       }
       case "charge": {
         b.setLinvel(wardenChargeVelocity(aim, speedMult, bolt), true);
-        spawnBurst({ position: origin, count: 18, color: WARDEN_COLOR, speed: 4, ttl: 0.5, size: 0.09 });
+        chargeBurstFx(origin, bolt, WARDEN_COLOR);
         break;
       }
       case "slam": {
         // Telegraph: flare up and rumble; the brain detonates it ("boom") later.
+        // The warning circle on the floor is drawn at the blast's real
+        // (omen-scaled) radius, so what you see is what hits.
         e.flash.current = 1;
         gameEvents.emit("shake", 0.25);
+        telegraphFx(t, WARDEN_SLAM_RADIUS * getFloorRules().explosionRadiusMult, WARDEN_COLOR, WARDEN.slamTelegraph);
         break;
       }
     }

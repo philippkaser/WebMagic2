@@ -3,7 +3,7 @@ import { BallCollider, RigidBody, type RapierRigidBody } from "@react-three/rapi
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Group } from "three";
 import { addLightSource, removeLightSource, type DynamicLightSource } from "../fx/DynamicLights";
-import { spawnBurst } from "../fx/Particles";
+import { blackHoleFx, collapseFlashFx, voidSeedFx } from "../fx/effects";
 import type { DamageSource } from "../game/damageSource";
 import { isHostileWizard } from "../game/hostility";
 import { getPlayerBody, playerPosition } from "../game/player-state";
@@ -172,6 +172,8 @@ export function SingularitySeed({
     if (!b) return;
     const p = b.translation();
     light.current?.position.set(p.x, p.y, p.z);
+    // Motes drawn in on tight spirals + a dark wake: a seed that eats light.
+    voidSeedFx(p, spec.size);
     if (swirl.current) {
       swirl.current.rotation.y += dt * 6;
       swirl.current.rotation.x += dt * 3;
@@ -211,9 +213,13 @@ const BH_RADIUS = 4.5;
 const BH_DURATION = 1.3;
 const BH_PULL = 11;
 
+/** Seconds between event-horizon rings contracting into the core. */
+const BH_RING_EVERY = 0.16;
+
 function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void }) {
   const life = useRef(BH_DURATION);
   const tug = useRef(0);
+  const ringClock = useRef(0);
   const imploded = useRef(false);
   const core = useRef<Group>(null);
   const [cx, cy, cz] = hole.pos;
@@ -233,6 +239,7 @@ function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void 
   const implode = useCallback(() => {
     if (imploded.current) return;
     imploded.current = true;
+    collapseFlashFx(hole.pos);
     // Host does entity damage; replicas replay VFX + local-player effects
     // only. The local wizard is hurt only by a hostile caster's implosion.
     explode({
@@ -308,19 +315,12 @@ function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void 
       pb.applyImpulse({ x: pdx * inv, y: pdy * inv * 0.3, z: pdz * inv }, true);
     }
 
-    // Matter spiralling into the well.
-    const a = Math.random() * Math.PI * 2;
-    spawnBurst({
-      position: [cx + Math.cos(a) * BH_RADIUS * 0.7, cy + (Math.random() - 0.5) * 2, cz + Math.sin(a) * BH_RADIUS * 0.7],
-      count: 1,
-      color: ["#c89cff", "#5a2d8a"],
-      speed: 0,
-      upward: 0,
-      ttl: 0.5,
-      size: 0.07,
-      gravity: 0,
-      drag: 0,
-    });
+    // Matter spiralling into the well along its accretion disc, and rings
+    // of light falling through the event horizon.
+    ringClock.current -= dt;
+    const pulse = ringClock.current <= 0;
+    if (pulse) ringClock.current = BH_RING_EVERY;
+    blackHoleFx(hole.pos, BH_RADIUS, pulse);
 
     if (life.current <= 0) {
       implode();
