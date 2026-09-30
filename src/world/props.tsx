@@ -19,7 +19,7 @@ import {
   removeLightSource,
   type DynamicLightSource,
 } from "../fx/DynamicLights";
-import { shatterFx, torchEmberFx, torchSmokeFx, torchSparkFx } from "../fx/effects";
+import { shatterFx, torchEmberFx, torchSmokeFx, torchSparkFx, runeBurstFx, soulRiseFx } from "../fx/effects";
 import { addFlame, removeFlame, type FlameHandle } from "../fx/Flames";
 import { spawnBurst } from "../fx/Particles";
 import { offerInteraction } from "../game/interactions";
@@ -377,6 +377,7 @@ export function Portal({
         size: 0.05,
         gravity: 0,
         drag: 0.5,
+        style: "spark" as const,
       },
       trail: {
         position: [0, 0, 0] as [number, number, number],
@@ -388,6 +389,7 @@ export function Portal({
         size: 0.05,
         gravity: 0,
         drag: 0.5,
+        style: "glow" as const,
       },
     }),
     [color],
@@ -430,7 +432,8 @@ export function Portal({
     // The seal: holds at 1 while locked; breaks over ~1.3 s once unlocked.
     if (wasLocked.current && !locked) {
       playSealBreak();
-      spawnBurst({ position: [cx, cy, cz], count: 40, color: [color, "#ffffff"], speed: 7, upward: 1, ttl: 1, size: 0.08, gravity: -6 });
+      spawnBurst({ position: [cx, cy, cz], count: 40, color: [color, "#ffffff"], speed: 7, upward: 1, ttl: 1, size: 0.08, gravity: -6, style: "spark" });
+      runeBurstFx([cx, position[1] + 0.05, cz], color);
       flashLight([cx, cy, cz + 0.6], color, 34, 14);
     }
     wasLocked.current = locked;
@@ -578,7 +581,9 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
           speed: 4,
           ttl: 0.7,
           size: 0.08,
+          style: "glow",
         });
+        soulRiseFx([position[0], position[1] + 1.2, position[2]], def.color, 14);
         flashLight([position[0], position[1] + 1.5, position[2]], def.color, 18);
       }
     },

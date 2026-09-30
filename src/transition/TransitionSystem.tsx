@@ -11,6 +11,7 @@ import {
 } from "../audio/sound";
 import { PLAYER } from "../core/config";
 import { flashLight } from "../fx/DynamicLights";
+import { shockwaveFx } from "../fx/effects";
 import { spawnBurst } from "../fx/Particles";
 import { playerPosition } from "../game/player-state";
 import { nearestPortalAnchor } from "./portals";
@@ -303,6 +304,7 @@ function onStage(
           size: 0.07,
           gravity: 1.5,
           drag: 1.2,
+          style: "ember",
         });
       } else if (style.look === "fromDark") {
         playRespawnRise();
@@ -319,6 +321,7 @@ function onStage(
           size: 0.08,
           gravity: 1.2,
           drag: 2.2,
+          style: "glow",
         });
         flashLight([playerPosition.x, playerPosition.y + 1, playerPosition.z], style.color, 14, 9);
       } else {
@@ -335,6 +338,7 @@ function onStage(
             size: 0.08,
             gravity: 0,
             drag: 2.4,
+            style: "spark",
           });
           flashLight(focus, style.color, 30, 14);
         }
@@ -362,7 +366,10 @@ function onStage(
         size: 0.09,
         gravity: -5,
         drag: 2,
+        style: "spark",
       });
+      // The landing: a ring of light runs out across the floor at your feet.
+      shockwaveFx(feet, 2.2, style.color, 0.8);
       flashLight([feet[0], feet[1] + 0.6, feet[2]], style.color, 34, 13);
       return;
     case "idle":
