@@ -1,19 +1,15 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
-import { Group } from "three";
 import { gameEvents } from "../core/events";
 import { Rng } from "../core/rng";
-import {
-  addLightSource,
-  removeLightSource,
-  type DynamicLightSource,
-} from "../fx/DynamicLights";
+import { addLightSource, removeLightSource } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { isHost, useNet } from "../net/netStore";
 import { setOrbProvider } from "../net/replication";
 import { session } from "../net/session";
+import { LootModel } from "../render/models/LootModel";
 import { useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
 import { getItemDef } from "./catalog";
@@ -67,6 +63,19 @@ export function LootOrbs() {
 
   useEffect(() => {
     pushOrb = (orb) => setOrbs((prev) => [...prev, orb]);
+    // Dev-only: conjure a specific drop for looking at loot visuals.
+    if (import.meta.env.DEV) {
+      (window as unknown as Record<string, unknown>).__dropLoot = (
+        defId: string,
+        rarity: ItemInstance["rarity"] = "common",
+        at: Vec3 = [playerPosition.x, 0.5, playerPosition.z - 2.5],
+      ) =>
+        pushOrb?.({
+          id: `orb_dev_${orbCounter++}`,
+          item: { uid: `dev_${orbCounter}`, defId, level: 1, rarity, runLoot: true },
+          position: at,
+        });
+    }
     takeOrbLocal = (orbId, by) => {
       setOrbs((prev) => {
         const orb = prev.find((o) => o.id === orbId);
@@ -129,40 +138,33 @@ export function LootOrbs() {
   );
 }
 
+/** Loot rests on the floor at y=0; anything spawned higher (a pedestal, a
+ * ledge) just floats without a floor decal reaching down to it. */
+function groundOffset(y: number): number {
+  return y >= 0 && y < 3 ? -y : -0.1;
+}
+
 function LootOrb({ orb }: { orb: Orb }) {
-  const group = useRef<Group>(null);
-  const light = useRef<DynamicLightSource | null>(null);
   const requested = useRef(0);
   const def = getItemDef(orb.item.defId);
-  const rarity = RARITIES[orb.item.rarity];
   const [x, y, z] = orb.position;
 
   useEffect(() => {
+    // Better loot throws a little more light (legendary: 2.4 → 4.2).
     const src = addLightSource({
-      position: [x, y + 0.5, z],
+      position: [x, y + 0.6, z],
       color: def.color,
-      intensity: 2.4,
+      intensity: 2.4 + (RARITIES[orb.item.rarity].mult - 1) * 3.6,
       distance: 5,
       priority: 1,
     });
-    light.current = src;
-    return () => {
-      removeLightSource(src);
-      light.current = null;
-    };
+    return () => removeLightSource(src);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useFrame(({ clock }, dt) => {
-    const g = group.current;
-    if (!g) return;
-    const t = clock.elapsedTime;
-    g.position.set(x, y + 0.35 + Math.sin(t * 2.4) * 0.12, z);
-    g.rotation.y = t * 1.6;
-    light.current?.position.copy(g.position);
+  useFrame((_, dt) => {
     requested.current -= dt;
-
-    const d2 = playerPosition.distanceToSquared(g.position);
+    const d2 = (playerPosition.x - x) ** 2 + (playerPosition.y - (y + 0.45)) ** 2 + (playerPosition.z - z) ** 2;
     if (d2 < 5.5) {
       offerInteraction(`E — Take ${itemTitle(orb.item)} · Lv ${orb.item.level}  (${def.desc})`, d2, () => {
         if (isHost()) {
@@ -181,21 +183,8 @@ function LootOrb({ orb }: { orb: Orb }) {
   });
 
   return (
-    <group ref={group} position={orb.position}>
-      <mesh>
-        <octahedronGeometry args={[0.22]} />
-        <meshStandardMaterial
-          color="#0c0c14"
-          emissive={def.color}
-          emissiveIntensity={3.4}
-          toneMapped={false}
-        />
-      </mesh>
-      {/* Rarity halo */}
-      <mesh rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.34, 0.025, 4, 12]} />
-        <meshBasicMaterial color={rarity.color} toneMapped={false} />
-      </mesh>
+    <group position={orb.position}>
+      <LootModel item={orb.item} groundY={groundOffset(y)} />
     </group>
   );
 }

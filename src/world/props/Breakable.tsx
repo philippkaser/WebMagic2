@@ -11,7 +11,7 @@ import { isHost, selectIsHost, useNet } from "../../net/netStore";
 import { registerEntity } from "../../net/replication";
 import { session } from "../../net/session";
 import { COLLISION } from "../../physics/groups";
-import { getTextures } from "../../render/textures";
+import { BarrelModel, CrateModel, PotModel } from "../../render/models/PropModels";
 import type { PropKind, Vec3 } from "../types";
 
 const PROP_GROUPS = COLLISION.prop;
@@ -173,57 +173,21 @@ export function Breakable({
       {kind === "crate" && (
         <>
           <CuboidCollider args={[0.42, 0.42, 0.42]} mass={spec.mass} collisionGroups={PROP_GROUPS} />
-          <CrateMesh />
+          <CrateModel />
         </>
       )}
       {kind === "barrel" && (
         <>
           <CylinderCollider args={[0.48, 0.4]} mass={spec.mass} collisionGroups={PROP_GROUPS} />
-          <BarrelMesh />
+          <BarrelModel />
         </>
       )}
       {kind === "pot" && (
         <>
           <BallCollider args={[0.3]} mass={spec.mass} collisionGroups={PROP_GROUPS} />
-          <PotMesh />
+          <PotModel seed={entityId} />
         </>
       )}
     </RigidBody>
-  );
-}
-
-function CrateMesh() {
-  const tex = useMemo(() => getTextures("planks"), []);
-  return (
-    <mesh castShadow receiveShadow>
-      <boxGeometry args={[0.84, 0.84, 0.84]} />
-      <meshStandardMaterial map={tex.map} normalMap={tex.normalMap} roughness={0.85} />
-    </mesh>
-  );
-}
-
-function BarrelMesh() {
-  const tex = useMemo(() => getTextures("barrel"), []);
-  return (
-    <mesh castShadow receiveShadow>
-      <cylinderGeometry args={[0.36, 0.4, 0.96, 10]} />
-      <meshStandardMaterial map={tex.map} normalMap={tex.normalMap} roughness={0.75} metalness={0.15} />
-    </mesh>
-  );
-}
-
-function PotMesh() {
-  const tex = useMemo(() => getTextures("ceramic"), []);
-  return (
-    <group>
-      <mesh castShadow receiveShadow scale={[1, 1.15, 1]}>
-        <sphereGeometry args={[0.3, 10, 8]} />
-        <meshStandardMaterial map={tex.map} normalMap={tex.normalMap} roughness={0.6} />
-      </mesh>
-      <mesh position={[0, 0.36, 0]}>
-        <cylinderGeometry args={[0.12, 0.16, 0.12, 8]} />
-        <meshStandardMaterial map={tex.map} roughness={0.6} />
-      </mesh>
-    </group>
   );
 }
