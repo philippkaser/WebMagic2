@@ -35,7 +35,7 @@ export function Village() {
   const gear = useGame((s) => gearLevel(s.equipment));
   const range = useMemo(() => entryRange(gear), [gear]);
   const groundTex = useMemo(() => getTextures("dirt", 22, 22), []);
-  const wallTex = useMemo(() => getTextures("stone"), []);
+  const wallTex = useMemo(() => getTextures("timber"), []);
 
   useEffect(() => {
     scene.fog = new Fog("#0a0d18", 18, 70);

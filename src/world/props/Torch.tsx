@@ -8,7 +8,7 @@ import type { Vec3 } from "../types";
 
 /** Wall torch: flickering warm light (via the dynamic light pool), glowing
  * ember head, drifting sparks. */
-export function Torch({ position }: { position: Vec3 }) {
+export function Torch({ position, color = "#ff9a4d" }: { position: Vec3; color?: string }) {
   const group = useRef<Group>(null);
   const light = useRef<DynamicLightSource | null>(null);
   const worldPos = useRef(new Vector3(...position));
@@ -23,7 +23,7 @@ export function Torch({ position }: { position: Vec3 }) {
     g.getWorldPosition(worldPos.current);
     const src = addLightSource({
       position: [worldPos.current.x, worldPos.current.y + 0.25, worldPos.current.z + 0.2],
-      color: "#ff9a4d",
+      color,
       intensity: 7,
       distance: 10,
       priority: 1,
@@ -33,7 +33,7 @@ export function Torch({ position }: { position: Vec3 }) {
       removeLightSource(src);
       light.current = null;
     };
-  }, [position]);
+  }, [position, color]);
 
   useFrame(({ clock }, dt) => {
     const t = clock.elapsedTime + seed;
@@ -48,7 +48,7 @@ export function Torch({ position }: { position: Vec3 }) {
       spawnBurst({
         position: [w.x, w.y + 0.12, w.z],
         count: 1,
-        color: ["#ffb257", "#ff6b2e"],
+        color: ["#ffb257", color],
         speed: 0.5,
         upward: 1.3,
         ttl: 0.8,
@@ -67,7 +67,7 @@ export function Torch({ position }: { position: Vec3 }) {
       </mesh>
       <mesh position={[0, 0.08, 0.05]}>
         <sphereGeometry args={[0.09, 8, 6]} />
-        <meshStandardMaterial color="#200" emissive="#ff8b3d" emissiveIntensity={4.5} toneMapped={false} />
+        <meshStandardMaterial color="#200" emissive={color} emissiveIntensity={4.5} toneMapped={false} />
       </mesh>
     </group>
   );
