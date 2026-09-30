@@ -19,6 +19,7 @@ import { PeerBodies } from "../net/PeerBodies";
 import { RemoteWizards } from "../net/RemoteWizards";
 import { StaffView } from "../player/StaffView";
 import { Effects } from "../render/Effects";
+import { TransitionSystem } from "../transition/TransitionSystem";
 import { useGame } from "../state/gameStore";
 import { generateFloor } from "../world/gen";
 import { omenRules } from "../world/omens";
@@ -84,6 +85,9 @@ export function GameScene() {
         <CastingSystem />
         <InteractionSystem />
         <ConsumableSystem />
+        {/* Portal journeys: camera pull/FOV/roll and the vortex tunnel that
+            covers every scene switch (transition/). */}
+        <TransitionSystem />
         {/* Tiny procedural environment map: gives the wet slabs and metal
             trims something interesting to reflect without external assets. */}
         <Environment resolution={64} frames={1}>

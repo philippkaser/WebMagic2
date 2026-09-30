@@ -9,7 +9,7 @@ import {
 } from "@react-three/rapier";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, MeshStandardMaterial, Vector3 } from "three";
-import { playHit, playPortal } from "../audio/sound";
+import { playHit, playPortal, playSealBreak, playSealedTouch } from "../audio/sound";
 import { GROUPS } from "../core/config";
 import { Rng, hashSeed } from "../core/rng";
 import { explode, sanitizeHit, type HitData } from "../weapons/damage";
@@ -34,8 +34,11 @@ import { isHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
 import { useNetBody } from "../net/NetSystems";
 import { useGame } from "../state/gameStore";
+import { registerPortalAnchor } from "../transition/portals";
+import { smoothstep } from "../transition/timeline";
+import { isTraveling } from "../transition/travel";
 import { PEDESTAL_ORB_Y, PedestalModel } from "../render/models/PedestalModel";
-import { PortalModel } from "../render/models/PortalModel";
+import { PORTAL_RING_Y, PortalModel, newPortalDrive, portalSpinDir } from "../render/models/PortalModel";
 import { BarrelModel, CrateModel, PotModel } from "../render/models/PropModels";
 import { TORCH_EMBER_INTENSITY, TorchModel } from "../render/models/TorchModel";
 import type { PropKind, Vec3 } from "./types";
@@ -296,9 +299,13 @@ export function Torch({
   );
 }
 
-/** Interactive portal ring. While `locked`, it burns dim, shows its rune
- * seal and refuses use. The look is render/models/PortalModel; this is the
- * light, the sparks, the spin and the prompt. */
+/** Interactive portal ring. The look is render/models/PortalModel; this is
+ * the behaviour: the pooled light, the sparks and the motes being drawn in,
+ * the prompt, and the numbers that drive the vortex (proximity, the seal, the
+ * surge when a journey starts here). While `locked` it burns dim behind its
+ * rune seal and refuses use — trying it makes the seal flare; when it unlocks
+ * mid-floor (the Warden falls) the seal visibly breaks. Open portals register
+ * a travel anchor so the journey (transition/) opens around this ring. */
 export function Portal({
   position,
   color,
@@ -314,10 +321,50 @@ export function Portal({
   locked?: boolean;
   lockedPrompt?: string;
 }) {
-  const disc = useRef<MeshStandardMaterial>(null);
-  const group = useRef<Group>(null);
+  // Created once: the model reads it every frame, this behaviour writes it.
+  const [drive] = useState(() => newPortalDrive(locked));
   const light = useRef<DynamicLightSource | null>(null);
   const sparkClock = useRef(0);
+  const wasLocked = useRef(locked);
+  /** Motes spiralling into the ring, drawn as trails of short-lived sparks:
+   * per mote an angle, a radius and the countdown to its next spark. */
+  const [comets] = useState(() =>
+    Array.from({ length: PORTAL_COMETS }, (_, i) => ({
+      angle: (i / PORTAL_COMETS) * Math.PI * 2,
+      radius: 0,
+      side: i % 2 ? 1 : -1,
+      emit: 0,
+    })),
+  );
+  // Reusable burst options (rim sparks, mote trails) — no per-frame garbage.
+  const fx = useMemo(
+    () => ({
+      spin: portalSpinDir(color),
+      rim: {
+        position: [0, 0, 0] as [number, number, number],
+        count: 1,
+        color,
+        speed: 0.4,
+        upward: 0.7,
+        ttl: 0.9,
+        size: 0.05,
+        gravity: 0,
+        drag: 0.5,
+      },
+      trail: {
+        position: [0, 0, 0] as [number, number, number],
+        count: 1,
+        color,
+        speed: 0.05,
+        upward: 0,
+        ttl: 0.4,
+        size: 0.05,
+        gravity: 0,
+        drag: 0.5,
+      },
+    }),
+    [color],
+  );
 
   useEffect(() => {
     const src = addLightSource({
@@ -334,39 +381,92 @@ export function Portal({
     };
   }, [position, color]);
 
-  useFrame(({ clock }, dt) => {
+  useEffect(() => {
+    if (locked) return;
+    return registerPortalAnchor({
+      x: position[0],
+      y: position[1] + PORTAL_RING_Y,
+      z: position[2],
+      surge: () => {
+        drive.surge = 1;
+      },
+    });
+  }, [position, locked, drive]);
+
+  useFrame(({ clock }, rawDt) => {
+    const dt = Math.min(rawDt, 0.1);
     const t = clock.elapsedTime;
-    if (disc.current) {
-      disc.current.emissiveIntensity = locked ? 0.35 : 1.9 + Math.sin(t * 2.2) * 0.5;
+    const cx = position[0];
+    const cy = position[1] + PORTAL_RING_Y;
+    const cz = position[2];
+
+    // The seal: holds at 1 while locked; breaks over ~1.3 s once unlocked.
+    if (wasLocked.current && !locked) {
+      playSealBreak();
+      spawnBurst({ position: [cx, cy, cz], count: 40, color: [color, "#ffffff"], speed: 7, upward: 1, ttl: 1, size: 0.08, gravity: -6 });
+      flashLight([cx, cy, cz + 0.6], color, 34, 14);
     }
+    wasLocked.current = locked;
+    drive.seal = locked ? 1 : Math.max(0, drive.seal - dt / 1.3);
+    drive.surge = Math.max(0, drive.surge - dt * 0.8);
+    drive.refusal = Math.max(0, drive.refusal - dt * 1.8);
+
+    const dx = playerPosition.x - cx;
+    const dz = playerPosition.z - cz;
+    const d2 = dx * dx + dz * dz;
+    const near = 1 - smoothstep(1.4, 9, Math.sqrt(d2));
+    drive.proximity += (near - drive.proximity) * Math.min(1, dt * 3);
+    const prox = drive.proximity;
+
     if (light.current) {
-      light.current.intensity = locked ? 1.5 : 9 + Math.sin(t * 2.2) * 1.2;
-    }
-    if (group.current) group.current.rotation.z = t * (locked ? 0.06 : 0.35);
-
-    sparkClock.current -= dt;
-    if (sparkClock.current <= 0 && !locked) {
-      sparkClock.current = 0.09;
-      const a = Math.random() * Math.PI * 2;
-      spawnBurst({
-        position: [position[0] + Math.cos(a) * 1.1, position[1] + 1.5 + Math.sin(a) * 1.1, position[2]],
-        count: 1,
-        color,
-        speed: 0.4,
-        upward: 0.7,
-        ttl: 0.9,
-        size: 0.05,
-        gravity: 0,
-        drag: 0.5,
-      });
+      light.current.intensity = locked
+        ? 1.5 + drive.refusal * 7
+        : (8 + prox * 5 + drive.surge * 16) * (1 - drive.seal * 0.8) + Math.sin(t * 2.2) * 1.2;
     }
 
-    const d2 =
-      (playerPosition.x - position[0]) ** 2 + (playerPosition.z - position[2]) ** 2;
-    if (d2 < 7) {
+    // Sparks and motes only near the player: far away they're a few pixels
+    // in the fog, and every one costs the shared particle pool a slot.
+    if (!locked && d2 < PORTAL_FX_RANGE_SQ) {
+      // Sparks thrown off the rim — more of them as you come close.
+      sparkClock.current -= dt;
+      if (sparkClock.current <= 0) {
+        sparkClock.current = 0.09 / (1 + prox * 1.5);
+        const a = Math.random() * Math.PI * 2;
+        fx.rim.position[0] = cx + Math.cos(a) * 1.1;
+        fx.rim.position[1] = cy + Math.sin(a) * 1.1;
+        fx.rim.position[2] = cz;
+        spawnBurst(fx.rim);
+      }
+      // Motes drawn in: each spirals toward the heart, leaving a trail of
+      // sparks, then respawns out in the air around the ring.
+      const pull = 1 + prox * 1.4 + drive.surge * 3;
+      for (const m of comets) {
+        if (m.radius <= 0.12) {
+          m.radius = 1.9 + Math.random() * 0.9;
+          m.angle = Math.random() * Math.PI * 2;
+        }
+        m.radius -= dt * pull * (0.35 + (2.4 - Math.min(m.radius, 2.4)) * 0.9);
+        m.angle += dt * pull * (1.2 + 2.2 / Math.max(m.radius, 0.3)) * fx.spin;
+        m.emit -= dt;
+        if (m.emit <= 0 && m.radius > 0.12) {
+          m.emit = 0.05;
+          const depth = Math.min(1, (m.radius - 1) / 1.4);
+          fx.trail.position[0] = cx + Math.cos(m.angle) * m.radius;
+          fx.trail.position[1] = cy + Math.sin(m.angle) * m.radius;
+          fx.trail.position[2] = cz + m.side * Math.max(0, depth) * 0.7;
+          fx.trail.size = 0.05 + prox * 0.02;
+          spawnBurst(fx.trail);
+        }
+      }
+    }
+
+    if (d2 < 7 && !isTraveling()) {
       const above: [number, number, number] = [position[0], position[1] + 3, position[2]];
       if (locked) {
-        offerInteraction(lockedPrompt, d2, () => {}, above);
+        offerInteraction(lockedPrompt, d2, () => {
+          playSealedTouch();
+          drive.refusal = 1;
+        }, above);
       } else {
         offerInteraction(
           prompt,
@@ -383,10 +483,15 @@ export function Portal({
 
   return (
     <group position={position}>
-      <PortalModel color={color} locked={locked} discRef={disc} ringRef={group} />
+      <PortalModel color={color} locked={locked} drive={drive} />
     </group>
   );
 }
+
+/** Motes spiralling into each open portal (see Portal). */
+const PORTAL_COMETS = 3;
+/** Beyond this (m, squared) a portal throws no sparks or motes. */
+const PORTAL_FX_RANGE_SQ = 20 * 20;
 
 // ── Floor treasure networking ────────────────────────────────────────────────
 // One treasure per floor, first come first served, granted by the authority.
