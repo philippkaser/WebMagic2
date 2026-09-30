@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from "react";
 import {
   AdditiveBlending,
   BoxGeometry,
+  Color,
   CylinderGeometry,
   DoubleSide,
   Group,
@@ -22,8 +23,8 @@ import { getFxTexture } from "./modelTextures";
  * coals — where the light source hangs. */
 
 const FLAME_FRAMES = 4;
-const flameGeo = new PlaneGeometry(0.34, 0.62);
-flameGeo.translate(0, 0.26, 0); // pivot at the base so flicker scales upward
+const flameGeo = new PlaneGeometry(0.46, 0.8);
+flameGeo.translate(0, 0.33, 0); // pivot at the base so flicker scales upward
 const coalGeo = new IcosahedronGeometry(0.06, 0);
 const tmp = new Vector3();
 
@@ -58,7 +59,7 @@ const templates: Record<"wall" | "free", Group | null> = { wall: null, free: nul
 /** `wallYaw`: Y rotation that points the bracket (local -Z) at the wall it
  * hangs on, or null for a free-standing torch. The flame is never rotated
  * with it — it billboards in world space. */
-export function TorchModel({ wallYaw, seed }: { wallYaw: number | null; seed: number }) {
+export function TorchModel({ wallYaw, seed, color = "#ff9a4d" }: { wallYaw: number | null; seed: number; color?: string }) {
   const wall = wallYaw !== null;
   const flame = useRef<Mesh>(null);
   const body = useMemo(() => {
@@ -72,14 +73,15 @@ export function TorchModel({ wallYaw, seed }: { wallYaw: number | null; seed: nu
     map.repeat.set(1 / FLAME_FRAMES, 1);
     return new MeshBasicMaterial({
       map,
-      color: "#ffd0a0",
+      // Tint the painted flame toward the light color; white keeps the core hot.
+      color: new Color(color).lerp(new Color("#ffffff"), 0.45),
       transparent: true,
       blending: AdditiveBlending,
       depthWrite: false,
       side: DoubleSide,
       toneMapped: false,
     });
-  }, []);
+  }, [color]);
   useEffect(() => () => {
     flameMat.map?.dispose();
     flameMat.dispose();
@@ -107,7 +109,7 @@ export function TorchModel({ wallYaw, seed }: { wallYaw: number | null; seed: nu
   return (
     <group>
       <primitive object={body} rotation-y={wallYaw ?? 0} />
-      <mesh geometry={coalGeo} material={glow("#ff8b3d", 4)} />
+      <mesh geometry={coalGeo} material={glow(color, 4)} />
       <mesh ref={flame} geometry={flameGeo} material={flameMat} position={[0, 0.02, 0]} />
     </group>
   );

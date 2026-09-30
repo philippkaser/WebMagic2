@@ -1,4 +1,5 @@
 import { useFrame } from "@react-three/fiber";
+import { CuboidCollider, RigidBody } from "@react-three/rapier";
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { Color, DoubleSide, Group, InstancedMesh, Object3D, ShaderMaterial } from "three";
 import { playPortal } from "../../audio/sound";
@@ -8,7 +9,8 @@ import { spawnBurst } from "../../fx/Particles";
 import { offerInteraction } from "../../game/interactions";
 import { playerPosition } from "../../game/player-state";
 import { RIP_FRAG, RIP_VERT } from "../../render/shaders/rift";
-import { getTextures } from "../../render/textures";
+import { RIFT_STONES, RiftFrameModel } from "../../render/models/AltarModels";
+import { COLLISION } from "../../physics/groups";
 import type { Vec3 } from "../types";
 
 /** Fancy motes swirling around the rip: a swarm of glowing shards that spiral
@@ -95,7 +97,7 @@ export function Portal({
   const activity = useRef(locked ? 0.12 : 1);
 
   const seedKey = position.join(",");
-  const { material, stepTex } = useMemo(() => {
+  const material = useMemo(() => {
     const material = new ShaderMaterial({
       vertexShader: RIP_VERT,
       fragmentShader: RIP_FRAG,
@@ -109,7 +111,7 @@ export function Portal({
       depthWrite: false,
       side: DoubleSide,
     });
-    return { material, stepTex: getTextures("runestone") };
+    return material;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedKey]);
 
@@ -189,11 +191,14 @@ export function Portal({
 
   return (
     <group position={position}>
-      {/* Cracked runestone step at the foot of the tear */}
-      <mesh position={[0, 0.12, 0]} receiveShadow>
-        <boxGeometry args={[3.4, 0.24, 1.6]} />
-        <meshStandardMaterial map={stepTex.map} normalMap={stepTex.normalMap} roughness={0.85} />
-      </mesh>
+      {/* Rune dais and the broken standing stones framing the tear; the
+          stones are solid, the dais stays walk-through as the old step was. */}
+      <RiftFrameModel color={color} />
+      <RigidBody type="fixed" colliders={false}>
+        {RIFT_STONES.map((s, i) => (
+          <CuboidCollider key={i} position={s.pos} args={s.half} collisionGroups={COLLISION.world} />
+        ))}
+      </RigidBody>
       {/* The rip itself — one shader plane — plus the mote swarm around it */}
       <group ref={group} position={[0, 1.8, 0]}>
         <mesh material={material}>

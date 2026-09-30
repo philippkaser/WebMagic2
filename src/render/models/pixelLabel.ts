@@ -59,6 +59,7 @@ const GLYPHS: Record<string, string> = {
   "#": "avaava0",
   "+": "044v440",
   "(": "2488842",
+  "▼": "0ve4000",
   ")": "8422248",
 };
 
@@ -72,11 +73,13 @@ function glyph(ch: string): string {
   return GLYPHS[ch] ?? GLYPHS[ch.toUpperCase()] ?? GLYPHS["?"];
 }
 
-function textWidth(text: string): number {
-  return Math.max(0, text.length * ADVANCE - 1);
+export function textWidth(text: string, scale = 1): number {
+  return Math.max(0, text.length * ADVANCE - 1) * scale;
 }
 
-function drawText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string) {
+/** Draw `text` in the 5x7 pixel font with a 1px drop shadow, at an integer
+ * `scale` (each font pixel becomes scale×scale canvas pixels). */
+export function drawPixelText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string, scale = 1) {
   // One-pixel drop shadow first, then the letters.
   for (const [dx, dy, c] of [
     [1, 1, "rgba(0,0,0,0.85)"],
@@ -88,7 +91,9 @@ function drawText(ctx: CanvasRenderingContext2D, text: string, x: number, y: num
       for (let r = 0; r < GLYPH_H; r++) {
         const bits = parseInt(rows[r], 32);
         for (let b = 0; b < GLYPH_W; b++) {
-          if (bits & (1 << (GLYPH_W - 1 - b))) ctx.fillRect(x + i * ADVANCE + b + dx, y + r + dy, 1, 1);
+          if (bits & (1 << (GLYPH_W - 1 - b))) {
+            ctx.fillRect(x + (i * ADVANCE + b) * scale + dx, y + r * scale + dy, scale, scale);
+          }
         }
       }
     }
@@ -152,7 +157,7 @@ export function pixelLabel(spec: LabelSpec): SpriteMaterial {
   rune(ctx, w - 4, 4 + Math.floor(GLYPH_H / 2) - 1, spec.accent);
 
   lines.forEach((l, i) => {
-    drawText(ctx, l.text, Math.floor((w - textWidth(l.text)) / 2), 3 + i * lineH, l.color);
+    drawPixelText(ctx, l.text, Math.floor((w - textWidth(l.text)) / 2), 3 + i * lineH, l.color);
   });
 
   if (spec.pips) {

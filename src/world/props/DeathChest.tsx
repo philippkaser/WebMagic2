@@ -1,6 +1,6 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import { CanvasTexture, Group, LinearFilter, MeshStandardMaterial, SpriteMaterial } from "three";
+import { Group, MeshStandardMaterial, SpriteMaterial } from "three";
 import { playPickup } from "../../audio/sound";
 import { gameEvents } from "../../core/events";
 import { addLightSource, flashLight, removeLightSource } from "../../fx/DynamicLights";
@@ -10,6 +10,7 @@ import { playerPosition } from "../../game/player-state";
 import type { ChestInfo } from "../../net/protocol";
 import { session } from "../../net/session";
 import { ChestModel } from "../../render/models/ChestModel";
+import { pixelLabel } from "../../render/models/pixelLabel";
 import type { Vec3 } from "../types";
 
 /** What a fallen wizard left behind: a chest holding everything the dungeon
@@ -21,7 +22,7 @@ export function DeathChest({ chest, position }: { chest: ChestInfo; position: Ve
   const seam = useRef<MeshStandardMaterial>(null);
   const requested = useRef(0);
   const remains = chest.slot !== null;
-  const label = useMemo(() => chestLabel(chest.owner, chest.itemCount, remains), [chest, remains]);
+  const label = useMemo(() => chestLabel(chest.owner, chest.itemCount, remains, chest.glow), [chest, remains]);
 
   useEffect(() => {
     const src = addLightSource({
@@ -74,29 +75,19 @@ export function DeathChest({ chest, position }: { chest: ChestInfo; position: Ve
   return (
     <group position={position}>
       <ChestModel lidRef={lid} seamRef={seam} glow={chest.glow} remains={remains} />
-      <sprite position={[0, 1.35, 0]} scale={[1.8, 0.45, 1]} material={label} />
+      <sprite position={[0, 1.35, 0]} scale={[...(label.userData.size as [number, number]), 1]} material={label} />
     </group>
   );
 }
 
-function chestLabel(owner: string, count: number, remains: boolean): SpriteMaterial {
-  const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 64;
-  const ctx = canvas.getContext("2d")!;
-  ctx.font = "bold 22px 'Courier New', monospace";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  const text = remains ? `✝ ${owner}` : `${owner}'s chest`;
-  const w = Math.min(ctx.measureText(text).width + 20, 250);
-  ctx.fillStyle = "rgba(0,0,0,0.55)";
-  ctx.fillRect(128 - w / 2, 8, w, 30);
-  ctx.fillStyle = remains ? "#b9b0a0" : "#ffd27a";
-  ctx.fillText(text, 128, 24);
-  ctx.font = "16px 'Courier New', monospace";
-  ctx.fillStyle = "#8f86a0";
-  ctx.fillText(`${count} item${count === 1 ? "" : "s"}`, 128, 52);
-  const tex = new CanvasTexture(canvas);
-  tex.minFilter = LinearFilter;
-  return new SpriteMaterial({ map: tex, depthWrite: false, transparent: true });
+/** Pixel-font plaque: whose chest, and how much it holds. Remains read in
+ * bone-grey with a grave cross; a fresh chest in gold, bordered in its glow. */
+function chestLabel(owner: string, count: number, remains: boolean, glow: string): SpriteMaterial {
+  return pixelLabel({
+    lines: [
+      { text: remains ? `✝ ${owner}` : `${owner}'s chest`, color: remains ? "#c9c0b0" : "#ffd27a" },
+      { text: `${count} item${count === 1 ? "" : "s"}`, color: "#a89cc0" },
+    ],
+    accent: remains ? "#6a6070" : glow,
+  });
 }

@@ -1,6 +1,5 @@
 import { useFrame } from "@react-three/fiber";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Group } from "three";
 import { gameEvents } from "../../core/events";
 import { Rng } from "../../core/rng";
 import { addLightSource, flashLight, removeLightSource } from "../../fx/DynamicLights";
@@ -13,6 +12,8 @@ import { rollItem } from "../../items/loot";
 import { isHost, useNet } from "../../net/netStore";
 import { setTreasureProvider } from "../../net/replication";
 import { session } from "../../net/session";
+import { AltarModel, ALTAR_TOP } from "../../render/models/AltarModels";
+import { LootModel } from "../../render/models/LootModel";
 import { useGame } from "../../state/gameStore";
 import type { Vec3 } from "../types";
 
@@ -25,7 +26,6 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
   const [taken, setTaken] = useState(false);
   const takenRef = useRef(false);
   const requested = useRef(0);
-  const orb = useRef<Group>(null);
 
   const consume = useCallback(
     (byMe: boolean, silent = false) => {
@@ -88,13 +88,8 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
     return () => removeLightSource(src);
   }, [taken, def, position]);
 
-  useFrame(({ clock }, dt) => {
+  useFrame((_, dt) => {
     if (taken) return;
-    const g = orb.current;
-    if (g) {
-      g.position.y = 1.45 + Math.sin(clock.elapsedTime * 2) * 0.09;
-      g.rotation.y = clock.elapsedTime * 1.4;
-    }
     requested.current -= dt;
     const d2 =
       (playerPosition.x - position[0]) ** 2 + (playerPosition.z - position[2]) ** 2;
@@ -117,21 +112,10 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
 
   return (
     <group position={position}>
-      <mesh position={[0, 0.55, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[0.3, 0.42, 1.1, 8]} />
-        <meshStandardMaterial color="#4e4658" roughness={0.8} />
-      </mesh>
+      <AltarModel color={def.color} />
       {!taken && (
-        <group ref={orb} position={[0, 1.45, 0]}>
-          <mesh castShadow>
-            <octahedronGeometry args={[0.26]} />
-            <meshStandardMaterial
-              color="#0c0c14"
-              emissive={def.color}
-              emissiveIntensity={2.8}
-              toneMapped={false}
-            />
-          </mesh>
+        <group position={[0, ALTAR_TOP, 0]}>
+          <LootModel item={item} groundY={0} float={0.42} />
         </group>
       )}
     </group>

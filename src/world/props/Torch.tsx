@@ -20,11 +20,11 @@ const PROBES: [number, number][] = [
   [0, -1],
 ];
 
-/** Wall torch: flickering warm light (via the dynamic light pool), a flame
+/** Wall torch: flickering light (warm by default; biomes may tint it) (via the dynamic light pool), a flame
  * card over glowing coals, drifting sparks. The level data only gives a
  * position, so the torch feels for the nearest wall with a few short ray
  * casts and turns its bracket toward it. */
-export function Torch({ position }: { position: Vec3 }) {
+export function Torch({ position, color = "#ff9a4d" }: { position: Vec3; color?: string }) {
   const group = useRef<Group>(null);
   const light = useRef<DynamicLightSource | null>(null);
   const worldPos = useRef(new Vector3(...position));
@@ -42,7 +42,7 @@ export function Torch({ position }: { position: Vec3 }) {
     g.getWorldPosition(worldPos.current);
     const src = addLightSource({
       position: [worldPos.current.x, worldPos.current.y + 0.25, worldPos.current.z + 0.2],
-      color: "#ff9a4d",
+      color,
       intensity: 7,
       distance: 10,
       priority: 1,
@@ -53,7 +53,7 @@ export function Torch({ position }: { position: Vec3 }) {
       removeLightSource(src);
       light.current = null;
     };
-  }, [position]);
+  }, [position, color]);
 
   useFrame(({ clock }, dt) => {
     const t = clock.elapsedTime + seed;
@@ -89,7 +89,7 @@ export function Torch({ position }: { position: Vec3 }) {
       spawnBurst({
         position: [w.x, w.y + 0.25, w.z],
         count: 1,
-        color: ["#ffb257", "#ff6b2e"],
+        color: [color, "#ffb257"],
         speed: 0.5,
         upward: 1.3,
         ttl: 0.8,
@@ -102,7 +102,7 @@ export function Torch({ position }: { position: Vec3 }) {
 
   return (
     <group ref={group} position={position}>
-      <TorchModel wallYaw={wallYaw} seed={seed} />
+      <TorchModel wallYaw={wallYaw} seed={seed} color={color} />
     </group>
   );
 }
