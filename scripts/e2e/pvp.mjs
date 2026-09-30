@@ -43,7 +43,7 @@ async function boot(name) {
 const state = (p) =>
   p.evaluate(() => {
     const g = window.__game.getState();
-    return { phase: g.phase, floor: g.floor, inst: g.instanceId, satchel: g.satchel.length, run: g.run, lastDeath: g.lastDeath };
+    return { phase: g.phase, floor: g.floor, inst: g.instanceId, mode: window.__session.mode, satchel: g.satchel.length, run: g.run, lastDeath: g.lastDeath };
   });
 
 const A = await boot("Alda");
@@ -55,6 +55,7 @@ await sleep(6000);
 
 const [sa, sb] = [await state(A), await state(B)];
 if (sa.phase !== "dungeon" || sb.phase !== "dungeon") fail(`both should be in the dungeon (${sa.phase}/${sb.phase})`);
+if (sa.mode !== "online" || sb.mode !== "online") fail(`both must be online (${sa.mode}/${sb.mode}) — is the server running?`);
 if (sa.inst !== sb.inst) fail("server should have placed both in one instance (WEBMAGIC_JOIN_CHANCE=1?)");
 ok(`both wizards share ${sa.inst} on floor ${sa.floor}`);
 
