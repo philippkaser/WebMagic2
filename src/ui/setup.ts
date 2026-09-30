@@ -1,5 +1,5 @@
 import "@fontsource/jacquard-12/400.css";
-import "@fontsource/pixelify-sans/400.css";
+import "@fontsource/tiny5/400.css";
 import "@fontsource/silkscreen/400.css";
 import "./styles.css";
 import { FRAMES, frameImage, parchmentImage, stoneImage } from "./pixelArt";

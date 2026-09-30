@@ -16,7 +16,7 @@
   color: var(--wm-parchment);
   -webkit-font-smoothing: none;
   font-smooth: never;
-  /* Pixelify's fi/fl ligatures read as "A" at pixel sizes. */
+  /* Pixel faces: ligatures only ever hurt legibility. */
   font-variant-ligatures: none;
 }
 .wm-root * { box-sizing: border-box; }

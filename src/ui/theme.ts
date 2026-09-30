@@ -30,11 +30,11 @@ export const color = {
 
 export const font = {
   /** Pixel blackletter — titles, floor numbers, the big moments. */
-  title: "'Jacquard 12', 'Pixelify Sans', serif",
+  title: "'Jacquard 12', 'Tiny5', serif",
   /** Crisp pixel sans — all readable body text. */
-  body: "'Pixelify Sans', 'Silkscreen', monospace",
+  body: "'Tiny5', 'Silkscreen', monospace",
   /** Tiny all-caps pixel labels and numbers. */
-  label: "'Silkscreen', 'Pixelify Sans', monospace",
+  label: "'Silkscreen', 'Tiny5', monospace",
 } as const;
 
 export function rarityColor(rarity: Rarity): string {

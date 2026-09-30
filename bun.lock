@@ -6,8 +6,8 @@
       "name": "webmagic",
       "dependencies": {
         "@fontsource/jacquard-12": "^5.3.0",
-        "@fontsource/pixelify-sans": "^5.3.0",
         "@fontsource/silkscreen": "^5.3.0",
+        "@fontsource/tiny5": "^5.3.0",
         "@react-three/drei": "^10.0.0",
         "@react-three/fiber": "^9.0.0",
         "@react-three/postprocessing": "^3.0.0",
@@ -127,9 +127,9 @@
 
     "@fontsource/jacquard-12": ["@fontsource/jacquard-12@5.3.0", "", {}, "sha512-P1a2NHci2j/ArWzw1AheOtceKy+78J0s891FLuiGhrq0Nj5tfqCAa+FgcXE9dlWvjrTdC/wlXtahcL5JbOAFDA=="],
 
-    "@fontsource/pixelify-sans": ["@fontsource/pixelify-sans@5.3.0", "", {}, "sha512-4RCe9nXbi7wUu5+H0FNX1sgPZ2kJ1MmY1uTkEfvQIzzqhoS8zGKJaJfdK8oreE0OU+5gM+NdurFi3H3FJRBvyw=="],
-
     "@fontsource/silkscreen": ["@fontsource/silkscreen@5.3.0", "", {}, "sha512-M1NQ3LQH0LFNvyFPd/piHEGMImPPtpLglNnLC6Vdcq9kL0jNIOtTQmksAWCc4enbDnw1OnIpZtjNEfRqYm/QmA=="],
+
+    "@fontsource/tiny5": ["@fontsource/tiny5@5.3.0", "", {}, "sha512-29H01ByMRs6uiLeOoBnZLedf0dR3pF5A53cIBzhp1/Y6Bu5D0t5selTb4TWs3ENoc/OK71rOed5xAdvBywe4aQ=="],
 
     "@jridgewell/gen-mapping": ["@jridgewell/gen-mapping@0.3.13", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.0", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA=="],
 
