@@ -42,8 +42,11 @@ export function Slime({
     floor,
     healthScale: cfg.hp,
     deathFx: {
-      burst: { count: 20, color: ["#7fdc4a", "#2f5a1a", "#c8ff8a"], speed: 5, ttl: 0.7, size: 0.09 + cfg.size * 0.05 },
+      // Goo: opaque chunky blobs that splat and bounce (the "pixel" look).
+      burst: { count: 20, color: ["#7fdc4a", "#2f5a1a", "#c8ff8a"], speed: 5, ttl: 0.9, size: 0.09 + cfg.size * 0.05 },
       light: { color: "#7fdc4a", intensity: 14 },
+      soul: "#a8f06a",
+      scale: 0.45 + cfg.size * 0.45,
     },
     // The whole slime's loot lands when its LAST piece dies, not on every split.
     drops: { lootChance: last ? ENEMY_LOOT_CHANCE : 0, minY: 0.4 },

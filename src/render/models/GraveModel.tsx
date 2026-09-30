@@ -164,6 +164,10 @@ export function GraveModel({
       size: 0.05,
       gravity: 0.3,
       drag: 0.7,
+      // Wandering soul-light rather than a solid chip.
+      style: "soul",
+      endColor: ghostHex,
+      intensity: 2,
     });
   });
 

@@ -7,7 +7,7 @@ import { enemyCast } from "../weapons/hostileEffects";
 import { floorScale } from "../core/config";
 import { gameEvents } from "../core/events";
 import { flashLight } from "../fx/DynamicLights";
-import { spawnBurst } from "../fx/Particles";
+import { castFlareFx, spikeFx, warpFx } from "../fx/effects";
 import { playerPosition } from "../game/player-state";
 import { nearestWizardTo } from "../game/targets";
 import { isHost } from "../net/netStore";
@@ -65,14 +65,7 @@ function SpikeTrap({ pos, floor }: { pos: Vec3; floor: number }) {
       pop.current = 1;
       useGame.getState().takeDamage(def.baseDamage * scale.enemyDamage);
       playHit();
-      spawnBurst({
-        position: [pos[0], pos[1] + 0.15, pos[2]],
-        count: 10,
-        color: ["#c8ccd4", "#ff6a6a"],
-        speed: 3,
-        ttl: 0.4,
-        size: 0.06,
-      });
+      spikeFx(pos);
     }
   });
 
@@ -124,6 +117,8 @@ function DartTrap({ pos, floor }: { pos: Vec3; floor: number }) {
     if (world.castRay(losRay, target.dist - 0.6, true) !== null) return;
     fireTimer.current = 1.6;
     const speed = 26;
+    // Muzzle flash on the emitter's face, down the line of fire.
+    castFlareFx([head.x + aim.x * 0.45, head.y, head.z + aim.z * 0.45], aim, "#ffd24a", undefined, 1.6);
     aim.multiplyScalar(speed);
     enemyCast.announce({
       origin: [head.x + (aim.x / speed) * 0.5, head.y, head.z + (aim.z / speed) * 0.5],
@@ -169,14 +164,7 @@ function WarpTrap({ pos }: { pos: Vec3 }) {
     const dz = playerPosition.z - pos[2];
     if (dx * dx + dz * dz < r2) {
       triggered.current = true;
-      spawnBurst({
-        position: [pos[0], pos[1] + 0.6, pos[2]],
-        count: 22,
-        color: ["#b46bff", "#ffffff"],
-        speed: 5,
-        ttl: 0.7,
-        size: 0.08,
-      });
+      warpFx(pos, "#b46bff");
       flashLight([pos[0], pos[1] + 0.6, pos[2]], "#b46bff", 20);
       playPortal();
       // descend() requires an active floor session; from the dev village arena

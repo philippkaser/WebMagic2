@@ -12,7 +12,7 @@ import {
   removeLightSource,
   type DynamicLightSource,
 } from "../fx/DynamicLights";
-import { spawnBurst } from "../fx/Particles";
+import { boltTrailFx } from "../fx/effects";
 import type { DamageSource } from "../game/damageSource";
 import { isHostileWizard } from "../game/hostility";
 import { nearestHittable } from "../game/registry";
@@ -173,7 +173,9 @@ export function Projectiles() {
 function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => void }) {
   const body = useRef<RapierRigidBody>(null);
   const detonated = useRef(false);
-  const trailClock = useRef(0);
+  /** Where the bolt was last frame — the trail is laid along the segment
+   * between, so it stays continuous at any speed or frame rate. */
+  const prev = useRef({ x: spec.position[0], y: spec.position[1], z: spec.position[2] });
   const light = useRef<DynamicLightSource | null>(null);
 
   const detonate = useCallback(() => {
@@ -252,22 +254,11 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
       }
     }
 
-    trailClock.current -= dt;
-    if (trailClock.current <= 0) {
-      trailClock.current = 0.035;
-      const t = b.translation();
-      spawnBurst({
-        position: [t.x, t.y, t.z],
-        count: 1,
-        color: spec.color,
-        speed: 0.4,
-        upward: 0,
-        ttl: 0.35,
-        size: 0.06,
-        gravity: 0,
-        drag: 0,
-      });
-    }
+    const t = b.translation();
+    boltTrailFx(prev.current, t, spec.color, spec.size);
+    prev.current.x = t.x;
+    prev.current.y = t.y;
+    prev.current.z = t.z;
   });
 
   return (

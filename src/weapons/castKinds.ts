@@ -103,6 +103,7 @@ function burst(
   def: Readonly<BlastSpell | ShockwaveSpell>,
   center: Vector3,
   ctx: AbilityContext,
+  vfx: "blast" | "shockwave" = "blast",
 ): void {
   explode({
     position: center,
@@ -115,6 +116,7 @@ function burst(
     particles: def.particles,
     light: def.light,
     remote: ctx.remote,
+    vfx,
   });
 }
 
@@ -133,7 +135,7 @@ function castBlast(def: Readonly<BlastSpell>, ctx: AbilityContext): void {
 }
 
 function castShockwave(def: Readonly<ShockwaveSpell>, ctx: AbilityContext): void {
-  burst(def, ctx.origin, ctx);
+  burst(def, ctx.origin, ctx, "shockwave");
 }
 
 function castSeed(def: Readonly<SeedSpell>, ctx: AbilityContext): void {

@@ -11,7 +11,7 @@ import { Vector3 } from "three";
 import { playDash, playJump } from "../audio/sound";
 import { EYE_HEIGHT, GROUPS, PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
-import { spawnBurst } from "../fx/Particles";
+import { dashFx, dustPuffFx, hoverWispFx, runeBurstFx } from "../fx/effects";
 import { playerPosition, playerVelocity, setPlayerBody } from "../game/player-state";
 import { publishLocalPose } from "../net/players";
 import { getStats, useGame } from "../state/gameStore";
@@ -139,22 +139,15 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
         jumpBuffer.current = 0;
         coyote.current = 0;
         playJump();
-        dust(t, 6);
+        dust(t, 0.45);
       } else if (stats.jump === "double" && !doubleJumpUsed.current) {
         vy = PLAYER.jumpVelocity * 0.92;
         doubleJumpUsed.current = true;
         jumpBuffer.current = 0;
         playJump();
-        spawnBurst({
-          position: [t.x, t.y - 0.8, t.z],
-          count: 10,
-          color: "#7fe08a",
-          speed: 3,
-          upward: 0.5,
-          ttl: 0.5,
-          size: 0.07,
-          gravity: -3,
-        });
+        // A rune circle flashes underfoot: the air itself was stepped on.
+        fxAt.set(t.x, t.y - FEET, t.z);
+        runeBurstFx(fxAt, DOUBLE_JUMP_COLOR);
       }
     }
 
@@ -169,17 +162,9 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
       vy = PLAYER.hoverFallSpeed;
       hoverClock.current -= dt;
       if (hoverClock.current <= 0) {
-        hoverClock.current = 0.06;
-        spawnBurst({
-          position: [t.x, t.y - 0.9, t.z],
-          count: 2,
-          color: "#8fd0ff",
-          speed: 1.6,
-          upward: -1,
-          ttl: 0.45,
-          size: 0.05,
-          gravity: 0,
-        });
+        hoverClock.current = 0.05;
+        fxAt.set(t.x, t.y - FEET, t.z);
+        hoverWispFx(fxAt, HOVER_COLOR);
       }
     }
 
@@ -199,16 +184,9 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
       dashCooldown.current = PLAYER.dashCooldown;
       playDash();
       trauma.current = Math.min(1, trauma.current + 0.14);
-      spawnBurst({
-        position: [t.x, t.y - 0.4, t.z],
-        count: 14,
-        color: "#e3c8ff",
-        speed: 4,
-        upward: 0.4,
-        ttl: 0.5,
-        size: 0.08,
-        gravity: -2,
-      });
+      // Speed lines pouring past the eyes + an afterimage where we stood.
+      fxAt.set(t.x, t.y + EYE_HEIGHT, t.z);
+      dashFx(fxAt, dir, DASH_COLOR);
     }
 
     b.setLinvel({ x: nvx, y: vy, z: nvz }, true);
@@ -217,7 +195,8 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
     if (grounded && !wasGrounded.current && v.y < -9) {
       landDip.current = Math.min(0.22, -v.y * 0.014);
       trauma.current = Math.min(1, trauma.current + 0.1);
-      dust(t, 10);
+      // Harder landings kick up more.
+      dust(t, Math.min(1.4, -v.y / 14));
     }
     wasGrounded.current = grounded;
     landDip.current = Math.max(0, landDip.current - dt * 1.1);
@@ -281,15 +260,16 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
   );
 }
 
-function dust(t: { x: number; y: number; z: number }, count: number) {
-  spawnBurst({
-    position: [t.x, t.y - 0.85, t.z],
-    count,
-    color: ["#6b5d4d", "#4a4038"],
-    speed: 2.2,
-    upward: 1,
-    ttl: 0.5,
-    size: 0.06,
-    gravity: -6,
-  });
+/** Body centre → sole of the boots. */
+const FEET = 0.88;
+/** Boot/cloak colours of the movement effects (their items' colours). */
+const DOUBLE_JUMP_COLOR = "#7fe08a";
+const HOVER_COLOR = "#8fd0ff";
+const DASH_COLOR = "#e3c8ff";
+/** Scratch for effect positions — the fx copy what they need. */
+const fxAt = new Vector3();
+
+function dust(t: { x: number; y: number; z: number }, strength: number) {
+  fxAt.set(t.x, t.y - FEET, t.z);
+  dustPuffFx(fxAt, strength);
 }

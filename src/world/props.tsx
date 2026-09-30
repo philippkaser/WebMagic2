@@ -19,6 +19,8 @@ import {
   removeLightSource,
   type DynamicLightSource,
 } from "../fx/DynamicLights";
+import { shatterFx, torchEmberFx, torchSmokeFx, torchSparkFx } from "../fx/effects";
+import { addFlame, removeFlame, type FlameHandle } from "../fx/Flames";
 import { spawnBurst } from "../fx/Particles";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
@@ -58,10 +60,14 @@ interface PropSpec {
 }
 
 const SPECS: Record<PropKind, PropSpec> = {
-  crate: { hp: 26, mass: 1.1, shards: ["#a8743c", "#6b4a24"], lootChance: 0.08, explodes: false },
-  barrel: { hp: 42, mass: 2, shards: ["#8a5c2e", "#ff9a3c"], lootChance: 0.08, explodes: true },
-  pot: { hp: 6, mass: 0.4, shards: ["#c98d5f", "#8a5a3a"], lootChance: 0.12, explodes: false },
+  crate: { hp: 26, mass: 1.1, shards: ["#a8743c", "#6b4a24", "#8a5c2e"], lootChance: 0.08, explodes: false },
+  barrel: { hp: 42, mass: 2, shards: ["#8a5c2e", "#5a3a1c", "#6e6e74"], lootChance: 0.08, explodes: true },
+  pot: { hp: 6, mass: 0.4, shards: ["#c98d5f", "#8a5a3a", "#e0b48a"], lootChance: 0.12, explodes: false },
 };
+
+/** Debris amount per prop (a pot is a handful of sherds, a barrel a lot of
+ * staves and hoops). */
+const SHATTER_SCALE: Record<PropKind, number> = { crate: 1, barrel: 1.2, pot: 0.75 };
 
 /** A physical, breakable prop. Every dungeon floor scatters these so rooms
  * double as a physics sandbox: they tumble when shoved, shatter under fire,
@@ -91,14 +97,8 @@ export function Breakable({
       deadRef.current = true;
       const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
       if (!silent) {
-        spawnBurst({
-          position: [t.x, t.y, t.z],
-          count: 22,
-          color: spec.shards,
-          speed: 5,
-          ttl: 0.9,
-          size: 0.09,
-        });
+        // Tumbling lit chunks that bounce and settle, and a puff of dust.
+        shatterFx(t, spec.shards, SHATTER_SCALE[kind]);
         if (!remote) {
           dropLoot([t.x, Math.max(t.y, 0.5), t.z], floor, spec.lootChance);
           dropGold([t.x, Math.max(t.y, 0.5), t.z], floor, GOLD_DROPS.propChance, "prop");
@@ -125,7 +125,7 @@ export function Breakable({
       }
       setDead(true);
     },
-    [floor, position, spec],
+    [floor, position, spec, kind],
   );
 
   const net = useNetBody({
@@ -221,11 +221,15 @@ export function Breakable({
   );
 }
 
-/** Wall torch: flickering warm light (via the dynamic light pool), glowing
- * ember head, drifting sparks. The look is render/models/TorchModel; this is
- * the light, the flicker (shared by light and ember) and the sparks. */
-/** Wall torch. `color`/`intensity` let each depth biome burn its own fire
- * (teal in the Drowned Halls, small and warm in the Hollow). */
+/** Wall torch: a living shader flame (fx/Flames) over the glowing ember head
+ * of render/models/TorchModel, a flickering light from the dynamic pool, and
+ * what a fire sheds — rising embers, a thread of lit smoke, the odd popping
+ * spark. Light, ember and flame all breathe on one flicker. `color` /
+ * `intensity` let each depth biome burn its own fire (teal in the Drowned
+ * Halls, small and warm in the Hollow). */
+/** Torches farther than this (m) from the player stop shedding particles. */
+const TORCH_FX_RANGE_SQ = 22 * 22;
+
 export function Torch({
   position,
   color = "#ff9a4d",
@@ -240,6 +244,10 @@ export function Torch({
   const light = useRef<DynamicLightSource | null>(null);
   const worldPos = useRef(new Vector3(...position));
   const emberClock = useRef(Math.random());
+  const smokeClock = useRef(Math.random() * 0.5);
+  const sparkClock = useRef(1 + Math.random() * 4);
+  const flame = useRef<FlameHandle | null>(null);
+  const top = useRef(new Vector3());
   const seed = useMemo(() => hashSeed(position.join(",")) % 100, [position]);
 
   useEffect(() => {
@@ -256,9 +264,21 @@ export function Torch({
       priority: 1,
     });
     light.current = src;
+    // The flame stands on the ember head (TorchModel: ember at y 0.08,
+    // z 0.05); weaker biome fires burn smaller.
+    const w = worldPos.current;
+    const f = addFlame({
+      position: [w.x, w.y + 0.07, w.z + 0.05],
+      color,
+      scale: 0.52 * (0.7 + 0.3 * intensity),
+    });
+    flame.current = f;
+    top.current.set(w.x, w.y + 0.07 + f.scale * 0.8, w.z + 0.05);
     return () => {
       removeLightSource(src);
       light.current = null;
+      removeFlame(f);
+      flame.current = null;
     };
   }, [position, color, intensity]);
 
@@ -271,21 +291,28 @@ export function Torch({
     if (ember.current) {
       ember.current.emissiveIntensity = TORCH_EMBER_INTENSITY * (0.75 + (0.25 * flicker) / 7);
     }
+    if (flame.current) flame.current.intensity = (0.72 + (0.28 * flicker) / 7) * (0.8 + 0.2 * intensity);
+
+    // What the fire sheds — only near the player: a distant torch's embers
+    // are sub-pixel and fogged anyway, so they'd be budget spent on nothing.
+    const w = worldPos.current;
+    const dx = w.x - playerPosition.x;
+    const dz = w.z - playerPosition.z;
+    if (dx * dx + dz * dz > TORCH_FX_RANGE_SQ) return;
     emberClock.current -= dt;
     if (emberClock.current <= 0) {
-      emberClock.current = 0.16 + Math.random() * 0.12;
-      const w = worldPos.current;
-      spawnBurst({
-        position: [w.x, w.y + 0.12, w.z],
-        count: 1,
-        color: [color, "#ffe2b8"],
-        speed: 0.5,
-        upward: 1.3,
-        ttl: 0.8,
-        size: 0.05,
-        gravity: 0.6,
-        drag: 0.4,
-      });
+      emberClock.current = 0.2 + Math.random() * 0.25;
+      torchEmberFx(top.current, color);
+    }
+    smokeClock.current -= dt;
+    if (smokeClock.current <= 0) {
+      smokeClock.current = 0.45 + Math.random() * 0.3;
+      torchSmokeFx(top.current);
+    }
+    sparkClock.current -= dt;
+    if (sparkClock.current <= 0) {
+      sparkClock.current = 2 + Math.random() * 4;
+      torchSparkFx(top.current, color);
     }
   });
 

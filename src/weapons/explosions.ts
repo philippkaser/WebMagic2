@@ -2,7 +2,7 @@ import { Vector3 } from "three";
 import { playExplosion } from "../audio/sound";
 import { gameEvents } from "../core/events";
 import { flashLight } from "../fx/DynamicLights";
-import { spawnBurst } from "../fx/Particles";
+import { explosionFx, shockwaveFx } from "../fx/effects";
 import type { DamageSource } from "../game/damageSource";
 import { getFloorRules } from "../game/floorRules";
 import { isHostileWizard } from "../game/hostility";
@@ -31,6 +31,10 @@ export interface ExplosionOptions {
   color?: string;
   particles?: number;
   light?: number;
+  /** Which look: "blast" (a detonation at the point, the default) or
+   * "shockwave" (a ring of force centred on its caster — no fireball in
+   * the caster's face, the energy is all in the expanding rings). */
+  vfx?: "blast" | "shockwave";
   /** Replayed from another client: full VFX and local-player damage, but no
    * entity damage — the authoritative copy of this explosion runs elsewhere.
    * Prevents double damage in multiplayer. */
@@ -57,14 +61,11 @@ export function explode(opts: ExplosionOptions): void {
   if (Array.isArray(opts.position)) center.set(...opts.position);
   else center.copy(opts.position);
 
-  spawnBurst({
-    position: [center.x, center.y, center.z],
-    count: particles,
-    color: [color, "#fff3d0", "#3c2a18"],
-    speed: radius * 2.6,
-    ttl: 0.7,
-    size: 0.11,
-  });
+  // `particles` is the caller's sense of how big a deal this blast is (a
+  // bolt's pop ≈ 14, a barrel 36, a boss slam 50) — it scales the effect's
+  // particle budget, while the radius scales its size.
+  if (opts.vfx === "shockwave") shockwaveFx(center, radius, color, particles / 36);
+  else explosionFx(center, radius, color, particles / 36);
   flashLight([center.x, center.y, center.z], color, light);
   playExplosion(radius);
 

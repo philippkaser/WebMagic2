@@ -3,6 +3,8 @@ import { useEffect, useRef } from "react";
 import { Vector3, type Camera } from "three";
 import { playCast } from "../audio/sound";
 import { gameEvents } from "../core/events";
+import { castFlareFx } from "../fx/effects";
+import { playerVelocity } from "../game/player-state";
 import { getItemDef } from "../items/catalog";
 import type { ItemDef } from "../items/types";
 import { peerMessage } from "../net/channels";
@@ -51,14 +53,18 @@ const peerCast = peerMessage<CastMsg>("cast", (raw, meta) => {
   ) {
     return;
   }
+  const staff = getItemDef(msg.staffId);
   getAbility(msg.abilityId).cast({
     origin: replayOrigin.set(...msg.origin),
     dir: replayDir.set(...msg.dir),
     stats: msg.stats,
-    staff: getItemDef(msg.staffId),
+    staff,
     caster: meta.from,
     remote: true,
   });
+  // Their staff flares too (we don't know their velocity; a peer's flare is
+  // seen from a distance, where the lag doesn't show).
+  castFlareFx(replayOrigin, replayDir, staff.color);
 });
 
 /** Cast one of the equipped staff's abilities from the staff tip, tell the
@@ -78,6 +84,9 @@ function castFromStaff(abilityId: string, staff: ItemDef, camera: Camera): numbe
 
   ability.cast({ origin: muzzle, dir: aim, stats, staff, caster: localWizardId() });
   peerCast.send(encodeCastMsg(ability.id, muzzle, aim, staff.id, stats));
+  // Muzzle flare: rides with our own velocity so a strafing cast doesn't
+  // leave its flash hanging in the air behind the staff.
+  castFlareFx(muzzle, aim, staff.color, playerVelocity);
 
   playCast();
   gameEvents.emit("staffKick", 0.9);
@@ -106,8 +115,11 @@ export function CastingSystem() {
       castFromStaff(abilityId, staff, camera);
       return true;
     };
+    // Point the camera without casting (screenshot scripts).
+    w.__lookAt = (x: number, y: number, z: number) => camera.lookAt(x, y, z);
     return () => {
       delete w.__castAt;
+      delete w.__lookAt;
     };
   }, [camera]);
 

@@ -3,6 +3,7 @@ import { CuboidCollider, RigidBody, useRapier } from "@react-three/rapier";
 import { useMemo, useRef } from "react";
 import type { Group, MeshStandardMaterial } from "three";
 import { flashLight } from "../../fx/DynamicLights";
+import { castFlareFx } from "../../fx/effects";
 import { playerPosition } from "../../game/player-state";
 import { nearestWizardTo } from "../../game/targets";
 import { ENEMY_GLOW, SentryModel } from "../../render/models/enemies";
@@ -14,9 +15,11 @@ import { ENEMY_GROUPS, ENEMY_LOOT_CHANCE, useEnemy, type EnemyDeathFx, type Enem
 
 const BOLT_COLOR = "#ff5136";
 const DEATH_FX: EnemyDeathFx = {
-  burst: { count: 36, color: ["#ff7a4d", "#ffd9a8", "#3a2418"], speed: 6.5, ttl: 0.9, size: 0.11 },
+  // The warding crystal shatters into lit shards that bounce and settle.
+  burst: { count: 26, color: ["#ff7a4d", "#ffd9a8", "#3a2418"], speed: 6, ttl: 1.8, size: 0.12, style: "shard" },
   light: { color: "#ff7a4d", intensity: 26 },
   lift: 0.8,
+  soul: "#ff9a5a",
 };
 const DROPS: EnemyDrops = { lootChance: ENEMY_LOOT_CHANCE, lift: 0.5 };
 
@@ -36,6 +39,7 @@ export function Sentry({ position, floor, entityId }: { position: Vec3; floor: n
     immobile: true,
     deathFx: DEATH_FX,
     drops: DROPS,
+    hitColor: "#ff9a5a",
   });
   const brain = useMemo(() => createSentryBrain(), []);
   const tick = useMemo(createSentryTick, []);
@@ -90,6 +94,7 @@ export function Sentry({ position, floor, entityId }: { position: Vec3; floor: n
       blastImpulse: 11,
     });
     flashLight([headPos.x, headPos.y, headPos.z], BOLT_COLOR, 10);
+    castFlareFx(headPos, aim, BOLT_COLOR, undefined, 2);
   });
 
   if (e.dead) return null;

@@ -1,6 +1,7 @@
 import { useFrame } from "@react-three/fiber";
 import { useRef } from "react";
 import { PointLight, Vector3 } from "three";
+import { FX_LIGHT_COUNT, setFxLightSlot } from "./fxUniforms";
 
 /** Dynamic light pool.
  *
@@ -16,7 +17,9 @@ import { PointLight, Vector3 } from "three";
  * distant torch goes dark long before a nearby explosion does — and the cost
  * per frame is a handful of uniform updates. */
 
-const POOL_SIZE = 14;
+/** Shared with the fx shaders, which light smoke/dust/debris from the same
+ * pool (fxUniforms.ts) — one constant so the two can never disagree. */
+const POOL_SIZE = FX_LIGHT_COUNT;
 
 export interface DynamicLightSource {
   /** Owners mutate these freely every frame. */
@@ -79,6 +82,10 @@ export function flashLight(
   src._decay = 9;
 }
 
+/** Reused every frame (no per-frame allocation). */
+const ranked: DynamicLightSource[] = [];
+const byScore = (a: DynamicLightSource, b: DynamicLightSource) => b._score - a._score;
+
 export function DynamicLights() {
   const lights = useRef<(PointLight | null)[]>([]);
   // Last color string applied per slot — skips redundant color parsing.
@@ -99,7 +106,7 @@ export function DynamicLights() {
 
     // Score: importance class dominates, proximity breaks ties, a small
     // stickiness bonus keeps slots from flickering between equal sources.
-    const ranked: DynamicLightSource[] = [];
+    ranked.length = 0;
     for (const src of sources.values()) {
       if (src.intensity < 0.05) {
         src._assigned = false;
@@ -113,7 +120,7 @@ export function DynamicLights() {
       src._score = src.priority * 8 - dist + (src._assigned ? 2 : 0);
       ranked.push(src);
     }
-    ranked.sort((a, b) => b._score - a._score);
+    ranked.sort(byScore);
 
     for (let i = 0; i < POOL_SIZE; i++) {
       const light = lights.current[i];
@@ -121,6 +128,7 @@ export function DynamicLights() {
       const src = ranked[i];
       if (!src) {
         light.intensity = 0;
+        setFxLightSlot(i, null, 0, 0, 0, 0);
         continue;
       }
       src._assigned = true;
@@ -131,6 +139,9 @@ export function DynamicLights() {
         slotColors.current[i] = src.color;
         light.color.set(src.color);
       }
+      // Mirror the slot into the particle shaders' light array.
+      const c = light.color;
+      setFxLightSlot(i, src.position, src.maxDistance, c.r * src.intensity, c.g * src.intensity, c.b * src.intensity);
     }
     for (let i = POOL_SIZE; i < ranked.length; i++) ranked[i]._assigned = false;
   }, 0.9);

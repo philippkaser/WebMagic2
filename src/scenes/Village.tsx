@@ -10,6 +10,7 @@ import { PlayerController } from "../player/PlayerController";
 import { getTextures } from "../render/textures";
 import { useGame } from "../state/gameStore";
 import { SpawnedEnemies } from "../enemies/SpawnedEnemies";
+import { AmbientParticles } from "../fx/AmbientParticles";
 import { DevSlab, DevSpawns } from "../world/devProps";
 import { Breakable, Portal, Torch } from "../world/props";
 import { Merchant, StorageChest } from "../world/villageProps";
@@ -72,6 +73,7 @@ export function Village() {
         shadow-camera-bottom={-28}
       />
       <Stars radius={90} depth={40} count={2400} factor={4} saturation={0} fade speed={0.6} />
+      <AmbientParticles biome="village" omen={null} ceiling={8} />
 
       {/* Ground + invisible perimeter */}
       <RigidBody type="fixed" colliders={false}>

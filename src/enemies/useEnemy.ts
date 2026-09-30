@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { playHit } from "../audio/sound";
 import { floorScale, GROUPS, PLAYER } from "../core/config";
 import { flashLight } from "../fx/DynamicLights";
+import { hitSparksFx, soulDissolveFx } from "../fx/effects";
 import { spawnBurst, type BurstOptions } from "../fx/Particles";
 import { ENEMY_SOURCE } from "../game/damageSource";
 import { getFloorRules } from "../game/floorRules";
@@ -52,12 +53,19 @@ export function enemyDamage(base: number, floor: number): number {
   return base * floorScale(floor).enemyDamage * getFloorRules().enemyDamageMult;
 }
 
-/** The standard death: a particle burst and a light flash at the body. */
+/** The standard death: the creature's energy dissolving upward as rising
+ * soul-light with a flash and a ring (fx/effects#soulDissolveFx), its body
+ * bursting into `burst` (goo, crystal shards, shadow smoke — pick a `style`),
+ * and a light flash at the body. */
 export interface EnemyDeathFx {
   burst: Omit<BurstOptions, "position">;
   light: { color: string; intensity: number };
   /** Height of the burst and flash above the body origin (the sentry's crystal). */
   lift?: number;
+  /** Colour of the rising soul (default: the light's colour). */
+  soul?: string;
+  /** Size of the dissolve (1 = a wisp-sized creature). */
+  scale?: number;
 }
 
 /** The standard drops: gold at the enemy's usual odds, and maybe an item. */
@@ -160,6 +168,7 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
       if (fx) {
         const at: Vec3 = [t.x, t.y + (fx.lift ?? 0), t.z];
         spawnBurst({ ...fx.burst, position: at });
+        soulDissolveFx(at, fx.soul ?? fx.light.color, fx.scale ?? 1);
         flashLight(at, fx.light.color, fx.light.intensity);
       }
       const drops = o.drops;
@@ -178,8 +187,8 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
   const hitFeedback = useCallback(() => {
     const color = opts.current.hitColor;
     const t = color ? body.current?.translation() : undefined;
-    if (!t) return;
-    spawnBurst({ position: [t.x, t.y, t.z], count: 6, color, speed: 3, ttl: 0.4, size: 0.06 });
+    if (!t || !color) return;
+    hitSparksFx(t, color);
   }, []);
 
   // Getting shot wakes an enemy, no matter who shot.
@@ -290,13 +299,18 @@ export function useContactDamage(spec: ContactDamage): (at: Vec, dt: number, arm
     timer.current = s.cooldown ?? PLAYER.contactDamageCooldown;
     useGame.getState().takeDamage(enemyDamage(s.damage, s.floor), ENEMY_SOURCE);
     if (s.burst) {
+      // Sparks off the wizard where it bit — low, in the lower edge of view.
       spawnBurst({
         position: [playerPosition.x, playerPosition.y + 0.3, playerPosition.z],
-        count: 12,
+        count: 14,
         color: s.burst,
-        speed: 4,
-        ttl: 0.5,
-        size: 0.08,
+        endColor: s.burst,
+        style: "spark",
+        speed: 5,
+        upward: 1.5,
+        ttl: 0.4,
+        size: 0.05,
+        intensity: 2.4,
       });
     }
     if (s.push) {
