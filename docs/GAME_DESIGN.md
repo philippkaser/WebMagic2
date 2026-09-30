@@ -65,15 +65,37 @@ The emotional loop we are chasing:
   generated **normal map** (derived from a height field via a Sobel filter),
   so torchlight and spell-flashes ripple across the coarse texels. This is the
   thing that makes it look intentional rather than just low-res.
-- **Fancy, moody lighting.** Near-black dungeons lit by warm flickering
-  torches, glowing emissive magic, and the player's own staff-light. Fog for
-  depth. A heavy vignette. Reflections on wet floor slabs and metal trim via a
-  tiny procedural environment map.
-- **Particles everywhere.** Explosions, sparks, embers rising from torches,
-  loot shimmer, dash trails, muzzle flashes.
-- **Post-processing chain:** bloom (feeds the emissive magic) → film grain →
-  vignette. The pixelation itself is *free*: the canvas renders at ~1/3
-  resolution and the browser upscales it with `image-rendering: pixelated`.
+- **Fancy, moody lighting.** Near-black dungeons lit by flickering torches,
+  glowing magic, and the player's own staff-light. Fog for depth. A heavy
+  vignette. Real reflections in wet and polished floors — a torch across the
+  hall glints in the puddle at your feet.
+- **The Drowned Halls rule** (one material language for every biome): big,
+  calm, low-contrast stone whose detail lives in the normal and roughness
+  maps; the biome's colour comes from its light and fog, not from paint;
+  glowing things are rare and physical (a crystal cluster, a heat seam), never
+  wallpaper. Tall, vaulted rooms (7 m ceilings, arch ribs, pillars, shafts of
+  dusty light) so the lighting has space to be beautiful in. Clutter is the
+  enemy; "boring" is fixed with light and architecture, not with more texture.
+- **Particles everywhere, and alive.** Explosions with core flash, fireball,
+  stretched sparks, lit smoke and a shockwave ring; comet-tailed bolts;
+  enemies that dissolve upward as light; torches with real shader flames and
+  embers; and the air itself moving — dust in torchlight, drowned spores and
+  drips, forge embers, crystal glitter, falling ash.
+- **Portals are the showpiece.** A living vortex that quickens as you come
+  close, and using one is a journey: you're pulled in, fly the tunnel while
+  the next floor loads, and the ring opens onto the new place. Sealed portals
+  are frozen, cracked glass.
+- **The UI is in the world.** No flat screens: words burn into the air ahead
+  of you as runes that settle into letters and later burn away; menus are
+  stone tablets that assemble out of the dark; your health and mana are
+  glowing flasks, your gold a heap of coins, your items small objects you
+  pick up and set down. New UI must follow this — if it could be a DOM panel,
+  it's wrong.
+- **Post-processing chain:** bloom (feeds the emissive magic) → highlight
+  roll-off → film grain → vignette. The pixelation itself is *free*: the
+  world renders at ~1/3 resolution and the browser upscales it with
+  `image-rendering: pixelated` (the UI canvas above it renders at full
+  resolution so the pixel font stays crisp).
 
 ### Hard constraint: **zero binary assets**
 
@@ -485,12 +507,16 @@ src/
                wizard poses, remote wizards + collision capsules
   state/       zustand game store, codex, save persistence
   player/      input, first-person controller, staff viewmodel
-  fx/          pooled particle system, dynamic light pool
+  fx/          shader particle system + named effects, ambient air, torch
+               flames, dynamic light pool
   audio/       procedural WebAudio synth (sfx, biome drones)
   render/      textures/ (pure painters + normal/emissive/roughness maps),
                models/ (every mesh), post-processing
   scenes/      village, dungeon floor, floor atmosphere, canvas composition
-  ui/          hud/ widgets, overlays/, inventory/, codex/, devroom/
+  transition/  portal journeys: enter pull, vortex tunnel, arrival
+  ui3d/        the in-world UI: pixel font, rune text, tablets, item models,
+               the HUD, menus and inventory as physical things
+  ui/          the DOM leftovers: perf overlay, build stamp, dev room
   game/        cross-system registries and seams (hostility, floor rules,
                damage sources, interactions, player-state, targeting)
 server/        Bun WebSocket game server (relay, accounts, provenance)
@@ -576,8 +602,12 @@ table, and the extension guide.
   presence sense, pacts and wizard-vs-wizard combat, kill credit, grave
   chests, host-authority replication of enemies/props/boss/loot/graves,
   late-join sync, host migration, reconnect into the same instance.
+- The look: five biomes in one material language with vaulted 7 m rooms,
+  reflective floors, light shafts and ambient air; shader particles for every
+  effect; vortex portals and portal journeys for every scene switch; and the
+  whole UI in the world (rune text, stone-tablet menus, flask HUD, 3D items).
 - Persistence of the deepest floor, banked inventory + gold, player name,
-  and the shadows quality toggle (localStorage cache; server-authoritative
+  and the shadows / reflections quality toggles (localStorage cache; server-authoritative
   online — including gold provenance and merchant purchase validation).
 
 **Not done yet / known gaps:**

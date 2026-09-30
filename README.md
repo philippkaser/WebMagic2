@@ -58,6 +58,9 @@ DATA_FILE=/tmp/wm-e2e.json bun run e2e   # CHROMIUM_PATH=… to pick a browser
 | P (or F3) | FPS / frame-time overlay |
 | O (or F4) | Toggle shadows (quality option, off by default) |
 
+Reflections (floor mirrors, on by default) and shadows can also be toggled on
+the title screen's left tablet.
+
 The current build id (`b<n> · <sha>`) is always shown in the bottom-right
 corner — check it against the latest commit when testing.
 
@@ -101,8 +104,13 @@ corner — check it against the latest commit when testing.
   explode; enemies get knocked around; force-blast at your feet to blast-jump.
 - **Bosses every 10th floor**: the Warden of the Deep seals the floor's
   portals until it falls.
-- **Procedural everything**: textures, normal maps, models and every sound
-  are generated at runtime — zero binary assets.
+- **Procedural everything**: textures, normal maps, models, the pixel font
+  and every sound are generated at runtime — zero binary assets.
+- **The UI lives in the world**: messages burn into the air ahead of you as
+  runes that settle into letters, menus are stone tablets that build
+  themselves out of the dark, health and mana are glowing flasks, items are
+  small 3D objects. Portals are living vortices, and stepping through one is
+  a journey — pulled in, through the tunnel, out into the new floor.
 
 ### Multiplayer
 
@@ -132,11 +140,15 @@ src/
   net/         protocol, matchmaking, transport, session, replication, remote wizards
   state/       game store, codex, save persistence
   player/      input, first-person controller, staff viewmodel
-  fx/          pooled particles + dynamic light pool
+  fx/          shader particles + named effects, ambient air, torch flames,
+               the dynamic light pool
   audio/       procedural WebAudio synth (sfx, biome drones)
   render/      textures/ (procedural painters), models/, post-processing
   scenes/      village, dungeon floor, floor atmosphere, canvas composition
-  ui/          hud/ widgets, overlays/, inventory/, codex/, devroom/
+  transition/  portal journeys (enter pull, vortex tunnel, arrival)
+  ui3d/        in-world UI: pixel font, rune text, tablets, item models; the
+               HUD, menus and inventory as layers
+  ui/          DOM leftovers: perf overlay, build stamp, dev room
   game/        cross-system seams: registries, hostility, floor rules, damage sources
 server/        Bun WebSocket server: relay, accounts & provenance
 ```
@@ -151,8 +163,9 @@ Design rules that keep it future-proof:
 - **Data-driven content** — a new staff is a catalog entry, a new spell a row
   in `weapons/spellCatalog.ts`, a new omen/biome/lore fragment a row in its
   table.
-- **Performance by construction** — instanced walls, greedy-merged colliders,
-  pooled particles/projectiles/lights, render at 1/3 resolution.
+- **Performance by construction** — one-mesh stonework, greedy-merged
+  colliders, one draw call for all particles, pooled projectiles/lights,
+  the world rendered at 1/3 resolution (the UI canvas above it at full).
 
 ## Roadmap
 

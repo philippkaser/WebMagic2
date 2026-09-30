@@ -10,8 +10,9 @@ rewrites:
    `items/`, `world/gen/` + `world/{biomes,omens,lore}`, `net/matchmaking`,
    `enemies/brains/` + `enemies/roster`, `weapons/{spellCatalog,allegiance,
    castMessage,hits}`, `encounters/{pacts,graveRules,killCredit}`,
-   `render/textures/painters/`. Deterministic, unit-tested with `bun test`,
-   and safe to run on a server.
+   `render/textures/painters/`, `fx/particleSim`, `transition/timeline`,
+   `ui3d/font/`. Deterministic, unit-tested with `bun test`, and safe to run
+   on a server.
 2. **Runtime state**: the zustand store (`state/gameStore.ts`) owns the game
    flow (menu → village → dungeon → death), equipment and run-loot rules.
    Frame-hot data (player position/velocity) lives outside React in
@@ -308,8 +309,17 @@ limiting and hit/pickup sanitization already run server-/authority-side.
 ## Floor mood: biomes, omens, lore
 
 - `world/biomes.ts`: five depth bands with fog, backdrop, ambient light,
-  torch color, surface ids and enemy weight multipliers; the generator reads
-  the monster mix, `scenes/floorAtmosphere.ts` and `DungeonFloor` the rest.
+  torch color, the player's own lantern colour, environment strength,
+  surface ids, a `look` (damp band on the walls, vault fade, floor
+  reflection strength, light-shaft tint, optional glowing seams) and enemy
+  weight multipliers; the generator reads the monster mix,
+  `scenes/floorAtmosphere.ts` and `DungeonFloor` the rest. Every biome
+  follows one material language (the Drowned Halls' — see Rendering): the
+  light and the fog carry the colour, not the stone.
+- `world/gen/architecture.ts`: a generator stage on its own RNG stream (so
+  layouts never shift) that places pillars (only in rooms ≥ 7×7, never on a
+  path — tested), arch ribs on wall piers, light shafts and, in the Crystal
+  Deep, crystal clusters that each register a pooled light.
 - `world/omens.ts`: ~28% of floors (never floor 1) roll an omen on their own
   RNG stream (so layouts stay stable). Omens carry `FloorRules` bends
   (gravity, enemy damage/speed/health, loot/gold, mana, explosion radius) and
@@ -347,17 +357,33 @@ limiting and hit/pickup sanitization already run server-/authority-side.
 
 ## Rendering
 
-- **Zero binary assets**: all textures are painted onto 64×64 canvases at
+- **Zero binary assets**: all textures are painted onto small canvases at
   startup by pure painters (`render/textures/painters/`), each with a normal
   map derived from its height field via Sobel — chunky pixels that still
-  catch light. Some surfaces add an **emissive map** (magma cracks, crystal
-  veins, bone runes) or a **roughness map** (wet stone that glints).
-  `getSurface(kind)` returns the maps plus the material settings they were
-  tuned under. `NearestFilter` everywhere. Models live in `render/models/`
-  as presentational components; behaviour stays in world/enemies code.
-- **Walls are one instanced draw call**; their physics colliders are
+  catch light. **One material language** for every biome: low-contrast,
+  low-frequency albedo (big stones, few features), the detail in normal and
+  roughness maps, and colour carried by light and fog rather than paint —
+  glowing things are rare separate geometry (crystal clusters, heat seams),
+  not painted emissive. Every wall and floor has a roughness map, so torches
+  glint in damp stone everywhere. `getSurface(kind)` returns the maps plus
+  the material settings they were tuned under. `NearestFilter` everywhere.
+  Models live in `render/models/` as presentational components; behaviour
+  stays in world/enemies code.
+- **Stonework is one world-mapped mesh** (`render/models/DungeonStone.tsx`):
+  7 m walls, base course, arch ribs on their piers and pillars share one draw
+  call with texture coordinates in world space, so blocks stay square on tall
+  walls and run continuously across tiles. Physics colliders are
   greedy-merged rectangles (tested to cover every wall tile), so collider
   count stays low as floors grow.
+- **Reflective floors** (`render/models/DungeonGround.tsx`, quality flag
+  `reflections`, default on): a real planar reflection through drei's
+  reflector shader, but with our own mirror camera and render targets (drei's
+  component leaks four targets per mount — one per descent) and the
+  reflection added as *light* weighted by gloss and Fresnel, so a torch
+  across the hall shines in the puddle at your feet. 256² with a small blur;
+  the matte Hollow skips it.
+- **Light shafts** (`LightShaftModel.tsx`): additive cones of dusty moonlight
+  falling from ceiling cracks, tinted per biome.
 - **Lighting — the dynamic light pool** (`fx/DynamicLights.tsx`): forward
   rendering pays per-fragment cost per light, and *changing* the light count
   recompiles every shader in the scene. So the game mounts exactly 14 pooled
@@ -392,11 +418,81 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   is `AmbientParticles.tsx` — seeds animated entirely on the GPU in a box that
   follows the camera (dust, spores and drips, embers and ash, glints, falling
   ash, village fireflies; the Weightless Hour makes it all float up).
-- **Post chain**: bloom → film grain → vignette (`render/Effects.tsx`).
+- **Post chain**: bloom → hue-preserving highlight roll-off → film grain
+  (scaled by brightness, so dark scenes don't crawl with static) → vignette
+  (`render/Effects.tsx`). The composer turns the renderer's tone mapping
+  off; the roll-off stops lit pale stone from clipping into flat white
+  without washing saturated magic (the cyan portal) out the way ACES would.
+  The scene-wide environment strength is set per biome
+  (`scene.environmentIntensity`) — in three 0.175 a material's own
+  `envMapIntensity` is ignored for scene environments.
 - **Shadows are a quality toggle** (F4 / main menu, persisted, default off):
   a shadow-casting point light re-renders the scene six times per frame,
   measured at roughly +50% frame time even at low resolution.
 - **F3 overlay** shows fps / p95 / worst frame for perf reports.
+
+## Portal journeys (`transition/`)
+
+Every scene switch is a journey you watch: the view is pulled into the
+portal (FOV stretch, a slight roll, the gaze turned toward the ring), you
+fly through a vortex tunnel while the next floor loads, and a bright ring
+opens onto the new place. Death is a dark-red dissolve instead, respawn
+rises out of that black.
+
+- `timeline.ts` (pure, tested): per-kind styles (gate, descend, home,
+  feather, death, respawn), easing, and samplers that turn (stage,
+  progress) into camera offsets and overlay parameters — ARRIVE ends at an
+  exact identity, so the FOV is always restored to the base 78°.
+- `travel.ts`: `travel(kind, doSwitch)` plays ENTER, runs the store's scene
+  switch under the TUNNEL (waiting for the new scene to render a few frames
+  and at least one tunnel beat), then plays ARRIVE. The store's
+  `enterDungeon`, `descend`, `walkHome`, the feather escape, death and
+  `respawn` are wrapped in it; their logic and phases are unchanged.
+- `TransitionSystem.tsx`: a camera system that runs after the player
+  controller and layers FOV/roll/dolly on top (never leaking into
+  mouse-look), and ONE fullscreen quad in the world scene (so bloom applies)
+  that draws the analytic tunnel. Pointer lock and mouse-look survive the
+  journey — you land in control.
+- Portals themselves (`render/models/PortalModel.tsx`) are a log-polar fbm
+  vortex with a burning rim that quickens as you approach; sealed portals
+  freeze into cracked frosted glass and shatter when the seal breaks.
+
+## In-world UI (`ui3d/`)
+
+There are no flat screens. Text burns into the air ahead of you as runes
+that settle into letters and later burn away into embers; menus are stone
+tablets that assemble out of the dark; items are small 3D objects; the HUD
+is flasks, coin heaps and rune-stones carried in front of the eye.
+
+- **Two canvases.** The world renders at dpr 0.35 (the pixel look); a 5×7
+  pixel font rendered there would be mush. So a second, transparent,
+  full-resolution canvas (`UiCanvas.tsx`) sits on top and copies the world
+  camera every frame (`bridge.tsx` — R3F runs all roots in one loop in
+  creation order, so there is no frame of lag). UI objects live in world
+  space: prompts hang over the chest they belong to, messages hang in the
+  air where you were looking. The UI canvas has its own torchlight so its
+  stone reads as stone. It is click-through during play (the world canvas
+  below takes the click that locks the pointer — `PointerLockControls` is
+  scoped to `#wm-world canvas`) and catches the pointer while a menu is up.
+- **Text** (`font/`, `text/`): a hand-set pixel font plus sixteen runes,
+  packed by pure code into an atlas whose channels hold the glyph, a halo
+  and an outline. `RuneText` draws one instanced quad per glyph with the
+  whole lifecycle on the GPU (birth times per instance, a vanish time per
+  block): one draw call per text block and no per-frame CPU work. Changed
+  glyphs rewrite themselves alone (a ticking counter flickers one digit).
+- **Choreography** (`presence.tsx`): nothing pops. `<UiPresence show exit>`
+  keeps a subtree mounted while it plays its exit, and every toolkit piece
+  (RuneText, Tablet, RuneButton, ItemModel) ANDs the ambient "show" flag
+  into its own — a tablet closing burns off all its words for free.
+- **Toolkit**: `Tablet` (fitted stones fly in, a rune channel burns around
+  the rim), `RuneButton` (a stone plaque that lifts and kindles), `ItemModel`
+  (every item family as primitives — also used for loot in the world),
+  `ViewAnchor`/`WorldAnchor`/`placeInFront`, `pxFor(distance, fraction)`
+  (size by share of the screen height), UI sparks and `audio/uiSounds.ts`.
+- **Layers** (`layers/`, listed in `UiRoot.tsx`): messages, prompts, the
+  HUD (`hud/`), the menus (`menus/`: title, the Weighing, death, codex) and
+  the inventory family (`inventory/`). The DOM keeps only what isn't part of
+  the fiction: the perf overlay, the build stamp and the dev room.
 
 ## Extending
 
@@ -418,4 +514,7 @@ limiting and hit/pickup sanitization already run server-/authority-side.
 | New networked entity | `useNetBody({ id, body, … })` — snapshots, interpolation, late-join, migration are automatic |
 | New networked message | `hostEvent` / `hostCommand` / `peerMessage` in the owning module — zero server changes |
 | New late-join state | `registerSyncProvider(key, { collect, apply })` |
-| New HUD widget / overlay | a file in `ui/hud/` or `ui/overlays/` + one line (see `ui/HUD.tsx`) |
+| New HUD piece | a file in `ui3d/layers/hud/` + one line in its `Hud.tsx` |
+| New screen / menu | a file in `ui3d/layers/menus/` + one line in `Menus.tsx` (wrap it in `<UiPresence>`, build it from `Tablet`/`RuneText`/`RuneButton`) |
+| New scene switch / travel style | a kind in `transition/timeline.ts` and `travel(kind, …)` around the switch |
+| New particle effect | a named function in `fx/effects.ts` (styles in `fx/particleSim.ts`) |
