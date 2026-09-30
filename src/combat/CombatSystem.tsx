@@ -43,6 +43,7 @@ export function CombatSystem() {
             size: ev.size,
             blastRadius: ev.blastRadius,
             blastImpulse: ev.blastImpulse,
+            gravityScale: ev.gravity,
             cosmetic: true,
           });
         } else if (ev.k === "boom") {

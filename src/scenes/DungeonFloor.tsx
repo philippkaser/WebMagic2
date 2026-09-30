@@ -5,6 +5,7 @@ import { startAmbient, stopAmbient } from "../audio/sound";
 import { gameEvents } from "../core/events";
 import { hashSeed } from "../core/rng";
 import { Boss } from "../enemies/Boss";
+import { EnemyFx } from "../enemies/fx/EnemyFx";
 import { ENEMY_COMPONENTS } from "../enemies/registry";
 import { resetRegistries } from "../game/registry";
 import type { ChestInfo } from "../net/protocol";
@@ -85,6 +86,7 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
           entityId={`p${i}`}
         />
       ))}
+      <EnemyFx />
       {layout.enemies.map((enemy, i) => {
         const Enemy = ENEMY_COMPONENTS[enemy.kind];
         return <Enemy key={i} position={enemy.pos} floor={layout.floor} entityId={`e${i}`} />;

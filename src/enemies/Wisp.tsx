@@ -1,164 +1,163 @@
 import { useFrame } from "@react-three/fiber";
-import { BallCollider, RigidBody, type RapierRigidBody } from "@react-three/rapier";
-import { useCallback, useMemo, useRef, useState } from "react";
-import { MeshStandardMaterial, Vector3 } from "three";
-import { floorScale, PLAYER } from "../core/config";
-import { flashLight } from "../fx/DynamicLights";
+import { BallCollider, RigidBody } from "@react-three/rapier";
+import { useMemo, useRef } from "react";
 import { spawnBurst } from "../fx/Particles";
-import { getPlayerBody, playerPosition } from "../game/player-state";
+import { playerPosition } from "../game/player-state";
 import { nearestPlayerTo } from "../game/targets";
-import { dropLoot } from "../items/LootOrbs";
-import { isHost, selectIsHost, useNet } from "../net/netStore";
-import { session } from "../net/session";
 import { getStats, useGame } from "../state/gameStore";
-import type { Vec3 } from "../world/types";
-import { ENEMY_GROUPS, LOOT_DROP_CHANCE } from "./shared";
-import { useEnemyNet } from "./useEnemyNet";
+import { touchPlayer } from "./ai/contact";
+import { MotionTracker, steer, turnToward } from "./ai/steering";
+import { GIBS } from "./fx/gibs";
+import { useGlow } from "./models/materials";
+import { WispModel, type WispRig } from "./models/WispModel";
+import { bandTint, devStage, ENEMY_GROUPS, type EnemyProps } from "./shared";
+import { useEnemy } from "./useEnemy";
 
-/** Wisp — a floating mote of hostile magic. Chases the player and burns on
- * contact. The floor host runs its AI; replicas interpolate. */
-export function Wisp({
-  position,
-  floor,
-  entityId,
-}: {
-  position: Vec3;
-  floor: number;
-  entityId: string;
-}) {
-  const body = useRef<RapierRigidBody>(null);
-  const mat = useRef<MeshStandardMaterial>(null);
-  const host = useNet(selectIsHost);
-  const scale = useMemo(() => floorScale(floor), [floor]);
-  const hp = useRef(30 * scale.enemyHealth);
-  const deadRef = useRef(false);
-  const [dead, setDead] = useState(false);
-  const aggro = useRef(false);
-  const knockTimer = useRef(0);
-  const contactTimer = useRef(0);
-  const flash = useRef(0);
-  const phase = useMemo(() => Math.random() * Math.PI * 2, []);
-  const desired = useMemo(() => new Vector3(), []);
+const DASH_RANGE = 5.5;
+const TELEGRAPH = 0.55;
+const DASH_TIME = 0.35;
 
-  const kill = useCallback(
-    (silent = false) => {
-      if (deadRef.current) return;
-      deadRef.current = true;
-      const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
-      if (!silent) {
-        spawnBurst({
-          position: [t.x, t.y, t.z],
-          count: 30,
-          color: ["#b46bff", "#ffffff", "#4a2a7a"],
-          speed: 7,
-          ttl: 0.8,
-          size: 0.1,
-        });
-        flashLight([t.x, t.y, t.z], "#b46bff", 22);
-        if (isHost()) {
-          dropLoot([t.x, Math.max(t.y, 0.6), t.z], floor, LOOT_DROP_CHANCE);
-          session.sendEntityEvent({ k: "death", id: entityId });
-        }
-      }
-      setDead(true);
-    },
-    [entityId, floor, position],
-  );
-
-  const hitFeedback = useCallback(() => {
-    const t = body.current?.translation();
-    if (!t) return;
-    spawnBurst({
-      position: [t.x, t.y, t.z],
-      count: 6,
-      color: "#d9a9ff",
-      speed: 3,
-      ttl: 0.4,
-      size: 0.06,
-    });
-  }, []);
-
-  const onDamaged = useCallback(() => {
-    aggro.current = true; // getting shot wakes it, no matter who shot
-  }, []);
-
-  const { interpolate } = useEnemyNet({
+/** Wisp — a mote of grave-light that remembers being someone. It drifts
+ * after the nearest wizard, and when close it swells, brightens — the tell —
+ * and lunges. Burns on contact. Tinted by the depth it haunts. */
+export function Wisp({ position, floor, entityId }: EnemyProps) {
+  const tint = useMemo(() => bandTint(floor), [floor]);
+  const glow = useGlow(tint, 1.8);
+  const rig = useMemo<WispRig>(() => ({ body: null, motes: null }), []);
+  const e = useEnemy({
     entityId,
-    body,
-    hp,
-    deadRef,
-    flash,
-    dead,
-    knockTimer,
-    onKill: kill,
-    hitFeedback,
-    onDamaged,
+    floor,
+    position,
+    baseHp: 30,
+    hitColor: "#e9d9ff",
+    death: {
+      centerY: 0,
+      burst: [tint, "#ffffff", "#2a1a44"],
+      light: tint,
+      gibs: GIBS.shadow,
+      gibCount: 6,
+      force: 4,
+    },
   });
+  const { body, host, scale, deadRef, flash, aggro, knockTimer, interpolate } = e;
+  const contactTimer = useRef(0);
+  const phase = useMemo(() => Math.random() * Math.PI * 2, []);
+  /** >0 while winding up a lunge; <0 while lunging (counts up to 0). */
+  const lunge = useRef(0);
+  const lungeCooldown = useRef(2 + Math.random() * 2);
+  const yaw = useRef(0);
+  const trail = useRef(0);
+  const motion = useMemo(() => new MotionTracker(), []);
 
   useFrame(({ clock }, dt) => {
     const b = body.current;
     if (!b || deadRef.current) return;
     if (useGame.getState().phase !== "dungeon") return;
-
-    flash.current = Math.max(0, flash.current - dt * 5);
-    if (mat.current) mat.current.emissiveIntensity = 1.7 + flash.current * 6;
-    contactTimer.current -= dt;
-
+    const time = clock.elapsedTime;
     const t = b.translation();
-    const dx = playerPosition.x - t.x;
-    const dy = playerPosition.y - t.y;
-    const dz = playerPosition.z - t.z;
-    const dist = Math.hypot(dx, dy, dz);
+    motion.update(t.x, t.y, t.z, dt);
 
-    // Contact burn is local on every client — your health is yours.
-    if (dist < 1.45 && contactTimer.current <= 0) {
-      contactTimer.current = PLAYER.contactDamageCooldown;
-      useGame.getState().takeDamage(9 * scale.enemyDamage);
-      spawnBurst({
-        position: [playerPosition.x, playerPosition.y + 0.3, playerPosition.z],
-        count: 12,
-        color: ["#ff5d5d", "#b46bff"],
-        speed: 4,
-        ttl: 0.5,
-        size: 0.08,
-      });
-      const push = 5 / Math.max(dist, 0.4);
-      getPlayerBody()?.applyImpulse({ x: dx * push * 0.35, y: 2, z: dz * push * 0.35 }, true);
+    // ── Look: flicker, swell before a lunge, stare at our wizard ────────────
+    flash.current = Math.max(0, flash.current - dt * 5);
+    const windup = lunge.current > 0 ? 1 - lunge.current / TELEGRAPH : 0;
+    glow.emissiveIntensity =
+      1.6 + Math.sin(time * 9 + phase) * 0.25 + flash.current * 6 + windup * 4;
+    if (rig.body) {
+      const s = 1 + windup * 0.35 + flash.current * 0.15;
+      rig.body.scale.set(s, s * (1 + Math.sin(time * 6 + phase) * 0.06), s);
+      yaw.current = turnToward(
+        yaw.current,
+        Math.atan2(playerPosition.x - t.x, playerPosition.z - t.z),
+        dt * 5,
+      );
+      rig.body.rotation.set(Math.min(motion.speed * 0.05, 0.5), yaw.current, 0);
     }
+    if (rig.motes) {
+      rig.motes.rotation.y += dt * (2 + windup * 14);
+      rig.motes.rotation.x = Math.sin(time * 1.3 + phase) * 0.4;
+    }
+    trail.current -= dt;
+    if (trail.current <= 0 && Math.abs(playerPosition.x - t.x) + Math.abs(playerPosition.z - t.z) < 22) {
+      trail.current = 0.09;
+      spawnBurst({
+        position: [t.x, t.y - 0.1, t.z],
+        count: 1,
+        color: tint,
+        speed: 0.3,
+        upward: 0.6,
+        ttl: 0.6,
+        size: 0.07,
+        gravity: 0.5,
+        drag: 1,
+      });
+    }
+
+    contactTimer.current -= dt;
+    touchPlayer(t.x, t.y, t.z, {
+      reach: 1.45,
+      damage: (lunge.current < 0 ? 13 : 9) * scale.enemyDamage,
+      timer: contactTimer,
+      cooldown: 0.7,
+      knock: 5,
+      color: tint,
+    });
 
     if (!host) {
       interpolate(dt);
       return;
     }
 
-    // ── Host AI: threaten the NEAREST wizard on the floor, not just ours ─────
+    // ── Host brain: threaten the NEAREST wizard on the floor ────────────────
     const target = nearestPlayerTo(t.x, t.y, t.z);
     knockTimer.current -= dt;
-    if (!aggro.current) {
+    if (!aggro.current || devStage.calm) {
       if (target.dist < 15 * getStats().aggroMult) aggro.current = true;
-      b.setLinvel({ x: 0, y: Math.sin(clock.elapsedTime * 1.4 + phase) * 0.5, z: 0 }, true);
+      b.setLinvel({ x: 0, y: Math.sin(time * 1.4 + phase) * 0.5, z: 0 }, true);
       return;
     }
-    if (knockTimer.current <= 0) {
-      const targetY = target.pos.y + 0.5 + Math.sin(clock.elapsedTime * 2.1 + phase) * 0.4;
-      desired.set(target.pos.x - t.x, 0, target.pos.z - t.z);
-      if (desired.lengthSq() > 0.01) desired.normalize();
-      desired.multiplyScalar(4.3 + floor * 0.07);
-      desired.y = Math.max(-3.5, Math.min(3.5, (targetY - t.y) * 2.4));
-      const v = b.linvel();
-      const k = 1 - Math.exp(-2.8 * dt);
-      b.setLinvel(
-        {
-          x: v.x + (desired.x - v.x) * k,
-          y: v.y + (desired.y - v.y) * k,
-          z: v.z + (desired.z - v.z) * k,
-        },
-        true,
-      );
+    if (knockTimer.current > 0) return;
+
+    const dx = target.pos.x - t.x;
+    const dz = target.pos.z - t.z;
+    const flat = Math.hypot(dx, dz) || 1;
+    lungeCooldown.current -= dt;
+
+    if (lunge.current > 0) {
+      // Wind-up: hang in the air, backing off a touch.
+      lunge.current -= dt;
+      steer(b, (-dx / flat) * 1.2, (-dz / flat) * 1.2, 6, dt, 0);
+      if (lunge.current <= 0) {
+        lunge.current = -DASH_TIME;
+        const dy = target.pos.y + 0.3 - t.y;
+        const d = Math.hypot(dx, dy, dz) || 1;
+        const speed = 12 + floor * 0.05;
+        b.setLinvel({ x: (dx / d) * speed, y: (dy / d) * speed, z: (dz / d) * speed }, true);
+      }
+      return;
     }
+    if (lunge.current < 0) {
+      lunge.current = Math.min(0, lunge.current + dt);
+      return; // coast through the lunge
+    }
+    if (target.dist < DASH_RANGE && lungeCooldown.current <= 0) {
+      lunge.current = TELEGRAPH;
+      lungeCooldown.current = 3 + Math.random() * 1.5;
+      return;
+    }
+
+    const speed = 4.3 + floor * 0.07;
+    const targetY = target.pos.y + 0.5 + Math.sin(time * 2.1 + phase) * 0.4;
+    steer(
+      b,
+      (dx / flat) * speed,
+      (dz / flat) * speed,
+      2.8,
+      dt,
+      Math.max(-3.5, Math.min(3.5, (targetY - t.y) * 2.4)),
+    );
   });
 
-  if (dead) return null;
+  if (e.dead) return null;
   return (
     <RigidBody
       ref={body}
@@ -170,21 +169,7 @@ export function Wisp({
       enabledRotations={[false, false, false]}
     >
       <BallCollider args={[0.42]} mass={2} collisionGroups={ENEMY_GROUPS} />
-      <mesh castShadow>
-        <icosahedronGeometry args={[0.42, 0]} />
-        <meshStandardMaterial
-          ref={mat}
-          color="#160d26"
-          emissive="#b46bff"
-          emissiveIntensity={1.7}
-          flatShading
-          roughness={0.4}
-        />
-      </mesh>
-      <mesh>
-        <sphereGeometry args={[0.14, 8, 8]} />
-        <meshStandardMaterial color="#000" emissive="#f0dcff" emissiveIntensity={4} toneMapped={false} />
-      </mesh>
+      <WispModel rig={rig} glow={glow} />
     </RigidBody>
   );
 }

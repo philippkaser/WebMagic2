@@ -74,6 +74,10 @@ export type EntityEvent =
       size: number;
       blastRadius: number;
       blastImpulse: number;
+      /** Gravity scale for lobbed casts (arcs). */
+      gravity?: number;
+      /** Lob leaves a burning ground patch for this many seconds. */
+      burn?: number;
     }
   | {
       k: "boom";
