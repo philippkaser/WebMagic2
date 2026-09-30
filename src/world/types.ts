@@ -20,6 +20,31 @@ export interface EnemySpawn {
   pos: Vec3;
 }
 
+/** Non-gameplay dressing (see world/gen/decor + world/decor). Pillars and
+ * braziers get static colliders; everything else is purely visual. */
+export type DecorKind =
+  | "pillar"
+  | "beam" // ceiling beam spanning a room (scale.x = length)
+  | "lintel" // arch over a corridor mouth (scale.x = opening width)
+  | "pilaster" // arch jamb standing against the wall
+  | "rubble"
+  | "bones"
+  | "web" // corner cobweb near the ceiling
+  | "chain" // hangs from the ceiling (scale.y = length)
+  | "growth" // mushrooms / crystals / slag / eyes by biome
+  | "pool" // water / magma / ichor by biome
+  | "brazier"
+  | "runeCircle"
+  | "stalactite";
+
+export interface DecorItem {
+  kind: DecorKind;
+  pos: Vec3;
+  /** Yaw in radians. */
+  rot: number;
+  scale: Vec3;
+}
+
 /** Axis-aligned merged wall collider (world units). */
 export interface WallBox {
   center: Vec3;
@@ -49,6 +74,9 @@ export interface FloorLayout {
   torches: Vec3[];
   props: PropSpawn[];
   enemies: EnemySpawn[];
+  /** Deterministic set dressing — pure decoration, placed clear of spawn,
+   * portals, treasure, props and enemies. */
+  decor: DecorItem[];
   /** One entry per visible wall cube (world position of cube center). */
   wallInstances: Vec3[];
   /** Greedy-merged physics colliders covering all wall tiles. */

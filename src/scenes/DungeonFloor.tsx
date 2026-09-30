@@ -14,6 +14,7 @@ import { PlayerController } from "../player/PlayerController";
 import { canExtract } from "../progression/progression";
 import { useGame } from "../state/gameStore";
 import { biomeFor } from "../world/biomes";
+import { Decor } from "../world/decor/Decor";
 import { FloorGeometry } from "../world/FloorGeometry";
 import { Breakable, DeathChest, Portal, Torch, TreasurePedestal } from "../world/props";
 import type { FloorLayout } from "../world/types";
@@ -71,10 +72,11 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
     <group>
       <ambientLight intensity={biome.ambient.intensity} color={biome.ambient.color} />
 
-      <FloorGeometry layout={layout} />
+      <FloorGeometry layout={layout} biome={biome} />
+      <Decor layout={layout} biome={biome} />
 
       {layout.torches.map((pos, i) => (
-        <Torch key={i} position={pos} />
+        <Torch key={i} position={pos} color={biome.torchColor} />
       ))}
       {layout.props.map((prop, i) => (
         <Breakable

@@ -1,14 +1,14 @@
 import { DUNGEON, TILE, WALL_HEIGHT, floorScale } from "../../core/config";
 import { Rng } from "../../core/rng";
 import { pickEnemy } from "../../enemies/spawnTable";
+import { biomeFor } from "../biomes";
 import type { EnemySpawn, FloorLayout, PropSpawn, Rect, Vec3, WallBox } from "../types";
+import { placeDecor } from "./decor";
+import { FLOOR, SOLID, tileToWorld, toWorld, worldToTile } from "./grid";
 
 /** Procedural floor generator. Pure and deterministic: the same (seed, floor)
  * pair always yields an identical layout, which is what lets every player in
  * a shared floor instance generate the world locally from just a seed. */
-
-const FLOOR = 1;
-const SOLID = 0;
 
 export function generateFloor(seed: number, floor: number): FloorLayout {
   const rng = new Rng(seed ^ (floor * 0x51ed270b));
@@ -148,7 +148,7 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     }
   }
 
-  return {
+  const base = {
     floor,
     seed,
     size,
@@ -167,6 +167,8 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     wallBoxes,
     extent: (size * TILE) / 2,
   };
+  const decor = placeDecor(base, { spawnRoom, exitRoom, treasureRoom }, biomeFor(floor).decor);
+  return { ...base, decor };
 }
 
 /** BFS over walkable tiles — used by tests to prove every floor is traversable. */
@@ -249,21 +251,8 @@ function carveCorridor(
   dig(x, y);
 }
 
-function toWorld(tx: number, ty: number, size: number): Vec3 {
-  return [(tx - size / 2) * TILE + TILE / 2, 0, (ty - size / 2) * TILE + TILE / 2];
-}
 
-function tileToWorld(t: [number, number], size: number, y: number): Vec3 {
-  const [wx, , wz] = toWorld(t[0], t[1], size);
-  return [wx, y, wz];
-}
 
-function worldToTile(p: Vec3, size: number): [number, number] {
-  return [
-    Math.floor(p[0] / TILE + size / 2),
-    Math.floor(p[2] / TILE + size / 2),
-  ];
-}
 
 function randomInRoom(rng: Rng, room: Rect, size: number, y: number): Vec3 {
   const tx = rng.int(room.x + 1, room.x + room.w - 2);
