@@ -16,8 +16,9 @@ export const MAT = {
   boneDark: flat("#4a4234"),
   stone: flat("#4a4452", 0.95),
   stoneDark: flat("#2a2630", 0.95),
-  iron: flat("#2a262e", 0.45, 0.7),
-  rust: flat("#5a3424", 0.8, 0.3),
+  // Low metalness: there is no environment map, so true metal renders black.
+  iron: flat("#3a3440", 0.55, 0.25),
+  rust: flat("#5a3424", 0.8, 0.1),
   rot: flat("#3a4c44", 0.8),
   rotDark: flat("#1e2a26", 0.9),
   barnacle: flat("#666150", 0.95),
@@ -51,8 +52,9 @@ export const MAT = {
   }),
 } as const;
 
-/** One enemy's animated emissive material, disposed with it. */
-export function useGlow(color: string, intensity: number): MeshStandardMaterial {
+/** One enemy's animated emissive material, disposed with it. `wireframe`
+ * draws it as glowing cracks/lattice over whatever it wraps. */
+export function useGlow(color: string, intensity: number, wireframe = false): MeshStandardMaterial {
   const mat = useMemo(
     () =>
       new MeshStandardMaterial({
@@ -60,8 +62,9 @@ export function useGlow(color: string, intensity: number): MeshStandardMaterial 
         emissive: color,
         emissiveIntensity: intensity,
         toneMapped: false,
+        wireframe,
       }),
-    [color, intensity],
+    [color, intensity, wireframe],
   );
   useEffect(() => () => mat.dispose(), [mat]);
   return mat;

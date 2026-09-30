@@ -4,7 +4,7 @@ import { Color, Fog } from "three";
 import { startAmbient, stopAmbient } from "../audio/sound";
 import { gameEvents } from "../core/events";
 import { hashSeed } from "../core/rng";
-import { Boss } from "../enemies/Boss";
+import { Boss, bossTitle } from "../enemies/Boss";
 import { EnemyFx } from "../enemies/fx/EnemyFx";
 import { ENEMY_COMPONENTS } from "../enemies/registry";
 import { resetRegistries } from "../game/registry";
@@ -104,7 +104,7 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
         prompt={`E — Descend to floor ${layout.floor + 1}`}
         onUse={descend}
         locked={bossAlive}
-        lockedPrompt="Sealed — the Warden of the Deep still lives"
+        lockedPrompt={`Sealed — ${bossTitle(layout.floor)} still lives`}
       />
       {homewardOpen && (
         <Portal
@@ -113,7 +113,7 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
           prompt="E — Escape homeward (keep everything you carry)"
           onUse={extract}
           locked={bossAlive}
-          lockedPrompt="Sealed — the Warden of the Deep still lives"
+          lockedPrompt={`Sealed — ${bossTitle(layout.floor)} still lives`}
         />
       )}
 
