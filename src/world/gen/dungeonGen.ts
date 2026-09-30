@@ -1,5 +1,6 @@
 import { DUNGEON, TILE, WALL_HEIGHT, floorScale } from "../../core/config";
 import { Rng } from "../../core/rng";
+import { pickEnemy } from "../../enemies/spawnTable";
 import type { EnemySpawn, FloorLayout, PropSpawn, Rect, Vec3, WallBox } from "../types";
 
 /** Procedural floor generator. Pure and deterministic: the same (seed, floor)
@@ -141,8 +142,8 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     for (let i = 0; i < share; i++) {
       const pos = randomInRoom(rng, room, size, 1.6);
       if (dist2World(pos, spawn) < 100) continue;
-      const sentry = floor >= 2 && rng.chance(0.22);
-      enemies.push({ kind: sentry ? "sentry" : "wisp", pos: sentry ? [pos[0], 0.9, pos[2]] : pos });
+      const row = pickEnemy(floor, rng);
+      enemies.push({ kind: row.kind, pos: [pos[0], row.y, pos[2]] });
       enemyBudget--;
     }
   }
