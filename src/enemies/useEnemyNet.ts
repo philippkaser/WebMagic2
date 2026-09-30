@@ -9,9 +9,15 @@ import { registerEntity } from "../net/replication";
 import { session } from "../net/session";
 import { useGame } from "../state/gameStore";
 
+type Impulse = { x: number; y: number; z: number };
+
+/** Replica bodies further than this from the latest snapshot snap instead of
+ * gliding — a blinking Shade should vanish, not slide through the room. */
+const TELEPORT_DIST_SQ = 4 * 4;
+
 /** Shared host/replica plumbing for one enemy: hittable registration with
  * authority routing, replication registration, and kinematic interpolation
- * for replicas. Keeps Wisp/Sentry/Boss focused on their behavior. */
+ * for replicas. Keeps each enemy focused on its behavior. */
 export function useEnemyNet(opts: {
   entityId: string;
   body: React.RefObject<RapierRigidBody | null>;
@@ -24,7 +30,11 @@ export function useEnemyNet(opts: {
   knockbackScale?: number;
   /** silent = late-join catch-up: apply the death without VFX. */
   onKill: (silent?: boolean) => void;
-  hitFeedback?: () => void;
+  /** Local VFX for a landed hit (every client, before authority routing). */
+  hitFeedback?: (impulse: Impulse) => void;
+  /** Host: reshape incoming damage by where it came from (armored fronts,
+   * weak backs). `impulse` points away from the source. */
+  damageFilter?: (damage: number, impulse: Impulse) => number;
   /** Host: damage landed (from anyone) — wake up and fight back. */
   onDamaged?: () => void;
   /** Replica: called after each authoritative snapshot (e.g. boss HP bar). */
@@ -41,6 +51,7 @@ export function useEnemyNet(opts: {
     knockbackScale = 1,
     onKill,
     hitFeedback,
+    damageFilter,
     onDamaged,
     onSnap,
   } = opts;
@@ -62,9 +73,9 @@ export function useEnemyNet(opts: {
   );
 
   const applyDamage = useCallback(
-    (damage: number, impulse: { x: number; y: number; z: number }) => {
+    (damage: number, impulse: Impulse) => {
       if (deadRef.current) return;
-      hp.current -= damage;
+      hp.current -= damageFilter ? damageFilter(damage, impulse) : damage;
       flash.current = 1;
       if (knockTimer) knockTimer.current = 0.4;
       body.current?.applyImpulse(
@@ -79,7 +90,7 @@ export function useEnemyNet(opts: {
       onDamaged?.();
       if (hp.current <= 0) kill();
     },
-    [body, deadRef, flash, hp, knockTimer, knockbackScale, kill, onDamaged, onSnap],
+    [body, deadRef, flash, hp, knockTimer, knockbackScale, kill, damageFilter, onDamaged, onSnap],
   );
 
   useEffect(() => {
@@ -94,7 +105,7 @@ export function useEnemyNet(opts: {
         lastLocalHit.current = performance.now();
         gameEvents.emit("hitConfirm", { kind: "enemy" });
         playHit();
-        hitFeedback?.();
+        hitFeedback?.(impulse);
         if (isHost()) applyDamage(damage, impulse);
         else session.sendHit(entityId, damage, impulse);
       },
@@ -125,18 +136,25 @@ export function useEnemyNet(opts: {
     };
   }, [dead, entityId, applyDamage, body, deadRef, flash, hp, target, kill, hitFeedback]);
 
-  /** Replica movement: glide the kinematic body toward the latest snapshot. */
+  /** Replica movement: glide the kinematic body toward the latest snapshot.
+   * Returns true on the frame a long jump (teleport) was snapped. */
   const interpolate = useCallback(
-    (dt: number) => {
+    (dt: number): boolean => {
       const b = body.current;
-      if (!b || !hasSnap.current) return;
+      if (!b || !hasSnap.current) return false;
       const t = b.translation();
+      const jumpSq = (target.x - t.x) ** 2 + (target.y - t.y) ** 2 + (target.z - t.z) ** 2;
+      if (jumpSq > TELEPORT_DIST_SQ) {
+        b.setNextKinematicTranslation({ x: target.x, y: target.y, z: target.z });
+        return true;
+      }
       const k = Math.min(1, dt * 9);
       b.setNextKinematicTranslation({
         x: t.x + (target.x - t.x) * k,
         y: t.y + (target.y - t.y) * k,
         z: t.z + (target.z - t.z) * k,
       });
+      return false;
     },
     [body, target],
   );

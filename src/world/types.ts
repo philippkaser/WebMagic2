@@ -8,7 +8,7 @@ export interface Rect {
 }
 
 export type PropKind = "crate" | "barrel" | "pot";
-export type EnemyKind = "wisp" | "sentry";
+export type EnemyKind = "wisp" | "sentry" | "skitter" | "drowned" | "shade" | "imp" | "golem" | "mimic";
 
 export interface PropSpawn {
   kind: PropKind;
