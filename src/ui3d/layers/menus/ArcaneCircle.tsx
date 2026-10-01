@@ -82,73 +82,73 @@ void main() {
   vec2 p = (vUv - 0.5) * uGrid;
   vec2 pix = floor(p);
   vec2 c = pix + 0.5 - uCentre;
-  float breathe = 0.5 + 0.5 * sin(t * 0.8);
+  float rr = length(vec2(c.x, c.y / 0.92));
   vec3 col = vec3(0.0);
 
-  // Rings.
-  float a = ring(c, 74.0, t * 0.05, false, 0.0) * (0.16 + breathe * 0.06);
-  a += ring(c, 68.0, -t * 0.08, true, 0.08) * 0.22;
-  a += ring(c, 50.0, t * 0.12, false, 0.16) * 0.10;
+  // The circle (most of the view is outside it: skip the work there).
+  if (rr < 75.0) {
+    float breathe = 0.5 + 0.5 * sin(t * 0.8);
+    float a = ring(c, 74.0, t * 0.05, false, 0.0) * (0.16 + breathe * 0.06);
+    a += ring(c, 68.0, -t * 0.08, true, 0.08) * 0.22;
+    a += ring(c, 50.0, t * 0.12, false, 0.16) * 0.10;
 
-  // Runes riding between the rings: 3×3 glyphs from a 4-bit mask.
-  float kindle = clamp((uDraw - 0.55) / 0.35, 0.0, 1.0);
-  if (kindle > 0.0) {
-    float ang = atan(c.y / 0.92, c.x);
-    float i = mod(floor((ang + t * 0.08) / TAU * 24.0 + 0.5), 24.0);
-    float ga = i / 24.0 * TAU - t * 0.08;
-    vec2 g = floor(vec2(cos(ga) * 59.0, sin(ga) * 59.0 * 0.92) + uCentre + 0.5);
-    vec2 d = pix - g;
-    float bits = floor(hash(i) * 16.0);
-    float on = 0.0;
-    if (d == vec2(0.0, 1.0)) on = 1.0;
-    if (d == vec2(0.0, 0.0)) on = 0.7;
-    if (d == vec2(-1.0, 0.0) && mod(bits, 2.0) >= 1.0) on = 1.0;
-    if (d == vec2(1.0, 0.0) && mod(floor(bits / 2.0), 2.0) >= 1.0) on = 1.0;
-    if (d == vec2(0.0, -1.0) && mod(floor(bits / 4.0), 2.0) >= 1.0) on = 1.0;
-    if (d == vec2(-1.0, -1.0) && mod(floor(bits / 8.0), 2.0) >= 1.0) on = 1.0;
-    // Each rune lights in its turn around the circle.
-    float lit = step(i / 24.0, kindle * 1.05);
-    a += on * lit * (0.25 + 0.25 * sin(t * 2.0 + i));
-  }
-
-  // The hexagram, very faint, drawn after the rings.
-  float spokes = clamp((uDraw - 0.35) / 0.4, 0.0, 1.0);
-  if (spokes > 0.0) {
-    for (int k = 0; k < 6; k++) {
-      float a1 = float(k) / 6.0 * TAU + t * 0.05;
-      float a2 = a1 + TAU / 3.0;
-      vec2 p1 = vec2(cos(a1), sin(a1) * 0.92) * 50.0;
-      vec2 p2 = vec2(cos(a2), sin(a2) * 0.92) * 50.0;
-      vec2 e = p2 - p1;
-      float s = clamp(dot(c - p1, e) / dot(e, e), 0.0, spokes);
-      vec2 n = c - (p1 + e * s);
-      if (max(abs(n.x), abs(n.y)) < 0.5) { a += 0.07; break; }
+    // Runes riding between the rings: 3×3 glyphs from a 4-bit mask.
+    float kindle = clamp((uDraw - 0.55) / 0.35, 0.0, 1.0);
+    if (kindle > 0.0 && abs(rr - 59.0) < 3.0) {
+      float ang = atan(c.y / 0.92, c.x);
+      float i = mod(floor((ang + t * 0.08) / TAU * 24.0 + 0.5), 24.0);
+      float ga = i / 24.0 * TAU - t * 0.08;
+      vec2 g = floor(vec2(cos(ga) * 59.0, sin(ga) * 59.0 * 0.92) + uCentre + 0.5);
+      vec2 d = pix - g;
+      float bits = floor(hash(i) * 16.0);
+      float on = 0.0;
+      if (d == vec2(0.0, 1.0)) on = 1.0;
+      if (d == vec2(0.0, 0.0)) on = 0.7;
+      if (d == vec2(-1.0, 0.0) && mod(bits, 2.0) >= 1.0) on = 1.0;
+      if (d == vec2(1.0, 0.0) && mod(floor(bits / 2.0), 2.0) >= 1.0) on = 1.0;
+      if (d == vec2(0.0, -1.0) && mod(floor(bits / 4.0), 2.0) >= 1.0) on = 1.0;
+      if (d == vec2(-1.0, -1.0) && mod(floor(bits / 8.0), 2.0) >= 1.0) on = 1.0;
+      // Each rune lights in its turn around the circle.
+      float lit = step(i / 24.0, kindle * 1.05);
+      a += on * lit * (0.25 + 0.25 * sin(t * 2.0 + i));
     }
+
+    // The hexagram, very faint, drawn after the rings.
+    float spokes = clamp((uDraw - 0.35) / 0.4, 0.0, 1.0);
+    if (spokes > 0.0 && rr < 51.0) {
+      for (int k = 0; k < 6; k++) {
+        float a1 = float(k) / 6.0 * TAU + t * 0.05;
+        float a2 = a1 + TAU / 3.0;
+        vec2 p1 = vec2(cos(a1), sin(a1) * 0.92) * 50.0;
+        vec2 p2 = vec2(cos(a2), sin(a2) * 0.92) * 50.0;
+        vec2 e = p2 - p1;
+        float s = clamp(dot(c - p1, e) / dot(e, e), 0.0, spokes);
+        vec2 n = c - (p1 + e * s);
+        if (max(abs(n.x), abs(n.y)) < 0.5) { a += 0.07; break; }
+      }
+    }
+    // Alpha as artpass blends it — in sRGB: this pass is encoded on output,
+    // so a fraction a of the colour there is a^2.2 of it here.
+    col += uRing * pow(a, 2.2);
   }
-  // Alpha as artpass blends it — in sRGB: this pass is encoded on output,
-  // so a fraction a of the colour there is a^2.2 of it here.
-  col += uRing * pow(a, 2.2);
 
   // Motes: a few columns each carry one, rising and fading as it climbs;
   // a mote sways a pixel either way, so look at the neighbours too.
   if (uMotes > 0.0) {
-    for (int layer = 0; layer < 2; layer++) {
-      for (int dx = -1; dx <= 1; dx++) {
-        float x = pix.x + float(dx);
-        float n = x * 1.37 + float(layer) * 517.0;
-        if (hash(n) > 0.085) continue;
-        float phase = hash(n + 3.0) * TAU;
-        float sway = floor(sin(t * 0.7 + phase) * 1.5 + 0.5);
-        if (x + sway != pix.x) continue;
-        float vy = 4.0 + hash(n + 1.0) * 10.0;
-        float rise = mod(hash(n + 2.0) * uGrid.y + t * vy, uGrid.y + 4.0) - 2.0;
-        float y = floor(-uGrid.y * 0.5 + rise);
-        if (y != pix.y) continue;
-        float flick = 0.35 + 0.45 * abs(sin(t * 2.2 + phase));
-        float low = 1.0 - rise / uGrid.y;
-        vec3 mc = hash(n + 4.0) < 0.3 ? uMoteB : uMoteA;
-        col += mc * pow(flick * low * uMotes, 2.2);
-      }
+    for (int dx = -1; dx <= 1; dx++) {
+      float x = pix.x + float(dx);
+      float n = x * 1.37;
+      if (hash(n) > 0.17) continue;
+      float phase = hash(n + 3.0) * TAU;
+      float sway = floor(sin(t * 0.7 + phase) * 1.5 + 0.5);
+      if (x + sway != pix.x) continue;
+      float vy = 4.0 + hash(n + 1.0) * 10.0;
+      float rise = mod(hash(n + 2.0) * uGrid.y + t * vy, uGrid.y + 4.0) - 2.0;
+      if (floor(-uGrid.y * 0.5 + rise) != pix.y) continue;
+      float flick = 0.35 + 0.45 * abs(sin(t * 2.2 + phase));
+      float low = 1.0 - rise / uGrid.y;
+      vec3 mc = hash(n + 4.0) < 0.3 ? uMoteB : uMoteA;
+      col += mc * pow(flick * low * uMotes, 2.2);
     }
   }
 
@@ -168,7 +168,7 @@ export function ArcaneCircle({
   distance,
   stageDistance,
   cy = 0.24,
-  intensity = 1,
+  intensity = 1.35,
   delay = 0,
 }: {
   mood?: CircleMood;

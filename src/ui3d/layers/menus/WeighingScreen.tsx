@@ -86,9 +86,9 @@ export function WeighingScreen() {
   const phase = useGame((s) => s.phase);
   return (
     <UiPresence show={phase === "weighing"} exit={TABLET_EXIT}>
-      <Veil color="#030206" inner="#0b1517" strength={0.9} center={0.72} cy={0.2} />
+      <Veil color="#030206" inner="#0b1517" strength={0.93} center={0.86} cy={0.2} />
       <Stage distance={D} width={0.95}>
-        <ArcaneCircle mood="arcane" distance={3.2} stageDistance={D} cy={0.2} intensity={0.85} />
+        <ArcaneCircle mood="arcane" distance={3.2} stageDistance={D} cy={0.2} intensity={1.1} />
         <Ritual />
         <Delayed by={T.panel}>
           <GatePanel />

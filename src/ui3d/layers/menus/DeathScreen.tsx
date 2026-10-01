@@ -86,7 +86,7 @@ export function DeathScreen() {
     <UiPresence show={phase === "dead"} exit={TABLET_EXIT}>
       <Veil color="#030102" inner="#1e0808" strength={0.95} center={0.85} cy={0.2} />
       <Stage distance={D} width={1.0}>
-        <ArcaneCircle mood="blood" distance={3.2} stageDistance={D} cy={0.2} />
+        <ArcaneCircle mood="blood" distance={3.2} stageDistance={D} cy={0.2} intensity={2} />
         <Death />
       </Stage>
     </UiPresence>
