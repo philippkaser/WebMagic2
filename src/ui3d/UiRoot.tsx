@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { ViewAnchor, pxFor } from "./anchors";
+import { useFacesReady } from "./font/faces";
 import { ItemModel } from "./ItemModel";
 import { Hud } from "./layers/hud/Hud";
 import { Menus } from "./layers/menus/Menus";
@@ -16,6 +17,9 @@ import { RuneText } from "./text/RuneText";
  * and decides for itself when to appear; order is irrelevant (depth sorts
  * them), so adding UI is one file in layers/ plus one line here. */
 export function UiRoot() {
+  // Suspends (UiCanvas holds the Suspense) until the pixel fonts are
+  // rasterized, so every layer measures text with the real faces.
+  useFacesReady();
   return (
     <>
       <WorldMessages />
@@ -51,7 +55,7 @@ function DevShowcase() {
     <UiPresence show={on} exit={TABLET_EXIT}>
       <ViewAnchor offset={[0, 0, -1.5]}>
         <Tablet width={1.3} height={0.86} tilt>
-          <RuneText text="THE WEIGHING GATE" px={pxFor(1.5, 0.034)} position={[0, 0.3, 0]} color="#e8dfc8" />
+          <RuneText text="The Weighing Gate" font="title" px={pxFor(1.5, 0.034)} position={[0, 0.3, 0]} color="#eadfc4" />
           <RuneText
             text={[
               { text: "It reads what you carry and casts you where your " },

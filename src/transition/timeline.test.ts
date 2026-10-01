@@ -165,6 +165,34 @@ describe("overlay", () => {
     expect(sampleOverlay("arriving", 1, s, ov).fade).toBeCloseTo(0, 6);
   });
 
+  test("the warp's phases: sucked in through ENTER, hovering by the tunnel's end, spat out on ARRIVE", () => {
+    for (const kind of ["gate", "descend", "home", "feather"] as const) {
+      const s = TRAVEL_STYLES[kind];
+      const ov = newOverlayFx();
+      expect(sampleOverlay("entering", 0, s, ov).suck).toBe(0);
+      const endSuck = sampleOverlay("entering", 1, s, ov).suck;
+      const endRush = ov.rush;
+      expect(endSuck).toBeCloseTo(1, 6);
+      // Continuous into the tunnel (no pop), and calm by the end of its beat.
+      expect(sampleOverlay("tunnel", 0, s, ov).suck).toBeCloseTo(endSuck, 6);
+      expect(ov.rush).toBeCloseTo(endRush, 6);
+      expect(sampleOverlay("tunnel", 1, s, ov).suck).toBe(0);
+      expect(ov.eject).toBe(0);
+      // ARRIVE starts where the tunnel left off and kicks out early.
+      expect(sampleOverlay("arriving", 0, s, ov).eject).toBe(0);
+      expect(sampleOverlay("arriving", 0.12, s, ov).eject).toBeGreaterThan(0.8);
+      expect(ov.flash).toBeGreaterThan(0.3);
+    }
+  });
+
+  test("the void sinks on the way down and rises on the way up", () => {
+    expect(TRAVEL_STYLES.gate.drift).toBe(1);
+    expect(TRAVEL_STYLES.descend.drift).toBe(1);
+    expect(TRAVEL_STYLES.home.drift).toBe(-1);
+    expect(TRAVEL_STYLES.feather.drift).toBe(-1);
+    expect(TRAVEL_STYLES.respawn.drift).toBe(-1);
+  });
+
   test("respawn begins fully dark (continuing the death screen) and clears", () => {
     const s = TRAVEL_STYLES.respawn;
     const ov = newOverlayFx();

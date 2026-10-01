@@ -2,13 +2,14 @@ import { useThree } from "@react-three/fiber";
 import { useEffect } from "react";
 import { Color, Fog } from "three";
 import { playOmen, startAmbient, stopAmbient, type AmbientMood } from "../audio/sound";
+import { resetGrade, setGrade } from "../render/Effects";
 import { getBiomeDef } from "../world/biomes";
 import { omenGenMods } from "../world/omens";
 import type { BiomeId, FloorLayout } from "../world/types";
 
 /** How a floor FEELS, applied while it's mounted: the biome's fog, backdrop,
- * environment-map strength and ambient drone, and the omen's arrival
- * whisper. The layout decides WHAT is on the floor; this decides the mood
+ * environment-map strength, colour grade (eased in by render/Effects) and
+ * ambient drone, and the omen's arrival whisper. The layout decides WHAT is on the floor; this decides the mood
  * it's seen and heard in. (The omen's rule bends are installed by GameScene
  * alongside the layout, before any enemy renders.) Everything here is
  * undone on unmount. */
@@ -45,6 +46,7 @@ export function useFloorAtmosphere(layout: FloorLayout): void {
     scene.background = new Color(biome.background);
     const envBefore = scene.environmentIntensity;
     scene.environmentIntensity = biome.envIntensity;
+    setGrade(biome.grade);
     startAmbient("dungeon", BIOME_MOODS[layout.biome]);
 
     let omenTimer: ReturnType<typeof setTimeout> | null = null;
@@ -57,6 +59,7 @@ export function useFloorAtmosphere(layout: FloorLayout): void {
       if (omenTimer !== null) clearTimeout(omenTimer);
       scene.fog = null;
       scene.environmentIntensity = envBefore;
+      resetGrade();
       stopAmbient();
     };
   }, [scene, layout]);

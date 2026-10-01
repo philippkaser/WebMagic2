@@ -1,55 +1,93 @@
+import { useFrame } from "@react-three/fiber";
 import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import { Effect } from "postprocessing";
 import { useMemo } from "react";
+import { Color, Uniform } from "three";
+import type { Grade } from "../world/biomes";
 
-/** The gritty-pixel post chain: bloom feeds the emissive magic/torches, then
- * a highlight roll-off, film grain and a heavy vignette. The pixelation
- * itself is free: the canvas renders at dpr 0.35 and the browser upscales it
- * with image-rendering: pixelated (see GameScene), so every lighting and
- * post pass pays ~1/8th the fragment cost of native resolution. */
+/** The gritty-pixel post chain (ported from the artpass branch): bloom
+ * feeds the emissive magic, torches and painted specks, a split-tone colour
+ * grade sets each place's mood, then a whisper of film grain and a heavy
+ * vignette. The pixelation itself is free: the canvas renders at dpr 0.35
+ * and the browser upscales it with image-rendering: pixelated (see
+ * GameScene), so every lighting and post pass pays ~1/8th the fragment cost
+ * of native resolution. */
 export function Effects() {
-  const rolloff = useMemo(() => new HighlightRolloffEffect(), []);
+  const grade = useMemo(() => new GradeEffect(), []);
+  useFrame((_, dt) => grade.approach(target, Math.min(dt, 0.1)));
   return (
     <EffectComposer multisampling={0}>
-      <Bloom mipmapBlur intensity={1.15} luminanceThreshold={0.55} luminanceSmoothing={0.2} />
-      <primitive object={rolloff} dispose={null} />
-      {/* Premultiplied grain lives in the lit image, not on top of it: the
-          dark stays dark instead of sparkling with white static. */}
-      <Noise premultiply opacity={0.32} />
-      <Vignette eskil={false} offset={0.22} darkness={0.82} />
+      <Bloom mipmapBlur intensity={1.2} luminanceThreshold={0.5} luminanceSmoothing={0.25} />
+      <primitive object={grade} dispose={null} />
+      <Noise opacity={0.06} />
+      <Vignette eskil={false} offset={0.2} darkness={0.85} />
     </EffectComposer>
   );
 }
 
-/** Hue-preserving highlight roll-off.
- *
- * The composer switches the renderer's own tone mapping off, so without
- * this pass anything a torch or the staff light pushes past 1.0 — pale
- * stone, a pillar at arm's length, a wet wall — clips channel by channel
- * into a flat white or yellow blob with no texture left in it.
- *
- * Stock tone mappers fix that but also bleach bright colour toward white
- * (ACES, AgX, and Khronos Neutral's desaturation step), which would wash
- * out the portals and spells whose saturated glow is the game's signature.
- * So this is Khronos PBR Neutral's compression curve applied to the PEAK
- * channel and scaled back onto the colour: everything below 0.76 passes
- * untouched, brighter values ease toward 1.0, and a hue is never shifted.
- * It runs after bloom, which needs the unclipped HDR values. */
-const ROLLOFF_FRAG = /* glsl */ `
+/** Moonlit blue in the darks, warm lamplight in the lights: the village
+ * above, and the grade the game starts in. */
+export const VILLAGE_GRADE: Grade = { shadows: "#0c1438", highlights: "#ffe0b0", saturation: 0.9, contrast: 1.06 };
+let target: Grade = VILLAGE_GRADE;
+
+/** Scenes call this on mount; the grade eases toward it over ~a second so
+ * arriving somewhere new reads as the air changing, not a cut. */
+export function setGrade(grade: Grade): void {
+  target = grade;
+}
+
+/** Back to the village grade (a dungeon floor calls this on unmount, so
+ * walking home never keeps the deep's colour). */
+export function resetGrade(): void {
+  target = VILLAGE_GRADE;
+}
+
+const fragment = /* glsl */ `
+uniform vec3 uShadows;
+uniform vec3 uHighlights;
+uniform float uSaturation;
+uniform float uContrast;
+
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-  vec3 c = max(inputColor.rgb, 0.0);
-  float peak = max(c.r, max(c.g, c.b));
-  const float start = 0.76;
-  if (peak > start) {
-    const float d = 1.0 - start;
-    float rolled = 1.0 - d * d / (peak + d - start);
-    c *= rolled / peak;
-  }
+  vec3 c = inputColor.rgb;
+  float l = luma(c);
+  c = mix(vec3(l), c, uSaturation);
+  // Split tone: hue-only tints (normalized to unit luma), weighted by the
+  // pixel's own brightness, plus a faint colored lift in the blacks.
+  float w = smoothstep(0.0, 0.35, l);
+  vec3 sh = uShadows / max(luma(uShadows), 1e-3);
+  vec3 hi = uHighlights / max(luma(uHighlights), 1e-3);
+  c *= mix(mix(vec3(1.0), sh, 0.45), mix(vec3(1.0), hi, 0.3), w);
+  c += uShadows * 0.35;
+  // Log contrast around middle grey keeps the darks inky without clipping.
+  c = 0.18 * pow(max(c, 0.0) / 0.18, vec3(uContrast));
   outputColor = vec4(c, inputColor.a);
 }`;
 
-class HighlightRolloffEffect extends Effect {
+/** The split-tone grade as a postprocessing Effect. Uniforms ease toward
+ * the target every frame (a lerp into a scratch colour — no allocation). */
+class GradeEffect extends Effect {
+  private scratch = new Color();
+
   constructor() {
-    super("HighlightRolloffEffect", ROLLOFF_FRAG);
+    super("GradeEffect", fragment, {
+      uniforms: new Map<string, Uniform>([
+        ["uShadows", new Uniform(new Color(VILLAGE_GRADE.shadows))],
+        ["uHighlights", new Uniform(new Color(VILLAGE_GRADE.highlights))],
+        ["uSaturation", new Uniform(VILLAGE_GRADE.saturation)],
+        ["uContrast", new Uniform(VILLAGE_GRADE.contrast)],
+      ]),
+    });
+  }
+
+  approach(g: Grade, dt: number) {
+    const k = 1 - Math.exp(-dt * 2.5);
+    const u = this.uniforms;
+    (u.get("uShadows")!.value as Color).lerp(this.scratch.set(g.shadows), k);
+    (u.get("uHighlights")!.value as Color).lerp(this.scratch.set(g.highlights), k);
+    u.get("uSaturation")!.value += (g.saturation - u.get("uSaturation")!.value) * k;
+    u.get("uContrast")!.value += (g.contrast - u.get("uContrast")!.value) * k;
   }
 }

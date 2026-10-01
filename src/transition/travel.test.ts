@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createTraveler, type TravelDeps } from "./travel";
+import { createTraveler, previewFreeze, type TravelDeps } from "./travel";
 import { TRAVEL_STYLES, type TravelKind, type TravelStage } from "./timeline";
 
 /** A fake clock: sleep() advances time instantly, settle() is a no-op, and
@@ -130,5 +130,18 @@ describe("travel", () => {
     await Promise.all([first, second]);
     // The first journey's late "idle" never lands on top of the second's.
     expect(log).toEqual(["entering", "tunnel", "arriving", "entering", "tunnel", "arriving", "idle"]);
+  });
+});
+
+describe("previewFreeze", () => {
+  test("maps one 0…1 journey progress across ENTER, the tunnel beat and ARRIVE", () => {
+    const s = TRAVEL_STYLES.descend;
+    const total = s.enterMs + s.minTunnelMs + s.arriveMs;
+    expect(previewFreeze("descend", 0)).toMatchObject({ stage: "entering", progress: 0 });
+    expect(previewFreeze("descend", (s.enterMs / 2) / total)).toMatchObject({ stage: "entering" });
+    expect(previewFreeze("descend", (s.enterMs + s.minTunnelMs / 2) / total).stage).toBe("tunnel");
+    const end = previewFreeze("descend", 1);
+    expect(end.stage).toBe("arriving");
+    expect(end.progress).toBeCloseTo(1, 6);
   });
 });

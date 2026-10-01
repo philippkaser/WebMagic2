@@ -19,9 +19,13 @@ import type { Pois } from "./pois";
 import { STREAM_SALT, streamSeed } from "./seeds";
 
 /** Stage 8 — architecture: what turns a carved box into a hall. Arch ribs
- * spanning each room under the 7 m ceiling on piers, colonnades in the big
+ * spanning each room under the vault on piers, colonnades in the big
  * rooms, shafts of light falling from cracks in the vault, and — in the
  * Crystal Deep — glowing crystal clusters in the corners.
+ *
+ * For now only the SHAFTS render (scenes/DungeonFloor.tsx): the dungeon is
+ * kept to its basic painted look, so ribs, pillars and crystals are planned
+ * (and tested) but drawn nowhere and collide with nothing, ready to return.
  *
  * Runs LAST, on its own stream, reading only finished layout data: adding or
  * retuning architecture can never move a room, prop, enemy, trap or rune.

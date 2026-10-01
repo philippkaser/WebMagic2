@@ -8,43 +8,52 @@ import type { BiomeId, EnemyKind } from "./types";
  * The fiction: the Catacombs are the builders' tombs, the Drowned Halls are
  * where the sea got in, the Ember Forge is where the Founders forged their
  * wards, the Crystal Deep is the dungeon's singing bones, and the Hollow —
- * near the bottom — is silence, pale light, and something listening. */
+ * near the bottom — is silence, crimson dark, and something listening. */
 
-/** Procedural texture ids a biome may dress its surfaces with. These names
- * are a contract with render/textures: every one must exist there. A
- * ceiling may be any of them — most halls are vaulted in their own stone. */
+/** Procedural texture ids a biome may dress its surfaces with: the
+ * architecture kinds of render/textures, `<set>-<part>`, one painted set
+ * per artpass biome. These names are a contract with render/textures: every
+ * one must exist there (tested). */
 export const BIOME_SURFACE_IDS = [
-  "tomb",
-  "wetstone",
-  "basalt",
-  "slate",
-  "palestone",
-  "flagstone",
-  "wetslab",
-  "obsidian",
-  "polished",
-  "ashflag",
-  "void",
+  "catacombs-wall",
+  "catacombs-floor",
+  "catacombs-ceiling",
+  "drowned-wall",
+  "drowned-floor",
+  "drowned-ceiling",
+  "forge-wall",
+  "forge-floor",
+  "forge-ceiling",
+  "crystal-wall",
+  "crystal-floor",
+  "crystal-ceiling",
+  "abyss-wall",
+  "abyss-floor",
+  "abyss-ceiling",
 ] as const;
 export type BiomeSurfaceId = (typeof BIOME_SURFACE_IDS)[number];
+type Part<P extends string> = Extract<BiomeSurfaceId, `${string}-${P}`>;
 
-/** How a biome's architecture is weathered and lit, beyond its textures.
- * Colours are sRGB hex like everywhere else (multipliers included — three
- * linearises them, so "#c8c8c8" darkens by ~40%, not 20%). */
+/** Split-tone colour grade applied in post (render/Effects.tsx): the
+ * band's mood pushed into the image itself. */
+export interface Grade {
+  /** Tint pushed into the darks. */
+  shadows: string;
+  /** Tint pulled into the lights. */
+  highlights: string;
+  saturation: number;
+  contrast: number;
+}
+
+/** How a biome's architecture is lit beyond its textures. Colours are sRGB
+ * hex like everywhere else. */
 export interface BiomeLook {
-  /** Wall-foot damp band and the fade toward the vault
-   * (render/models/wallMaterial.ts). */
-  stone: { dampTint: string; dampHeight: number; dampGloss: number; vaultShade: number };
-  /** The floor mirror (render/models/DungeonGround.tsx): how strongly it
-   * reflects and how much rough texels blur. null = a matte floor, which
-   * skips the mirror pass entirely. */
+  /** The floor mirror (render/models/DungeonGround.tsx) when the
+   * `reflections` quality flag is on: how strongly it reflects and how much
+   * rough texels blur. null = a matte floor even then. */
   reflection: { strength: number; blur: number } | null;
   /** Light shafts through cracks in the vault — or, `rising`, heat haze. */
   shaft: { color: string; strength: number; rising?: boolean };
-  /** Glowing seams at the foot of the walls: share of wall faces and their
-   * colour. The only glow built into the architecture, kept rare and at
-   * floor level. Absent = none. */
-  seams?: { chance: number; color: string };
 }
 
 export interface BiomeDef {
@@ -61,21 +70,26 @@ export interface BiomeDef {
   ambient: { color: string; intensity: number };
   /** Strength of the scene's procedural environment map on this band
    * (scene.environmentIntensity — three ignores a material's own
-   * envMapIntensity when the env comes from the scene). The env is generic
-   * warm/violet/blue panels: a wet sheen that suits the Drowned Halls, but
-   * off-palette patches in a polished Crystal Deep floor. */
+   * envMapIntensity when the env comes from the scene): what the wet and
+   * polished texels of the painted surfaces glint with. */
   envIntensity: number;
   /** Flame/light colour of wall torches. */
   torchColor: string;
   /** Scales torch light intensity (the flicker keeps its shape). */
   torchIntensityMult: number;
   /** The wizard's own light (player/StaffView) while on this band. It is
-   * the strongest light on screen — everything near you is lit by it — so
-   * it must agree with the band's palette: warm against the teal Drowned
-   * Halls, silver in the Hollow's night. */
+   * the strongest light on screen — everything near you is lit by it. */
   lantern: { color: string; intensity: number };
   /** Texture ids for the three dungeon surfaces. */
-  surfaces: { wall: BiomeSurfaceId; floor: BiomeSurfaceId; ceiling: BiomeSurfaceId };
+  surfaces: { wall: Part<"wall">; floor: Part<"floor">; ceiling: Part<"ceiling"> };
+  /** The painted glow in the band's surfaces (lume specks, magma seams,
+   * crystal veins, bleeding runes): emissive strength and how much it
+   * breathes over time (0 = steady). */
+  glow: { intensity: number; pulse: number };
+  /** The band's colour grade (render/Effects.tsx eases into it on arrival). */
+  grade: Grade;
+  /** Glow colour of the band's sigils — the arrival rune circle. */
+  accent: string;
   look: BiomeLook;
   /** Multipliers on the generator's per-kind enemy weights (missing = 1).
    * They reshape the mix of kinds already introduced at this depth; they
@@ -83,125 +97,130 @@ export interface BiomeDef {
   enemyWeights: Partial<Record<EnemyKind, number>>;
 }
 
-/** One material language for every band (see render/textures/painters):
- * calm, low-contrast stone whose detail lives in normals and roughness, and
- * a mood carried by LIGHT and FOG — the torch colour, the ambient, the fog
- * the distance dissolves into, the tint of the shafts. The Drowned Halls
- * were the reference: a restrained palette, wet surfaces that glint, and a
- * fog that turns everything far away into the biome's own colour. */
+/** The artpass look, band by band: painted pixel-art surfaces with palette
+ * ramps and tiny emissive specks, glow through bloom, and the mood carried
+ * by fog, light and a split-tone grade. (Fog, light, torch, glow and grade
+ * values are the artpass branch's, mapped onto our bands; the Hollow wears
+ * its abyss.) */
 export const BIOME_DEFS: readonly BiomeDef[] = [
   {
-    // An ancient damp tomb in warm torchlight: dressed stone, worn flags
-    // with glossy wet patches, dusty warm light through the vault.
+    // Warm sandstone ossuary brick in torchlight, cool violet in the shadow.
     id: "catacombs",
     name: "The Catacombs",
     epithet: "The builders' tombs, where every descent begins and many end.",
     floors: [1, 9],
-    fog: { color: "#110c0a", near: 6, far: 42 },
-    background: "#110c0a",
-    // Cool shadow against warm flame: the split that gives the tomb depth.
-    ambient: { color: "#50608e", intensity: 0.15 },
-    envIntensity: 0.35,
-    torchColor: "#ff8f45",
-    torchIntensityMult: 1.15,
-    lantern: { color: "#ffb877", intensity: 24 },
-    surfaces: { wall: "tomb", floor: "flagstone", ceiling: "tomb" },
+    fog: { color: "#0b0706", near: 8, far: 46 },
+    background: "#0b0706",
+    ambient: { color: "#7080b0", intensity: 0.28 },
+    envIntensity: 1,
+    torchColor: "#ff9a4d",
+    torchIntensityMult: 1,
+    lantern: { color: "#ffb877", intensity: 26 },
+    surfaces: { wall: "catacombs-wall", floor: "catacombs-floor", ceiling: "catacombs-ceiling" },
+    glow: { intensity: 1.2, pulse: 0 },
+    grade: { shadows: "#1c1030", highlights: "#ffd49a", saturation: 0.85, contrast: 1.08 },
+    accent: "#e0b060",
     look: {
-      stone: { dampTint: "#b8b0a8", dampHeight: 1.3, dampGloss: 0.45, vaultShade: 0.6 },
       reflection: { strength: 0.75, blur: 1.2 },
       shaft: { color: "#ffd49a", strength: 0.2 },
     },
     enemyWeights: {},
   },
   {
-    // Cold teal mist, brine on the stones, standing water that mirrors the
-    // torches: sight lines shorten, and the slow, wet things thrive.
+    // Sea-green ashlar furred with moss from the vault, a black tide line,
+    // lume specks, standing water — and teal fire. Sight lines shorten, and
+    // the slow, wet things thrive.
     id: "drowned",
     name: "The Drowned Halls",
     epithet: "Where the sea got in, and never found its way back out.",
     floors: [10, 19],
-    fog: { color: "#08181c", near: 5, far: 36 },
-    background: "#08181c",
-    ambient: { color: "#4f9aa6", intensity: 0.18 },
-    envIntensity: 0.8,
-    torchColor: "#8fe6d4",
-    torchIntensityMult: 0.95,
-    lantern: { color: "#ffb877", intensity: 24 },
-    surfaces: { wall: "wetstone", floor: "wetslab", ceiling: "wetstone" },
+    fog: { color: "#041110", near: 5, far: 34 },
+    background: "#041110",
+    ambient: { color: "#3a8a80", intensity: 0.2 },
+    envIntensity: 1,
+    torchColor: "#5cffc8",
+    torchIntensityMult: 1,
+    lantern: { color: "#ffb877", intensity: 26 },
+    surfaces: { wall: "drowned-wall", floor: "drowned-floor", ceiling: "drowned-ceiling" },
+    glow: { intensity: 1.6, pulse: 0.2 },
+    grade: { shadows: "#002a2c", highlights: "#c0ffe8", saturation: 0.82, contrast: 1.05 },
+    accent: "#5cffd8",
     look: {
-      stone: { dampTint: "#a4c2c2", dampHeight: 1.7, dampGloss: 0.3, vaultShade: 0.6 },
       reflection: { strength: 1.1, blur: 1.4 },
       shaft: { color: "#a6efe6", strength: 0.24 },
     },
     enemyWeights: { slime: 1.6, wisp: 1.1, sentry: 0.8, shadow: 0.8 },
   },
   {
-    // Calm dark basalt; the heat is in the LIGHT — deep orange torches, a
-    // red-brown haze — and in a few seams glowing where wall meets floor.
+    // Columnar basalt split by seams that still glow, magma-veined floors.
     // The Founders' wardstones were cut here, so sentries stand thickest.
     id: "forge",
     name: "The Ember Forge",
     epithet: "Where the Founders hammered out their wards, and the fires never cooled.",
     floors: [20, 34],
-    fog: { color: "#2a0e06", near: 5, far: 38 },
-    background: "#2a0e06",
-    ambient: { color: "#a2421c", intensity: 0.22 },
-    envIntensity: 0.25,
-    torchColor: "#ff5e1c",
-    torchIntensityMult: 1.45,
-    lantern: { color: "#ff9a5c", intensity: 22 },
-    surfaces: { wall: "basalt", floor: "obsidian", ceiling: "basalt" },
+    fog: { color: "#0f0605", near: 8, far: 46 },
+    background: "#0f0605",
+    ambient: { color: "#7a5a5a", intensity: 0.17 },
+    envIntensity: 1,
+    torchColor: "#ff6a1a",
+    torchIntensityMult: 1,
+    lantern: { color: "#ffb877", intensity: 26 },
+    surfaces: { wall: "forge-wall", floor: "forge-floor", ceiling: "forge-ceiling" },
+    glow: { intensity: 1.5, pulse: 0.25 },
+    grade: { shadows: "#240a04", highlights: "#ffc07a", saturation: 1.05, contrast: 1.12 },
+    accent: "#ff7a1a",
     look: {
-      stone: { dampTint: "#a09088", dampHeight: 1.1, dampGloss: 0.85, vaultShade: 0.55 },
       reflection: { strength: 0.95, blur: 1 },
       shaft: { color: "#ff7a30", strength: 0.06, rising: true },
-      seams: { chance: 0.13, color: "#ff7424" },
     },
     enemyWeights: { sentry: 1.8, wisp: 0.9, slime: 0.6 },
   },
   {
-    // Dark slate and polished floors; the colour is in the crystals growing
-    // from the corners and the violet light they cast. The long sight lines
-    // of a cavern that sings, and more drifting lights than anywhere else.
+    // Indigo strata threaded with glowing veins, geodes, a ceiling of
+    // glints. The long sight lines of a cavern that sings.
     id: "crystal",
     name: "The Crystal Deep",
     epithet: "The dungeon's singing bones, cold light caught in stone.",
     floors: [35, 54],
-    fog: { color: "#0d0a1e", near: 7, far: 48 },
-    background: "#0d0a1e",
-    ambient: { color: "#6a52cc", intensity: 0.28 },
-    envIntensity: 0.15,
-    torchColor: "#8fdcff",
-    torchIntensityMult: 1.05,
-    lantern: { color: "#cdb8ff", intensity: 22 },
-    surfaces: { wall: "slate", floor: "polished", ceiling: "slate" },
+    fog: { color: "#08061c", near: 7, far: 50 },
+    background: "#08061c",
+    ambient: { color: "#6a5aff", intensity: 0.22 },
+    envIntensity: 1,
+    torchColor: "#a58cff",
+    torchIntensityMult: 1,
+    lantern: { color: "#ffb877", intensity: 26 },
+    surfaces: { wall: "crystal-wall", floor: "crystal-floor", ceiling: "crystal-ceiling" },
+    glow: { intensity: 0.75, pulse: 0.15 },
+    grade: { shadows: "#0c0634", highlights: "#d8f4ff", saturation: 1.1, contrast: 1.06 },
+    accent: "#7ad8ff",
     look: {
-      stone: { dampTint: "#b8b0d4", dampHeight: 1, dampGloss: 0.5, vaultShade: 0.6 },
       reflection: { strength: 1.15, blur: 0.8 },
       shaft: { color: "#b690ff", strength: 0.2 },
     },
     enemyWeights: { wisp: 1.5, sentry: 1.2, slime: 0.7, shadow: 0.9 },
   },
   {
-    // Pale bone-white stone at night: drained of colour, cold silver-blue
-    // light, deep shadow, a thin mist — and the one floor that doesn't
-    // shine. Near-silent. Oathbreakers' shadows.
+    // Near the bottom the stone has begun to become a body: flesh-stone,
+    // bleeding runes, eyes in the walls, crimson dark. The one floor that
+    // doesn't shine. Oathbreakers' shadows.
     id: "hollow",
     name: "The Hollow",
     epithet: "Near the bottom the silence is so complete it listens back.",
     floors: [55, 100],
-    fog: { color: "#1a1f2a", near: 5, far: 34 },
-    background: "#1a1f2a",
-    ambient: { color: "#94a4c8", intensity: 0.15 },
-    envIntensity: 0.2,
-    torchColor: "#bccfff",
-    torchIntensityMult: 0.7,
-    lantern: { color: "#c8d4f0", intensity: 12 },
-    surfaces: { wall: "palestone", floor: "ashflag", ceiling: "void" },
+    fog: { color: "#0c0205", near: 6, far: 38 },
+    background: "#0c0205",
+    ambient: { color: "#8a2034", intensity: 0.2 },
+    envIntensity: 1,
+    torchColor: "#ff3040",
+    torchIntensityMult: 1,
+    lantern: { color: "#ffb877", intensity: 26 },
+    surfaces: { wall: "abyss-wall", floor: "abyss-floor", ceiling: "abyss-ceiling" },
+    glow: { intensity: 1.6, pulse: 0.4 },
+    grade: { shadows: "#1c0008", highlights: "#ffb4a0", saturation: 0.92, contrast: 1.15 },
+    accent: "#ff2a44",
     look: {
-      stone: { dampTint: "#c4c8d0", dampHeight: 0.9, dampGloss: 1, vaultShade: 0.35 },
       reflection: null,
-      shaft: { color: "#c9d6ff", strength: 0.22 },
+      shaft: { color: "#ffc2b4", strength: 0.2 },
     },
     enemyWeights: { shadow: 2, wisp: 1.3, sentry: 0.8, slime: 0.5 },
   },

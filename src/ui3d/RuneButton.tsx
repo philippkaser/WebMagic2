@@ -1,15 +1,18 @@
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BoxGeometry, Color, Group, MeshStandardMaterial } from "three";
+import { BoxGeometry, Color, Group, MeshBasicMaterial } from "three";
 import { playUiHover, playUiPress } from "../audio/uiSounds";
-import { layoutText, type TextInput } from "./font/layout";
-import { stoneMaterial } from "./materials";
+import type { TextInput } from "./font/layout";
+import { PixelFrame } from "./PixelFrame";
+import { ink, type FrameKind } from "./theme";
 import { useUiShow } from "./presence";
-import { RuneText } from "./text/RuneText";
+import { measureText, RuneText } from "./text/RuneText";
 
-/** A button you press with the mouse, but that is really a small stone
- * plaque set into a tablet: the pointer finding it makes it rise off the
- * stone and its rune seam kindle; pressing pushes it in with a click.
+/** A button you press with the mouse, but that is really a small framed
+ * plate set onto a tablet — the grimoire's button (after artpass): a dark
+ * fill in a pixel frame with a hard drop shadow, "✦ label ✦". The pointer
+ * finding it lifts it and warms its fill; pressing steps it down onto its
+ * shadow with a click.
  *
  * Sized from its label unless `width` is given. Invisible (and inert) while
  * the enclosing tablet/presence isn't showing. */
@@ -17,7 +20,10 @@ import { RuneText } from "./text/RuneText";
 export interface RuneButtonProps {
   label: TextInput;
   onPress: () => void;
-  /** Accent (seam + hover glow). */
+  /** Look: "arcane" (default: the way onward), "ghost" (secondary),
+   * "danger", "gold" — or any accent colour for the frame. */
+  variant?: ButtonVariant;
+  /** Older name for a frame colour; `variant` wins. */
   accent?: string;
   /** Label colour. */
   color?: string;
@@ -31,12 +37,41 @@ export interface RuneButtonProps {
 }
 
 const box = new BoxGeometry(1, 1, 1);
+const tmpHover = new Color();
+
+export type ButtonVariant = "arcane" | "ghost" | "danger" | "gold" | (string & {});
+
+interface ButtonLook {
+  frame: FrameKind | string;
+  fill: string;
+  hover: string;
+  glyph: string;
+}
+
+/** The grimoire's four buttons (after artpass's .wm-btn variants). */
+const LOOKS: Record<string, ButtonLook> = {
+  arcane: { frame: "arcane", fill: "#0a1e1c", hover: "#1a4840", glyph: ink.arcaneDim },
+  ghost: { frame: "iron", fill: "#0e0a12", hover: "#282030", glyph: ink.faded },
+  danger: { frame: "blood", fill: "#280808", hover: "#5a1212", glyph: "#ff6a5a" },
+  gold: { frame: "gold", fill: "#281c06", hover: "#50380a", glyph: ink.gold },
+};
+
+function buttonLook(v: string | undefined): ButtonLook {
+  if (!v || v === ink.arcane) return LOOKS.arcane!;
+  return LOOKS[v] ?? { frame: v, fill: "#0e0a12", hover: "#262030", glyph: v };
+}
+
+let shadow: MeshBasicMaterial | null = null;
+function shadowMaterial(): MeshBasicMaterial {
+  return (shadow ??= new MeshBasicMaterial({ color: "#000000", transparent: true, opacity: 0.55, depthWrite: false }));
+}
 
 export function RuneButton({
   label,
   onPress,
-  accent = "#46ffd0",
-  color = "#e8dfc8",
+  accent,
+  variant,
+  color = ink.parchment,
   px = 0.0045,
   width,
   disabled = false,
@@ -54,21 +89,21 @@ export function RuneButton({
   // Mounted hidden = already sunk away (not "sinking now").
   const lift = useRef(show ? 0 : -0.02);
   const glow = useRef(0);
-  const layout = useMemo(() => layoutText(label), [label]);
-  const w = width ?? layout.width * px + px * 16;
-  const h = layout.height * px + px * 10;
-  const seam = useMemo(
-    () =>
-      new MeshStandardMaterial({
-        color: "#050407",
-        emissive: new Color(accent),
-        emissiveIntensity: 0.4,
-        toneMapped: false,
-        roughness: 0.4,
-      }),
-    [accent],
+  const size = useMemo(() => measureText([{ text: "✦ " }, ...(typeof label === "string" ? [{ text: label }] : label), { text: " ✦" }], px), [label, px]);
+  const w = width ?? size.width + px * 16;
+  const h = size.height + px * 10;
+  const look = buttonLook(variant ?? accent);
+  const fill = useMemo(() => new MeshBasicMaterial({ color: look.fill, toneMapped: false }), [look.fill]);
+  useEffect(() => () => fill.dispose(), [fill]);
+  const frameTexel = px * 1.35;
+  const decorated = useMemo<TextInput>(
+    () => [
+      { text: "✦ ", color: look.glyph },
+      ...(typeof label === "string" ? [{ text: label }] : label),
+      { text: " ✦", color: look.glyph },
+    ],
+    [label, look.glyph],
   );
-  useEffect(() => () => seam.dispose(), [seam]);
 
   const active = show && !disabled;
   useEffect(() => {
@@ -92,13 +127,17 @@ export function RuneButton({
     const k = 1 - Math.exp(-dt * 14);
     const targetLift = !show ? -0.02 : down ? -0.004 : hover ? 0.012 : 0.004;
     lift.current += (targetLift - lift.current) * k;
-    glow.current += ((hover ? 2.6 : disabled ? 0.1 : 0.5) - glow.current) * k;
+    glow.current += ((hover ? 1 : 0) - glow.current) * k;
     g.position.z = lift.current;
+    // Pressed, the plate steps down-right onto its shadow (the DOM
+    // grimoire's 2 px press), in whole steps, not a slide.
+    g.position.x = down ? frameTexel * 1.5 : 0;
+    g.position.y = down ? -frameTexel * 1.5 : 0;
     // Hidden, the plaque sinks and shrinks to nothing (lift → −0.02 m).
     const s = show ? 1 : Math.max(0.001, 1 + lift.current * 50);
     g.scale.setScalar(s);
     g.visible = s > 0.002;
-    seam.emissiveIntensity = glow.current;
+    fill.color.set(look.fill).lerp(tmpHover.set(look.hover), glow.current);
   });
 
   const over = (e: ThreeEvent<PointerEvent>) => {
@@ -111,14 +150,13 @@ export function RuneButton({
   return (
     <group position={position as [number, number, number] | undefined}>
       <group ref={group}>
-        {/* The seam: a slightly larger dark plate whose emissive rim shows
-            around the plaque — the glow lives in the gap, like light
-            through a crack. */}
-        <mesh geometry={box} material={seam} scale={[w + px * 3, h + px * 3, 0.01]} position={[0, 0, -0.006]} />
+        {/* Drop shadow: the plate's hard 3-texel offset shadow. */}
+        <mesh geometry={box} material={shadowMaterial()} scale={[w + frameTexel * 8, h + frameTexel * 8, 0.004]} position={[frameTexel * 3, -frameTexel * 3, -0.008]} />
+        <PixelFrame width={w + frameTexel * 8} height={h + frameTexel * 8} frame={look.frame} texel={frameTexel} position={[0, 0, 0.0075]} renderOrder={7} />
         <mesh
           geometry={box}
-          material={stoneMaterial("#4a4452")}
-          scale={[w, h, 0.02]}
+          material={fill}
+          scale={[w + frameTexel * 6, h + frameTexel * 6, 0.012]}
           position={[0, 0, 0]}
           onPointerOver={over}
           onPointerOut={() => {
@@ -142,12 +180,12 @@ export function RuneButton({
           }}
         />
         <RuneText
-          text={label}
+          text={decorated}
           px={px}
-          color={disabled ? "#6a6470" : color}
-          brightness={hover ? 1.45 : 1}
-          glow={hover ? 1.6 : 0.7}
-          position={[0, 0, 0.0115]}
+          color={disabled ? ink.faded : color}
+          brightness={hover ? 1.35 : 1}
+          glow={hover ? 1.2 : 0.5}
+          position={[0, 0, 0.009]}
           delay={delay}
           depth={-0.3}
         />

@@ -1,13 +1,18 @@
 /** Portal travel — the pure timeline.
  *
  * Every scene switch (the Weighing Gate, a descent, the way home, a feather,
- * a death, a respawn) plays the same three-beat shape:
+ * a death, a respawn) plays the same three-beat shape, drawn in the gritty
+ * pixel style of the rifts themselves (ported from the artpass warp):
  *
- *   ENTER    the view is pulled in (FOV stretch, roll, the screen swirls shut)
- *   TUNNEL   an endless vortex covers the view while the next place loads —
- *            at least one beat, however fast the switch is
- *   ARRIVE   the tunnel collapses into a bright ring that opens on the new
- *            place, and the camera settles
+ *   ENTER    the view is pulled in (FOV stretch, roll) while the rift's tear
+ *            rips open over the screen and you are SUCKED IN — the starry
+ *            void behind it spins up, streaks screaming past
+ *   TUNNEL   you HOVER in a dark parallel world of blocky stars drifting past
+ *            (sinking on the way down, rising on the way home) while the next
+ *            place loads — at least one beat, however fast the switch is
+ *   ARRIVE   you are SPAT OUT: the void kicks outward, surges back into the
+ *            rift's colour and flashes, and a tear rips open at the centre
+ *            onto the new place while the camera settles
  *
  * This module is the math of that shape, and nothing else: per-kind styles,
  * easing, and two samplers that turn (stage, progress) into camera and
@@ -26,7 +31,7 @@ export type TravelStage = "idle" | "entering" | "tunnel" | "arriving";
 export type TravelLook = "portal" | "dissolve" | "fromDark";
 
 export interface TravelStyle {
-  /** Base colour of the vortex and tunnel walls. */
+  /** Base colour of the warp: its stars, streaks and the tear's rim. */
   color: string;
   /** Hot highlight: the rim, streak heads, the light at the tunnel's end. */
   hot: string;
@@ -58,9 +63,14 @@ export interface TravelStyle {
   rings: number;
   /** Soft drifting feathers instead of (some of) the hard streaks. */
   feathers: number;
+  /** Which way the starry void drifts past while you hover: +1 you sink
+   * (down into the deep), −1 you rise (home, and back from death). */
+  drift: 1 | -1;
 }
 
-const PORTAL_BEATS = { enterMs: 900, minTunnelMs: 320, arriveMs: 650 } as const;
+/** One beat of hovering in the starry void is what sells the journey (the
+ * artpass warp's middle); the pull-in and the spit-out stay brisk. */
+const PORTAL_BEATS = { enterMs: 850, minTunnelMs: 450, arriveMs: 650 } as const;
 
 /** The six journeys. Colours follow the portals themselves: cyan descends,
  * gold walks home; the feather is a paler, softer gold; death is black-red
@@ -72,7 +82,7 @@ export const TRAVEL_STYLES: Record<TravelKind, TravelStyle> = {
     deep: "#0b2a5c",
     look: "portal",
     ...PORTAL_BEATS,
-    enterMs: 950,
+    enterMs: 880,
     fovKick: 1.55,
     roll: 0.55,
     pull: 1.6,
@@ -82,6 +92,7 @@ export const TRAVEL_STYLES: Record<TravelKind, TravelStyle> = {
     streaks: 0.8,
     rings: 1,
     feathers: 0,
+    drift: 1,
   },
   descend: {
     color: "#46ffd0",
@@ -98,6 +109,7 @@ export const TRAVEL_STYLES: Record<TravelKind, TravelStyle> = {
     streaks: 1,
     rings: 0,
     feathers: 0,
+    drift: 1,
   },
   home: {
     color: "#ffd44f",
@@ -114,6 +126,7 @@ export const TRAVEL_STYLES: Record<TravelKind, TravelStyle> = {
     streaks: 0.85,
     rings: 0.35,
     feathers: 0,
+    drift: -1,
   },
   feather: {
     color: "#ffe6a6",
@@ -132,6 +145,7 @@ export const TRAVEL_STYLES: Record<TravelKind, TravelStyle> = {
     streaks: 0.35,
     rings: 0,
     feathers: 1,
+    drift: -1,
   },
   death: {
     color: "#ff2a12",
@@ -150,6 +164,7 @@ export const TRAVEL_STYLES: Record<TravelKind, TravelStyle> = {
     streaks: 0,
     rings: 0,
     feathers: 0,
+    drift: 1,
   },
   respawn: {
     color: "#9ec4ff",
@@ -168,6 +183,7 @@ export const TRAVEL_STYLES: Record<TravelKind, TravelStyle> = {
     streaks: 0.6,
     rings: 0,
     feathers: 0.3,
+    drift: -1,
   },
 };
 
@@ -295,20 +311,30 @@ export function sampleCamera(stage: TravelStage, p: number, s: TravelStyle, out:
 
 // ── Overlay ──────────────────────────────────────────────────────────────────
 
-/** Numbers for the fullscreen vortex overlay (all 0…1 unless noted). */
+/** Numbers for the fullscreen warp overlay (all 0…1 unless noted). */
 export interface OverlayFx {
   /** Anything to draw at all (0 = overlay hidden). */
   cover: number;
-  /** ENTER: the vortex iris around the portal, from the portal's own size
-   * (0) to past the farthest screen corner (1). */
+  /** ENTER: the tear ripping open over the view around the rift, from the
+   * rift's own size (0) to past the farthest screen corner (1). */
   iris: number;
-  /** ARRIVE: the revealing hole at the screen centre, 0 (closed) → 1 (past
-   * the corners). */
+  /** ARRIVE: the tear opening at the screen centre onto the new place,
+   * 0 (closed) → 1 (past the corners). */
   reveal: number;
-  /** Brightness of the event-horizon ring riding the iris / reveal edge. */
+  /** Brightness of the burning rim riding the tear's edge. */
   ring: number;
-  /** Spiral arms swirling over the still-visible world during ENTER. */
+  /** Shards of the world being sucked in over the still-visible view
+   * during ENTER. */
   swirl: number;
+  /** Being SUCKED IN: the void spins up, zooms toward its heart and streaks
+   * scream past. Rises through ENTER, dies away into the hover. */
+  suck: number;
+  /** How fast the starry void is streaming past (the fall between floors):
+   * surges as you are pulled through, eases to a slow drift while hovering. */
+  rush: number;
+  /** Being SPAT OUT: the void kicks outward past you and surges back into
+   * the rift's colour (ARRIVE). */
+  eject: number;
   /** Death: how much of the world has burned away (0…1). */
   dissolve: number;
   /** Respawn: a black veil over the tunnel (continues the death screen). */
@@ -320,7 +346,20 @@ export interface OverlayFx {
 }
 
 export function newOverlayFx(): OverlayFx {
-  return { cover: 0, iris: 0, reveal: 0, ring: 0, swirl: 0, dissolve: 0, dark: 0, flash: 0, fade: 1 };
+  return {
+    cover: 0,
+    iris: 0,
+    reveal: 0,
+    ring: 0,
+    swirl: 0,
+    suck: 0,
+    rush: 0,
+    eject: 0,
+    dissolve: 0,
+    dark: 0,
+    flash: 0,
+    fade: 1,
+  };
 }
 
 function zeroOverlay(out: OverlayFx): OverlayFx {
@@ -329,6 +368,9 @@ function zeroOverlay(out: OverlayFx): OverlayFx {
   out.reveal = 0;
   out.ring = 0;
   out.swirl = 0;
+  out.suck = 0;
+  out.rush = 0;
+  out.eject = 0;
   out.dissolve = 0;
   out.dark = 0;
   out.flash = 0;
@@ -368,31 +410,44 @@ export function sampleOverlay(stage: TravelStage, p: number, s: TravelStyle, out
     case "entering":
       out.cover = 1;
       if (s.look === "fromDark") {
-        // Straight into the tunnel from the death screen's black.
+        // Straight into the hover from the death screen's black: a calm
+        // starry void brightening as you rise out of it.
         out.iris = 1;
         out.dark = 1 - smoothstep(0.05, 1, p);
-        out.ring = 0;
+        out.rush = 0.25 * p;
         return out;
       }
       out.iris = easeInCubic(remap01(p, 0.08, 0.94));
       out.swirl = smoothstep(0.12, 0.65, p);
       out.ring = 0.55 + 0.9 * easeInQuad(p);
+      out.suck = smoothstep(0.1, 0.85, p);
+      out.rush = easeInQuad(p);
       out.flash = 0.55 * smoothstep(0.82, 1, p);
       return out;
-    case "tunnel":
+    case "tunnel": {
+      // The suck-in dies away into the hover; the fall eases to a drift.
+      const settle = smoothstep(0, 1, p);
+      const pulled = s.look === "fromDark" ? 0 : 1;
       out.cover = 1;
       out.iris = 1;
-      out.swirl = 0;
-      out.ring = 0;
-      out.flash = 0.55 * (1 - smoothstep(0, 0.45, p));
+      out.suck = pulled * (1 - settle);
+      out.rush = (s.look === "fromDark" ? 0.25 : 1) * (1 - settle);
+      out.flash = pulled * 0.55 * (1 - smoothstep(0, 0.45, p));
       return out;
+    }
     case "arriving": {
-      // The far light rushes up, bursts into a ring, and the ring opens.
-      const open = easeOutCubic(remap01(p, 0.06, 1));
-      out.reveal = open;
+      // Spat out: the void kicks outward and surges into colour with a
+      // flash, and a tear rips open at the centre onto the new place.
+      // (The surge peaks early and falls back toward the dark, so the tear
+      // opening onto the new place reads against it instead of drowning in
+      // a white-out.)
+      out.eject = smoothstep(0, 0.1, p) * (1 - 0.7 * smoothstep(0.1, 0.4, p));
+      out.rush = out.eject;
+      // The tear holds narrow long enough to read as a tear, then rips wide.
+      out.reveal = smoothstep(0.08, 0.85, p);
       out.iris = 1;
       out.ring = 1.6 * (1 - easeInQuad(p));
-      out.flash = 0.4 * (1 - smoothstep(0, 0.25, p));
+      out.flash = 0.6 * bump(remap01(p, 0, 0.24));
       out.cover = p >= 1 ? 0 : 1;
       return out;
     }

@@ -145,7 +145,7 @@ src/
   audio/       procedural WebAudio synth (sfx, biome drones)
   render/      textures/ (procedural painters), models/, post-processing
   scenes/      village, dungeon floor, floor atmosphere, canvas composition
-  transition/  portal journeys (enter pull, vortex tunnel, arrival)
+  transition/  portal journeys (pulled through the rift, the starry warp, arrival)
   ui3d/        in-world UI: pixel font, rune text, tablets, item models; the
                HUD, menus and inventory as layers
   ui/          DOM leftovers: perf overlay, build stamp, dev room

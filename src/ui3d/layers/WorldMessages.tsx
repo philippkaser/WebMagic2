@@ -7,7 +7,10 @@ import { placeInFront, pxFor } from "../anchors";
 import { uiNow } from "../clock";
 import { useGame } from "../../state/gameStore";
 import { isInventoryMode } from "./inventory/layout";
-import { RuneText } from "../text/RuneText";
+import { Plate } from "../Plate";
+import { UiShow } from "../presence";
+import { measureText, RuneText } from "../text/RuneText";
+import { ink } from "../theme";
 
 /** The message feed, in the air: every `message` event burns itself into the
  * space ahead of you, hangs there, and burns away.
@@ -113,17 +116,37 @@ function Message({ text, shown, slot, onHidden }: { text: string; shown: boolean
     g.quaternion.slerp(camera.quaternion, placed.current ? 1 - Math.exp(-dt * 6) : 1);
   });
 
+  const px = pxFor(DISTANCE, SIZE);
+  const tone = TONES[toneOf(text)];
+  const size = measureText(text, px, MAX_COLS);
   return (
     <group ref={group}>
-      <RuneText
-        text={text}
-        px={pxFor(DISTANCE, SIZE)}
-        maxCols={46}
-        color="#e9dfc6"
-        glow={0.9}
-        show={shown}
-        onHidden={onHidden}
-      />
+      <UiShow show={shown}>
+        <Plate width={size.width + px * 10} height={size.height + px * 6} frame={tone.frame} texel={px * 1.1} fillOpacity={0.72}>
+          <RuneText text={text} px={px} maxCols={MAX_COLS} color={tone.ink} glow={0.7} depth={-0.4} onHidden={onHidden} />
+        </Plate>
+      </UiShow>
     </group>
   );
 }
+
+const MAX_COLS = 46;
+
+type Tone = "plain" | "omen" | "good" | "ally";
+
+/** Messages arrive as plain strings from everywhere; their tone is read
+ * from what they say, so omens and triumphs stand out at a glance (after
+ * the grimoire feed's colouring). */
+export function toneOf(text: string): Tone {
+  if (/not alone|presence|stranger|slain|slew|fallen|grave|broken|oathbreak|warden/i.test(text)) return "omen";
+  if (/pact|sworn|ally/i.test(text)) return "ally";
+  if (/home|banked|endured|equipped|treasure|way home|feather/i.test(text)) return "good";
+  return "plain";
+}
+
+const TONES: Record<Tone, { frame: string; ink: string }> = {
+  plain: { frame: "iron", ink: ink.parchment },
+  omen: { frame: "violet", ink: "#e3cfff" },
+  good: { frame: "gold", ink: "#ffe9b0" },
+  ally: { frame: ink.ally, ink: "#cff5d6" },
+};

@@ -73,9 +73,9 @@ function UiLights() {
   }, -90);
   return (
     <>
-      <ambientLight intensity={0.55} color="#8d86a8" />
+      <ambientLight intensity={1.1} color="#9d96b8" />
       <group ref={group}>
-        <pointLight position={[-0.7, 0.6, 0.2]} intensity={9} distance={8} decay={1.3} color="#ffc88f" />
+        <pointLight position={[-0.7, 0.6, 0.2]} intensity={4} distance={8} decay={1.3} color="#ffd9a8" />
         <pointLight position={[0.9, -0.4, -0.3]} intensity={1.2} distance={5} decay={1.6} color="#7fb8ff" />
         <pointLight position={[0, 0.8, -4.5]} intensity={2} distance={5} decay={1.2} color="#b89cff" />
       </group>

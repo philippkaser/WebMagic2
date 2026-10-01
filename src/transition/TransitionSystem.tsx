@@ -31,10 +31,14 @@ import {
 import { markTravelFrame } from "./travel";
 import { createVortexMaterial } from "./vortexMaterial";
 
-/** The tunnel's lens relative to the camera's (see uTanHalf). */
-const TUNNEL_LENS = 0.8;
-/** Portal ring radius (m) — the ENTER iris starts at its on-screen size. */
-const RING_RADIUS = 1.05;
+/** Where the ENTER tear ends up, in screen units per tear-metre relative to
+ * the screen's far corner — big enough that the tear (which also rips wider
+ * as it opens) swallows the whole view. */
+const IRIS_END = 0.6;
+/** Fall speed of the starry void (warp units/s): a slow drift while hovering,
+ * a rush while being pulled through or spat out. */
+const DRIFT_SPEED = 0.3;
+const RUSH_SPEED = 4.5;
 const UP = new Vector3(0, 1, 0);
 /** Feet below the capsule centre (the capsule's half-height + radius). */
 const FEET = PLAYER.halfHeight + PLAYER.radius - 0.05;
@@ -48,8 +52,10 @@ const FEET = PLAYER.halfHeight + PLAYER.radius - 0.05;
  * frame's is undone first) so it can never leak into the mouse-look; the base
  * FOV is captured when a journey starts and restored exactly when it ends.
  *
- * Overlay: one fullscreen vortex quad (vortexMaterial.ts) in the world scene,
- * so the post chain's bloom feeds on the tunnel's light like any emissive.
+ * Overlay: one fullscreen warp quad (vortexMaterial.ts) in the world scene,
+ * so it shares the world's pixels and the post chain's bloom feeds on its
+ * light like any emissive: the rift's tear ripping open over the view, the
+ * starry void you hover in, the tear you are spat out of.
  *
  * Side effects on stage changes: the whoosh, the tunnel's rush loop, the
  * arrival thump, particle bursts and light flashes. */
@@ -68,6 +74,8 @@ export function TransitionSystem() {
     styledKind: null as TravelKind | null,
     /** Where the vortex centre was when ENTER ended (screen units). */
     enterCenter: new Vector2(),
+    /** How far the starry void has streamed past this journey (warp units). */
+    fall: 0,
     /** The position offset applied last frame, and where it left the camera
      * — if the controller skipped a frame (no body yet during a scene swap),
      * the offset is taken back out instead of accumulating. */
@@ -213,7 +221,7 @@ export function TransitionSystem() {
       u.uDeep.value.set(style.deep);
       u.uSpinDir.value = style.roll < 0 ? -1 : 1;
       u.uSpin.value = style.spin;
-      u.uSpeed.value = style.speed;
+      u.uDrift.value = style.drift;
       u.uStreaks.value = style.streaks;
       u.uRings.value = style.rings;
       u.uFeathers.value = style.feathers;
@@ -224,10 +232,16 @@ export function TransitionSystem() {
     const tanHalf = Math.tan((camera.fov * Math.PI) / 360);
     u.uTime.value = t;
     u.uAspect.value = aspect;
-    // A touch narrower than the camera: the tube reads deeper, and still
-    // stretches along with the view's FOV kick.
-    u.uTanHalf.value = tanHalf * TUNNEL_LENS;
     u.uRoll.value = fx.roll;
+    // The fall through the void: integrated, so its speed can surge and
+    // settle without the stars ever jumping (a frozen still derives it from
+    // its fixed clock instead).
+    const fallRate = style.speed * (DRIFT_SPEED + RUSH_SPEED * ov.rush);
+    if (frozen?.time !== undefined) c.fall = frozen.time * fallRate;
+    else c.fall += Math.min(dt, 0.1) * fallRate;
+    u.uFall.value = c.fall;
+    u.uSuck.value = ov.suck;
+    u.uEject.value = ov.eject;
 
     // Where the vortex sits on screen (aspect-corrected half-height units):
     // on the portal during ENTER, drifting to the centre in the tunnel, with
@@ -242,8 +256,10 @@ export function TransitionSystem() {
         scratch.v.copy(scratch.focus).project(camera);
         if (scratch.v.z < 1 && Math.abs(scratch.v.x) < 1.6 && Math.abs(scratch.v.y) < 1.6) {
           c.enterCenter.set(scratch.v.x * aspect, scratch.v.y);
+          // The tear starts at the rift's own on-screen size (screen
+          // half-heights per metre at the rift's distance).
           const dist = camera.position.distanceTo(scratch.focus);
-          r0 = RING_RADIUS / Math.max(0.3, dist) / tanHalf;
+          r0 = 1 / Math.max(0.3, dist) / tanHalf;
         }
       }
       u.uCenter.value.copy(c.enterCenter);
@@ -256,8 +272,10 @@ export function TransitionSystem() {
     const cx = u.uCenter.value.x;
     const cy = u.uCenter.value.y;
     const farCorner = Math.hypot(aspect + Math.abs(cx), 1 + Math.abs(cy));
-    u.uIrisR.value = r0 + (farCorner * 1.15 - r0) * ov.iris;
-    u.uRevealR.value = ov.reveal * Math.hypot(aspect, 1) * 1.2;
+    u.uIris.value = ov.iris;
+    u.uIrisR.value = r0 + (farCorner * IRIS_END - r0) * ov.iris;
+    u.uReveal.value = ov.reveal;
+    u.uRevealR.value = ov.reveal * Math.hypot(aspect, 1) * 0.9;
     u.uRing.value = ov.ring;
     u.uSwirl.value = ov.swirl;
     u.uDissolve.value = ov.dissolve;

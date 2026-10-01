@@ -150,6 +150,15 @@ export const travel = traveler.travel;
  * actions refuse to start a second one. */
 export const isTraveling = traveler.isTraveling;
 
+/** A whole-journey progress (0…1) as the (stage, progress) it falls in. */
+export function previewFreeze(kind: TravelKind, progress: number, time?: number): TravelFreeze {
+  const s = TRAVEL_STYLES[kind];
+  const t = Math.min(Math.max(progress, 0), 1) * (s.enterMs + s.minTunnelMs + s.arriveMs);
+  if (t < s.enterMs) return { stage: "entering", kind, progress: t / s.enterMs, time };
+  if (t < s.enterMs + s.minTunnelMs) return { stage: "tunnel", kind, progress: (t - s.enterMs) / s.minTunnelMs, time };
+  return { stage: "arriving", kind, progress: (t - s.enterMs - s.minTunnelMs) / s.arriveMs, time };
+}
+
 // Dev-only hook: freeze/scrub the visuals for screenshots and tuning.
 if (typeof window !== "undefined" && import.meta.env?.DEV) {
   (window as unknown as Record<string, unknown>).__travel = {
@@ -158,7 +167,18 @@ if (typeof window !== "undefined" && import.meta.env?.DEV) {
       setTravelFreeze(f);
     },
     thaw: () => setTravelFreeze(null),
+    /** Freeze at `progress` (0…1) through the WHOLE journey — ENTER, the
+     * tunnel's minimum beat, ARRIVE — like the artpass branch's
+     * __previewTransition(mode, progress). */
+    preview: (kind: TravelKind, progress: number, time?: number) => setTravelFreeze(previewFreeze(kind, progress, time)),
     state: () => useTravel.getState(),
     isTraveling,
   };
+  /** Artpass parity: scrub a journey by one 0…1 progress (thaw with
+   * __travel.thaw()). Mode 0 was its warp → a descent here, mode 1 its
+   * mind-dive → the gate. */
+  (window as unknown as Record<string, unknown>).__previewTransition = (
+    mode: 0 | 1 | TravelKind,
+    progress: number,
+  ) => setTravelFreeze(previewFreeze(mode === 0 ? "descend" : mode === 1 ? "gate" : mode, progress));
 }

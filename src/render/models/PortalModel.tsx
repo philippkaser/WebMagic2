@@ -1,71 +1,77 @@
-import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useFrame } from "@react-three/fiber";
+import { useEffect, useMemo, useRef } from "react";
 import {
-  AdditiveBlending,
-  BoxGeometry,
-  BufferAttribute,
-  BufferGeometry,
   Color,
   DoubleSide,
   Group,
-  MeshStandardMaterial,
-  OctahedronGeometry,
+  InstancedMesh,
+  MeshBasicMaterial,
+  Object3D,
   PlaneGeometry,
   ShaderMaterial,
-  TorusGeometry,
+  TetrahedronGeometry,
   UniformsLib,
   UniformsUtils,
 } from "three";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { VORTEX_NOISE_GLSL } from "../../transition/vortexGlsl";
-import { SEAL_GLYPHS, getSealGlyphAtlas } from "../textures";
-import { shared, surfaceMaterial } from "./shared";
+import { PIXEL_NOISE_GLSL } from "../../transition/vortexGlsl";
+import { RIFT_RUNE_GLOW, RiftFrameModel, createRiftRuneMaterial } from "./RiftFrameModel";
+import { shared } from "./shared";
 
-/** The portal: stone steps, a dark metal ring, and inside it a living vortex.
- * Origin is the ground at the portal's centre; the ring stands at
- * PORTAL_RING_Y.
+/** The portal: a wound torn in space (ported from the artpass branch's rift).
+ * Origin is the ground at the rift's centre; the tear hangs at RIFT_Y over a
+ * rune dais framed by broken standing stones (RiftFrameModel).
  *
- * The vortex is a shader, not a texture (zero binary assets): a tunnel seen
- * head-on in log-polar coordinates. Three layers of periodic fbm flow inward
- * and spin — the deeper a layer, the slower, darker and finer it is — so the
- * core seems to recede while the rim burns; spiral arms, hot filaments and
- * twinkling flecks ride on top, and the event horizon's edge wobbles and
- * shimmers against the ring. An additive corona licks flames over the ring
- * (its silhouette seems to waver in the heat) and a swarm of motes spirals in.
- * Everything glowing is written far above 1.0 for the bloom pass.
+ * The tear is one shader plane, computed entirely on a coarse pixel grid so
+ * it reads as blocky torn pixels, not a smooth decal: a hard, stepped
+ * silhouette (no anti-aliasing) — a vertical lens whose width frays and whose
+ * spine wobbles with fast noise, so the edges writhe — a ragged burning rim,
+ * and, seen THROUGH the tear, a blocky star vortex spiralling in, all in a
+ * stepped palette. It turns to face you around Y (a rip in space has no flat
+ * side to catch) and breathes rather than spins: a wound, not a machine. A
+ * swarm of glowing shards spirals in from the rim and is swallowed, over and
+ * over (RiftMotes).
  *
  * Behaviour (world/props.tsx Portal) owns the pooled light, the sparks, the
  * prompt and the numbers in `drive`, which the model reads every frame:
- * proximity (the vortex quickens and brightens as the player nears), the seal
- * (1 = sealed … 0 = open; animating it down BREAKS the seal) and surge (a
- * journey is starting through this portal).
+ * proximity (the wound quickens, burns brighter and its motes swarm faster as
+ * the player nears), the seal (1 = sealed … 0 = open; easing it down tears
+ * the wound open), surge (a journey is starting through it) and refusal
+ * (someone tried it while sealed).
  *
  * SEALED (the way home before the Tithe is paid, exits while a boss lives):
- * the vortex stops dead and drains to a dim, frosted glass cracked in a
- * spiderweb whose cracks glow in the seal's colour — and pulse brighter when
- * someone comes close — while the ring of carved glyph plates slowly
- * counter-rotates over it: "this opens, just not yet". */
+ * the wound is nearly shut — a dim, thin slit that still writhes, its runes
+ * smouldering and its motes barely a sparkle. Touch it and it flinches; break
+ * its seal and it rips open, the rim flaring white-hot as it goes. */
 
-/** Height of the ring's centre above the portal origin. */
-export const PORTAL_RING_Y = 1.5;
+/** Height of the tear's centre above the rift's origin (the travel pull aims
+ * here). */
+export const RIFT_Y = 1.8;
+/** The tear plane, in metres. The shader's coordinates are these metres. */
+const TEAR_W = 3;
+const TEAR_H = 4;
+/** How wide a sealed wound stays open (artpass's `uActive` for a sealed rift). */
+const SEALED_ACTIVITY = 0.12;
 
 /** Numbers the behaviour writes and the model reads every frame. */
 export interface PortalDrive {
-  /** 0…1 — how close the player is (1 = at the steps). */
+  /** 0…1 — how close the player is (1 = on the dais). */
   proximity: number;
-  /** 1 = sealed, 0 = open. Easing it from 1 to 0 plays the seal breaking. */
+  /** 1 = sealed, 0 = open. Easing it from 1 to 0 tears the wound open. */
   seal: number;
-  /** 0…1 flare while a journey starts through this portal; decays. */
+  /** 0…1 flare while a journey starts through this rift; decays. */
   surge: number;
-  /** 0…1 flare when someone tries a sealed portal; decays. */
+  /** 0…1 flare when someone tries a sealed rift; decays. */
   refusal: number;
+  /** Written BY the model: the tear's current facing (radians about Y), so
+   * the behaviour can throw sparks off its actual rim. */
+  yaw: number;
 }
 
 export function newPortalDrive(locked: boolean): PortalDrive {
-  return { proximity: 0, seal: locked ? 1 : 0, surge: 0, refusal: 0 };
+  return { proximity: 0, seal: locked ? 1 : 0, surge: 0, refusal: 0, yaw: 0 };
 }
 
-/** Which way a portal of this colour swirls: warm (gold, the way home) turns
+/** Which way a rift of this colour swirls: warm (gold, the way home) turns
  * the other way from cool (cyan, the way down) — up and down should feel
  * like opposites. */
 export function portalSpinDir(color: string): 1 | -1 {
@@ -74,519 +80,285 @@ export function portalSpinDir(color: string): 1 | -1 {
   return hsl.h > 0.03 && hsl.h < 0.2 ? -1 : 1;
 }
 
-const stepGeo = shared(() => new BoxGeometry(3.4, 0.24, 1.6));
-const stepMat = shared(() =>
-  surfaceMaterial("slab", { roughness: 0.85, metalness: 0.05, envMapIntensity: 0.5 }),
-);
-const ringGeo = shared(() => new TorusGeometry(1.15, 0.13, 8, 24));
-const ringMat = shared(
-  () => new MeshStandardMaterial({ color: "#2c2836", metalness: 0.6, roughness: 0.35 }),
-);
-/** The vortex fills r ≤ ~1.0 and its burning rim runs under the ring. */
-const discGeo = shared(() => new PlaneGeometry(2.2, 2.2));
-/** Two quads, just in front of and behind the ring, for the flame corona. */
-const coronaGeo = shared(() => {
-  const front = new PlaneGeometry(3.6, 3.6);
-  front.translate(0, 0, 0.16);
-  const back = new PlaneGeometry(3.6, 3.6);
-  back.rotateY(Math.PI);
-  back.translate(0, 0, -0.16);
-  const merged = mergeGeometries([front, back]);
-  front.dispose();
-  back.dispose();
-  return merged;
-});
+/** How open the wound is (artpass `uActive`: 0.12 sealed … 1 open) for a
+ * seal value — eased, so it tears open fast and settles rather than sliding. */
+export function riftActivity(seal: number): number {
+  const open = 1 - seal;
+  return SEALED_ACTIVITY + (1 - SEALED_ACTIVITY) * open * open * (3 - 2 * open);
+}
 
-const MOTE_COUNT = 56;
-/** Point motes: positions are computed in the vertex shader from a per-mote
- * seed, so the swarm costs one draw call and zero CPU per frame. */
-const motesPointsGeo = shared(() => {
-  const g = new BufferGeometry();
-  const seeds = new Float32Array(MOTE_COUNT * 3);
-  for (let i = 0; i < seeds.length; i++) seeds[i] = Math.random();
-  g.setAttribute("position", new BufferAttribute(new Float32Array(MOTE_COUNT * 3), 3));
-  g.setAttribute("aSeed", new BufferAttribute(seeds, 3));
-  return g;
-});
+const tearGeo = shared(() => new PlaneGeometry(TEAR_W, TEAR_H));
+const moteGeo = shared(() => new TetrahedronGeometry(1));
 
-// ── Shaders ──────────────────────────────────────────────────────────────────
+// ── The tear ─────────────────────────────────────────────────────────────────
 
-const LOCAL_VERTEX = /* glsl */ `
-varying vec2 vP;
+const TEAR_VERTEX = /* glsl */ `
+varying vec2 vUv;
 #include <fog_pars_vertex>
 void main() {
-  vP = position.xy;
+  vUv = uv;
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mvPosition;
   #include <fog_vertex>
 }
 `;
 
-const COMMON_UNIFORMS = /* glsl */ `
+const TEAR_FRAGMENT = /* glsl */ `
+varying vec2 vUv;
 uniform float uTime;
 uniform float uClock;
-uniform float uProx;
-uniform float uSeal;
-uniform float uSurge;
-uniform float uRefusal;
-uniform float uSeed;
-uniform float uSpinDir;
 uniform vec3 uColor;
 uniform vec3 uHot;
-uniform vec3 uDeep;
-uniform vec3 uSealColor;
-const float TAU = 6.2831853;
-`;
-
-const DISC_FRAGMENT = /* glsl */ `
-varying vec2 vP;
-${COMMON_UNIFORMS}
+uniform float uActive;
+uniform float uEnergy;
+uniform float uFlare;
+uniform float uSeed;
+uniform float uSpinDir;
 #include <fog_pars_fragment>
-${VORTEX_NOISE_GLSL}
-
-/** Distance from p to a straight crack through o at angle th, if p lies
- * within len of o along it (else a large number). */
-float crackLine(vec2 p, vec2 o, float th, float len) {
-  vec2 d = vec2(cos(th), sin(th));
-  vec2 q = p - o;
-  float along = dot(q, d);
-  float perp = abs(q.x * d.y - q.y * d.x);
-  return along > 0.0 && along < len ? perp : 9.0;
-}
+${PIXEL_NOISE_GLSL}
 
 void main() {
-  vec2 p = vP;
-  // Seen from behind, mirror so it still swirls the same way.
-  if (!gl_FrontFacing) p.x = -p.x;
-  float r = length(p);
-  if (r > 1.09) discard;
-  float a = atan(p.y, p.x);
-  float open = 1.0 - uSeal;
-  float energy = 1.0 + uProx * 0.45 + uSurge * 0.7;
-  float tc = uClock;
-  float dir = uSpinDir;
+  // Plane-local metres: x in [-1.5, 1.5], y in [-2, 2]. Everything below is
+  // sampled on a 26-per-metre grid — at play distance about one world pixel
+  // per cell, chunkier as you come close.
+  vec2 raw = (vUv - 0.5) * vec2(${TEAR_W.toFixed(1)}, ${TEAR_H.toFixed(1)});
+  vec2 p = pix(raw, 26.0);
+  // The wound's own clock: slower while sealed, quicker near the player.
+  float t = uClock;
 
-  // The event horizon: its edge wobbles (more when you're close).
-  float wob = (vxNoiseP(vec2(a / TAU * 12.0, uTime * 1.7), 12.0) - 0.5) * (0.07 + 0.05 * uProx) * open;
-  float edge = 0.97 + wob;
-  float rn = clamp(r / edge, 0.0, 1.0);
-  float lr = log(max(rn, 0.015));
+  // ---- Silhouette: a sealed wound is a thin slit; a touch or a breaking
+  //      seal makes it flinch wider. ----
+  float spine;
+  float width = mix(0.24, 1.0, uActive) + 0.16 * uFlare;
+  float d = tearSd(p, t, uSeed, width, spine);
+  float inside = step(d, 0.0);                  // hard, gritty edge (no AA)
+  float edge = smoothstep(0.24, 0.0, abs(d));   // ragged burning rim band
 
-  // Three layers, back to front — deeper = slower, darker, finer. Most of
-  // the disc stays under the bloom threshold so the bright filaments and the
-  // rim are what glow: structure, not a white blob.
-  vec3 col = uDeep * 0.25;
-  {
-    float u = a / TAU + dir * (tc * 0.18 + lr * 0.16);
-    float v = lr * 1.1 + tc * 0.25;
-    float n = vxFbmP(vec2(u * 6.0, v), 6.0);
-    col += uDeep * 1.4 * n + uColor * 0.1 * n * n;
-  }
-  float arms;
-  {
-    float u = a / TAU + dir * (tc * 0.36 + lr * 0.3);
-    float v = lr * 1.9 + tc * 0.55;
-    float n = vxFbmP(vec2(u * 8.0, v), 8.0);
-    float s = sin((a + dir * (lr * 2.4 + tc * 1.2)) * 3.0) * 0.5 + 0.5;
-    arms = smoothstep(0.42, 0.92, n * 0.7 + s * 0.45);
-    col = mix(col, uColor * (0.42 + 0.22 * energy), arms * 0.9);
-  }
-  {
-    float u = a / TAU + dir * (tc * 0.6 + lr * 0.45);
-    float v = lr * 3.0 + tc * 1.1;
-    float n = vxFbmP(vec2(u * 14.0, v), 14.0);
-    col += mix(uColor, uHot, 0.6) * pow(n, 4.0) * 1.6 * energy * (0.35 + arms);
-  }
-  // The core recedes: dark at the heart, with a pinprick of far light.
-  col *= mix(0.1, 1.0, smoothstep(0.0, 0.55, rn));
-  col += uHot * exp(-rn * 16.0) * 1.1 * energy;
-  // The rim burns.
-  float rim = smoothstep(0.62, 1.0, rn);
-  col += uColor * rim * rim * rim * 1.3 * energy;
-  // Sparkle flecks riding the spiral (faded near the core, where the cells
-  // shrink below a pixel and would only shimmer).
-  {
-    float u = a / TAU * 36.0 + dir * tc * 3.0;
-    float v = lr * 5.0 + tc * 1.4;
-    vec2 cell = vec2(mod(floor(u), 36.0), floor(v));
-    float h = vxHash21(cell + uSeed);
-    vec2 f = vec2(fract(u), fract(v)) - 0.5;
-    float tw = pow(max(0.0, sin(uTime * (2.0 + h * 5.0) + h * 40.0)), 14.0);
-    float dotMask = 1.0 - smoothstep(0.15, 0.4, length(f));
-    col += uHot * 3.0 * tw * dotMask * step(0.8 - uProx * 0.1, h) * smoothstep(0.3, 0.6, rn);
-  }
-  // The shimmering horizon band itself, bright enough to bloom.
-  float band = smoothstep(edge - 0.055, edge, r);
-  float shimmer = 0.5 + 0.5 * sin(a * 22.0 * dir + uTime * 9.0) * (vxNoiseP(vec2(a / TAU * 20.0, uTime * 4.0), 20.0) * 2.0 - 0.6);
-  vec3 rimCol = mix(uColor * 1.6, uHot * 2.1, clamp(shimmer, 0.0, 1.0)) * energy;
-  vec3 openCol = mix(col, rimCol, band);
+  // ---- The void through the tear: blocky stars + nebula spiralling in. ----
+  vec2 c = vec2(p.x - spine, p.y * 0.55);
+  float rr = length(c);
+  float aa = atan(c.y, c.x) * uSpinDir;
+  float swirl = aa + (1.3 - rr) * 2.8 + t * 0.55;
 
-  // ── Sealed: the vortex stopped dead, frosted, cracked ──
-  // (uSeal is a uniform, so this branch is coherent: open portals skip the
-  // glass entirely.)
-  if (uSeal < 0.001) {
-    gl_FragColor = vec4(openCol, 1.0);
-    #include <fog_fragment>
-    return;
-  }
-  float lum = dot(col, vec3(0.3, 0.5, 0.2));
-  vec3 frozen = mix(vec3(lum), uSealColor * lum, 0.3) * 0.22 + uDeep * 0.1;
-  frozen *= 0.8 + 0.4 * vxNoise(p * 14.0 + uSeed); // frost grain
-  float sheen = smoothstep(0.86, 1.0, sin((p.x * 0.8 + p.y) * 2.4 + 0.7));
-  frozen += vec3(0.5, 0.6, 0.75) * sheen * 0.06;
-  // Cracked like struck glass: straight spokes from an off-centre impact,
-  // and broken chords between them.
-  vec2 o = vec2(0.24, -0.18) * (0.5 + fract(uSeed * 0.37));
-  float d = 9.0;
-  for (int k = 0; k < 9; k++) {
-    float fk = float(k);
-    float th = (fk + 0.5 + (vxHash11(fk + uSeed) - 0.5) * 0.7) * TAU / 9.0;
-    d = min(d, crackLine(p, o, th, 0.55 + vxHash11(fk * 3.1 + uSeed) * 0.9));
-  }
-  vec2 ip = p - o;
-  float ir = length(ip);
-  float ia = atan(ip.y, ip.x);
-  float si = floor(ia / TAU * 9.0);
-  float sc = (si + 0.5) * TAU / 9.0;
-  float proj = ir * cos(ia - sc);
-  for (int k = 0; k < 3; k++) {
-    float rho = 0.2 + float(k) * 0.24 + (vxHash21(vec2(si, float(k)) + uSeed) - 0.5) * 0.1;
-    float on = step(0.4, vxHash21(vec2(si + 17.0, float(k)) + uSeed));
-    d = min(d, on > 0.5 ? abs(proj - rho) : 9.0);
-  }
-  float crack = (1.0 - smoothstep(0.012, 0.03, d)) * (1.0 - smoothstep(0.92, 0.99, r));
-  float impact = exp(-ir * 26.0);
-  float pulse = pow(0.5 + 0.5 * sin(ir * 8.0 - uTime * 2.6), 6.0);
-  // Breaking: the cracks flare white-hot halfway through.
-  float breaking = 4.0 * uSeal * (1.0 - uSeal);
-  float crackGlow = 0.55 + pulse * (0.4 + 1.4 * uProx) + uRefusal * 3.0 + breaking * 5.0;
-  frozen += uSealColor * (crack * crackGlow + impact * (0.8 + uRefusal * 2.0));
-  // A thin, cold, steady rim.
-  frozen = mix(frozen, uSealColor * 0.7, smoothstep(edge - 0.03, edge, r));
+  vec2 g0 = vec2(swirl * 2.3, pow(max(rr, 0.03), 0.5) * 6.0 - t * 1.5);
+  float sh0 = hash21(floor(g0));
+  float star0 = step(0.86, sh0) * (0.4 + 0.6 * fract(sh0 * 71.3 + uTime));
+  vec2 g1 = vec2(swirl * 4.6 + 9.0, pow(max(rr, 0.03), 0.6) * 11.0 - t * 1.4);
+  float star1 = step(0.90, hash21(floor(g1))) * 0.5;
+  float neb = pow(fbm(vec2(swirl * 1.2, rr * 2.4 - t * 0.5)), 1.6);
 
-  vec3 outCol = mix(openCol, frozen, uSeal);
-  gl_FragColor = vec4(outCol, 1.0);
+  vec3 deep = mix(uColor * 0.12, vec3(0.04, 0.015, 0.09), smoothstep(0.0, 0.9, rr));
+  vec3 voidCol = deep;
+  voidCol += uColor * neb * 0.6 * (1.0 - rr * 0.6);
+  voidCol += (vec3(0.9) + uColor * 0.6) * star0 * (0.5 + 0.8 * uActive) * uEnergy;
+  voidCol += uColor * star1 * (0.4 + 0.6 * uActive);
+
+  // ---- Ragged burning rim: white-hot while a seal breaks. ----
+  float flick = 0.78 + 0.22 * sin(uTime * 11.0 + p.y * 7.0 + uSeed);
+  vec3 rim = mix(uColor, uHot, clamp(uFlare, 0.0, 1.0) * 0.85);
+  // (A sealed wound's rim smoulders rather than burns: a dim slit.)
+  vec3 edgeCol = rim * edge * (1.25 + 1.5 * uActive) * mix(0.5, 1.0, uActive) * flick * uEnergy * (1.0 + 1.5 * uFlare);
+
+  vec3 col = voidCol * inside + edgeCol;
+  // Hard stepped palette → deliberate pixel-magic banding.
+  col = floor(col * 14.0) / 14.0;
+
+  float halo = smoothstep(0.34, 0.0, abs(d)) * edge * (0.35 + 0.5 * uActive);
+  float alpha = clamp(max(inside, halo), 0.0, 1.0);
+  if (alpha < 0.02) discard;
+  gl_FragColor = vec4(col, alpha);
   #include <fog_fragment>
 }
 `;
 
-const CORONA_FRAGMENT = /* glsl */ `
-varying vec2 vP;
-${COMMON_UNIFORMS}
-${VORTEX_NOISE_GLSL}
-
-void main() {
-  float r = length(vP);
-  // Nothing to draw inside the ring or past the longest tongue.
-  if (r < 0.98 || r > 1.75) discard;
-  float a = atan(vP.y, vP.x);
-  float open = 1.0 - uSeal;
-  float energy = 1.0 + uProx * 0.7 + uSurge * 1.2;
-  // Flame tongues licking outward over the ring: its silhouette seems to
-  // waver in the heat.
-  float n = vxFbmP(vec2(a / TAU * 18.0 + uSpinDir * uTime * 0.15, r * 3.4 - uTime * 1.5), 18.0);
-  float tongues = smoothstep(0.5, 0.9, n);
-  float reach = 1.22 + 0.12 * energy + tongues * 0.3;
-  float glow = smoothstep(1.0, 1.1, r) * (1.0 - smoothstep(1.1, reach, r)) * (0.08 + tongues * 0.9);
-  // Soft outer halo.
-  glow += smoothstep(1.0, 1.15, r) * exp(-max(r - 1.15, 0.0) * 5.0) * 0.05;
-  vec3 col = mix(uColor, uHot, tongues * 0.5) * glow * energy * mix(0.1, 1.0, open);
-  gl_FragColor = vec4(col, 1.0);
-}
-`;
-
-const MOTES_VERTEX = /* glsl */ `
-attribute vec3 aSeed;
-uniform float uClock;
-uniform float uProx;
-uniform float uSeal;
-uniform float uSurge;
-uniform float uSpinDir;
-uniform float uPx;
-varying float vAlpha;
-varying float vHeat;
-void main() {
-  float life = fract(uClock * (0.1 + aSeed.z * 0.07) + aSeed.x);
-  float e = life * life;
-  float rad = mix(2.3, 0.06, e);
-  float side = aSeed.z > 0.5 ? 1.0 : -1.0;
-  float ang = aSeed.y * 6.2831853 + uSpinDir * e * 5.0;
-  vec3 pos = vec3(cos(ang) * rad, sin(ang) * rad, side * mix(0.35 + aSeed.x * 0.9, 0.0, e));
-  vec4 mv = modelViewMatrix * vec4(pos, 1.0);
-  gl_Position = projectionMatrix * mv;
-  gl_PointSize = max(1.0, 0.075 * (1.0 - e * 0.5) * projectionMatrix[1][1] * uPx / -mv.z);
-  vAlpha = smoothstep(0.0, 0.12, life) * (1.0 - smoothstep(0.86, 1.0, life))
-    * (1.0 - uSeal) * (0.35 + 0.65 * uProx + uSurge);
-  vHeat = e;
-}
-`;
-
-const MOTES_FRAGMENT = /* glsl */ `
-uniform vec3 uColor;
-uniform vec3 uHot;
-varying float vAlpha;
-varying float vHeat;
-void main() {
-  // Square points on purpose: they're pixels, like everything else.
-  vec3 col = mix(uColor * 1.8, uHot * 2.8, vHeat);
-  gl_FragColor = vec4(col * vAlpha, 1.0);
-}
-`;
-
-interface PortalUniforms {
+interface TearUniforms {
   uTime: { value: number };
   uClock: { value: number };
-  uProx: { value: number };
-  uSeal: { value: number };
-  uSurge: { value: number };
-  uRefusal: { value: number };
-  uSeed: { value: number };
-  uSpinDir: { value: number };
-  uPx: { value: number };
   uColor: { value: Color };
   uHot: { value: Color };
-  uDeep: { value: Color };
-  uSealColor: { value: Color };
+  uActive: { value: number };
+  uEnergy: { value: number };
+  uFlare: { value: number };
+  uSeed: { value: number };
+  uSpinDir: { value: number };
 }
 
-/** Per-portal materials sharing one uniform set (so one write per frame
- * drives disc, corona and motes alike). */
-function buildMaterials(color: string, sealColor: string) {
+function buildTearMaterial(color: string): ShaderMaterial & { uniforms: TearUniforms } {
   const base = new Color(color);
-  const hot = base.clone().lerp(new Color("#ffffff"), 0.72);
-  // The deep shade: darker, and nudged round the hue wheel so the vortex has
-  // depth instead of being one flat colour.
-  const hsl = { h: 0, s: 0, l: 0 };
-  base.getHSL(hsl);
-  const deep = new Color().setHSL((hsl.h + 0.08) % 1, Math.min(1, hsl.s * 0.9 + 0.1), 0.07);
-  const uniforms: PortalUniforms = {
+  const own: TearUniforms = {
     uTime: { value: 0 },
     uClock: { value: Math.random() * 100 },
-    uProx: { value: 0 },
-    uSeal: { value: 0 },
-    uSurge: { value: 0 },
-    uRefusal: { value: 0 },
-    uSeed: { value: Math.floor(Math.random() * 1000) },
-    uSpinDir: { value: portalSpinDir(color) },
-    uPx: { value: 100 },
     uColor: { value: base },
-    uHot: { value: hot },
-    uDeep: { value: deep },
-    uSealColor: { value: new Color(sealColor) },
+    uHot: { value: base.clone().lerp(new Color("#ffffff"), 0.75) },
+    uActive: { value: 1 },
+    uEnergy: { value: 1 },
+    uFlare: { value: 0 },
+    // Two rifts never writhe in step.
+    uSeed: { value: Math.random() * 10 },
+    uSpinDir: { value: portalSpinDir(color) },
   };
-  const disc = new ShaderMaterial({
+  const material = new ShaderMaterial({
     uniforms: UniformsUtils.merge([UniformsLib.fog]) as Record<string, { value: unknown }>,
-    vertexShader: LOCAL_VERTEX,
-    fragmentShader: DISC_FRAGMENT,
+    vertexShader: TEAR_VERTEX,
+    fragmentShader: TEAR_FRAGMENT,
+    transparent: true,
+    depthWrite: false,
     side: DoubleSide,
     fog: true,
   });
-  // Merge keeps fog's own uniforms; ours are shared by reference.
-  Object.assign(disc.uniforms, uniforms);
-  const corona = new ShaderMaterial({
-    uniforms: uniforms as unknown as Record<string, { value: unknown }>,
-    vertexShader: LOCAL_VERTEX.replace("#include <fog_pars_vertex>", "").replace("#include <fog_vertex>", ""),
-    fragmentShader: CORONA_FRAGMENT,
-    transparent: true,
-    depthWrite: false,
-    blending: AdditiveBlending,
-    side: DoubleSide,
-  });
-  const motes = new ShaderMaterial({
-    uniforms: uniforms as unknown as Record<string, { value: unknown }>,
-    vertexShader: MOTES_VERTEX,
-    fragmentShader: MOTES_FRAGMENT,
-    transparent: true,
-    depthWrite: false,
-    blending: AdditiveBlending,
-  });
-  return { uniforms, disc, corona, motes };
+  // Merge cloned fog's uniforms; ours are assigned by reference.
+  Object.assign(material.uniforms, own);
+  return material as ShaderMaterial & { uniforms: TearUniforms };
 }
 
-// ── The seal ─────────────────────────────────────────────────────────────────
+// ── The mote swarm ───────────────────────────────────────────────────────────
 
-const SEAL_RADIUS = 0.74;
-const PLATE = 0.26;
-const MOTES = 6;
+const MOTE_COUNT = 34;
+/** Beyond this (m) from the camera the swarm isn't updated — a few pixels in
+ * the fog. */
+const MOTE_RANGE = 36;
 
-/** Every glyph plate, both faces of the disc, merged into ONE geometry (one
- * draw call). Each plate's UVs are remapped onto its own atlas slot, and
- * plates are turned so each glyph's "up" points away from the centre. */
-const sealPlatesGeo = shared(() => {
-  const parts: BufferGeometry[] = [];
-  for (const side of [1, -1]) {
-    for (let k = 0; k < SEAL_GLYPHS; k++) {
-      const g = new PlaneGeometry(PLATE, PLATE);
-      const uv = g.getAttribute("uv");
-      for (let i = 0; i < uv.count; i++) uv.setX(i, (k + uv.getX(i)) / SEAL_GLYPHS);
-      // Back-face plates sit half a slot round so the two faces interleave.
-      const a = ((k + (side < 0 ? 0.5 : 0)) / SEAL_GLYPHS) * Math.PI * 2;
-      // Flip back plates to face −Z FIRST, so the Z turn still points their
-      // glyph's up (+Y) outward and they read unmirrored from behind.
-      if (side < 0) g.rotateY(Math.PI);
-      g.rotateZ(a - Math.PI / 2);
-      g.translate(Math.cos(a) * SEAL_RADIUS, Math.sin(a) * SEAL_RADIUS, 0.05 * side);
-      parts.push(g);
-    }
-  }
-  const merged = mergeGeometries(parts);
-  for (const g of parts) g.dispose();
-  return merged;
-});
+interface Mote {
+  a0: number;
+  /** Turns over one life. */
+  spin: number;
+  base: number;
+  /** Lives per second. */
+  speed: number;
+  ph: number;
+  z: number;
+  wob: number;
+}
 
-const bindingGeo = shared(() => new TorusGeometry(SEAL_RADIUS - 0.2, 0.012, 4, 48));
+function newMote(): Mote {
+  return {
+    a0: Math.random() * Math.PI * 2,
+    spin: 1 + Math.random() * 2.2,
+    base: 0.55 + Math.random() * 0.6,
+    speed: 0.12 + Math.random() * 0.24,
+    ph: Math.random(),
+    z: (Math.random() - 0.5) * 0.6,
+    wob: Math.random() * Math.PI * 2,
+  };
+}
 
-const motesGeo = shared(() => {
-  const parts: BufferGeometry[] = [];
-  for (let k = 0; k < MOTES; k++) {
-    const a = (k / MOTES) * Math.PI * 2;
-    const g = new OctahedronGeometry(0.05);
-    g.translate(Math.cos(a) * 1.38, Math.sin(a) * 1.38, k % 2 ? 0.06 : -0.06);
-    parts.push(g);
-  }
-  const merged = mergeGeometries(parts);
-  for (const g of parts) g.dispose();
-  return merged;
-});
+/** Glowing shards swirling around the tear: each spirals in from the rim as
+ * if pulled through, growing then shrinking over its life, and is reborn at
+ * the rim somewhere else — the rift's endless cycle. One instanced draw
+ * call, hard-edged tetrahedra (pixels, like everything else). Gated by the
+ * wound's activity so a sealed rift barely sparkles; proximity and a surge
+ * quicken the swarm. */
+function RiftMotes({ color, drive }: { color: string; drive: PortalDrive }) {
+  const mesh = useRef<InstancedMesh>(null);
+  const dummy = useMemo(() => new Object3D(), []);
+  const motes = useMemo(() => Array.from({ length: MOTE_COUNT }, newMote), []);
+  const material = useMemo(() => new MeshBasicMaterial({ color, toneMapped: false }), [color]);
+  useEffect(() => () => material.dispose(), [material]);
 
-/** The rune seal. While the portal is sealed the plates slowly
- * counter-rotate and breathe, flaring when someone comes close or tries the
- * portal. When the seal breaks (drive.seal easing to 0) the plates are flung
- * outward, spinning, flaring white-hot, and gone. */
-function PortalSeal({ color, drive }: { color: string; drive: PortalDrive }) {
-  const root = useRef<Group>(null);
-  const plates = useRef<Group>(null);
-  const motes = useRef<Group>(null);
-  const spin = useRef(0);
-  const mats = useMemo(() => {
-    const atlas = getSealGlyphAtlas();
-    return {
-      glyph: new MeshStandardMaterial({
-        color: "#000000",
-        emissive: color,
-        emissiveIntensity: 1.8,
-        emissiveMap: atlas,
-        alphaMap: atlas,
-        // Hard cut, no blending: crisp pixel glyphs and no sort order issues.
-        alphaTest: 0.5,
-        toneMapped: false,
-      }),
-      mote: new MeshStandardMaterial({
-        color: "#000000",
-        emissive: color,
-        emissiveIntensity: 2.2,
-        toneMapped: false,
-      }),
-    };
-  }, [color]);
-  useEffect(
-    () => () => {
-      mats.glyph.dispose();
-      mats.mote.dispose();
-    },
-    [mats],
-  );
-
-  useFrame(({ clock }, dt) => {
+  useFrame(({ clock, camera }, rawDt) => {
+    const m = mesh.current;
+    if (!m) return;
+    const e = m.matrixWorld.elements;
+    const cx = camera.position.x - e[12];
+    const cz = camera.position.z - e[14];
+    if (cx * cx + cz * cz > MOTE_RANGE * MOTE_RANGE) return;
+    const dt = Math.min(rawDt, 0.1);
     const t = clock.elapsedTime;
-    const broken = 1 - drive.seal; // 0 while sealed … 1 once gone
-    if (root.current) root.current.visible = drive.seal > 0.02;
-    spin.current += dt * (0.22 + broken * broken * 9);
-    if (plates.current) {
-      plates.current.rotation.z = -spin.current;
-      // Breathing while sealed; flung outward as it breaks.
-      plates.current.scale.setScalar(1 + Math.sin(t * 0.9) * 0.025 + drive.proximity * 0.03 + broken * broken * 1.6);
+    const act = riftActivity(drive.seal);
+    const quick = 1 + drive.proximity * 0.8 + drive.surge * 2.5;
+    const size = act * (1 + drive.proximity * 0.25 + drive.surge * 0.6);
+    for (let i = 0; i < MOTE_COUNT; i++) {
+      const p = motes[i];
+      p.ph += p.speed * quick * dt;
+      if (p.ph >= 1) {
+        p.ph -= 1;
+        p.a0 = Math.random() * Math.PI * 2;
+        p.base = 0.55 + Math.random() * 0.6;
+      }
+      const ph = p.ph;
+      const R = (1.75 * (1 - ph) + 0.12) * p.base; // spiral from the rim to the heart
+      const a = p.a0 + ph * p.spin * Math.PI * 2 + t * 0.3;
+      dummy.position.set(
+        Math.cos(a) * R * 0.7,
+        Math.sin(a) * R * 1.05,
+        Math.sin(ph * Math.PI) * p.z + Math.sin(t * 2 + p.wob) * 0.05,
+      );
+      // Fade in and out over the life.
+      dummy.scale.setScalar(Math.max((0.018 + 0.05 * Math.sin(ph * Math.PI)) * size, 0.0001));
+      dummy.rotation.set(t + p.wob, t * 1.3, 0);
+      dummy.updateMatrix();
+      m.setMatrixAt(i, dummy.matrix);
     }
-    if (motes.current) {
-      motes.current.rotation.z = t * 0.45 + spin.current * 0.5;
-      motes.current.scale.setScalar(1 + broken * 0.8);
-    }
-    // A white-hot flare peaking halfway through the break.
-    const flare = 1 + drive.refusal * 2.2 + 12 * broken * (1 - broken);
-    mats.glyph.emissiveIntensity =
-      (1.7 + Math.sin(t * 1.9) * 0.5 + drive.proximity * 0.9) * flare;
-    mats.mote.emissiveIntensity = (2.2 + drive.proximity) * flare;
+    m.instanceMatrix.needsUpdate = true;
   });
 
   return (
-    <group ref={root} position={[0, PORTAL_RING_Y, 0]}>
-      <group ref={plates}>
-        <mesh geometry={sealPlatesGeo()} material={mats.glyph} />
-        <mesh geometry={bindingGeo()} material={mats.mote} />
-      </group>
-      <group ref={motes}>
-        <mesh geometry={motesGeo()} material={mats.mote} />
-      </group>
-    </group>
+    <instancedMesh
+      ref={mesh}
+      args={[moteGeo(), material, MOTE_COUNT]}
+      // Positions are rewritten every frame; the (unit) bounds would lie.
+      frustumCulled={false}
+    />
   );
 }
 
-/** How long the seal stays mounted after unlocking, to play its breaking. */
-const SEAL_BREAK_MS = 1800;
+// ── The rift ─────────────────────────────────────────────────────────────────
 
-export function PortalModel({
-  color,
-  locked = false,
-  sealColor,
-  drive,
-}: {
-  /** The vortex's colour (and, by default, the seal's). */
-  color: string;
-  /** Show the rune seal (the vortex's frozen look follows drive.seal). */
-  locked?: boolean;
-  /** Seal rune colour, if it should differ from the vortex. */
-  sealColor?: string;
-  drive: PortalDrive;
-}) {
-  const size = useThree((s) => s.size);
-  const dpr = useThree((s) => s.viewport.dpr);
-  const mats = useMemo(() => buildMaterials(color, sealColor ?? color), [color, sealColor]);
+export function PortalModel({ color, drive }: { color: string; drive: PortalDrive }) {
+  const tear = useRef<Group>(null);
+  const material = useMemo(() => buildTearMaterial(color), [color]);
+  const runes = useMemo(() => createRiftRuneMaterial(color), [color]);
   useEffect(
     () => () => {
-      mats.disc.dispose();
-      mats.corona.dispose();
-      mats.motes.dispose();
+      material.dispose();
+      runes.dispose();
     },
-    [mats],
+    [material, runes],
   );
 
-  // Keep the seal mounted a moment after unlocking, so it can shatter.
-  const [sealMounted, setSealMounted] = useState(locked);
-  useEffect(() => {
-    if (locked) {
-      setSealMounted(true);
-      return;
-    }
-    const id = setTimeout(() => setSealMounted(false), SEAL_BREAK_MS);
-    return () => clearTimeout(id);
-  }, [locked]);
-
-  useFrame(({ clock }, rawDt) => {
+  useFrame(({ clock, camera }, rawDt) => {
     const dt = Math.min(rawDt, 0.1);
-    const u = mats.uniforms;
-    u.uTime.value = clock.elapsedTime;
-    // The vortex's own clock: integrated, so proximity can quicken it (and a
-    // seal stop it dead) without the pattern ever jumping.
-    u.uClock.value += dt * (1 - drive.seal) * (1 + drive.proximity * 0.9 + drive.surge * 2.5);
-    u.uProx.value = drive.proximity;
-    u.uSeal.value = drive.seal;
-    u.uSurge.value = drive.surge;
-    u.uRefusal.value = drive.refusal;
-    u.uPx.value = (size.height * dpr) / 2;
+    const t = clock.elapsedTime;
+    const u = material.uniforms;
+    const act = riftActivity(drive.seal);
+    // The seal breaking: 0 at both ends, peaking as the wound rips open.
+    const breaking = 4 * drive.seal * (1 - drive.seal);
+    const flare = breaking * 1.2 + drive.refusal * 0.9;
+    const energy = 1 + drive.proximity * 0.25 + drive.surge * 0.9;
+    u.uTime.value = t;
+    // Integrated, so proximity can quicken the wound without it ever jumping.
+    u.uClock.value += dt * (0.4 + 0.6 * act) * (1 + drive.proximity * 0.6 + drive.surge * 2.5);
+    u.uActive.value = act;
+    u.uEnergy.value = energy;
+    u.uFlare.value = flare;
+    runes.emissiveIntensity =
+      RIFT_RUNE_GLOW * (0.3 + 0.7 * act) * (0.9 + 0.1 * Math.sin(t * 1.9)) * (energy + flare * 2.5);
+
+    const g = tear.current;
+    if (!g) return;
+    // Billboard around Y so the tear always presents its face — a rip in
+    // space has no flat side to catch. (The parent's world position: the
+    // rift never moves or rotates, so its matrix is enough.)
+    const e = g.parent ? g.parent.matrixWorld.elements : g.matrixWorld.elements;
+    drive.yaw = Math.atan2(camera.position.x - e[12], camera.position.z - e[14]);
+    g.rotation.y = drive.yaw;
+    // Breathe, don't spin — a rip is a wound, not a machine. A journey
+    // starting through it makes it gasp open.
+    const swell = 1 + drive.surge * 0.1;
+    g.scale.set(
+      (1 + Math.sin(t * 1.7) * 0.02 * act) * swell,
+      (1 + Math.sin(t * 1.7 + 1.2) * 0.015 * act) * swell,
+      1,
+    );
   });
 
   return (
     <group>
-      {/* Steps */}
-      <mesh geometry={stepGeo()} material={stepMat()} position={[0, 0.12, 0]} receiveShadow />
-      <group position={[0, PORTAL_RING_Y, 0]}>
-        <mesh geometry={ringGeo()} material={ringMat()} castShadow />
-        <mesh geometry={discGeo()} material={mats.disc} />
-        <mesh geometry={coronaGeo()} material={mats.corona} />
-        {/* Positions come from the shader, so the (zeroed) bounds lie. */}
-        <points geometry={motesPointsGeo()} material={mats.motes} frustumCulled={false} />
+      <RiftFrameModel runes={runes} />
+      <group ref={tear} position={[0, RIFT_Y, 0]}>
+        <mesh geometry={tearGeo()} material={material} />
+        <RiftMotes color={color} drive={drive} />
       </group>
-      {sealMounted && <PortalSeal color={sealColor ?? color} drive={drive} />}
     </group>
   );
 }

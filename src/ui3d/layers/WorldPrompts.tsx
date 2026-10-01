@@ -3,15 +3,20 @@ import { useEffect, useRef, useState } from "react";
 import { Group } from "three";
 import { useGame } from "../../state/gameStore";
 import { usePointerLocked } from "../../ui/hooks";
-import { palette } from "../../ui/theme";
+import { KeyCap, keyCapWidth } from "../KeyCap";
+import { Plate } from "../Plate";
+import { UiShow } from "../presence";
+import { ink } from "../theme";
 import { ViewAnchor, pxFor } from "../anchors";
 import type { TextSpan } from "../font/layout";
-import { RuneText } from "../text/RuneText";
+import { measureText, RuneText } from "../text/RuneText";
 
 /** The interaction prompt, written where the thing is: "E — Plunder …"
  * hangs above the grave, "E — Descend" above the portal. Prompts without a
  * place (rare) hang low in front of you.
  *
+ * Each prompt is a small grimoire plate: an arcane frame, the key as a
+ * parchment key cap, the action in parchment (the hint uses an iron frame).
  * Changing prompts don't swap — the old one burns away while the new one
  * writes itself. While the pointer is free (and no screen is open) the
  * "click to take control" hint takes the prompt's place. */
@@ -27,20 +32,32 @@ interface Entry {
 
 let nextId = 1;
 
-/** "E — Take Ember Staff (desc)" → the key cap in accent, the verb bright,
- * the parenthetical dim. */
-export function promptSpans(text: string): TextSpan[] {
+/** One piece of a prompt row: a key cap or a run of text. */
+type Part = { key: string } | { text: TextSpan[] };
+
+/** "E — Take Ember Staff (desc)" → [E] key cap, the verb in parchment, the
+ * parenthetical dimmed (the grimoire prompt: `.wm-prompt`). */
+export function promptParts(text: string): Part[] {
   const m = /^([A-Z])\s+—\s+(.*)$/.exec(text);
-  if (!m) return [{ text }];
+  if (!m) return [{ text: [{ text }] }];
   const [, key, rest] = m as unknown as [string, string, string];
   const paren = rest.indexOf("(");
-  const spans: TextSpan[] = [{ text: `${key} `, color: palette.accent }];
-  if (paren > 0) {
-    spans.push({ text: rest.slice(0, paren) });
-    spans.push({ text: rest.slice(paren), color: palette.dim });
-  } else spans.push({ text: rest });
-  return spans;
+  const spans: TextSpan[] =
+    paren > 0 ? [{ text: rest.slice(0, paren) }, { text: rest.slice(paren), color: ink.parchmentDim }] : [{ text: rest }];
+  return [{ key }, { text: spans }];
 }
+
+const HINT: Part[] = [
+  { key: "Click" },
+  { text: [{ text: "to take control" }] },
+  { text: [{ text: "·", color: ink.faded }] },
+  { key: "Tab" },
+  { text: [{ text: "inventory" }] },
+];
+const HINT_TEXT = "\u0000hint";
+
+/** Hint text width wraps past this many characters. */
+const MAX_COLS = 40;
 
 export function WorldPrompts() {
   const prompt = useGame((s) => s.prompt);
@@ -53,7 +70,7 @@ export function WorldPrompts() {
   // The hint belongs to play only: menus (title, the Weighing, death) have
   // no pointer to take.
   const playing = phase === "village" || phase === "dungeon";
-  const text = locked ? prompt : overlay === "none" && playing ? "Click to take control — WASD move · Space jump · Mouse casts" : null;
+  const text = locked ? prompt : overlay === "none" && playing ? HINT_TEXT : null;
   const at: Anchor = locked ? promptAt : null;
   const key = text ? `${text}@${at ? at.map((v) => v.toFixed(1)).join(",") : "view"}` : null;
 
@@ -82,13 +99,14 @@ export function WorldPrompts() {
           />
         ) : (
           <ViewAnchor key={e.id} offset={[0, -0.42, -1.6]}>
-            <RuneText
-              text={promptSpans(e.text)}
-              px={pxFor(1.6, 0.02)}
-              show={e.shown}
-              glow={0.8}
-              onHidden={() => setEntries((prev) => prev.filter((x) => x.id !== e.id))}
-            />
+            <UiShow show={e.shown}>
+              <PromptPanel
+                parts={e.text === HINT_TEXT ? HINT : promptParts(e.text)}
+                px={pxFor(1.6, 0.018)}
+                frame={e.text === HINT_TEXT ? "iron" : "arcane"}
+                onHidden={() => setEntries((prev) => prev.filter((x) => x.id !== e.id))}
+              />
+            </UiShow>
           </ViewAnchor>
         ),
       )}
@@ -111,7 +129,56 @@ function AnchoredPrompt({ entry, onHidden }: { entry: Entry; onHidden: () => voi
   });
   return (
     <group ref={group}>
-      <RuneText text={promptSpans(entry.text)} px={pxFor(1.8, 0.019)} maxCols={40} show={entry.shown} glow={0.9} onHidden={onHidden} />
+      <UiShow show={entry.shown}>
+        <PromptPanel parts={promptParts(entry.text)} px={pxFor(1.8, 0.017)} frame="arcane" onHidden={onHidden} />
+      </UiShow>
     </group>
+  );
+}
+
+/** A framed row of key caps and text, centred — built in place: the plate
+ * forges its frame, the key caps settle, the words burn in. */
+function PromptPanel({
+  parts,
+  px,
+  frame,
+  onHidden,
+}: {
+  parts: Part[];
+  px: number;
+  frame: string;
+  onHidden: () => void;
+}) {
+  const gap = px * 4;
+  const items = parts.map((p) =>
+    "key" in p
+      ? { part: p, w: keyCapWidth(p.key, px), h: measureText(p.key, px, undefined, "label").height + px * 6 }
+      : (({ width, height }) => ({ part: p, w: width, h: height }))(measureText(p.text, px, MAX_COLS)),
+  );
+  const width = items.reduce((w, it) => w + it.w, 0) + gap * (items.length - 1);
+  const height = items.reduce((h, it) => Math.max(h, it.h), 0);
+  let x = -width / 2;
+  const lastText = items.map((it) => "text" in it.part).lastIndexOf(true);
+  return (
+    <Plate width={width + px * 10} height={height + px * 6} frame={frame} texel={px * 1.1}>
+      {items.map((it, i) => {
+        const cx = x + it.w / 2;
+        x += it.w + gap;
+        return "key" in it.part ? (
+          <KeyCap key={i} k={it.part.key} px={px} position={[cx, 0, 0]} />
+        ) : (
+          <RuneText
+            key={i}
+            text={it.part.text}
+            px={px}
+            maxCols={MAX_COLS}
+            position={[cx, 0, 0]}
+            glow={0.6}
+            depth={-0.3}
+            onHidden={i === lastText ? onHidden : undefined}
+          />
+        );
+      })}
+    </Plate>
   );
 }

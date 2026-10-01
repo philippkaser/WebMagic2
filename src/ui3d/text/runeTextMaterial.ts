@@ -1,6 +1,5 @@
 import { Color, ShaderMaterial, Vector2 } from "three";
-import { ATLAS_COLS, ATLAS_PAD, CELL_H, CELL_W, glyphAtlas } from "../font/atlas";
-import { GLYPH_H, GLYPH_W } from "../font/glyphs";
+import { getPixelFace, type Face } from "../font/faces";
 
 /** The shader behind every word of in-world text.
  *
@@ -30,6 +29,9 @@ uniform float uVanishAt;
 uniform float uOut;
 uniform float uOutStagger;
 uniform float uDepth;
+uniform vec2 uCell;
+uniform vec2 uGlyphOrigin;
+uniform vec2 uHalfGlyph;
 
 attribute vec2 aCell;
 attribute vec2 aSlots;
@@ -43,9 +45,6 @@ varying float vIn;
 varying float vOut;
 varying float vSeed;
 
-const vec2 CELL = vec2(${CELL_W}.0, ${CELL_H}.0);
-const float PAD = ${ATLAS_PAD}.0;
-const vec2 HALF_GLYPH = vec2(${GLYPH_W / 2}, ${GLYPH_H / 2});
 
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
 
@@ -58,8 +57,8 @@ void main() {
   vIn = tin; vOut = tout; vSeed = seed; vSlots = aSlots; vColor = aColor; vUv = uv;
 
   // Font space: pixels, y down, origin at the block's anchor.
-  vec2 p = aCell + vec2(uv.x * CELL.x, (1.0 - uv.y) * CELL.y) - PAD - uOrigin;
-  vec2 c = aCell + HALF_GLYPH - uOrigin;
+  vec2 p = aCell + vec2(uv.x * uCell.x, (1.0 - uv.y) * uCell.y) - uGlyphOrigin - uOrigin;
+  vec2 c = aCell + uHalfGlyph - uOrigin;
 
   float e = 1.0 - pow(1.0 - tin, 3.0);
   float away = 1.0 - e;
@@ -84,6 +83,8 @@ uniform float uOpacity;
 uniform float uFlicker;
 uniform float uBright;
 uniform vec3 uHot;
+uniform vec2 uCell;
+uniform float uCols;
 
 varying vec2 vUv;
 varying vec2 vSlots;
@@ -99,14 +100,14 @@ ivec2 cellOrigin(float slotIn) {
   // interpolation can deliver 66.9999 for 67 — round, or every so often a
   // "c" renders as the "b" before it.
   float slot = floor(slotIn + 0.5);
-  float col = mod(slot, ${ATLAS_COLS}.0);
-  float row = floor(slot / ${ATLAS_COLS}.0);
-  return ivec2(int(col) * ${CELL_W}, int(row) * ${CELL_H});
+  float col = mod(slot, uCols);
+  float row = floor(slot / uCols);
+  return ivec2(int(col) * int(uCell.x), int(row) * int(uCell.y));
 }
 
 void main() {
-  vec2 cellPx = vec2(vUv.x * ${CELL_W}.0, (1.0 - vUv.y) * ${CELL_H}.0);
-  ivec2 pix = clamp(ivec2(floor(cellPx)), ivec2(0), ivec2(${CELL_W - 1}, ${CELL_H - 1}));
+  vec2 cellPx = vec2(vUv.x * uCell.x, (1.0 - vUv.y) * uCell.y);
+  ivec2 pix = clamp(ivec2(floor(cellPx)), ivec2(0), ivec2(uCell) - 1);
   vec4 L = texelFetch(uAtlas, cellOrigin(vSlots.x) + pix, 0);
   vec4 R = texelFetch(uAtlas, cellOrigin(vSlots.y) + pix, 0);
 
@@ -152,7 +153,11 @@ void main() {
 `;
 
 export interface RuneTextUniforms {
-  uAtlas: { value: ReturnType<typeof glyphAtlas> };
+  uAtlas: { value: Face["texture"] };
+  uCell: { value: Vector2 };
+  uCols: { value: number };
+  uGlyphOrigin: { value: Vector2 };
+  uHalfGlyph: { value: Vector2 };
   uPx: { value: number };
   uOrigin: { value: Vector2 };
   uTime: { value: number };
@@ -175,9 +180,24 @@ export type RuneTextMaterial = ShaderMaterial & { uniforms: RuneTextUniforms };
 /** Far future: "not vanishing" without a branch in the shader. */
 export const NEVER = 1e7;
 
-export function createRuneTextMaterial(): RuneTextMaterial {
+/** Point a material at a face: its atlas and the cell geometry the shader
+ * needs to find and place glyphs. */
+export function applyFace(material: RuneTextMaterial, face: Face): void {
+  const u = material.uniforms;
+  u.uAtlas.value = face.texture;
+  u.uCell.value.set(face.cellW, face.cellH);
+  u.uCols.value = face.cols;
+  u.uGlyphOrigin.value.set(face.originX, face.originY);
+  u.uHalfGlyph.value.set(face.halfGlyphW, face.halfGlyphH);
+}
+
+export function createRuneTextMaterial(face: Face = getPixelFace()): RuneTextMaterial {
   const uniforms: RuneTextUniforms = {
-    uAtlas: { value: glyphAtlas() },
+    uAtlas: { value: face.texture },
+    uCell: { value: new Vector2(face.cellW, face.cellH) },
+    uCols: { value: face.cols },
+    uGlyphOrigin: { value: new Vector2(face.originX, face.originY) },
+    uHalfGlyph: { value: new Vector2(face.halfGlyphW, face.halfGlyphH) },
     uPx: { value: 0.01 },
     uOrigin: { value: new Vector2() },
     uTime: { value: 0 },

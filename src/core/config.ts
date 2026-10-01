@@ -1,36 +1,26 @@
 /** Global tuning constants. Keep gameplay feel numbers here so they are easy to iterate on. */
 
 export const TILE = 2; // world units per dungeon tile
-/** Floor-to-ceiling height of the dungeon. Tall on purpose: a 7 m vault over
- * 2 m tiles is what makes a room read as a hall rather than a corridor of
- * boxes, and it gives torchlight, light shafts and arches room to breathe. */
-export const WALL_HEIGHT = 7;
+/** Floor-to-ceiling height of the dungeon: 6 m, half again the classic
+ * 4 m, so a room reads as a hall and the light shafts have a drop to fall
+ * through — but low enough that the painted walls (moss curtains from the
+ * vault, tide lines and grime at the foot, one texture per face) stay in
+ * view. Wall textures are painted WALL_HEIGHT × 32 px tall, so changing this
+ * keeps texels square (render/textures/surfaces/types.ts). */
+export const WALL_HEIGHT = 6;
 export const EYE_HEIGHT = 0.7; // camera offset above player body center
 
-/** How the dungeon's architecture is dressed (render + generator). */
+/** The generator's architecture plan (world/gen/architecture.ts). Only the
+ * light shafts render for now — the dungeon is kept to its basic look —
+ * but the planned arcades (ribs on wall piers, pillar pairs) are still laid
+ * out on their own seed stream, with these proportions, for later. */
 export const ARCHITECTURE = {
-  /** World metres one architecture texture spans, in both directions. Every
-   * wall, floor, ceiling, pillar and rib maps its UVs from world position at
-   * this scale, so a 128-texel surface is 32 texels per metre everywhere —
-   * no stretching on tall walls, and stone courses flow unbroken from one
-   * wall tile to the next. */
-  texMetres: 4,
-  /** The stone base course along every wall: height and how far it stands
-   * proud of the wall face. */
-  plinthHeight: 0.55,
-  plinthDepth: 0.14,
-  /** Transverse arch ribs: spacing along a room, and how thick they are. */
+  /** Transverse arch ribs: spacing along a room. */
   ribSpacing: 4,
-  ribWidth: 0.55,
-  /** Rib thickness at the crown (it deepens toward the springing). */
-  ribDepth: 0.42,
-  /** Free-standing pillars: shaft half-width (octagonal) and the half-size
-   * of the base block (also the collider's half-extent). */
-  pillarRadius: 0.4,
+  /** Free-standing pillars: half-size of the base block. */
   pillarBase: 0.52,
-  /** Engaged piers under each rib end: width along the wall and depth. */
+  /** Engaged piers under each rib end: width along the wall. */
   pierWidth: 0.7,
-  pierDepth: 0.22,
 } as const;
 
 export const GRAVITY = -26;
