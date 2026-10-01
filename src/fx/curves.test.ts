@@ -9,7 +9,9 @@ import {
   hash01,
   lifeAlpha,
   lifeSize,
-  minPixelSize,
+  pixelSpan,
+  steppedFlicker,
+  steps,
   randomInCone,
   randomUnit,
   ringPoint,
@@ -104,19 +106,38 @@ describe("colorMix / flicker / hash", () => {
   });
 });
 
-describe("minPixelSize", () => {
-  const out = { size: 0, alpha: 0 };
-  test("big enough particles are untouched", () => {
-    minPixelSize(0.1, 40, 1.6, out);
-    expect(out.size).toBe(0.1);
-    expect(out.alpha).toBe(1);
+describe("pixel steps", () => {
+  test("steps quantizes into flat levels and hits both ends", () => {
+    expect(steps(0, 4)).toBe(0);
+    expect(steps(0.2, 4)).toBe(0);
+    expect(steps(0.3, 4)).toBeCloseTo(1 / 3);
+    expect(steps(0.6, 4)).toBeCloseTo(2 / 3);
+    expect(steps(0.8, 4)).toBe(1);
+    expect(steps(1, 4)).toBe(1);
+    const seen = new Set<number>();
+    for (let x = 0; x <= 1; x += 0.01) seen.add(steps(x, 4));
+    expect(seen.size).toBe(4);
   });
-  test("sub-pixel particles grow to minPx and give back alpha by area", () => {
-    minPixelSize(0.01, 80, 1.6, out); // 0.8 px
-    expect(out.size * 80).toBeCloseTo(1.6);
-    expect(out.alpha).toBeCloseTo(0.25);
-    // Light conserved: area × alpha is the same as before.
-    expect(out.size * out.size * out.alpha).toBeCloseTo(0.01 * 0.01);
+  test("steppedFlicker only ever takes three levels within [1 − amount, 1]", () => {
+    const seen = new Set<number>();
+    for (let t = 0; t < 10; t += 0.013) {
+      const f = steppedFlicker(t, 0.37, 0.6);
+      expect(f).toBeGreaterThanOrEqual(0.4 - 1e-9);
+      expect(f).toBeLessThanOrEqual(1 + 1e-9);
+      seen.add(Math.round(f * 1000));
+    }
+    expect(seen.size).toBeLessThanOrEqual(3);
+    expect(seen.size).toBeGreaterThan(1);
+    expect(steppedFlicker(1, 0.2, 0)).toBe(1);
+  });
+  test("pixelSpan: whole pixels, never below one, sub-pixel dithers by coverage", () => {
+    const o = { n: 0, coverage: 0 };
+    expect(pixelSpan(2, o)).toEqual({ n: 4, coverage: 1 });
+    expect(pixelSpan(1.3, o).n).toBe(3);
+    pixelSpan(0.25, o);
+    expect(o.n).toBe(1);
+    expect(o.coverage).toBeCloseTo(0.5);
+    expect(pixelSpan(0, o).coverage).toBeCloseTo(0.08);
   });
 });
 

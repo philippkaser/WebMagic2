@@ -1,6 +1,6 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import { Color, Mesh, Vector2, Vector3 } from "three";
+import { Color, Mesh, Vector3 } from "three";
 import { clamp01, randomInCone, randomUnit, type MutVec3 } from "./curves";
 import { FlameSprites, markRange } from "./Flames";
 import { fxUniforms } from "./fxUniforms";
@@ -19,9 +19,11 @@ import {
 export type { ParticleStyle } from "./particleSim";
 
 /** The particle renderer: a CPU simulation (particleSim.ts) streaming into
- * one instanced quad mesh drawn with a single shader (particleMaterial.ts).
- * Every sprite style — additive sparks and glows, alpha-blended smoke, lit
- * debris, shockwave rings — is one draw call; the torch flames are one more.
+ * one instanced mesh drawn with a single shader (particleMaterial.ts). Every
+ * style — pixel sparks and embers, stepped glows, dithered smoke, tumbling
+ * debris cubes, pixel rings and star flares — is one draw call; the torch
+ * flames are one more. The look is pixel-magic: whole pixels on the render
+ * target's grid, stepped colour, dithered fades, glow from bloom.
  *
  * Gameplay code calls the effect functions in effects.ts, or spawnBurst()
  * (the original API, still supported with its original defaults). Nothing
@@ -150,11 +152,11 @@ export interface BurstOptions {
   /** Colour at death (colour-over-life), one per `color` entry or a single
    * colour for all. Defaults to the start colour. */
   endColor?: string | string[];
-  /** HDR brightness multiplier (> 1 blooms). Default 1 (glowing styles 1.6). */
+  /** HDR brightness multiplier (> 1 blooms). Default 1 (light styles 1.6). */
   intensity?: number;
   /** End size as a multiple of the start size (default: the style's). */
   endSize?: number;
-  /** Peak opacity. */
+  /** Peak coverage (fades dissolve by dither, not by blending). */
   alpha?: number;
   /** Random spawn offset radius around `position`. */
   spread?: number;
@@ -221,7 +223,9 @@ export function spawnBurst(opts: BurstOptions): void {
     spread = 0,
     cone = 0.6,
   } = opts;
-  const intensity = opts.intensity ?? (def.additive > 0 ? 1.6 : 1);
+  // Light (everything but chunks and smoke) glows past 1 so bloom takes it.
+  const light = def.shape !== SHAPE.chunk && def.shape !== SHAPE.smoke;
+  const intensity = opts.intensity ?? (light ? 1.6 : 1);
   const endMult = opts.endSize ?? def.endSize;
   const colors = Array.isArray(color) ? color : [color];
   const endColors = opts.endColor === undefined ? null : Array.isArray(opts.endColor) ? opts.endColor : [opts.endColor];
@@ -279,14 +283,13 @@ export function spawnBurst(opts: BurstOptions): void {
     const ci = (Math.random() * colors.length) | 0;
     const start = colors[ci];
     const end = endColors ? endColors[Math.min(ci, endColors.length - 1)] : start;
-    setParticleColor(p, start, end, intensity, def.additive > 0 && endColors ? intensity * 0.6 : intensity);
+    setParticleColor(p, start, end, intensity, light && endColors ? intensity * 0.6 : intensity);
     commitParticle();
   }
 }
 
 // ── Renderer ─────────────────────────────────────────────────────────────────
 
-const viewport = new Vector2();
 /** Dev-only counters (see __fxStats). */
 const stats = { peak: 0, stepMs: 0 };
 
@@ -327,7 +330,8 @@ export function FxSystems() {
     const dt = Math.min(rawDt, 1 / 20) * timeScale;
     // Wrapped so shader noise keeps float precision on long sessions.
     fxUniforms.uTime.value = state.clock.elapsedTime % 3600;
-    fxUniforms.uViewportH.value = gl.getDrawingBufferSize(viewport).y;
+    // The pixel grid every sprite snaps to (glsl.ts#PIXEL_GLSL).
+    gl.getDrawingBufferSize(fxUniforms.uViewport.value);
 
     const t0 = import.meta.env.DEV ? performance.now() : 0;
     const count = sim.step(dt, arrays);

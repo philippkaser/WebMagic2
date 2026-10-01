@@ -67,27 +67,37 @@ export function flicker(time: number, seed: number, amount: number): number {
   return 1 - amount * (1 - w);
 }
 
-/** Minimum on-screen size. At dpr 0.35 a particle under ~1.5 px shimmers in
- * and out of existence as it crosses pixel centres, so tiny particles are
- * drawn at `minPx` with their alpha scaled down by the area they gained:
- * the total light they add stays the same, but it never flickers.
- * Returns [drawSize, alphaScale] written into `out`. (Mirrored in the sprite
- * vertex shader; kept here so the rule is tested.) */
-export function minPixelSize(
-  size: number,
-  pxPerUnit: number,
-  minPx: number,
-  out: { size: number; alpha: number },
-): { size: number; alpha: number } {
-  const px = size * pxPerUnit;
-  if (px >= minPx || pxPerUnit <= 0) {
-    out.size = size;
-    out.alpha = 1;
-  } else {
-    const k = px / minPx;
-    out.size = minPx / pxPerUnit;
-    out.alpha = k * k;
-  }
+/** Quantize a 0..1 value into `bands` flat levels: 0, 1/(bands−1), …, 1.
+ * Colour-over-life goes through this, so a spark steps white → yellow →
+ * tint → dim like a hand-painted palette ramp instead of gliding. */
+export function steps(x: number, bands: number): number {
+  if (bands < 2) return clamp01(x);
+  return Math.min(1, Math.floor(clamp01(x) * bands) / (bands - 1));
+}
+
+/** Flicker as a pixel artist would animate it: the brightness SWITCHES
+ * between three levels in [1 − amount, 1] (see flicker for the pattern),
+ * rather than breathing smoothly. */
+export function steppedFlicker(time: number, seed: number, amount: number): number {
+  if (amount <= 0) return 1;
+  const w = (flicker(time, seed, amount) - (1 - amount)) / amount;
+  return 1 - amount * (1 - steps(w, 3));
+}
+
+/** A sprite's size in whole pixels, as the particle and ambient shaders
+ * draw it: the core is round(2 × half-extent) pixels, never below one. A
+ * sprite smaller than a pixel keeps its one pixel and is instead dithered
+ * out by its coverage (floored at `minCoverage`), so a steady subset of
+ * distant sparks shows rather than all of them shimmering as they cross
+ * pixel centres. (Mirrored in the vertex shaders; kept here so it's tested.) */
+export function pixelSpan(
+  halfPx: number,
+  out: { n: number; coverage: number },
+  minCoverage = 0.08,
+): { n: number; coverage: number } {
+  const full = 2 * Math.max(0, halfPx);
+  out.n = Math.max(1, Math.floor(full + 0.5));
+  out.coverage = full < 1 ? Math.max(full, minCoverage) : 1;
   return out;
 }
 

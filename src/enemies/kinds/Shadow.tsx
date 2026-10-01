@@ -17,7 +17,7 @@ import {
 
 const DEATH_FX: EnemyDeathFx = {
   // It unravels into the dark it came from: a slow bloom of shadow-smoke.
-  burst: { count: 16, color: ["#2a1a44", "#1a0d2a", "#050208"], speed: 2.5, ttl: 1.6, size: 0.55, style: "smoke", endColor: "#050208", alpha: 0.85, gravity: 0.6 },
+  burst: { count: 26, color: ["#2a1a44", "#1a0d2a", "#050208"], speed: 2.5, ttl: 1.6, size: 0.3, style: "smoke", endColor: "#050208", alpha: 0.85, gravity: 0.6 },
   light: { color: "#6a3d9a", intensity: 18 },
   soul: "#9a6aff",
 };
