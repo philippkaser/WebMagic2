@@ -19,11 +19,17 @@ import { Rng } from "../core/rng";
 import type { OmenId } from "../world/types";
 import { ambientLayers, type AmbientLayer, type AmbientPlace } from "./ambientConfig";
 import { fxUniforms } from "./fxUniforms";
-import { FOG_GLSL, LIGHTING_GLSL } from "./glsl";
+import { DITHER_GLSL, FOG_GLSL, LIGHTING_GLSL, PIXEL_GLSL } from "./glsl";
 
 /** Ambient particles: the air of a place — dust in the torchlight, spores and
  * drips in the Drowned Halls, embers and ash in the Forge, glints in the
  * Crystal Deep, falling ash in the Hollow, fireflies over the village.
+ *
+ * Drawn as single crisp pixels (1–2 render-target pixels, snapped to the
+ * grid — see glsl.ts#PIXEL_GLSL): specks, 1-px drip chains, glints that
+ * throw a tiny plus when they catch, embers and fireflies with a 1-px halo.
+ * Twinkles switch between stepped levels and fades are per-speck dither
+ * pops, never soft alpha — the pixel-magic air of the artpass motes.
  *
  * Costs nothing on the CPU: each layer is a fixed set of random seeds, and the
  * vertex shader computes every particle's position from (seed, time) —
@@ -37,6 +43,11 @@ import { FOG_GLSL, LIGHTING_GLSL } from "./glsl";
 
 const SHAPE_ID = { glow: 0, streak: 1, chunk: 2, flare: 3 } as const;
 const MODE_ID = { drift: 0, drip: 1, firefly: 2 } as const;
+
+/** Largest an ambient particle may draw, in render-target pixels (the
+ * artpass motes are 1–2 px points): a mote drifting past your nose stays a
+ * crisp speck instead of swelling into a blob. */
+const MAX_PX = 2;
 
 const VERT = /* glsl */ `
 attribute vec4 aSeed;
@@ -52,22 +63,29 @@ uniform vec3 uColorA;
 uniform vec3 uColorB;
 uniform vec4 uLook;        // intensity, lit, additive, alpha
 uniform vec2 uKind;        // shape, mode
-uniform float uViewportH;
-uniform float uMinPx;
 
-varying vec2 vUv;
-varying vec4 vColor;
-varying vec3 vInfo;        // shape, ripple (0/1), aspect
+varying vec2 vQ;
+varying vec4 vColor;       // rgb, coverage (dithered against vInfo.w)
+varying vec4 vInfo;        // shape (4 = ripple), N, rim / arm reach, threshold
+varying vec4 vInfo2;       // drip: length px, dir
 
 #include <fog_pars_vertex>
 ${LIGHTING_GLSL}
+${PIXEL_GLSL}
+
+/** Quantize a 0..1 brightness into three flat levels — twinkles SWITCH. */
+float stepped3(float x) { return floor(clamp(x, 0.0, 0.999) * 3.0) / 2.0; }
 
 void main() {
   float t = uTime;
   float ph = aSeed.w * 6.2831853;
   float bandH = max(uYRange.y - uYRange.x, 0.01);
   vec3 p = vec3(aSeed.x * uExtent, uYRange.x + aSeed.y * bandH, aSeed.z * uExtent);
-  float alpha = uLook.w;
+  // "cover" fades things in and out spatially (box faces, band ends) — it is
+  // dithered per particle, so a speck pops in or out whole; "bright" is
+  // twinkle/blink and is stepped.
+  float cover = uLook.w;
+  float bright = 1.0;
   vec3 vel = uDrift;
   float ripple = 0.0;
   float mode = uKind.y;
@@ -81,7 +99,7 @@ void main() {
     p += uWander.x * vec3(sin(t * w + ph), 0.5 * sin(t * w * 0.71 + ph * 2.0), cos(t * w * 0.83 + ph * 1.3));
     p.y = uYRange.x + mod(p.y - uYRange.x, bandH);
     float yRel = (p.y - uYRange.x) / bandH;
-    alpha *= smoothstep(0.0, 0.07, yRel) * (1.0 - smoothstep(0.9, 1.0, yRel));
+    cover *= smoothstep(0.0, 0.07, yRel) * (1.0 - smoothstep(0.9, 1.0, yRel));
   } else if (mode < 1.5) {
     // Drip: falls from the ceiling under gravity, then a ripple on the floor,
     // then waits for the next one.
@@ -94,9 +112,9 @@ void main() {
       float s = (tt - fall) / 0.45;
       p.y = uYRange.x + 0.02;
       ripple = 1.0;
-      alpha *= s < 1.0 ? (1.0 - s) * 0.8 : 0.0;
+      cover *= s < 1.0 ? 1.0 - s : 0.0;
     } else {
-      alpha *= smoothstep(0.0, 0.15, tt);
+      cover *= step(0.12, tt);
     }
   } else {
     // Firefly: a lazy wander and a slow blink.
@@ -104,102 +122,133 @@ void main() {
     p += uWander.x * vec3(sin(t * w + ph), 0.35 * sin(t * w * 1.37 + ph * 3.0), cos(t * w * 0.77 + ph * 1.7));
     p.y = clamp(p.y, uYRange.x, uYRange.y);
     float b = 0.5 + 0.5 * sin(t * uTwinkle.y * (0.6 + 0.8 * fract(aSeed.z * 9.1)) + ph * 5.0);
-    alpha *= 0.04 + 0.96 * b * b * b * b;
+    b = b * b * b * b;
+    cover *= step(0.04, b);
+    bright = 0.35 + 0.65 * stepped3(b * 1.2);
   }
 
   // Wrap horizontally into the camera-centred box; fade near its faces.
   vec2 origin = uCam.xz - uExtent * 0.5;
   p.xz = origin + mod(p.xz - origin, uExtent);
   vec2 rel = abs(p.xz - uCam.xz) / (uExtent * 0.5);
-  alpha *= 1.0 - smoothstep(0.65, 1.0, max(rel.x, rel.y));
+  cover *= 1.0 - smoothstep(0.65, 1.0, max(rel.x, rel.y));
 
+  float tw = 1.0;
   if (mode < 1.5 && uTwinkle.x > 0.0) {
-    float tw = 0.5 + 0.5 * sin(t * uTwinkle.y * (0.6 + 0.8 * aSeed.x) + ph * 3.0);
-    // A sharp twinkle for glints (depth near 1): mostly dark, brief flashes.
-    alpha *= 1.0 - uTwinkle.x * (1.0 - tw * tw * tw);
+    tw = 0.5 + 0.5 * sin(t * uTwinkle.y * (0.6 + 0.8 * aSeed.x) + ph * 3.0);
+    tw = tw * tw * tw;
+    // A sharp twinkle for glints (depth near 1): mostly dim, brief flashes —
+    // in three switched levels, never a smooth pulse.
+    bright *= 1.0 - uTwinkle.x * (1.0 - stepped3(tw));
   }
 
   vec3 col = mix(uColorA, uColorB, fract(aSeed.w * 13.7));
   vec3 light = uLook.y > 0.0 ? fxLighting(p) : vec3(0.0);
-  col = col * (uLook.x + uLook.y * light);
+  col = col * (uLook.x + uLook.y * light) * bright;
 
   float size = mix(uSize.x, uSize.y, fract(aSeed.x * 31.1 + aSeed.z));
-  vec4 mvCenter = modelViewMatrix * vec4(p, 1.0);
-  float depth = max(-mvCenter.z, 0.05);
-  float pxPerUnit = projectionMatrix[1][1] * uViewportH * 0.5 / depth;
-  float px = size * pxPerUnit;
-  if (px < uMinPx) {
-    float k = px / uMinPx;
-    alpha *= k * k;
-    size = uMinPx / pxPerUnit;
-  }
+  vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+  float depth = max(-mvPosition.z, 0.05);
+  float px = size * fxPxPerUnit(depth);
+  float N = clamp(floor(2.0 * px + 0.5), 1.0, ${MAX_PX}.0);
+  if (2.0 * px < 1.0) cover *= max(2.0 * px, 0.1);
 
   vec2 corner = position.xy;
-  vec4 mvPosition = mvCenter;
-  float aspect = 1.0;
   float shape = uKind.x;
+  float reach = 0.0;
+  vInfo2 = vec4(0.0);
   if (ripple > 0.5) {
-    // A flat ring on the floor, growing as it fades.
-    float r = size * 10.0 + 0.25 * (1.0 - alpha);
+    // A ring on the floor, growing as it fades; the fragment shader
+    // quantizes it into a stair-stepped pixel circle.
+    float r = size * 10.0 + 0.25 * (1.0 - cover);
     mvPosition = modelViewMatrix * vec4(p + vec3(corner.x, 0.0, corner.y) * r, 1.0);
-  } else if (shape > 0.5 && shape < 1.5) {
-    vec3 vv = (viewMatrix * vec4(vel, 0.0)).xyz;
-    float sp = length(vv.xy);
-    vec2 dir = sp > 0.0001 ? vv.xy / sp : vec2(0.0, 1.0);
-    vec2 perp = vec2(-dir.y, dir.x);
-    float len = min(sp * 0.035, 0.6);
-    float halfLen = size + len * 0.5;
-    aspect = halfLen / size;
-    mvPosition.xy += dir * (corner.y * halfLen - len * 0.5) + perp * corner.x * size;
+    gl_Position = projectionMatrix * mvPosition;
+    vQ = corner;
+    shape = 4.0;
+    reach = clamp(r / 0.03, 4.0, 16.0);
   } else {
-    mvPosition.xy += corner * size;
+    vec4 clipC = projectionMatrix * mvPosition;
+    float ext = N * 0.5;
+    if (shape > 0.5 && shape < 1.5) {
+      // A falling drop: a short 1-px chain of pixels along its screen path.
+      vec4 clipT = projectionMatrix * (modelViewMatrix * vec4(p - vel * 0.035, 1.0));
+      vec2 d = vec2(0.0);
+      if (clipT.w > 0.05) d = (clipT.xy / clipT.w - clipC.xy / clipC.w) * 0.5 * uViewport;
+      float L = min(length(d), 6.0);
+      vInfo2 = vec4(L, L > 0.01 ? normalize(d) : vec2(0.0, 1.0), 0.0);
+      N = 1.0;
+      ext = ceil(L) + 1.5;
+    } else if (shape > 2.5) {
+      // A glint: one pixel that throws a plus of 1–2 px arms at its peak.
+      N = 1.0;
+      reach = tw > 0.7 ? 2.0 : (tw > 0.35 ? 1.0 : 0.0);
+      ext = reach + 0.5;
+    } else if (shape < 0.5 && uLook.x > 1.2) {
+      // Bright motes (embers, fireflies) wear a 1-px halo of added light.
+      reach = 1.0;
+      ext = N * 0.5 + 1.0;
+    }
+    gl_Position = fxPixelCorner(clipC, ext, corner);
+    vQ = corner * ext;
   }
 
-  vUv = corner;
-  vColor = vec4(col, clamp(alpha, 0.0, 1.0));
-  vInfo = vec3(shape, ripple, aspect);
-  gl_Position = projectionMatrix * mvPosition;
+  vColor = vec4(col, clamp(cover, 0.0, 1.0));
+  vInfo = vec4(shape, N, reach, fract(aSeed.w * 53.13 + aSeed.x * 7.71) * 0.94 + 0.03);
   #include <fog_vertex>
 }
 `;
 
 const FRAG = /* glsl */ `
 uniform vec4 uLook;
-varying vec2 vUv;
+varying vec2 vQ;
 varying vec4 vColor;
-varying vec3 vInfo;
+varying vec4 vInfo;
+varying vec4 vInfo2;
 #include <fog_pars_fragment>
 ${FOG_GLSL}
+${DITHER_GLSL}
 void main() {
   float shape = vInfo.x;
+  float N = vInfo.y;
+  float reach = vInfo.z;
   vec3 col = vColor.rgb;
-  float a;
-  if (vInfo.y > 0.5) {
-    float r = length(vUv);
-    a = smoothstep(0.14, 0.0, abs(r - 0.82)) * step(r, 1.0);
-  } else if (shape < 0.5) {
-    float r2 = dot(vUv, vUv);
-    float f = max(1.0 - r2, 0.0);
-    a = f * f;
-    col *= 1.0 + smoothstep(0.25, 0.0, r2);
-  } else if (shape < 1.5) {
-    float L = vInfo.z;
-    vec2 q = vec2(vUv.x, vUv.y * L);
-    float d = length(vec2(q.x, max(abs(q.y) - (L - 1.0), 0.0)));
-    a = pow(max(1.0 - d, 0.0), 1.5) * mix(0.3, 1.0, vUv.y * 0.5 + 0.5);
-  } else if (shape < 2.5) {
-    a = 1.0;
+  float add = uLook.z;
+  vec2 q = vQ;
+  vec2 aq = abs(q);
+  float cheb = max(aq.x, aq.y);
+  float thr = vInfo.w;
+  if (shape > 3.5) {
+    // Ripple: the floor quad quantized into cells, a pixel ring in it.
+    vec2 g = (floor(q * reach) + 0.5) / reach;
+    if (abs(length(g) - 0.8) > 0.16) discard;
+    thr = fxBayer4(gl_FragCoord.xy);
+  } else if (shape > 2.5) {
+    // Glint: the core pixel, and a plus of dimmer arms at its peak.
+    if (cheb < 0.5) col *= 1.3;
+    else if (min(aq.x, aq.y) < 0.5 && cheb <= reach) { col *= 0.45; add = 1.0; }
+    else discard;
+  } else if (shape > 1.5) {
+    // Ash: a flat square speck.
+    if (cheb > N * 0.5) discard;
+  } else if (shape > 0.5) {
+    // Drip: a 1-px chain, brightest at the head.
+    float L = vInfo2.x;
+    vec2 dir = vInfo2.yz;
+    float t = dot(q, dir);
+    float s = abs(q.x * dir.y - q.y * dir.x);
+    if (s > 0.62 || t < -0.5 || t > L + 0.5) discard;
+    if (t > 0.5) col *= 0.55;
   } else {
-    float r = length(vUv);
-    float rays = max(0.0, 1.0 - abs(vUv.x) * 7.0) * (1.0 - abs(vUv.y))
-               + max(0.0, 1.0 - abs(vUv.y) * 7.0) * (1.0 - abs(vUv.x));
-    float core = pow(max(0.0, 1.0 - r), 3.0);
-    a = clamp(core + rays, 0.0, 1.0);
-    col *= 1.0 + 2.0 * core;
+    // Mote: a crisp N×N speck, bright ones with a corner-cut 1-px halo.
+    float R = N * 0.5;
+    if (cheb >= R) {
+      if (reach < 0.5 || length(q) >= R + 0.9) discard;
+      col *= 0.35;
+      add = 1.0;
+    }
   }
-  a *= vColor.a;
-  if (a < 0.003) discard;
-  gl_FragColor = fxApplyFog(col, a, uLook.z);
+  if (vColor.a < thr) discard;
+  gl_FragColor = fxApplyFog(col, 1.0, add);
   #include <colorspace_fragment>
 }
 `;
@@ -225,8 +274,7 @@ function buildLayer(layer: AmbientLayer, seed: number): LayerGpu {
     uniforms: {
       ...UniformsUtils.clone(UniformsLib.fog),
       uTime: fxUniforms.uTime,
-      uViewportH: fxUniforms.uViewportH,
-      uMinPx: fxUniforms.uMinPx,
+      uViewport: fxUniforms.uViewport,
       uLightPos: fxUniforms.uLightPos,
       uLightCol: fxUniforms.uLightCol,
       uAmbientLight: fxUniforms.uAmbientLight,
@@ -246,7 +294,10 @@ function buildLayer(layer: AmbientLayer, seed: number): LayerGpu {
     vertexShader: VERT,
     fragmentShader: FRAG,
     transparent: true,
-    depthWrite: false,
+    // Specks are solid or discarded (never blended), so they can write
+    // depth — except the added-light layers, which must not hide what's
+    // behind their halos.
+    depthWrite: layer.additive === 0,
     fog: true,
     toneMapped: false,
     blending: CustomBlending,

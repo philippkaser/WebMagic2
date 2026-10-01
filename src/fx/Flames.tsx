@@ -17,10 +17,13 @@ import {
 import { fxUniforms } from "./fxUniforms";
 import { FOG_GLSL, NOISE_GLSL } from "./glsl";
 
-/** Living flames: every torch's fire is a procedural shader flame — fbm
- * noise scrolling up through a teardrop mask, licking sideways, white-hot at
- * the root and cooling to the torch's colour and a deep red tip, with a soft
- * halo that feeds bloom. All flames share ONE instanced draw call; owners
+/** Living pixel flames: every torch's fire is a procedural shader flame in
+ * the game's pixel-magic look — fbm noise rising through a teardrop mask and
+ * licking sideways, but sampled on a coarse grid of square cells (~2.5 cm,
+ * like the artpass 16×32 flame sprite) and on a stepped clock (a 10 fps
+ * flipbook), and painted in four flat colours: white-hot core, gold, the
+ * torch's colour, a deep-red fringe. Crisp, flickering, never a soft blob —
+ * bloom supplies the glow. All flames share ONE instanced draw call; owners
  * register a handle and mutate it (intensity for flicker) like a light
  * source.
  *
@@ -106,6 +109,11 @@ void main() {
 }
 `;
 
+/** Cells per flame height: the flame's pixel grid. */
+const FLAME_CELLS = 18;
+/** Flipbook rate: the flame redraws this many times a second. */
+const FLAME_FPS = 10;
+
 const FRAG = /* glsl */ `
 uniform float uTime;
 varying vec2 vUv;
@@ -115,35 +123,39 @@ varying float vSeed;
 ${NOISE_GLSL}
 ${FOG_GLSL}
 void main() {
-  // Flame space: x in flame heights, y = 0 at the root, 1 at the nominal tip.
-  float y = vUv.y * 1.35 - 0.25;
-  float x = (vUv.x - 0.5) * 0.9;
-  float t = uTime + vSeed * 17.0;
+  // Flame space: x in flame heights, y = 0 at the root, 1 at the nominal tip
+  // — snapped to the centre of its grid cell, so the flame is drawn in
+  // square pixels that stay the same size however close you stand.
+  float G = ${FLAME_CELLS}.0;
+  float y = (floor((vUv.y * 1.35 - 0.25) * G) + 0.5) / G;
+  float x = (floor((vUv.x - 0.5) * 0.9 * G) + 0.5) / G;
+  // Stepped clock: the shape changes in frames, like a hand-drawn flipbook.
+  float t = floor((uTime + vSeed * 17.0) * ${FLAME_FPS}.0) / ${FLAME_FPS}.0;
   float hy = clamp(y, 0.0, 1.2);
   float n = fxFbm(vec2(x * 6.0 + vSeed * 9.0, y * 3.0 - t * 3.8));
   // Lick: the body sways more the higher up it is.
   float sway = (n - 0.5) * 0.16 * hy + sin(t * 5.7 + y * 4.0) * 0.03 * hy;
-  float width = mix(0.19, 0.03, clamp(y, 0.0, 1.0));
+  float width = mix(0.23, 0.04, clamp(y, 0.0, 1.0));
   float d = abs(x - sway) / width;
-  float root = smoothstep(-0.18, 0.05, y);
+  float root = step(-0.06, y);
   // Heat: hottest low in the middle; noise tears tongues off the edges.
   float heat = (1.0 - d) * mix(1.0, 0.42, clamp(y, 0.0, 1.0)) + (n - 0.5) * 0.55;
   heat *= root * (1.0 - smoothstep(0.7, 1.15, y + (n - 0.5) * 0.3));
-  heat = clamp(heat, 0.0, 1.0);
-  // Posterised into four bands — a pixel-art flame that stays crisp at
-  // dpr 0.35 instead of blooming into a blob.
+  // Four flat colours, no gradient: a pixel-art palette ramp. The body is
+  // drawn SOLID, so its colours stay exact against a brightly lit wall
+  // (added light would wash them to white); only the deep-red fringe adds
+  // light, so the flame's edge melts into its own glow.
   vec3 tint = vTint.rgb;
-  vec3 col = vec3(0.0);
-  if (heat > 0.62) col = mix(tint, vec3(1.0, 0.97, 0.88), 0.72) * 1.7;
-  else if (heat > 0.4) col = mix(tint, vec3(1.0), 0.3) * 1.25;
-  else if (heat > 0.2) col = tint * 1.0;
-  else if (heat > 0.07) col = tint * vec3(0.75, 0.38, 0.28) * 0.8;
-  // Halo: a soft ball of light around the root for bloom to pick up.
-  vec2 hp = vec2(x * 1.3, y - 0.22);
-  col += tint * exp(-dot(hp, hp) * 12.0) * 0.2;
-  col *= vTint.a;
-  if (col.r + col.g + col.b < 0.004) discard;
-  gl_FragColor = fxApplyFog(col, 1.0, 1.0);
+  vec3 col;
+  float add = 0.0;
+  if (heat > 0.62) col = mix(tint, vec3(1.0, 0.96, 0.84), 0.72) * 1.8;
+  else if (heat > 0.4) col = mix(tint, vec3(1.0, 0.8, 0.4), 0.4) * 1.35;
+  else if (heat > 0.2) col = tint * 1.1;
+  else if (heat > 0.08) { col = tint * vec3(0.8, 0.32, 0.2); add = 1.0; }
+  else discard;
+  // The owner's flicker, switched between a few levels rather than dimmed.
+  col *= floor(vTint.a * 6.0 + 0.5) / 6.0;
+  gl_FragColor = fxApplyFog(col, 1.0, add);
   #include <colorspace_fragment>
 }
 `;

@@ -3,6 +3,49 @@ import { FX_LIGHT_COUNT } from "./fxUniforms";
 /** GLSL shared by the fx shaders. Everything is procedural — no textures —
  * per the zero-binary-assets rule. */
 
+/** The pixel grid. The world renders at dpr 0.35, so one render-target pixel
+ * is a ~3-px block on screen: an fx sprite that straddles pixels smears into
+ * a soft blob, one that sits ON the grid reads as deliberate pixel art. So
+ * sprite quads are snapped: the centre goes to a pixel centre (odd widths)
+ * or a pixel corner (even widths), the half-width is a whole number of
+ * pixels, and the fragment shader then draws with exact integer offsets.
+ * `uViewport` is the render target's size in pixels (FxSystems keeps it). */
+export const PIXEL_GLSL = /* glsl */ `
+uniform vec2 uViewport;
+
+/** Clip position of one corner (±1) of a grid-aligned quad around the
+ * projected centre clipC, ext pixels from centre to edge (a multiple
+ * of 0.5). Varyings written as corner * ext then interpolate to exact
+ * pixel-centre offsets from the centre. */
+vec4 fxPixelCorner(vec4 clipC, float ext, vec2 corner) {
+  vec2 pix = (clipC.xy / clipC.w * 0.5 + 0.5) * uViewport;
+  bool odd = mod(ext * 2.0 + 0.5, 2.0) > 1.0;
+  vec2 c = odd ? floor(pix) + 0.5 : floor(pix + 0.5);
+  vec2 p = c + corner * ext;
+  return vec4((p / uViewport * 2.0 - 1.0) * clipC.w, clipC.z, clipC.w);
+}
+
+/** Render-target pixels per metre at a given view depth (vertical, so it
+ * holds for any aspect). */
+float fxPxPerUnit(float depth) {
+  return projectionMatrix[1][1] * uViewport.y * 0.5 / max(depth, 0.05);
+}
+`;
+
+/** Ordered dithering: fades are done by DROPPING pixels in a 4×4 Bayer
+ * pattern instead of blending alpha, so everything stays hard-edged and
+ * opaque (the classic pixel-art dissolve) — and, as a bonus, dithered pixels
+ * can write depth, so solid particles sort among themselves per pixel. */
+export const DITHER_GLSL = /* glsl */ `
+float fxBayer2(vec2 a) { return mod(3.0 * a.y + 2.0 * a.x, 4.0); }
+/** 4×4 ordered-dither threshold in (0, 1) for a pixel coordinate. */
+float fxBayer4(vec2 p) {
+  vec2 q = floor(p);
+  return (4.0 * fxBayer2(mod(q, 2.0)) + fxBayer2(mod(floor(q * 0.5), 2.0)) + 0.5) / 16.0;
+}
+float fxHash1(float x) { return fract(sin(x * 127.1 + 311.7) * 43758.5453); }
+`;
+
 /** Point-light accumulation for lit particles, evaluated per VERTEX (a
  * particle is a few pixels at dpr 0.35 — per-fragment would buy nothing).
  * The falloff mirrors three's punctual-light window (1 − (d/range)⁴)² / d²,

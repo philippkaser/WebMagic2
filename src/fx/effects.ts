@@ -14,12 +14,14 @@ import type { ParticleInit, ParticleStyle } from "./particleSim";
 
 /** Named gameplay effects, composed from the particle styles. Gameplay code
  * calls these instead of hand-tuning bursts, so every explosion, hit and
- * death in the game shares one visual language:
+ * death in the game shares one visual language — pixel magic:
  *
- * - light (additive glows, sparks, flares, rings) is HDR and feeds bloom;
- * - matter (smoke, dust, debris) is alpha-blended and lit by the light pool,
- *   so it glows with whatever flash made it;
- * - spell colour tints everything, with white-hot cores cooling into it.
+ * - many SMALL crisp pieces rather than a few big soft ones: 1–2 px sparks
+ *   and embers, hot chunks that tumble as little cubes, stepped glows;
+ * - light (glows, sparks, flares, rings) is HDR, so its pixels bloom;
+ * - matter (smoke, dust, debris) is solid, matte and lit by the light pool,
+ *   so it glows with whatever flash made it, and dissolves in dither cells;
+ * - spell colour tints everything, white-hot cores stepping down into it.
  *
  * All counts go through budgetCount: when the pool is filling up (a chain of
  * barrels), effects thin out instead of evicting each other. Everything here
@@ -90,7 +92,7 @@ function ring(
   color: string,
   intensity: number,
   alpha = 1,
-  whiten = 0.5,
+  whiten = 0.25,
 ): ParticleInit {
   const p = place(beginParticle("ring"), x, y, z);
   p.size0 = r0;
@@ -130,83 +132,101 @@ export function explosionFx(position: Vec3Like, radius: number, color: string, p
   // is capped further by its distance to the eye.
   const eye = Math.hypot(x - playerPosition.x, y - playerPosition.y - EYE_HEIGHT, z - playerPosition.z);
   const core = Math.min(R * (0.55 + 0.45 * Math.min(k, 1)), Math.max(0.5, eye * 0.7));
-  commit(flash("flare", x, y, z, core * 0.14, core * 0.6, 0.11, color, 2.4, 0.65));
-  commit(flash("glow", x, y, z, core * 0.26, core * 0.46, 0.17, color, 2.1, 0.5));
+  commit(flash("flare", x, y, z, core * 0.12, core * 0.42, 0.12, color, 2.4, 0.65));
+  commit(flash("glow", x, y, z, core * 0.14, core * 0.24, 0.14, color, 2.2, 0.6));
 
-  // Fireball: overlapping glows that swell as they slow, cooling to a dull tint.
-  for (let i = 0, n = budget(4 + 6 * k + R); i < n; i++) {
+  // Fireball: a cluster of stepped pixel puffs that swell as they slow,
+  // banding down from white-hot to the spell's tint to a dull ember.
+  for (let i = 0, n = budget(8 + 10 * k + R * 2); i < n; i++) {
     randomUnit(dir);
-    const s = R * rand(1, 2.4);
-    const p = place(beginParticle("glow"), x + dir.x * R * 0.12, y + dir.y * R * 0.12, z + dir.z * R * 0.12);
+    const s = R * rand(1, 2.6);
+    const off = R * rand(0.05, 0.2);
+    const p = place(beginParticle("glow"), x + dir.x * off, y + dir.y * off, z + dir.z * off);
     p.vx = dir.x * s;
     p.vy = dir.y * s + R * 0.4;
     p.vz = dir.z * s;
     p.drag = 5.5;
-    p.size0 = R * rand(0.1, 0.18);
-    p.size1 = p.size0 * rand(1.5, 1.9);
-    p.life = rand(0.3, 0.55);
+    p.size0 = R * rand(0.045, 0.09);
+    p.size1 = p.size0 * rand(1.5, 2);
+    p.life = rand(0.3, 0.6);
     // Modest HDR: pale spell colours (ice blue) saturate to white if pushed
     // much past 1.3, and the fireball should read as the spell's colour.
-    ramp(p, color, color, 1.3, 0.22, rand(0.05, 0.3));
+    ramp(p, color, color, 1.3, 0.55, Math.random() < 0.25 ? rand(0.2, 0.4) : rand(0, 0.1));
     commitParticle();
   }
 
-  // Sparks: hot streaks flung out, arcing down, bouncing off the floor.
-  for (let i = 0, n = budget(8 + 18 * k + R * 3); i < n; i++) {
+  // Sparks: chains of hot pixels flung out, arcing down, bouncing.
+  for (let i = 0, n = budget(14 + 26 * k + R * 4); i < n; i++) {
     randomUnit(dir);
     const s = R * rand(3, 7.5);
     const p = place(beginParticle("spark"), x, y, z);
     p.vx = dir.x * s;
     p.vy = dir.y * s + R * 1.2;
     p.vz = dir.z * s;
-    p.size0 = rand(0.03, 0.05);
+    p.size0 = rand(0.012, 0.026);
     p.size1 = p.size0 * 0.5;
-    p.life = rand(0.3, 0.75);
+    p.life = rand(0.3, 0.8);
     p.gravity = -14;
     p.drag = 1.7;
-    p.stretch = 0.065;
+    p.stretch = 0.04;
     ramp(p, "#fff1c8", color, 3, 1.3, 0);
     commitParticle();
   }
 
-  // Embers: slower, flickering, and they float up once the blast lets go.
-  for (let i = 0, n = budget(3 + 8 * k + R * 1.5); i < n; i++) {
+  // Cinders: hot little cubes that tumble out, bounce and cool — the
+  // chunky heart of a pixel explosion.
+  for (let i = 0, n = budget(6 + 8 * k + R * 2.5); i < n; i++) {
+    randomUnit(dir);
+    const s = R * rand(1.2, 3.6);
+    const p = place(beginParticle("pixel"), x, y, z);
+    p.vx = dir.x * s;
+    p.vy = Math.abs(dir.y) * s + R * 0.8;
+    p.vz = dir.z * s;
+    p.size0 = rand(0.015, 0.035) * Math.min(1.3, 0.6 + R * 0.15);
+    p.size1 = 0;
+    p.life = rand(0.7, 1.5);
+    ramp(p, "#ffe7b0", color, 2.4, 0.5, 0.2);
+    commitParticle();
+  }
+
+  // Embers: single bright pixels that float up once the blast lets go.
+  for (let i = 0, n = budget(6 + 12 * k + R * 2); i < n; i++) {
     randomUnit(dir);
     const s = R * rand(0.8, 2.6);
     const p = place(beginParticle("ember"), x, y, z);
     p.vx = dir.x * s;
     p.vy = Math.abs(dir.y) * s + 1;
     p.vz = dir.z * s;
-    p.size0 = rand(0.03, 0.05);
-    p.life = rand(1, 2.2);
+    p.size0 = rand(0.012, 0.022);
+    p.life = rand(1, 2.4);
     ramp(p, "#ffd08a", color, 2.6, 0.9, 0.2);
     commitParticle();
   }
 
   // Smoke: lit, so the flash (and nearby torches) colour it as it rolls up.
-  for (let i = 0, n = budget(2 + 5 * k + R); i < n; i++) {
+  for (let i = 0, n = budget(3 + 7 * k + R * 1.5); i < n; i++) {
     randomUnit(dir);
     const s = R * rand(0.4, 1.1);
     const p = place(beginParticle("smoke"), x + dir.x * R * 0.2, y + dir.y * R * 0.15, z + dir.z * R * 0.2);
     p.vx = dir.x * s;
     p.vy = dir.y * s * 0.5 + rand(0.4, 1);
     p.vz = dir.z * s;
-    p.size0 = R * rand(0.1, 0.16);
-    p.size1 = R * rand(0.32, 0.5);
+    p.size0 = R * rand(0.05, 0.09);
+    p.size1 = R * rand(0.18, 0.3);
     p.life = rand(1.2, 2.2);
-    p.alpha = rand(0.35, 0.55);
+    p.alpha = rand(0.55, 0.8);
     tintedSmoke(p, color, 0.18);
     commitParticle();
   }
 
   // Shockwave: a quick, thin pressure ring in the air…
-  commit(ring(x, y, z, null, R * 0.1, R * 0.9, 0.2, 0.05, color, 2, 0.3));
+  commit(ring(x, y, z, null, R * 0.1, R * 0.9, 0.2, 0.04, color, 2, 0.5));
   // …and where the blast is near the floor, a ground ring and a dust skirt.
   const h = y - GROUND_Y;
   if (h < R * 0.9) {
     const near = 1 - Math.max(0, h) / (R * 0.9);
     commit(ring(x, GROUND_Y + 0.06, z, UP, R * 0.2, R * 1.25, 0.42, 0.06, color, 2, 0.35 + 0.65 * near));
-    for (let i = 0, n = budget((3 + R * 2.5) * near); i < n; i++) {
+    for (let i = 0, n = budget((4 + R * 3.5) * near); i < n; i++) {
       const a = Math.random() * Math.PI * 2;
       const s = R * rand(1.6, 3);
       const p = place(beginParticle("smoke"), x + Math.cos(a) * R * 0.3, GROUND_Y + 0.15, z + Math.sin(a) * R * 0.3);
@@ -215,10 +235,10 @@ export function explosionFx(position: Vec3Like, radius: number, color: string, p
       p.vy = rand(0.2, 0.6);
       p.drag = 3.5;
       p.gravity = 0.15;
-      p.size0 = R * 0.06;
-      p.size1 = R * rand(0.16, 0.26);
+      p.size0 = R * 0.04;
+      p.size1 = R * rand(0.1, 0.17);
       p.life = rand(0.7, 1.2);
-      p.alpha = 0.4 * near;
+      p.alpha = 0.7 * near;
       ramp(p, "#5a4c3e", "#1c1916", 1, 1);
       commitParticle();
     }
@@ -245,7 +265,7 @@ export function shockwaveFx(position: Vec3Like, radius: number, color: string, p
   }
   commit(ring(x, y - 0.35, z, UP, 0.4, R * 1.2, 0.28, 0.04, color, 2, 0.45));
   const floorY = near > 0 ? gy + 0.08 : y - 0.5;
-  for (let i = 0, n = budget(22 * k); i < n; i++) {
+  for (let i = 0, n = budget(32 * k); i < n; i++) {
     const a = (i / n) * Math.PI * 2 + rand(-0.1, 0.1);
     const p = place(beginParticle("spark"), x + Math.cos(a) * 0.5, floorY, z + Math.sin(a) * 0.5);
     const s = R * rand(3, 4.6);
@@ -254,8 +274,8 @@ export function shockwaveFx(position: Vec3Like, radius: number, color: string, p
     p.vy = rand(0.3, 1.5);
     p.gravity = -6;
     p.drag = 2.4;
-    p.stretch = 0.06;
-    p.size0 = rand(0.025, 0.04);
+    p.stretch = 0.04;
+    p.size0 = rand(0.012, 0.024);
     p.life = rand(0.3, 0.5);
     ramp(p, "#ffffff", color, 2.8, 1.2);
     commitParticle();
@@ -268,19 +288,19 @@ export function shockwaveFx(position: Vec3Like, radius: number, color: string, p
     p.vz = Math.sin(a) * s;
     p.vy = rand(0.2, 0.5);
     p.drag = 3.2;
-    p.size0 = 0.15;
-    p.size1 = R * rand(0.1, 0.16);
+    p.size0 = 0.1;
+    p.size1 = R * rand(0.07, 0.11);
     p.life = rand(0.6, 1);
-    p.alpha = 0.35 * near;
+    p.alpha = 0.65 * near;
     ramp(p, "#6a5c4c", "#1c1916", 1, 1);
     commitParticle();
   }
-  for (let i = 0, n = budget(8 * k); i < n; i++) {
+  for (let i = 0, n = budget(14 * k); i < n; i++) {
     const a = Math.random() * Math.PI * 2;
     const r = R * rand(0.3, 0.9);
     const p = place(beginParticle("ember"), x + Math.cos(a) * r, floorY + 0.1, z + Math.sin(a) * r);
     p.vy = rand(0.8, 1.8);
-    p.size0 = rand(0.025, 0.04);
+    p.size0 = rand(0.012, 0.022);
     p.life = rand(0.7, 1.3);
     ramp(p, "#ffffff", color, 2.4, 0.9, 0.3);
     commitParticle();
@@ -329,14 +349,16 @@ export function castFlareFx(
   readVec(aim, dir);
   if (inherit) readVec(inherit, tmp2);
   else tmp2.x = tmp2.y = tmp2.z = 0;
-  withInherit(flash("flare", at.x, at.y, at.z, 0.05 * scale, 0.17 * scale, 0.1, color, 3, 0.7));
-  const c = ring(at.x, at.y, at.z, dir, 0.03 * scale, 0.2 * scale, 0.17, 0.2, color, 2.2, 0.9);
+  // The flash is a hard plus of pixels (a pixel-art star), the circle a
+  // stepped rune ring facing the aim.
+  withInherit(flash("flare", at.x, at.y, at.z, 0.06 * scale, 0.16 * scale, 0.11, color, 3, 0.7));
+  const c = ring(at.x, at.y, at.z, dir, 0.03 * scale, 0.14 * scale, 0.15, 0.07, color, 2.2, 1, 0.25);
   c.drag = 0;
   withInherit(c);
   const ax = dir.x;
   const ay = dir.y;
   const az = dir.z;
-  for (let i = 0, n = budget(6 * scale); i < n; i++) {
+  for (let i = 0, n = budget(9 * scale); i < n; i++) {
     randomInCone(ax, ay, az, 0.45, tmp);
     const s = rand(5, 11);
     const p = place(beginParticle("spark"), at.x, at.y, at.z);
@@ -345,16 +367,18 @@ export function castFlareFx(
     p.vz = tmp.z * s;
     p.gravity = -4;
     p.drag = 7;
-    p.size0 = rand(0.012, 0.02) * scale;
-    p.life = rand(0.1, 0.2);
+    p.size0 = rand(0.008, 0.014) * scale;
+    p.stretch = 0.025;
+    p.life = rand(0.1, 0.22);
     ramp(p, "#ffffff", color, 3, 1.4);
     withInherit(p);
   }
 }
 
-/** A glowing comet tail for a bolt, laid along the segment it flew this
- * frame so the trail is continuous at any speed. The head gets a short-lived
- * halo — bloom turns it into the bolt's glow. */
+/** A pixel comet tail for a bolt, laid along the segment it flew this frame
+ * so the trail is continuous at any speed: stepped squares that cool and
+ * burn down behind the head, a few loose sparks shed off it, and a tiny
+ * star at the head that bloom turns into the bolt's glow. */
 export function boltTrailFx(from: Vec3Like, to: Vec3Like, color: string, size: number): void {
   readVec(from, tmp);
   readVec(to, at);
@@ -362,38 +386,38 @@ export function boltTrailFx(from: Vec3Like, to: Vec3Like, color: string, size: n
   const dy = at.y - tmp.y;
   const dz = at.z - tmp.z;
   const dist = Math.hypot(dx, dy, dz);
-  const steps = Math.min(trailSteps(dist, 0.08, 12), budget(12));
+  const steps = Math.min(trailSteps(dist, 0.06, 14), budget(14));
   for (let i = 0; i < steps; i++) {
     const f = (i + Math.random()) / steps;
     const p = place(beginParticle("glow"), tmp.x + dx * f, tmp.y + dy * f, tmp.z + dz * f);
-    p.vx = rand(-0.25, 0.25);
-    p.vy = rand(-0.25, 0.25);
-    p.vz = rand(-0.25, 0.25);
+    p.vx = rand(-0.3, 0.3);
+    p.vy = rand(-0.3, 0.3);
+    p.vz = rand(-0.3, 0.3);
     p.drag = 2;
-    p.size0 = size * rand(1.1, 1.5);
+    p.size0 = size * rand(0.55, 0.85);
     p.size1 = 0;
     // Earlier points on the segment were "emitted" earlier: shorter life.
-    p.life = rand(0.16, 0.26) * (0.75 + 0.25 * f);
-    ramp(p, color, color, 2.2, 0.4, 0.45);
+    p.life = rand(0.16, 0.28) * (0.75 + 0.25 * f);
+    ramp(p, color, color, 2.2, 0.5, 0.5);
     commitParticle();
   }
-  // Head halo.
-  const h = flash("glow", at.x, at.y, at.z, size * 2.8, size * 2.2, 0.05, color, 1.8, 0.35);
+  // Head glint: a tiny pixel star riding the bolt.
+  const h = flash("flare", at.x, at.y, at.z, size * 1.4, size * 1.8, 0.05, color, 2, 0.5);
   h.vx = dx * 10;
   h.vy = dy * 10;
   h.vz = dz * 10;
   commitParticle();
-  // The odd shed spark.
-  if (Math.random() < 0.3 && budget(1) > 0) {
+  // Shed sparks: loose pixels flicked off the head.
+  for (let i = 0, n = Math.random() < 0.6 ? budget(2) : 0; i < n; i++) {
     randomUnit(dir);
-    const p = place(beginParticle("spark"), at.x, at.y, at.z);
-    p.vx = dir.x * 2.5;
-    p.vy = dir.y * 2.5;
-    p.vz = dir.z * 2.5;
-    p.gravity = -6;
-    p.size0 = size * 0.2;
-    p.life = rand(0.18, 0.32);
-    ramp(p, "#ffffff", color, 2.5, 1);
+    const p = place(beginParticle("ember"), at.x, at.y, at.z);
+    p.vx = dir.x * 1.6;
+    p.vy = dir.y * 1.6;
+    p.vz = dir.z * 1.6;
+    p.gravity = -3;
+    p.size0 = rand(0.008, 0.014);
+    p.life = rand(0.25, 0.5);
+    ramp(p, "#ffffff", color, 2.5, 1.2, 0);
     commitParticle();
   }
 }
@@ -420,17 +444,17 @@ export function voidSeedFx(position: Vec3Like, size: number): void {
   p.az = at.z;
   p.attract = 14;
   p.drag = 1;
-  p.size0 = size * 0.35;
-  p.size1 = size * 0.1;
+  p.size0 = size * 0.22;
+  p.size1 = size * 0.08;
   p.life = 0.5;
   ramp(p, VOID_LIGHT, "#8a4dff", 2, 1.4, 0.2);
   commitParticle();
   // Dark wake.
   const s = place(beginParticle("smoke"), at.x, at.y, at.z);
-  s.size0 = size * 0.6;
-  s.size1 = size * 2;
+  s.size0 = size * 0.4;
+  s.size1 = size * 1.2;
   s.life = 0.6;
-  s.alpha = 0.5;
+  s.alpha = 0.75;
   s.gravity = 0;
   ramp(s, "#1a0a2e", "#05020a", 1, 1);
   commitParticle();
@@ -446,7 +470,7 @@ const DISC_W = { x: 0, y: Math.cos(DISC_TILT), z: Math.sin(DISC_TILT) };
 export function blackHoleFx(position: Vec3Like, radius: number, ringPulse: boolean): void {
   readVec(position, at);
   const { x, y, z } = at;
-  for (let i = 0, n = budget(4); i < n; i++) {
+  for (let i = 0, n = budget(6); i < n; i++) {
     const a = Math.random() * Math.PI * 2;
     const r = radius * rand(0.45, 0.95);
     const ca = Math.cos(a);
@@ -470,13 +494,13 @@ export function blackHoleFx(position: Vec3Like, radius: number, ringPulse: boole
     p.gravity = 0;
     p.life = 1.4;
     if (dark) {
-      p.size0 = rand(0.18, 0.3);
-      p.size1 = 0.08;
-      p.alpha = 0.75;
+      p.size0 = rand(0.1, 0.18);
+      p.size1 = 0.05;
+      p.alpha = 0.9;
       ramp(p, "#140824", "#000000", 1, 1);
     } else {
-      p.size0 = rand(0.06, 0.12);
-      p.size1 = 0.03;
+      p.size0 = rand(0.025, 0.055);
+      p.size1 = 0.015;
       ramp(p, VOID_LIGHT, "#7a3dff", 2.4, 1.6, 0.35);
     }
     commitParticle();
@@ -498,8 +522,9 @@ export function collapseFlashFx(position: Vec3Like): void {
  * creature's colour. */
 export function hitSparksFx(position: Vec3Like, color: string, scale = 1): void {
   readVec(position, at);
-  commit(flash("glow", at.x, at.y, at.z, 0.18 * scale, 0.32 * scale, 0.09, color, 2.6, 0.7));
-  for (let i = 0, n = budget(7 * scale + 2); i < n; i++) {
+  commit(flash("flare", at.x, at.y, at.z, 0.1 * scale, 0.22 * scale, 0.1, color, 2.6, 0.7));
+  commit(flash("glow", at.x, at.y, at.z, 0.05 * scale, 0.08 * scale, 0.08, color, 2.4, 0.7));
+  for (let i = 0, n = budget(11 * scale + 3); i < n; i++) {
     randomUnit(dir);
     const s = rand(3, 7.5) * scale;
     const p = place(beginParticle("spark"), at.x, at.y, at.z);
@@ -508,8 +533,9 @@ export function hitSparksFx(position: Vec3Like, color: string, scale = 1): void 
     p.vz = dir.z * s;
     p.gravity = -13;
     p.drag = 2.8;
-    p.size0 = rand(0.018, 0.03) * scale;
-    p.life = rand(0.18, 0.36);
+    p.size0 = rand(0.009, 0.018) * scale;
+    p.stretch = 0.03;
+    p.life = rand(0.18, 0.4);
     ramp(p, "#ffffff", color, 2.8, 1.1);
     commitParticle();
   }
@@ -521,11 +547,11 @@ export function hitSparksFx(position: Vec3Like, color: string, scale = 1): void 
 export function soulDissolveFx(position: Vec3Like, color: string, scale = 1): void {
   readVec(position, at);
   const { x, y, z } = at;
-  commit(flash("glow", x, y, z, 0.35 * scale, 0.9 * scale, 0.2, color, 3, 0.8));
-  commit(flash("flare", x, y, z, 0.2 * scale, 0.8 * scale, 0.14, color, 2.6, 0.8));
-  commit(ring(x, y, z, null, 0.2 * scale, 1.5 * scale, 0.38, 0.1, color, 2.2, 0.9));
+  commit(flash("glow", x, y, z, 0.12 * scale, 0.26 * scale, 0.16, color, 3, 0.8));
+  commit(flash("flare", x, y, z, 0.2 * scale, 0.7 * scale, 0.16, color, 2.6, 0.8));
+  commit(ring(x, y, z, null, 0.2 * scale, 1.5 * scale, 0.38, 0.03, color, 2.2, 1));
 
-  for (let i = 0, n = budget(22 * scale); i < n; i++) {
+  for (let i = 0, n = budget(34 * scale); i < n; i++) {
     const a = Math.random() * Math.PI * 2;
     const r = Math.sqrt(Math.random()) * 0.45 * scale;
     const p = place(
@@ -538,19 +564,19 @@ export function soulDissolveFx(position: Vec3Like, color: string, scale = 1): vo
     p.vx = Math.cos(a) * out;
     p.vz = Math.sin(a) * out;
     p.vy = rand(0.3, 1.6);
-    p.size0 = rand(0.045, 0.09) * Math.sqrt(scale);
-    p.life = rand(0.8, 1.7);
+    p.size0 = rand(0.016, 0.04) * Math.sqrt(scale);
+    p.life = rand(0.8, 1.8);
     ramp(p, color, color, 2.4, 0.7, rand(0.1, 0.55));
     commitParticle();
   }
-  for (let i = 0, n = budget(8 + 4 * scale); i < n; i++) {
+  for (let i = 0, n = budget(12 + 6 * scale); i < n; i++) {
     randomUnit(dir);
     const s = rand(3.5, 7) * Math.sqrt(scale);
     const p = place(beginParticle("spark"), x, y, z);
     p.vx = dir.x * s;
     p.vy = dir.y * s + 2;
     p.vz = dir.z * s;
-    p.size0 = rand(0.02, 0.035);
+    p.size0 = rand(0.01, 0.02);
     p.life = rand(0.3, 0.6);
     ramp(p, "#ffffff", color, 2.8, 1);
     commitParticle();
@@ -561,9 +587,9 @@ export function soulDissolveFx(position: Vec3Like, color: string, scale = 1): vo
     p.vy = rand(7, 10) * Math.sqrt(scale);
     p.gravity = 0;
     p.drag = 2.2;
-    p.stretch = 0.08;
-    p.size0 = 0.04 * scale;
-    p.size1 = 0.01;
+    p.stretch = 0.06;
+    p.size0 = 0.018 * scale;
+    p.size1 = 0.008;
     p.life = 0.5;
     ramp(p, color, color, 2.2, 1, 0.35);
     commitParticle();
@@ -575,30 +601,30 @@ export function soulDissolveFx(position: Vec3Like, color: string, scale = 1): vo
 export function shatterFx(position: Vec3Like, colors: readonly string[], scale = 1): void {
   readVec(position, at);
   const { x, y, z } = at;
-  for (let i = 0, n = budget(16 * scale); i < n; i++) {
+  for (let i = 0, n = budget(24 * scale); i < n; i++) {
     randomUnit(dir);
     const s = rand(1.8, 5.5);
     const p = place(beginParticle("shard"), x + dir.x * 0.2, y + dir.y * 0.2, z + dir.z * 0.2);
     p.vx = dir.x * s;
     p.vy = Math.abs(dir.y) * s + rand(1.5, 3.5);
     p.vz = dir.z * s;
-    p.size0 = rand(0.035, 0.075) * scale;
+    p.size0 = rand(0.022, 0.055) * scale;
     p.size1 = p.size0 * 0.4;
     p.life = rand(1.2, 2.2);
     const c = colors[(Math.random() * colors.length) | 0];
     ramp(p, c, c, 1.4, 1.2);
     commitParticle();
   }
-  for (let i = 0, n = budget(5 * scale); i < n; i++) {
+  for (let i = 0, n = budget(7 * scale); i < n; i++) {
     randomUnit(dir);
     const p = place(beginParticle("smoke"), x + dir.x * 0.2, y + dir.y * 0.15, z + dir.z * 0.2);
     p.vx = dir.x * 1.1;
     p.vy = Math.abs(dir.y) * 0.6 + 0.25;
     p.vz = dir.z * 1.1;
-    p.size0 = 0.14 * scale;
-    p.size1 = rand(0.4, 0.6) * scale;
+    p.size0 = 0.08 * scale;
+    p.size1 = rand(0.22, 0.34) * scale;
     p.life = rand(0.8, 1.4);
-    p.alpha = 0.32;
+    p.alpha = 0.6;
     ramp(p, "#6e6152", "#2a2622", 1, 1);
     commitParticle();
   }
@@ -620,20 +646,20 @@ export function dustPuffFx(position: Vec3Like, strength = 1): void {
     p.vy = rand(0.15, 0.5);
     p.drag = 4;
     p.gravity = 0.1;
-    p.size0 = 0.07;
-    p.size1 = rand(0.22, 0.38) * (0.7 + strength * 0.3);
+    p.size0 = 0.05;
+    p.size1 = rand(0.12, 0.22) * (0.7 + strength * 0.3);
     p.life = rand(0.5, 0.95);
-    p.alpha = 0.3 + 0.1 * strength;
+    p.alpha = 0.55 + 0.15 * strength;
     ramp(p, "#7a6b5a", "#2e2923", 1, 1);
     commitParticle();
   }
-  for (let i = 0, n = budget(Math.round(3 * strength)); i < n; i++) {
+  for (let i = 0, n = budget(Math.round(5 * strength)); i < n; i++) {
     const a = Math.random() * Math.PI * 2;
     const p = place(beginParticle("pixel"), x, y + 0.05, z);
     p.vx = Math.cos(a) * rand(0.8, 2);
     p.vz = Math.sin(a) * rand(0.8, 2);
     p.vy = rand(1.5, 3);
-    p.size0 = rand(0.02, 0.035);
+    p.size0 = rand(0.012, 0.025);
     p.size1 = 0;
     p.life = rand(0.4, 0.7);
     ramp(p, "#4a4038", "#4a4038", 1, 1);
@@ -656,13 +682,13 @@ export function runeBurstFx(feet: Vec3Like, color: string): void {
     p.vz = Math.sin(a) * 1.4;
     p.vy = -0.8;
     p.drag = 3;
-    p.size0 = 0.05;
-    p.size1 = 0.09;
+    p.size0 = 0.04;
+    p.size1 = 0.07;
     p.life = 0.35;
     ramp(p, color, color, 2.6, 1.2, 0.5);
     commitParticle();
   }
-  for (let i = 0, n = budget(10); i < n; i++) {
+  for (let i = 0, n = budget(16); i < n; i++) {
     randomInCone(0, -1, 0, 0.8, dir);
     const s = rand(2.5, 5.5);
     const p = place(beginParticle("spark"), x, y, z);
@@ -670,7 +696,7 @@ export function runeBurstFx(feet: Vec3Like, color: string): void {
     p.vy = dir.y * s;
     p.vz = dir.z * s;
     p.gravity = -8;
-    p.size0 = 0.018;
+    p.size0 = 0.011;
     p.life = rand(0.2, 0.4);
     ramp(p, "#ffffff", color, 2.6, 1);
     commitParticle();
@@ -708,8 +734,8 @@ export function dashFx(eye: Vec3Like, direction: Vec3Like, color: string): void 
     p.vz = dz * s;
     p.gravity = 0;
     p.drag = 0;
-    p.stretch = 0.06;
-    p.size0 = rand(0.025, 0.04);
+    p.stretch = 0.05;
+    p.size0 = rand(0.012, 0.022);
     p.size1 = p.size0;
     p.alpha = 0.8;
     p.life = rand(0.16, 0.28);
@@ -723,7 +749,7 @@ export function dashFx(eye: Vec3Like, direction: Vec3Like, color: string): void 
     p.vz = -dz * rand(0.5, 1.5);
     p.vy = rand(0, 0.5);
     p.gravity = 1;
-    p.size0 = rand(0.07, 0.13);
+    p.size0 = rand(0.03, 0.06);
     p.life = rand(0.35, 0.6);
     ramp(p, color, color, 1.6, 0.5, 0.3);
     commitParticle();
@@ -739,8 +765,8 @@ export function hoverWispFx(feet: Vec3Like, color: string): void {
     p.vy = rand(-1.6, -0.8);
     p.vz = rand(-0.4, 0.4);
     p.drag = 1.5;
-    p.size0 = rand(0.05, 0.08);
-    p.size1 = 0.01;
+    p.size0 = rand(0.02, 0.035);
+    p.size1 = 0.008;
     p.life = rand(0.35, 0.55);
     ramp(p, color, color, 1.8, 0.6, 0.3);
     commitParticle();
@@ -759,7 +785,7 @@ export function torchEmberFx(top: Vec3Like, color: string): void {
   p.vx = rand(-0.25, 0.25);
   p.vy = rand(0.5, 1.1);
   p.vz = rand(-0.25, 0.25);
-  p.size0 = rand(0.016, 0.028);
+  p.size0 = rand(0.007, 0.013);
   p.life = rand(1, 1.9);
   ramp(p, "#ffe2b8", color, 2.6, 0.9, 0);
   commitParticle();
@@ -774,10 +800,10 @@ export function torchSmokeFx(top: Vec3Like): void {
   p.vz = rand(-0.08, 0.08);
   p.drag = 0.4;
   p.gravity = 0.05;
-  p.size0 = 0.05;
-  p.size1 = rand(0.22, 0.34);
+  p.size0 = 0.03;
+  p.size1 = rand(0.1, 0.16);
   p.life = rand(1.6, 2.4);
-  p.alpha = 0.16;
+  p.alpha = 0.42;
   ramp(p, "#2c2622", "#161412", 1, 1);
   commitParticle();
 }
@@ -793,7 +819,7 @@ export function torchSparkFx(top: Vec3Like, color: string): void {
     p.vz = dir.z * s;
     p.gravity = -5;
     p.drag = 1;
-    p.size0 = 0.012;
+    p.size0 = 0.008;
     p.life = rand(0.35, 0.6);
     ramp(p, "#fff4d6", color, 2.8, 1.2);
     commitParticle();
@@ -811,13 +837,13 @@ export function telegraphFx(center: Vec3Like, radius: number, color: string, dur
   commitParticle();
   commit(ring(at.x, gy, at.z, UP, radius, 0.4, duration, 0.08, color, 2, 0.7));
   // Sparks rising off the circle.
-  for (let i = 0, n = budget(28); i < n; i++) {
+  for (let i = 0, n = budget(40); i < n; i++) {
     const a = Math.random() * Math.PI * 2;
     const p = place(beginParticle("ember"), at.x + Math.cos(a) * radius, gy, at.z + Math.sin(a) * radius);
     p.vx = -Math.cos(a) * rand(0.5, 1.5);
     p.vz = -Math.sin(a) * rand(0.5, 1.5);
     p.vy = rand(0.8, 2.2);
-    p.size0 = rand(0.03, 0.05);
+    p.size0 = rand(0.014, 0.024);
     p.life = duration + rand(0, 0.3);
     ramp(p, "#ffd9a8", color, 2.6, 1);
     commitParticle();
@@ -834,19 +860,19 @@ export function spikeFx(position: Vec3Like): void {
     p.vx = dir.x * s;
     p.vy = dir.y * s;
     p.vz = dir.z * s;
-    p.size0 = 0.016;
+    p.size0 = 0.01;
     p.life = rand(0.2, 0.4);
     ramp(p, "#ffffff", "#ffb35a", 2.4, 1);
     commitParticle();
   }
-  for (let i = 0, n = budget(6); i < n; i++) {
+  for (let i = 0, n = budget(10); i < n; i++) {
     randomInCone(0, 1, 0, 1, dir);
     const p = place(beginParticle("pixel"), at.x, at.y + 0.2, at.z);
     const s = rand(1.5, 3.5);
     p.vx = dir.x * s;
     p.vy = dir.y * s;
     p.vz = dir.z * s;
-    p.size0 = rand(0.025, 0.04);
+    p.size0 = rand(0.015, 0.03);
     p.size1 = 0;
     p.life = rand(0.4, 0.7);
     ramp(p, "#b3202a", "#5a0a10", 1, 1);
@@ -861,14 +887,14 @@ export function warpFx(position: Vec3Like, color: string): void {
   commit(ring(x, y + 0.05, z, UP, 0.3, 2.4, 0.6, 0.1, color, 2.6, 1));
   commit(ring(x, y + 0.05, z, UP, 2, 0.2, 0.5, 0.14, color, 2, 0.8));
   commit(flash("flare", x, y + 0.8, z, 0.3, 1.4, 0.25, color, 3, 0.8));
-  for (let i = 0, n = budget(36); i < n; i++) {
+  for (let i = 0, n = budget(48); i < n; i++) {
     const a = Math.random() * Math.PI * 2;
     const r = rand(0.2, 0.9);
     const p = place(beginParticle("soul"), x + Math.cos(a) * r, y + rand(0, 0.4), z + Math.sin(a) * r);
     p.vx = -Math.cos(a) * 0.4;
     p.vz = -Math.sin(a) * 0.4;
     p.vy = rand(2, 5);
-    p.size0 = rand(0.04, 0.08);
+    p.size0 = rand(0.018, 0.04);
     p.life = rand(0.6, 1.2);
     ramp(p, color, color, 2.4, 0.8, 0.4);
     commitParticle();
@@ -885,7 +911,9 @@ export function moteFx(position: Vec3Like, color: string, opts?: { rise?: number
   p.vy = (opts?.rise ?? 0.45) * rand(0.6, 1.2);
   p.vz = rand(-0.12, 0.12);
   p.gravity = 0.15;
-  p.size0 = (opts?.size ?? 0.035) * rand(0.7, 1.3);
+  // Sizes are a mote's nominal width; at pixel scale it draws as a 1–3 px
+  // speck with a 1-px halo, so it's spent at a little over half that.
+  p.size0 = (opts?.size ?? 0.035) * 0.55 * rand(0.7, 1.3);
   p.life = (opts?.life ?? 1.6) * rand(0.8, 1.2);
   ramp(p, color, color, 2.2, 1, 0.35);
   commitParticle();
@@ -894,15 +922,16 @@ export function moteFx(position: Vec3Like, color: string, opts?: { rise?: number
 /** A burst of rising soul-light (a grave looted, a rune read). */
 export function soulRiseFx(position: Vec3Like, color: string, count = 16): void {
   readVec(position, at);
-  commit(flash("glow", at.x, at.y, at.z, 0.2, 0.6, 0.25, color, 2.2, 0.6));
-  for (let i = 0, n = budget(count); i < n; i++) {
+  commit(flash("glow", at.x, at.y, at.z, 0.08, 0.18, 0.22, color, 2.2, 0.6));
+  commit(flash("flare", at.x, at.y, at.z, 0.15, 0.45, 0.2, color, 2.2, 0.6));
+  for (let i = 0, n = budget(Math.round(count * 1.5)); i < n; i++) {
     const a = Math.random() * Math.PI * 2;
     const r = rand(0, 0.45);
     const p = place(beginParticle("soul"), at.x + Math.cos(a) * r, at.y + rand(-0.2, 0.2), at.z + Math.sin(a) * r);
     p.vx = Math.cos(a) * rand(0.2, 0.8);
     p.vz = Math.sin(a) * rand(0.2, 0.8);
     p.vy = rand(0.6, 1.8);
-    p.size0 = rand(0.04, 0.075);
+    p.size0 = rand(0.016, 0.034);
     p.life = rand(0.9, 1.6);
     ramp(p, color, color, 2.2, 0.7, 0.4);
     commitParticle();
@@ -914,14 +943,14 @@ export function chargeBurstFx(position: Vec3Like, direction: Vec3Like, color: st
   readVec(position, at);
   readVec(direction, dir);
   const l = Math.hypot(dir.x, dir.y, dir.z) || 1;
-  for (let i = 0, n = budget(20); i < n; i++) {
+  for (let i = 0, n = budget(30); i < n; i++) {
     randomInCone(-dir.x / l, -dir.y / l, -dir.z / l, 0.6, tmp);
     const s = rand(4, 9);
     const p = place(beginParticle("spark"), at.x, at.y, at.z);
     p.vx = tmp.x * s;
     p.vy = tmp.y * s;
     p.vz = tmp.z * s;
-    p.size0 = rand(0.03, 0.05);
+    p.size0 = rand(0.014, 0.026);
     p.life = rand(0.25, 0.5);
     ramp(p, "#ffd9a8", color, 2.8, 1.2);
     commitParticle();

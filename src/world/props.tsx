@@ -273,7 +273,7 @@ export function Torch({
     const f = addFlame({
       position: [w.x, w.y + 0.07, w.z + 0.05],
       color,
-      scale: 0.52 * (0.7 + 0.3 * intensity),
+      scale: 0.62 * (0.7 + 0.3 * intensity),
     });
     flame.current = f;
     top.current.set(w.x, w.y + 0.07 + f.scale * 0.8, w.z + 0.05);

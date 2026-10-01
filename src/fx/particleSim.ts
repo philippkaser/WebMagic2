@@ -1,4 +1,4 @@
-import { clamp01, colorMix, flicker, lerp, lifeAlpha, lifeSize } from "./curves";
+import { clamp01, colorMix, lerp, lifeAlpha, lifeSize, steppedFlicker, steps } from "./curves";
 
 /** The particle simulation, free of three.js so it can be unit-tested.
  *
@@ -13,18 +13,26 @@ import { clamp01, colorMix, flicker, lerp, lifeAlpha, lifeSize } from "./curves"
  * reusable `ParticleInit` scratch object (see Particles.tsx#emit). */
 
 // ── Shapes: what the fragment shader draws (shared with particleMaterial) ──
+// Everything is drawn on the render target's pixel grid in whole pixels —
+// the game's pixel-magic look — so these are pixel-art shapes, not soft
+// sprites (particleMaterial.ts has the details).
 export const SHAPE = {
-  /** Soft round falloff with a hot core — glows, embers, motes. */
+  /** Stepped glow: a solid core in banded rings with a 1-px halo of added
+   * light — embers, motes, souls, fireball chunks. */
   glow: 0,
-  /** Capsule stretched along velocity, brighter at the head — sparks, flames. */
+  /** A short chain of pixels along the screen velocity, white-hot at the
+   * head, breaking up at the tail — sparks, flame licks. */
   streak: 1,
-  /** Noisy soft puff, alpha-blended — smoke, dust. */
+  /** A matte block with a ragged cell silhouette that dissolves by ordered
+   * dither — smoke, dust. */
   smoke: 2,
-  /** Thin annulus, billboarded or oriented by a normal — shockwaves. */
+  /** A pixel circle (billboarded) or a quantized rune ring lying in a world
+   * plane — shockwaves, spell circles. */
   ring: 3,
-  /** Hard-edged square — the chunky pixel read (debris, legacy bursts). */
+  /** A hard square with a darker rim; a real tumbling cube once it's a few
+   * pixels big — debris, the classic chunky burst. */
   chunk: 4,
-  /** Four-point star — muzzle flares and glints. */
+  /** A plus-shaped star of pixels — muzzle flares, impact glints. */
   flare: 5,
 } as const;
 
@@ -47,8 +55,10 @@ export type ParticleStyle =
  * character. */
 export interface StyleDef {
   shape: number;
-  /** 1 = additive light (feeds bloom), 0 = alpha-blended matter. One blend
-   * mode serves both (premultiplied alpha), so both share a draw call. */
+  /** 1 = the whole particle is added light (flares, rings); 0 = solid
+   * pixels (glowing ones still carry a rim of added light). One blend mode
+   * serves both (premultiplied alpha), per fragment, so all share a draw
+   * call. */
   additive: number;
   /** 0 = emissive; 1 = lit by the dynamic light pool + staff light. */
   lit: number;
@@ -56,19 +66,21 @@ export interface StyleDef {
   sizeCurve: number;
   /** Default end size as a multiple of the start size. */
   endSize: number;
+  /** Fade envelope. "Alpha" drives an ordered-dither dissolve, not blending. */
   fadeIn: number;
   fadeOutPow: number;
-  /** Colour-over-life exponent (see curves.colorMix). */
+  /** Colour-over-life exponent (see curves.colorMix); the result is stepped
+   * into COLOR_BANDS flat colours, like a painted palette ramp. */
   colorK: number;
   /** Streak length in seconds of velocity (0 = no stretch). */
   stretch: number;
-  /** Brightness flicker amount 0..1. */
+  /** Brightness flicker amount 0..1 — switches between stepped levels. */
   flicker: number;
   /** Turbulent wander acceleration, m/s². */
   wobble: number;
   /** Floor restitution; < 0 = ignores the floor. */
   bounce: number;
-  /** Max random spin, rad/s. */
+  /** Max random spin, rad/s (a chunk's tumble). */
   spin: number;
   /** Brightness follows rotation — a tumbling chunk catching light. */
   tumble: boolean;
@@ -76,20 +88,24 @@ export interface StyleDef {
   drag: number;
 }
 
+/** Colour-over-life steps: a particle moves through this many flat colours
+ * (white-hot → tint → dim), never a smooth gradient. */
+export const COLOR_BANDS = 4;
+
 const STYLE_LIST: readonly (readonly [ParticleStyle, StyleDef])[] = [
-  // The pre-rework look: opaque chunky squares that shrink, fall and bounce.
-  ["pixel", { shape: SHAPE.chunk, additive: 0, lit: 0, sizeCurve: 0, endSize: 0, fadeIn: 0, fadeOutPow: 0, colorK: 1, stretch: 0, flicker: 0, wobble: 0, bounce: 0.35, spin: 0, tumble: false, gravity: -14, drag: 1.6 }],
-  ["glow", { shape: SHAPE.glow, additive: 1, lit: 0, sizeCurve: 1, endSize: 0.35, fadeIn: 0.04, fadeOutPow: 1.6, colorK: 0.7, stretch: 0, flicker: 0, wobble: 0, bounce: -1, spin: 0, tumble: false, gravity: 0, drag: 2.5 }],
-  ["spark", { shape: SHAPE.streak, additive: 1, lit: 0, sizeCurve: 0, endSize: 0.4, fadeIn: 0, fadeOutPow: 1.2, colorK: 0.45, stretch: 0.05, flicker: 0.15, wobble: 0, bounce: 0.3, spin: 0, tumble: false, gravity: -11, drag: 2.2 }],
-  ["ember", { shape: SHAPE.glow, additive: 1, lit: 0, sizeCurve: 0, endSize: 0.2, fadeIn: 0.12, fadeOutPow: 1.3, colorK: 0.8, stretch: 0, flicker: 0.6, wobble: 2.2, bounce: -1, spin: 0, tumble: false, gravity: 1.1, drag: 1.4 }],
-  ["smoke", { shape: SHAPE.smoke, additive: 0, lit: 1, sizeCurve: 1, endSize: 2.6, fadeIn: 0.14, fadeOutPow: 1.4, colorK: 1.5, stretch: 0, flicker: 0, wobble: 0.5, bounce: -1, spin: 1.2, tumble: false, gravity: 0.35, drag: 2.2 }],
+  // The classic look: opaque chunky cubes that tumble, shrink, fall and bounce.
+  ["pixel", { shape: SHAPE.chunk, additive: 0, lit: 0, sizeCurve: 0, endSize: 0, fadeIn: 0, fadeOutPow: 0, colorK: 1, stretch: 0, flicker: 0, wobble: 0, bounce: 0.35, spin: 9, tumble: false, gravity: -14, drag: 1.6 }],
+  ["glow", { shape: SHAPE.glow, additive: 0, lit: 0, sizeCurve: 1, endSize: 0.35, fadeIn: 0, fadeOutPow: 1.6, colorK: 0.7, stretch: 0, flicker: 0, wobble: 0, bounce: -1, spin: 0, tumble: false, gravity: 0, drag: 2.5 }],
+  ["spark", { shape: SHAPE.streak, additive: 0, lit: 0, sizeCurve: 0, endSize: 0.4, fadeIn: 0, fadeOutPow: 1.2, colorK: 0.45, stretch: 0.035, flicker: 0.3, wobble: 0, bounce: 0.3, spin: 0, tumble: false, gravity: -11, drag: 2.2 }],
+  ["ember", { shape: SHAPE.glow, additive: 0, lit: 0, sizeCurve: 0, endSize: 0.3, fadeIn: 0, fadeOutPow: 1.3, colorK: 0.8, stretch: 0, flicker: 0.5, wobble: 2.2, bounce: -1, spin: 0, tumble: false, gravity: 1.1, drag: 1.4 }],
+  ["smoke", { shape: SHAPE.smoke, additive: 0, lit: 1, sizeCurve: 1, endSize: 2.6, fadeIn: 0.14, fadeOutPow: 1.4, colorK: 1.5, stretch: 0, flicker: 0, wobble: 0.5, bounce: -1, spin: 0, tumble: false, gravity: 0.35, drag: 2.2 }],
   ["shard", { shape: SHAPE.chunk, additive: 0, lit: 1, sizeCurve: 0, endSize: 0.3, fadeIn: 0, fadeOutPow: 0, colorK: 1, stretch: 0, flicker: 0, wobble: 0, bounce: 0.3, spin: 14, tumble: true, gravity: -17, drag: 0.6 }],
-  ["mote", { shape: SHAPE.glow, additive: 1, lit: 0, sizeCurve: 0, endSize: 0.5, fadeIn: 0.3, fadeOutPow: 1.2, colorK: 1, stretch: 0, flicker: 0.35, wobble: 0.7, bounce: -1, spin: 0, tumble: false, gravity: 0, drag: 1.2 }],
-  ["flame", { shape: SHAPE.streak, additive: 1, lit: 0, sizeCurve: 0, endSize: 0.15, fadeIn: 0.08, fadeOutPow: 1.1, colorK: 0.75, stretch: 0.09, flicker: 0.25, wobble: 3, bounce: -1, spin: 0, tumble: false, gravity: 2.5, drag: 2 }],
+  ["mote", { shape: SHAPE.glow, additive: 0, lit: 0, sizeCurve: 0, endSize: 0.5, fadeIn: 0.2, fadeOutPow: 1.2, colorK: 1, stretch: 0, flicker: 0.4, wobble: 0.7, bounce: -1, spin: 0, tumble: false, gravity: 0, drag: 1.2 }],
+  ["flame", { shape: SHAPE.streak, additive: 0, lit: 0, sizeCurve: 0, endSize: 0.15, fadeIn: 0, fadeOutPow: 1.1, colorK: 0.75, stretch: 0.05, flicker: 0.3, wobble: 3, bounce: -1, spin: 0, tumble: false, gravity: 2.5, drag: 2 }],
   ["ring", { shape: SHAPE.ring, additive: 1, lit: 0, sizeCurve: 1, endSize: 6, fadeIn: 0, fadeOutPow: 1.8, colorK: 0.6, stretch: 0, flicker: 0, wobble: 0, bounce: -1, spin: 0, tumble: false, gravity: 0, drag: 0 }],
   ["flare", { shape: SHAPE.flare, additive: 1, lit: 0, sizeCurve: 2, endSize: 1.6, fadeIn: 0, fadeOutPow: 1.5, colorK: 0.5, stretch: 0, flicker: 0, wobble: 0, bounce: -1, spin: 0, tumble: false, gravity: 0, drag: 0 }],
   // Rising energy: the dissolve of a dying creature, souls leaving graves.
-  ["soul", { shape: SHAPE.glow, additive: 1, lit: 0, sizeCurve: 0, endSize: 0.1, fadeIn: 0.1, fadeOutPow: 1.1, colorK: 0.9, stretch: 0, flicker: 0.2, wobble: 3.2, bounce: -1, spin: 0, tumble: false, gravity: 3.2, drag: 1.8 }],
+  ["soul", { shape: SHAPE.glow, additive: 0, lit: 0, sizeCurve: 0, endSize: 0.1, fadeIn: 0, fadeOutPow: 1.1, colorK: 0.9, stretch: 0, flicker: 0.35, wobble: 3.2, bounce: -1, spin: 0, tumble: false, gravity: 3.2, drag: 1.8 }],
 ];
 
 /** Style index ↔ definition. "debris" is an alias of "shard". */
@@ -131,7 +147,9 @@ export interface ParticleInit {
   life: number;
   size0: number;
   size1: number;
-  /** Peak alpha (0..1); glows can exceed 1 via colour, not alpha. */
+  /** Peak "alpha" (0..1): the share of the particle's pixels drawn — fades
+   * are an ordered-dither dissolve, not blending. Glows exceed 1 via
+   * colour, not alpha. */
   alpha: number;
   /** Linear RGB at birth and at death (values > 1 are HDR — they bloom). */
   r0: number;
@@ -142,8 +160,8 @@ export interface ParticleInit {
   b1: number;
   gravity: number;
   drag: number;
-  /** Sprite rotation (rad). For rings it carries the band thickness as a
-   * fraction of the radius instead (rings don't spin). */
+  /** Tumble angle (rad) of a chunk's cube. For rings it carries the band
+   * thickness as a fraction of the radius instead (rings don't spin). */
   rotation: number;
   spin: number;
   /** Stretch seconds override (NaN = the style's). */
@@ -201,11 +219,13 @@ export function createParticleInit(): ParticleInit {
 export interface InstanceArrays {
   /** xyz position, w size (quad half-extent, metres). */
   posSize: Float32Array;
-  /** Linear RGB (HDR) + alpha. */
+  /** Linear RGB (HDR) + alpha (dither coverage). */
   color: Float32Array;
-  /** xyz = velocity (streaks) or plane normal (rings); w = stretch seconds. */
+  /** xyz = velocity (streaks) or plane normal (rings); w = stretch seconds
+   * (streaks) or the particle's seed. */
   axis: Float32Array;
-  /** x shape, y additive, z rotation, w lit. */
+  /** x shape, y additive, z rotation (rings: thickness; streaks: seed),
+   * w lit. */
   misc: Float32Array;
 }
 
@@ -362,10 +382,12 @@ export class ParticleSim {
       const size = lifeSize(t, d[o + SIZE0], d[o + SIZE1], def.sizeCurve);
       let alpha = d[o + ALPHA];
       if (def.fadeOutPow > 0 || def.fadeIn > 0) alpha *= lifeAlpha(t, def.fadeIn, def.fadeOutPow);
-      if (def.flicker > 0) alpha *= flicker(age, seed, def.flicker);
-      const m = colorMix(t, def.colorK);
+      // Colour walks a stepped ramp; flicker and tumble switch between
+      // brightness levels instead of fading — pixel art has no in-betweens.
+      const m = steps(colorMix(t, def.colorK), COLOR_BANDS);
       let bright = 1;
-      if (def.tumble) bright = 0.55 + 0.45 * Math.abs(Math.cos(rot * 1.3 + seed * 6));
+      if (def.flicker > 0) bright = steppedFlicker(age, seed, def.flicker);
+      if (def.tumble && Math.abs(Math.cos(rot * 1.3 + seed * 6)) < 0.5) bright *= 0.72;
 
       // ── Write instance ──
       const q = i * INSTANCE_VEC;
@@ -397,7 +419,9 @@ export class ParticleSim {
       }
       misc[q] = def.shape;
       misc[q + 1] = def.additive;
-      misc[q + 2] = rot;
+      // Streaks never rotate, so their slot carries the seed (their axis.w
+      // is taken by the stretch) — the shader dithers per particle with it.
+      misc[q + 2] = def.shape === SHAPE.streak ? seed : rot;
       misc[q + 3] = def.lit;
       i++;
     }

@@ -1,4 +1,4 @@
-import { Color, Vector3, Vector4 } from "three";
+import { Color, Vector2, Vector3, Vector4 } from "three";
 
 /** Uniforms shared by every fx shader (particles, flames, ambient volumes).
  *
@@ -41,10 +41,9 @@ export const fxUniforms = {
   },
   /** Seconds, wrapped to keep float precision (shader animation only). */
   uTime: { value: 0 },
-  /** Drawing-buffer height in pixels — for the minimum-pixel-size rule. */
-  uViewportH: { value: 210 },
-  /** Smallest on-screen particle, in (low-res) pixels. */
-  uMinPx: { value: 1.6 },
+  /** Drawing-buffer size in pixels: fx sprites snap to this grid (see
+   * glsl.ts#PIXEL_GLSL), so every particle is a whole number of pixels. */
+  uViewport: { value: new Vector2(448, 280) },
 };
 
 /** Current light-pool slot data, exported for tests/debug overlays. */

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  COLOR_BANDS,
   createInstanceArrays,
   createParticleInit,
   ParticleSim,
@@ -28,11 +29,17 @@ describe("styles", () => {
       expect(STYLE_DEFS[styleId(s)]).toBeDefined();
     }
   });
-  test("light is additive, matter isn't", () => {
-    for (const s of ["glow", "spark", "ember", "mote", "flame", "ring", "flare", "soul"] as const) {
-      expect(styleDef(s).additive).toBe(1);
+  test("rings and flares are pure added light; everything else draws solid pixels", () => {
+    for (const s of ["ring", "flare"] as const) expect(styleDef(s).additive).toBe(1);
+    for (const s of ["pixel", "glow", "spark", "ember", "smoke", "shard", "mote", "flame", "soul"] as const) {
+      expect(styleDef(s).additive).toBe(0);
     }
-    for (const s of ["pixel", "smoke", "shard"] as const) expect(styleDef(s).additive).toBe(0);
+  });
+  test("light is emissive, smoke and debris are lit by the light pool", () => {
+    for (const s of ["glow", "spark", "ember", "mote", "flame", "ring", "flare", "soul", "pixel"] as const) {
+      expect(styleDef(s).lit).toBe(0);
+    }
+    for (const s of ["smoke", "shard"] as const) expect(styleDef(s).lit).toBe(1);
   });
   test("the legacy default keeps the original physics", () => {
     const d = styleDef("pixel");
@@ -53,7 +60,7 @@ describe("ParticleSim", () => {
     expect(out.posSize[0]).toBeGreaterThan(1); // moved +x
     expect(out.posSize[1]).toBeCloseTo(2);
     expect(out.misc[0]).toBe(SHAPE.glow);
-    expect(out.misc[1]).toBe(1); // additive
+    expect(out.misc[1]).toBe(0); // solid core (its rim adds light in the shader)
   });
 
   test("particles die at the end of their life and the pool stays dense", () => {
@@ -129,6 +136,28 @@ describe("ParticleSim", () => {
     expect(out.axis[1]).toBe(1);
     expect(out.misc[2]).toBeCloseTo(0.12);
     expect(out.posSize[3]).toBeGreaterThan(0.1); // grew
+  });
+
+  test("colour steps through flat bands over life (no smooth gradient)", () => {
+    const sim = new ParticleSim(2);
+    const out = createInstanceArrays(2);
+    sim.spawn(init("ring", { r0: 4, g0: 4, b0: 4, r1: 0, g1: 0, b1: 0, life: 1 }));
+    const seen = new Set<number>();
+    for (let i = 0; i < 99; i++) {
+      sim.step(0.01, out);
+      seen.add(Math.round(out.color[0] * 1000));
+    }
+    expect(seen.size).toBeLessThanOrEqual(COLOR_BANDS);
+    expect(seen.size).toBeGreaterThan(1);
+  });
+
+  test("streaks carry their seed in misc.z (axis.w holds the stretch)", () => {
+    const sim = new ParticleSim(2);
+    const out = createInstanceArrays(2);
+    sim.spawn(init("spark", { vx: 3, life: 1, rotation: 5 }));
+    sim.step(0.01, out);
+    expect(out.misc[2]).toBeGreaterThan(0);
+    expect(out.misc[2]).toBeLessThan(1);
   });
 
   test("colour runs from start to end over life, HDR preserved", () => {
