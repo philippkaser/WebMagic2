@@ -308,18 +308,18 @@ limiting and hit/pickup sanitization already run server-/authority-side.
 
 ## Floor mood: biomes, omens, lore
 
-- `world/biomes.ts`: five depth bands with fog, backdrop, ambient light,
-  torch color, the player's own lantern colour, environment strength,
-  surface ids, a `look` (damp band on the walls, vault fade, floor
-  reflection strength, light-shaft tint, optional glowing seams) and enemy
+- `world/biomes.ts`: five depth bands — each with its painted surface set,
+  fog, backdrop, ambient light, torch colour, the player's lantern, a
+  breathing glow, a split-tone colour `grade`, an accent (the spawn sigil's
+  colour), a `look` (light-shaft tint, floor reflection strength) and enemy
   weight multipliers; the generator reads the monster mix,
-  `scenes/floorAtmosphere.ts` and `DungeonFloor` the rest. Every biome
-  follows one material language (the Drowned Halls' — see Rendering): the
-  light and the fog carry the colour, not the stone.
+  `scenes/floorAtmosphere.ts` and `DungeonFloor` the rest. The look of each
+  biome comes from the "gritty pixel-magic" art direction (see Rendering).
 - `world/gen/architecture.ts`: a generator stage on its own RNG stream (so
-  layouts never shift) that places pillars (only in rooms ≥ 7×7, never on a
-  path — tested), arch ribs on wall piers, light shafts and, in the Crystal
-  Deep, crystal clusters that each register a pooled light.
+  layouts never shift) that plans pillars, arch ribs, light shafts and
+  crystal clusters. For now only the light shafts are built — the dungeon
+  is deliberately plain while its basic look and feel settle; the rest of
+  the plan (tested to never block a path) is there to switch back on.
 - `world/omens.ts`: ~28% of floors (never floor 1) roll an omen on their own
   RNG stream (so layouts stay stable). Omens carry `FloorRules` bends
   (gravity, enemy damage/speed/health, loot/gold, mana, explosion radius) and
@@ -357,32 +357,30 @@ limiting and hit/pickup sanitization already run server-/authority-side.
 
 ## Rendering
 
-- **Zero binary assets**: all textures are painted onto small canvases at
-  startup by pure painters (`render/textures/painters/`), each with a normal
-  map derived from its height field via Sobel — chunky pixels that still
-  catch light. **One material language** for every biome: low-contrast,
-  low-frequency albedo (big stones, few features), the detail in normal and
-  roughness maps, and colour carried by light and fog rather than paint —
-  glowing things are rare separate geometry (crystal clusters, heat seams),
-  not painted emissive. Every wall and floor has a roughness map, so torches
-  glint in damp stone everywhere. `getSurface(kind)` returns the maps plus
-  the material settings they were tuned under. `NearestFilter` everywhere.
+- **Zero binary assets** (one exception: the UI's three pixel fonts, from
+  @fontsource): every texture is painted at startup by pure painters
+  (`render/textures/`) as deliberate pixel art — 5–6 tone palette ramps,
+  running-bond masonry with dark mortar, Worley flagstones, weathering
+  layers (grime bands, cracks, drips, moss curtains, tide lines, puddles)
+  and tiny emissive specks (lume, embers, veins, runes) — each with a
+  roughness map and a normal map from its height field. Every biome's walls
+  are whole painted compositions (moss from the vault, tide line at the
+  foot) in a few variants; `NearestFilter` everywhere. `getSurface(kind)`
+  returns the maps plus the material settings they were tuned under.
   Models live in `render/models/` as presentational components; behaviour
   stays in world/enemies code.
-- **Stonework is one world-mapped mesh** (`render/models/DungeonStone.tsx`):
-  7 m walls, base course, arch ribs on their piers and pillars share one draw
-  call with texture coordinates in world space, so blocks stay square on tall
-  walls and run continuously across tiles. Physics colliders are
-  greedy-merged rectangles (tested to cover every wall tile), so collider
-  count stays low as floors grow.
-- **Reflective floors** (`render/models/DungeonGround.tsx`, quality flag
-  `reflections`, default on): a real planar reflection through drei's
-  reflector shader, but with our own mirror camera and render targets (drei's
-  component leaks four targets per mount — one per descent) and the
-  reflection added as *light* weighted by gloss and Fresnel, so a torch
-  across the hall shines in the puddle at your feet. 256² with a small blur;
-  the matte Hollow skips it.
-- **Light shafts** (`LightShaftModel.tsx`): additive cones of dusty moonlight
+- **Stonework is one mesh** (`render/models/DungeonStone.tsx`): 6 m walls
+  (64 × 192 px textures, so texels stay square) in one draw call; physics
+  colliders are greedy-merged rectangles (tested to cover every wall tile),
+  so collider count stays low as floors grow.
+- **The spawn sigil** (`RuneCircleModel.tsx`): a painted rune circle under
+  every arrival, in the biome's accent, slowly turning.
+- **Reflective floors** (`render/models/DungeonGround.tsx`): an optional
+  planar reflection (quality flag `reflections`, default OFF — the painted
+  floors read best matte with roughness glints). It uses drei's reflector
+  shader with our own mirror camera and render targets (drei's component
+  leaks four targets per mount — one per descent).
+- **Light shafts** (`LightShaftModel.tsx`): additive cones of dusty light
   falling from ceiling cracks, tinted per biome.
 - **Lighting — the dynamic light pool** (`fx/DynamicLights.tsx`): forward
   rendering pays per-fragment cost per light, and *changing* the light count
@@ -418,14 +416,11 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   is `AmbientParticles.tsx` — seeds animated entirely on the GPU in a box that
   follows the camera (dust, spores and drips, embers and ash, glints, falling
   ash, village fireflies; the Weightless Hour makes it all float up).
-- **Post chain**: bloom → hue-preserving highlight roll-off → film grain
-  (scaled by brightness, so dark scenes don't crawl with static) → vignette
-  (`render/Effects.tsx`). The composer turns the renderer's tone mapping
-  off; the roll-off stops lit pale stone from clipping into flat white
-  without washing saturated magic (the cyan portal) out the way ACES would.
-  The scene-wide environment strength is set per biome
-  (`scene.environmentIntensity`) — in three 0.175 a material's own
-  `envMapIntensity` is ignored for scene environments.
+- **Post chain**: bloom (feeds the emissive specks, torches and magic) →
+  split-tone colour grade → film grain → heavy vignette
+  (`render/Effects.tsx`). Each biome sets its grade on arrival
+  (`setGrade`) and it eases in over a second, so arriving reads as the air
+  changing; the village has its own (`VILLAGE_GRADE`).
 - **Shadows are a quality toggle** (F4 / main menu, persisted, default off):
   a shadow-casting point light re-renders the scene six times per frame,
   measured at roughly +50% frame time even at low resolution.
