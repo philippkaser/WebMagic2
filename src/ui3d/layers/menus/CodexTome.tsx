@@ -7,21 +7,27 @@ import { BIOME_DEFS, biomeForFloor } from "../../../world/biomes";
 import { allLoreFragments, getLoreFragment } from "../../../world/lore";
 import { pxFor } from "../../anchors";
 import { uiNow } from "../../clock";
+import { getFace } from "../../font/faces";
 import { glowMaterial, metalMaterial } from "../../materials";
+import { PixelFrame } from "../../PixelFrame";
 import { UiPresence, UiShow, useUiShow } from "../../presence";
 import { RuneButton } from "../../RuneButton";
 import { TABLET_EXIT } from "../../Tablet";
 import { RuneText } from "../../text/RuneText";
+import { ink } from "../../theme";
 import { emitUiSparks } from "../../UiSparks";
 import { codexSpreads, CODEX_INK, type CodexPage, type CodexSpread } from "./codexPages";
+import { colsFor, Flourish, KeyLegend, spaced, TitleText } from "./grimoire";
 import { playBookClose, playBookOpen, playPageTurn } from "./menuSounds";
-import { MENU_INK } from "./menuText";
 import { screenUnit, smooth01, Stage, Veil } from "./stage";
 import { tomeMaterials } from "./tomeMaterials";
 
-/** The codex (C): a tome of dark vellum that rises out of the dark before
- * you, its cover swinging open to the carvings you have read, written in
- * glowing ink and grouped by the depths they speak from (codexPages.ts).
+/** The codex (C): a leather-bound grimoire that rises out of the dark before
+ * you, its brass-cornered cover swinging open to the carvings you have read
+ * — set in the grimoire's hand: chapter names in blackletter over a brass
+ * flourish, the carvings in parchment pixel type, captions in tiny caps,
+ * each page ruled in a thin brass frame — grouped by the depths they speak
+ * from (codexPages.ts).
  *
  * Turning a page is a page turning: the leaf lifts off the right-hand page
  * toward you and swings over the spine, the words on it burning away as it
@@ -36,11 +42,14 @@ const D = 1.4;
 const U = screenUnit(D);
 const px = (cap: number) => pxFor(D, cap);
 
-/** Characters per line and body lines per page — the pagination's page. */
-const PAGE_SIZE = { cols: 30, lines: 16 } as const;
-const BODY_CAP = 0.0185;
+const BODY_CAP = 0.0148;
 const PAGE_W = 0.54 * U;
 const PAGE_H = 0.62 * U;
+/** The text block's width on a page (the brass rule sits outside it). */
+const TEXT_W = PAGE_W - 0.085 * U;
+/** Body lines per page — the pagination's page (its width comes from the
+ * face at runtime: colsFor). */
+const PAGE_LINES = 16;
 /** The shallow V of an open book: each page rises from the gutter. */
 const V = 0.09;
 const BLOCK_T = 0.016 * U;
@@ -92,7 +101,15 @@ function Tome() {
   const read = useCodex((s) => s.read);
   const setOverlay = useGame((s) => s.setOverlay);
   const spreads = useMemo<CodexSpread[]>(
-    () => codexSpreads(read.map(getLoreFragment), allLoreFragments().length, BIOME_DEFS, biomeForFloor, PAGE_SIZE),
+    () =>
+      codexSpreads(
+        read.map(getLoreFragment),
+        allLoreFragments().length,
+        BIOME_DEFS,
+        biomeForFloor,
+        { cols: colsFor(TEXT_W, px(BODY_CAP)), lines: PAGE_LINES },
+        getFace("body"),
+      ),
     [read],
   );
   const last = spreads.length - 1;
@@ -272,16 +289,18 @@ function Tome() {
           <mesh geometry={leafGeo} material={m.leaf} scale={[PAGE_W * 0.985, PAGE_H * 0.985, 1]} />
         </group>
       </group>
-      <group position={[0, -0.415 * U, 0.05]}>
-        <RuneButton label="← PREV" onPress={() => turn(-1)} disabled={spread <= 0} px={px(0.019)} position={[-0.33 * U, 0, 0]} accent={CODEX_INK.head} delay={0.9} />
-        <RuneButton label="CLOSE" onPress={() => setOverlay("none")} px={px(0.019)} position={[0, 0, 0]} accent="#8f86a0" color="#c9c0d4" delay={1} />
-        <RuneButton label="NEXT →" onPress={() => turn(1)} disabled={spread >= last} px={px(0.019)} position={[0.33 * U, 0, 0]} accent={CODEX_INK.head} delay={0.9} />
-        <RuneText
-          text={`C or Esc closes · ← → turn the page`}
-          px={px(0.0155)}
-          position={[0, -0.052 * U, 0]}
-          color={MENU_INK.faint}
-          glow={0.4}
+      <group position={[0, -0.41 * U, 0.05]}>
+        <RuneButton label="← Prev" variant="ghost" onPress={() => turn(-1)} disabled={spread <= 0} px={px(0.0135)} position={[-0.3 * U, 0, 0]} delay={0.9} />
+        <RuneButton label="Close" variant="ghost" onPress={() => setOverlay("none")} px={px(0.0135)} color={ink.parchmentDim} position={[0, 0, 0]} delay={1} />
+        <RuneButton label="Next →" onPress={() => turn(1)} disabled={spread >= last} px={px(0.0135)} position={[0.3 * U, 0, 0]} delay={0.9} />
+        <KeyLegend
+          entries={[
+            { keys: ["C", "Esc"], action: "close" },
+            { keys: ["←", "→"], action: "turn the page" },
+          ]}
+          px={px(0.0085)}
+          maxWidth={0.8 * U}
+          position={[0, -0.058 * U, 0]}
           delay={1.2}
         />
       </group>
@@ -307,7 +326,7 @@ function Half({
   const m = tomeMaterials();
   const boardW = PAGE_W + COVER_M;
   const boardH = PAGE_H + COVER_M * 2;
-  const corner = metalMaterial("#9a7c48");
+  const corner = metalMaterial(ink.brass);
   return (
     <>
       <mesh
@@ -323,6 +342,15 @@ function Half({
         }}
       />
       <mesh geometry={box} material={m.leather} scale={[boardW, boardH, COVER_T]} position={[(side * boardW) / 2, 0, -BLOCK_T - COVER_T / 2]} />
+      {/* The page's brass rule: a thin pixel frame inset from the edge. */}
+      <PixelFrame
+        width={PAGE_W - 0.03 * U}
+        height={PAGE_H - 0.03 * U}
+        frame="brass"
+        texel={0.0016 * U}
+        position={[(side * PAGE_W) / 2, 0, 0.0012]}
+        renderOrder={5}
+      />
       {[1, -1].map((vy) => (
         <mesh
           key={vy}
@@ -342,13 +370,15 @@ function CoverFace() {
   const z = -BLOCK_T - COVER_T - 0.002;
   return (
     <group position={[x, 0, z]} rotation={[0, Math.PI, 0]}>
-      <mesh geometry={gem} material={glowMaterial(CODEX_INK.head, 2.6)} scale={[0.05 * U, 0.075 * U, 0.012 * U]} position={[0, 0.03 * U, 0]} />
-      <RuneText text="THE CODEX" px={px(0.026)} position={[0, -0.09 * U, 0.003]} color={CODEX_INK.title} glow={0.6} depth={-0.3} />
+      <mesh geometry={gem} material={glowMaterial(ink.arcane, 2.2)} scale={[0.04 * U, 0.06 * U, 0.012 * U]} position={[0, 0.06 * U, 0]} />
+      <TitleText text="The Codex" px={px(0.04)} color={ink.brassLight} position={[0, -0.06 * U, 0.003]} depth={-0.3} />
     </group>
   );
 }
 
-/** One page's words: running head, body, folio. */
+/** One page's words, in the grimoire's hand: the book's title or the
+ * chapter's name in blackletter over a brass flourish (with its floors in
+ * tiny caps), the body in parchment pixel type, the folio in caps. */
 function PageText({
   page,
   side,
@@ -362,54 +392,79 @@ function PageText({
 }) {
   const cx = (side * PAGE_W) / 2;
   const top = PAGE_H / 2;
-  const title = page.folio === null && page.head.length > 0;
   const bodyPx = px(BODY_CAP);
   const out = { outDuration: 0.35 } as const;
+  const headed = page.title || page.chapter !== null;
+  const bodyTop = page.title ? 0.15 : headed ? 0.118 : 0.05;
   return (
     <group position={[0, 0, 0.0025]}>
-      {page.head.length > 0 && (
-        <RuneText
-          text={page.head}
-          px={title ? px(0.034) : px(0.017)}
-          position={[cx, top - (title ? 0.075 : 0.05) * U, 0]}
-          show={shown}
-          delay={delay}
-          depth={-0.3}
-          glow={title ? 0.8 : 0.6}
-          {...out}
-        />
+      {page.title && (
+        <>
+          <TitleText text="The Codex" px={px(0.044)} position={[cx, top - 0.068 * U, 0]} show={shown} delay={delay} depth={-0.3} inDuration={0.6} />
+          <UiShow show={shown}>
+            <Flourish width={0.26 * U} texel={0.0015 * U} position={[cx, top - 0.115 * U, 0]} delay={delay + 0.2} />
+          </UiShow>
+        </>
       )}
-      {!title && page.head.length > 0 && (
-        <RuneText text="· ◇ ·" px={px(0.015)} position={[cx, top - 0.078 * U, 0]} color={CODEX_INK.faint} show={shown} delay={delay} depth={-0.3} glow={0.3} {...out} />
+      {page.chapter && (
+        <>
+          <TitleText
+            text={page.chapter.name}
+            px={px(0.024)}
+            color={ink.brassLight}
+            shadow={null}
+            diagonal
+            position={[cx, top - 0.05 * U, 0]}
+            show={shown}
+            delay={delay}
+            depth={-0.3}
+            inDuration={0.5}
+          />
+          <RuneText
+            text={spaced(`Floors ${page.chapter.floors[0]}–${page.chapter.floors[1]}`)}
+            font="label"
+            px={px(0.0082)}
+            color={ink.faded}
+            position={[cx, top - 0.08 * U, 0]}
+            show={shown}
+            delay={delay + 0.1}
+            depth={-0.3}
+            glow={0.2}
+            {...out}
+          />
+          <UiShow show={shown}>
+            <Flourish width={0.2 * U} texel={0.0013 * U} position={[cx, top - 0.098 * U, 0]} delay={delay + 0.15} />
+          </UiShow>
+        </>
       )}
       <RuneText
         text={page.body}
         px={bodyPx}
-        maxCols={PAGE_SIZE.cols}
+        maxCols={colsFor(TEXT_W, bodyPx)}
         align="left"
         anchor={[0.5, 0]}
-        position={[cx, top - (title ? 0.15 : 0.105) * U, 0]}
+        position={[cx, top - bodyTop * U, 0]}
         show={shown}
         delay={delay + 0.05}
         depth={-0.3}
-        glow={0.7}
+        glow={0.3}
         stagger={0.9}
         {...out}
       />
       {page.folio !== null && (
         <RuneText
           text={String(page.folio)}
-          px={px(0.015)}
+          font="label"
+          px={px(0.009)}
           position={[cx + side * (PAGE_W / 2 - 0.05 * U), -top + 0.035 * U, 0]}
-          color={CODEX_INK.dim}
+          color={CODEX_INK.faint}
           show={shown}
           delay={delay + 0.2}
           depth={-0.3}
-          glow={0.3}
+          glow={0.2}
           {...out}
         />
       )}
     </group>
   );
 }
-

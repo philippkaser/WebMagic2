@@ -131,8 +131,10 @@ void main() {
 
 const VEIL_FRAG = /* glsl */ `
 uniform vec3 uColor;
+uniform vec3 uInner;
 uniform float uAlpha;
 uniform float uCenter;
+uniform float uCy;
 uniform float uTime;
 uniform float uAspect;
 varying vec2 vUv;
@@ -145,19 +147,35 @@ float noise(vec2 p) {
 }
 float fbm(vec2 p) {
   float v = 0.0, a = 0.5;
-  for (int i = 0; i < 4; i++) { v += a * noise(p); p = p * 2.03 + 11.7; a *= 0.5; }
+  for (int i = 0; i < 3; i++) { v += a * noise(p); p = p * 2.03 + 11.7; a *= 0.5; }
   return v;
+}
+// 4×4 ordered dither: the gradient steps like a pixel-art backdrop.
+float bayer(vec2 c) {
+  vec2 m = mod(c, 4.0);
+  int i = int(m.x) + int(m.y) * 4;
+  int b[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+  return (float(b[i]) + 0.5) / 16.0;
 }
 
 void main() {
-  vec2 p = (vUv - 0.5) * vec2(uAspect, 1.0);
+  // The whole veil lives on a 180-row grid (artpass's backdrop canvas), so
+  // its gradient is banded pixels, not a smooth airbrush.
+  vec2 grid = vec2(180.0 * uAspect, 180.0);
+  vec2 cell = floor(vUv * grid);
+  vec2 uv = (cell + 0.5) / grid;
+  vec2 p = (uv - vec2(0.5, 0.5 + uCy)) * vec2(uAspect, 1.0);
+  float t = floor(uTime * 12.0) / 12.0;
   // Slow smoke: two layers drifting against each other.
-  float smoke = fbm(p * 2.2 + vec2(uTime * 0.035, -uTime * 0.05)) * 0.6
-              + fbm(p * 4.1 - vec2(uTime * 0.05, uTime * 0.02)) * 0.4;
+  float smoke = fbm(p * 2.2 + vec2(t * 0.035, -t * 0.05)) * 0.6 + fbm(p * 4.1 - vec2(t * 0.05, t * 0.02)) * 0.4;
   float r = length(p / vec2(uAspect * 0.62, 0.62));
-  float edge = smoothstep(0.25, 1.0, r);
-  float a = uAlpha * mix(uCenter, 1.0, edge) * (0.72 + 0.56 * smoke);
-  gl_FragColor = vec4(uColor * (0.8 + 0.4 * smoke), clamp(a, 0.0, 0.97));
+  float edge = smoothstep(0.15, 1.0, r);
+  float a = uAlpha * mix(uCenter, 1.0, edge) * (0.86 + 0.28 * smoke);
+  // Quantize to 10 levels, dithered between neighbours.
+  float levels = 10.0;
+  a = floor(a * levels + bayer(cell)) / levels;
+  vec3 col = mix(uInner, uColor, edge);
+  gl_FragColor = vec4(col, clamp(a, 0.0, 0.98));
   #include <colorspace_fragment>
 }
 `;
@@ -167,8 +185,24 @@ let veilQuad: PlaneGeometry | null = null;
 /** The world dims behind a menu the way a room does when you stop looking at
  * it: a slow smoke of darkness gathers, heavier toward the edges, lighter
  * where the menu stands. `strength` is the edge opacity, `center` the share
- * of it that reaches the middle. */
-export function Veil({ color, strength = 0.8, center = 0.55 }: { color: string; strength?: number; center?: number }) {
+ * of it that reaches the middle; `inner` tints the middle (artpass's
+ * backdrop glows a little toward its circle: violet-black on the title,
+ * oxblood on death), `cy` lifts the middle (fraction of the view height).
+ * Drawn on a 180-row pixel grid with dithered steps, like the artpass
+ * backdrop canvas it stands in for. */
+export function Veil({
+  color,
+  inner,
+  strength = 0.8,
+  center = 0.55,
+  cy = 0,
+}: {
+  color: string;
+  inner?: string;
+  strength?: number;
+  center?: number;
+  cy?: number;
+}) {
   const show = useUiShow();
   const size = useThree((s) => s.size);
   const material = useMemo(
@@ -176,8 +210,10 @@ export function Veil({ color, strength = 0.8, center = 0.55 }: { color: string; 
       new ShaderMaterial({
         uniforms: {
           uColor: { value: new Color(color) },
+          uInner: { value: new Color(inner ?? color) },
           uAlpha: { value: 0 },
           uCenter: { value: center },
+          uCy: { value: cy },
           uTime: { value: 0 },
           uAspect: { value: 1 },
         },
@@ -190,7 +226,7 @@ export function Veil({ color, strength = 0.8, center = 0.55 }: { color: string; 
         depthTest: true,
         depthWrite: false,
       }),
-    [color, center],
+    [color, inner, center, cy],
   );
   useEffect(() => () => material.dispose(), [material]);
   const mesh = useMemo(() => {
