@@ -1,10 +1,11 @@
+import { HoloPane } from "./holo/HoloPane";
 import { measureText, RuneText } from "./text/RuneText";
-import { Plate } from "./Plate";
 import { ink } from "./theme";
 
-/** A key cap — a little parchment plate with the key in ink (the
- * grimoire's `.wm-key`), for prompts and legends: [E] Plunder…, [TAB]
- * satchel. `px` sizes the letters like RuneText's. */
+/** A key cap — a small bright tile of parchment light with the key dark on
+ * it (the grimoire's `.wm-key`, cast like every other pane), for prompts
+ * and legends: [E] Plunder…, [TAB] satchel. `px` sizes the letters like
+ * RuneText's. */
 export function KeyCap({
   k,
   px,
@@ -20,9 +21,11 @@ export function KeyCap({
   const w = Math.max(size.width + px * 5, size.height + px * 5);
   const h = size.height + px * 4;
   return (
-    <Plate width={w} height={h} frame="#eadfc4" fill={ink.parchment} fillOpacity={1} texel={texel} position={position}>
-      <RuneText text={label} font="label" px={px} color={ink.ink} glow={0} outline={0} depth={-0.2} />
-    </Plate>
+    <group position={position as [number, number, number] | undefined}>
+      <HoloPane width={w + texel * 2} height={h + texel * 2} color={ink.parchment} cellPx={1.6} fill={7} smoke={0.9} border={false} float={false} speed={2.4} quiet>
+        <RuneText text={label} font="label" px={px} color={ink.ink} glow={0} outline={0} depth={-0.2} />
+      </HoloPane>
+    </group>
   );
 }
 

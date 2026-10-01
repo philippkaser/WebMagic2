@@ -18,6 +18,10 @@ export function WorldCameraBridge() {
   const camera = useThree((s) => s.camera);
   useEffect(() => {
     worldView.camera = camera as PerspectiveCamera;
+    // Dev-only: aim the eye for screenshots (pitch, yaw in radians).
+    if (import.meta.env.DEV) {
+      (window as unknown as Record<string, unknown>).__look = (pitch: number, yaw: number) => camera.rotation.set(pitch, yaw, 0, "YXZ");
+    }
     return () => {
       if (worldView.camera === camera) worldView.camera = null;
     };

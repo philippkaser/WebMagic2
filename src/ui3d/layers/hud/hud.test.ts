@@ -333,10 +333,9 @@ describe("artpass pixels", () => {
     expect(slotStrip(4).outerW).toBe(252); // artpass .wm-equip, four small cards
   });
 
-  test("the vitals flasks fit side by side with their numbers", () => {
-    expect(VITALS.flaskW).toBeCloseTo(26 * VITALS.texel, 10);
-    expect(VITALS.outerW).toBeCloseTo(2 * (VITALS.flaskW + VITALS.gap + VITALS.numW) + VITALS.between, 10);
-    expect(VITALS.outerH).toBeCloseTo(34 * VITALS.texel, 10);
+  test("the vitals orbs fit side by side with their numbers", () => {
+    expect(VITALS.outerW).toBe(2 * (VITALS.orb + VITALS.gap + VITALS.numW) + VITALS.between);
+    expect(VITALS.outerH).toBe(VITALS.orb);
   });
 
   test("stepped ramps hit their steps exactly", () => {

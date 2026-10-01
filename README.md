@@ -55,6 +55,7 @@ DATA_FILE=/tmp/wm-e2e.json bun run e2e   # CHROMIUM_PATH=… to pick a browser
 | Q | Use belt slot 1 |
 | I (or Tab) | Inventory screen (drag & drop gear/bag/belt — chest & merchant in the village) |
 | C | The codex — every lore carving you've read |
+| M | Cast the map — a hologram of the explored floor, a stride ahead (on a floor) |
 | P (or F3) | FPS / frame-time overlay |
 | O (or F4) | Toggle shadows (quality option, off by default) |
 
@@ -107,10 +108,11 @@ corner — check it against the latest commit when testing.
 - **Procedural everything**: painted pixel-art textures, normal maps, models
   and every sound are generated at runtime — no binary assets beyond the
   four pixel fonts.
-- **The UI lives in the world**: messages burn into the air ahead of you as
-  runes that settle into letters, menus are dark stone tablets that build
-  themselves out of the dark and forge a brass pixel frame, health and mana
-  are pixel-art flasks that slosh as you move, items are small 3D objects. Portals are rifts torn in the air, and stepping through one is
+- **The UI is magic you cast**: menus rise as projections of light from a
+  sigil burned onto the floor, messages burn into small panes of light as
+  runes that settle into letters, the map (M) is a hologram miniature of
+  the explored floor cast ahead of you, health and mana are glass orbs that
+  slosh as you move, items are small 3D objects. Portals are rifts torn in the air, and stepping through one is
   a journey — sucked in, through a void of blocky stars, spat out onto the
   new floor.
 

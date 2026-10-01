@@ -2,19 +2,17 @@ import { Color, DataTexture, NearestFilter, RGBAFormat, ShaderMaterial, SRGBColo
 import { frameTexture } from "../../PixelFrame";
 import type { FrameColors } from "../../theme";
 
-/** The item card a socket is drawn as — artpass's `.wm-card` in one quad:
+/** The item slot a socket is drawn as — a little well cast into the pane,
+ * in one quad:
  *
- *   - the grimoire's 12×12 nine-slice pixel frame (PixelFrame's bitmap:
- *     ink outline, trim, lit and shadowed edges, notched corners with a
- *     rivet) in the item's grade colours, forging itself around the rim
- *     when the socket rises;
- *   - a soot fill lit in three hard bands from the top, with the grade's
- *     colour pooled behind the item in stepped rings (the card's radial
- *     glow, quantized: no soft gradients);
- *   - a hard 1-texel ring and a flat wash for hover and drag feedback;
- *   - the level plate in the bottom-right corner (ink box, grade-coloured
- *     top and left edge — the number itself is RuneText);
- *   - a hard offset drop shadow.
+ *   - a dark haze that thins out toward its rim (no hard edge), the item's
+ *     grade pooled behind the item in stepped rings of light;
+ *   - a thread of the grade's light round it (its frame bitmap's lit tone),
+ *     drawing itself round from the bottom when the socket rises, with a
+ *     bright rune-dot at each corner;
+ *   - an inner ring of light and a wash for hover and drag feedback;
+ *   - the level plate in the bottom-right corner (a dark tile with a
+ *     grade-coloured edge — the number itself is RuneText).
  *
  * One draw call per socket, and every look change is a uniform write (the
  * frame swaps textures from a cache), so sockets never re-render to light
@@ -87,67 +85,72 @@ int sliceAxis(float p, float size) {
   return 4 + int(mod(floor(t - 4.0), 4.0));
 }
 
+float bayer4(vec2 c) {
+  vec2 m = mod(c, 4.0);
+  int i = int(m.x) + int(m.y) * 4;
+  float b[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+  return (b[i] + 0.5) / 16.0;
+}
+vec3 disp(vec3 c) { return pow(max(c, vec3(0.0)), vec3(1.0 / 2.2)); }
+
+// Output is premultiplied: the haze darkens what's behind it, the light is
+// added on top (colour without alpha), all in display values.
 void main() {
-  vec2 quad = uCard + vec2(uShadow);
-  vec2 q = vUv * quad;
-  // Card space: the card is [0,W]x[0,H]; the shadow hangs off its lower right.
-  vec2 p = q - vec2(0.0, uShadow);
-  vec4 col = vec4(0.0);
-  if (p.x >= 0.0 && p.y >= 0.0 && p.x <= uCard.x && p.y <= uCard.y) {
-    vec2 n = floor(uCard / uTexel);
-    vec2 t = min(floor(p / uTexel), n - 1.0);
-    float border = 4.0 * uTexel;
-    bool band = p.x < border || p.y < border || p.x > uCard.x - border || p.y > uCard.y - border;
-    // Interior: three hard bands of top light, the grade pooled in rings.
-    float v = (t.y + 0.5) / n.y;
-    vec3 rgb = uFill * (v > 0.72 ? 1.45 : v > 0.3 ? 1.0 : 0.7);
-    vec2 c = ((t + 0.5) / n - vec2(0.5, 0.47)) * 2.0;
-    float r = length(c);
-    rgb += uGlow * uGlowK * (r < 0.46 ? 0.11 : r < 0.7 ? 0.055 : r < 0.9 ? 0.02 : 0.0);
-    rgb = mix(rgb, uWash, uWashK);
-    float ring = (t.x == 4.0 || t.y == 4.0 || t.x == n.x - 5.0 || t.y == n.y - 5.0) ? 1.0 : 0.0;
-    rgb = mix(rgb, uRing, ring * uRingK);
-    col = vec4(rgb, uBody);
-    if (band) {
-      vec2 fromTop = vec2(p.x, uCard.y - p.y);
-      vec4 f = texelFetch(uFrame, ivec2(sliceAxis(fromTop.x, uCard.x), sliceAxis(fromTop.y, uCard.y)), 0);
-      // Forge: the trim runs from the bottom centre up both sides, in whole
-      // texels, a white-hot texel at each leading end.
-      vec2 g = (t + 0.5) * uTexel;
-      float dx = abs(g.x - uCard.x * 0.5);
-      float dB = g.y;
-      float dT = uCard.y - g.y;
-      float dS = uCard.x * 0.5 - dx;
-      float s;
-      if (dB <= min(dT, dS)) s = dx;
-      else if (dS <= dT) s = uCard.x * 0.5 + g.y;
-      else s = uCard.x * 0.5 + uCard.y + (uCard.x * 0.5 - dx);
-      s /= (uCard.x + uCard.y);
-      float front = uProgress * 1.02;
-      if (s > front) f.a = 0.0;
-      float hot = step(front - 0.03, s) * step(uProgress, 0.999);
-      f.rgb = mix(f.rgb, uHot, hot);
-      // Notched corners and unforged trim are holes; the frame's soft inner
-      // texel (alpha < 1) shades the fill under it.
-      col = f.a <= 0.0 ? vec4(0.0) : vec4(mix(rgb * 0.8, f.rgb, f.a), f.a > 0.99 ? 1.0 : max(f.a, uBody));
-    }
-    if (uPlate.x > 0.0 && uProgress >= 1.0) {
-      vec2 k = vec2(n.x - 1.0 - t.x, t.y);
-      if (k.x < uPlate.x && k.y < uPlate.y) {
-        bool edge = k.x >= uPlate.x - 1.0 || k.y >= uPlate.y - 1.0;
-        col = vec4(edge ? uPlateEdge : vec3(0.0024, 0.002, 0.003), 1.0);
-      }
+  vec2 p = vUv * uCard;
+  vec2 n = floor(uCard / uTexel);
+  vec2 t = min(floor(p / uTexel), n - 1.0);
+  float d = min(min(t.x, t.y), min(n.x - 1.0 - t.x, n.y - 1.0 - t.y));
+  vec3 edge = disp(texelFetch(uFrame, ivec2(6, 1), 0).rgb);
+
+  // The well: haze thinning to nothing at the rim.
+  float feather = clamp(d / 4.0, 0.0, 1.0);
+  float haze = uBody * 0.62 * step(bayer4(t), feather * 1.2);
+  vec3 light = vec3(0.0);
+
+  // Its grade pooled behind the item, in stepped rings.
+  vec2 c = ((t + 0.5) / n - vec2(0.5, 0.47)) * 2.0;
+  float r = length(c);
+  light += disp(uGlow) * uGlowK * (r < 0.46 ? 0.16 : r < 0.7 ? 0.08 : r < 0.9 ? 0.03 : 0.0) * uBody;
+  light += disp(uFill) * 0.6 * uBody;
+
+  // The thread, forging round from the bottom centre.
+  vec2 g = (t + 0.5) * uTexel;
+  float dx = abs(g.x - uCard.x * 0.5);
+  float dB = g.y;
+  float dT = uCard.y - g.y;
+  float dS = uCard.x * 0.5 - dx;
+  float s;
+  if (dB <= min(dT, dS)) s = dx;
+  else if (dS <= dT) s = uCard.x * 0.5 + g.y;
+  else s = uCard.x * 0.5 + uCard.y + (uCard.x * 0.5 - dx);
+  s /= (uCard.x + uCard.y);
+  float front = uProgress * 1.02;
+  if (s <= front) {
+    float hot = step(front - 0.03, s) * step(uProgress, 0.999);
+    float th = abs(d - 1.0) < 0.5 ? 0.42 : d < 0.5 ? (mod(t.x + t.y, 2.0) < 1.0 ? 0.1 : 0.0) : 0.0;
+    vec2 cd = min(t, n - 1.0 - t);
+    if (cd.x < 2.5 && cd.y < 2.5 && abs(cd.x - cd.y) < 1.5) th = max(th, cd.x + cd.y < 3.5 ? 0.9 : 0.25);
+    light += mix(edge * th, disp(uHot), hot);
+  }
+
+  // Feedback: an inner ring and a wash.
+  float ring = abs(d - 3.0) < 0.5 ? 1.0 : 0.0;
+  light += disp(uRing) * ring * uRingK * 0.8;
+  light += disp(uWash) * uWashK * 0.3 * step(2.5, d);
+
+  light *= 1.0 - uDim * 0.7;
+  haze = min(1.0, haze + uDim * 0.25 * step(0.5, d));
+  vec4 col = vec4(vec3(0.004, 0.003, 0.008) * haze + light, haze);
+
+  if (uPlate.x > 0.0 && uProgress >= 1.0) {
+    vec2 k = vec2(n.x - 1.0 - t.x, t.y);
+    if (k.x < uPlate.x && k.y < uPlate.y) {
+      bool pe = k.x >= uPlate.x - 1.0 || k.y >= uPlate.y - 1.0;
+      col = pe ? vec4(disp(uPlateEdge) * 0.8, 0.85) : vec4(0.01, 0.008, 0.015, 0.85);
     }
   }
-  if (col.a < 0.01) {
-    // Hard offset shadow (the card shifted right and down).
-    vec2 sp = q - vec2(uShadow, 0.0);
-    if (sp.x >= 0.0 && sp.y >= 0.0 && sp.x <= uCard.x && sp.y <= uCard.y) col = vec4(0.0, 0.0, 0.0, 0.55 * uBody);
-  }
-  if (col.a < 0.01) discard;
-  col.rgb *= 1.0 - uDim * 0.65;
-  gl_FragColor = vec4(col.rgb * col.a, col.a) * uFade;
-  #include <colorspace_fragment>
+  if (col.a < 0.002 && dot(col.rgb, col.rgb) < 0.000001) discard;
+  gl_FragColor = col * uFade;
 }
 `;
 
@@ -181,7 +184,9 @@ export function cardMaterial(w: number, h: number, texel: number, frame: FrameCo
     uFrame: { value: cardFrame(frame) },
     uCard: { value: [w, h] },
     uTexel: { value: texel },
-    uShadow: { value: texel * 2 },
+    // No drop shadow any more (kept as a uniform: callers lay the quad out
+    // with it).
+    uShadow: { value: 0 },
     uFill: { value: new Color(fill) },
     uGlow: { value: new Color("#000000") },
     uGlowK: { value: 0 },

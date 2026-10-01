@@ -474,12 +474,12 @@ black into the starry void.
 
 ## In-world UI (`ui3d/`)
 
-There are no flat screens. Text burns into the air ahead of you as runes
-that settle into letters and later burn away into embers; menus are dark
-stone tablets that assemble out of the dark and forge a pixel frame around
-their rim; items are small 3D objects. The look is the grimoire: soot
-panels in brass pixel frames with a hard drop shadow, parchment text,
-arcane cyan for magic and the way onward, gold for home, blood for danger.
+There are no flat screens, and nothing is a framed box: every pane is
+magic the wizard casts. Menus rise as projections of light from a sigil
+burned onto the floor; prompts, messages and tooltips are small panes of
+light; text burns into them as runes that settle into letters and later
+burn away into embers; items are small 3D objects. Parchment text, arcane
+cyan for magic and the way onward, gold for home, blood for danger.
 
 - **Two canvases.** The world renders at dpr 0.35 (the pixel look); a pixel
   font rendered there would be mush. So a second, transparent,
@@ -511,12 +511,25 @@ arcane cyan for magic and the way onward, gold for home, blood for danger.
   keeps a subtree mounted while it plays its exit, and every toolkit piece
   (RuneText, Tablet, Plate, RuneButton, ItemModel) ANDs the ambient "show"
   flag into its own — a tablet closing burns off all its words for free.
-- **Toolkit**: `theme.ts` (the palette and the frame colours), `PixelFrame`
-  (the nine-slice grimoire frame as a hard-edged quad that can forge itself
-  in), `Plate` (a small framed slab of pixel slate for prompts, messages
-  and tooltips), `Tablet` (stones fly in, the frame forges around the rim),
-  `KeyCap` (a parchment key), `RuneButton` ("✦ label ✦" in arcane, ghost,
-  danger or gold), `ItemModel` (every item family as primitives — also used
+- **Cast panes** (`holo/`): `HoloPane` is the surface of every menu and
+  popup — a plane of light (`holoMaterial.ts`) with a dark feathered haze
+  behind it for legibility, faint fill, scanlines, an interference band, a
+  rune lattice, shimmer, a thread of light round its edge with power
+  flowing along it and rune-diamonds at the corners. No border, no hard
+  edge: it feathers out, in dithered "holo pixels" of a fixed on-screen
+  size. It is cast in beats — a line grows from the middle of its lower
+  edge, sweeps up while rows slip sideways (tuning in), then the words
+  write themselves — and collapses back into its line and a spark. With
+  `projector`, a sigil burns onto the floor below and a beam rises into it
+  (`Projector.tsx`). Light is added onto the UI's transparent canvas
+  WITHOUT touching its alpha (`LIGHT_BLENDING`) and is computed in display
+  values, or it would turn into an opaque sheet over the world.
+- **Toolkit**: `theme.ts` (the palette; `holoColor` maps a frame name to
+  the light it is cast in), `Tablet` and `Plate` (big and small cast panes,
+  same API as the old stone ones), `PixelFrame` (a thread of light that
+  draws itself round an edge), `KeyCap` (a bright tile of parchment light),
+  `RuneButton` (a small bright pane, "✦ label ✦" in arcane, ghost, danger
+  or gold, swelling and racing on hover), `ItemModel` (every item family as primitives — also used
   for loot in the world), `ViewAnchor`/`WorldAnchor`/`placeInFront`, UI
   sparks and `audio/uiSounds.ts`.
 - **The carried HUD** (`hud/rig.ts`, `HudAnchor.tsx`): every piece held in
@@ -532,14 +545,31 @@ arcane cyan for magic and the way onward, gold for home, blood for danger.
   plates carried at the left edge under the location panel, newest on top —
   never in the room, where you could walk into them), prompts, the HUD
   (`hud/`: the location panel with the tithe runes; health and mana as two
-  pixel-art flasks (`PixelFlask.tsx`: one shader quad on a grid of chunky
-  flask pixels, the liquid leaning, rippling and bubbling as you move, a
-  blow blanching it and leaving a fizzing ghost); the coin heap, belt and
-  gear cards carried without panels; the arrival banner, which keeps its
-  distance as you move and burns away early once you walk off), the menus
-  (`menus/`: title, the Weighing, death, codex) and the inventory family
+  glass orbs (`PixelOrb.tsx`: one quad that ray-casts a sphere on a grid of
+  cells a couple of screen pixels wide, locked to the orb — the liquid a
+  smaller sphere cut by a surface that stays level with the WORLD and
+  leans with the slosh, lit in four dithered bands with swirling grit,
+  rising bubbles and sparks, a glass rim, glint and ink outline; a blow
+  blanches it and leaves a fizzing ghost); the coin heap, belt and gear
+  slots (wells of light) carried without panels; the arrival banner, which
+  keeps its distance as you move and burns away early once you walk off),
+  the cast map (`map/`: M on a floor — see below), the menus
+  (`menus/`: title, the Weighing, death, and the codex — a spectral tome
+  of see-through vellum and glowing page edges) and the inventory family
   (`inventory/`). The DOM keeps only what isn't part of the fiction: the perf
   overlay, the build stamp and the dev room.
+- **The cast map** (`layers/map/`): M on a floor casts a miniature of the
+  floor, as far as you have explored it, a stride ahead of you: a sigil
+  burns onto the floor, a column of light rises, and at table height the
+  explored tiles ripple out from where you stand and the walls rise behind
+  them as ribs of light (instanced, each instance born on its own beat);
+  markers kindle for you (walking as you walk), the way onward, the way
+  home, the treasure and the Warden once seen. It is world-aligned and
+  stays where it was cast — walk around it, or away (it lets go at 9 m);
+  M again folds it back into its sigil. The floor being played and what
+  has been seen of it live in `world/currentFloor.ts` (the UI canvas can't
+  see the world's React tree); `ExploreTracker` marks tiles a few times a
+  second.
 
 ## Extending
 

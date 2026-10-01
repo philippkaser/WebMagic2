@@ -42,30 +42,26 @@ uniform float uEmpty;
 uniform float uFlash;
 uniform float uShow;
 varying vec2 vUv;
+vec3 disp(vec3 c) { return pow(max(c, vec3(0.0)), vec3(1.0 / 2.2)); }
+// Premultiplied: a dark haze that thins to nothing at the rim, and added
+// light — the item's colour pooled behind it, a thread of that colour two
+// pixels in (dashed and dim when the slot is empty), rune-dots at the
+// corners. No hard border.
 void main() {
   vec2 p = floor(vUv * uPx);
   float d = min(min(p.x, p.y), min(uPx.x - 1.0 - p.x, uPx.y - 1.0 - p.y));
-  vec3 col;
-  if (d < 2.0) {
-    col = vec3(0.027, 0.024, 0.04);
-  } else if (d < 4.0) {
-    // The rarity border; dashed and dim on an empty card.
-    float dash = step(mod(floor((p.x + p.y) / 2.0), 2.0), 0.5);
-    col = uEmpty > 0.5 ? mix(vec3(0.027, 0.024, 0.04), vec3(0.18, 0.153, 0.208), dash) : uColor;
-  } else if (d < 5.0) {
-    col = vec3(0.03, 0.022, 0.04);
-  } else {
-    // Card: a touch lighter at the top, darker below, the item's colour
-    // pooled in the middle of the art in three hard bands.
-    float v = p.y / uPx.y;
-    col = vec3(0.07, 0.055, 0.09) * (0.68 + 0.42 * v);
-    vec2 c = (p + 0.5 - uPx * vec2(0.5, 0.55)) / (uPx * 0.5);
-    float r = length(c);
-    float pool = (1.0 - uEmpty) * (r < 0.5 ? 0.14 : r < 0.72 ? 0.06 : 0.0);
-    col = mix(col, uColor, pool + uFlash * 0.35);
-  }
-  gl_FragColor = vec4(col * uShow, uShow);
-  #include <colorspace_fragment>
+  vec3 tone = disp(uColor);
+  float haze = 0.55 * clamp(d / 6.0, 0.0, 1.0) * clamp(d / 6.0, 0.0, 1.0);
+  vec3 light = vec3(0.0);
+  vec2 c = (p + 0.5 - uPx * vec2(0.5, 0.55)) / (uPx * 0.5);
+  float r = length(c);
+  light += tone * (1.0 - uEmpty) * (r < 0.5 ? 0.16 : r < 0.72 ? 0.07 : 0.0);
+  light += tone * uFlash * 0.3 * step(3.0, d);
+  float dash = step(mod(floor((p.x + p.y) / 3.0), 2.0), 0.5);
+  if (abs(d - 2.0) < 1.0) light += uEmpty > 0.5 ? vec3(0.12, 0.11, 0.15) * dash : tone * (0.4 + uFlash * 0.4);
+  vec2 cd = min(p, uPx - 1.0 - p);
+  if (cd.x < 3.5 && cd.y < 3.5 && abs(cd.x - cd.y) < 1.5 && cd.x + cd.y > 2.5) light += (uEmpty > 0.5 ? vec3(0.2) : tone) * 0.7;
+  gl_FragColor = vec4(vec3(0.004, 0.003, 0.008) * haze + light, haze) * uShow;
 }
 `;
 

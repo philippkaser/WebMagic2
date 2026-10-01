@@ -142,15 +142,18 @@ function layoutPlaque(t: PlaqueText): { rows: Row[]; w: number; h: number } {
 
 let parchmentMat: ShaderMaterial | null = null;
 
-/** Aged dark parchment (artpass parchmentImage under its tooltip's dark
- * wash): per-texel noise in warm olive, a few lighter flecks. World-space
- * texels, so it never stretches with the card. */
+/** The tooltip's ground: a dark, slightly see-through haze of the caster's
+ * light (it is a spell like every pane), with faint scanlines and a
+ * shimmer, thinning out at its rim. World-space texels, so it never
+ * stretches with the card. Premultiplied. */
 function parchment(): ShaderMaterial {
   return (parchmentMat ??= new ShaderMaterial({
     uniforms: { uTexel: { value: TEXEL } },
     vertexShader: /* glsl */ `
       varying vec2 vPos;
+      varying vec2 vUv;
       void main() {
+        vUv = uv;
         vPos = (modelMatrix * vec4(position, 1.0)).xy;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
@@ -158,15 +161,22 @@ function parchment(): ShaderMaterial {
     fragmentShader: /* glsl */ `
       uniform float uTexel;
       varying vec2 vPos;
+      varying vec2 vUv;
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       void main() {
-        float n = hash(floor(vPos / uTexel));
-        float v = 0.118 + n * 0.03 + (n > 0.97 ? 0.035 : 0.0);
-        vec3 col = vec3(v * 1.2, v * 1.06, v * 0.74);
-        gl_FragColor = vec4(pow(col, vec3(2.2)), 1.0);
-        #include <colorspace_fragment>
+        vec2 c = floor(vPos / uTexel);
+        float n = hash(c);
+        vec2 e = min(vUv, 1.0 - vUv);
+        float rim = clamp(min(e.x, e.y) * 14.0, 0.0, 1.0);
+        float a = 0.93 * rim;
+        vec3 light = vec3(0.07, 0.25, 0.21) * (0.12 + (mod(c.y, 3.0) < 1.0 ? 0.08 : 0.0) + n * 0.05);
+        gl_FragColor = vec4(vec3(0.01, 0.012, 0.016) * a + light * rim, a);
       }
     `,
+    transparent: true,
+    premultipliedAlpha: true,
+    // It hangs in front of the pages: it must hide what's behind it.
+    depthWrite: true,
   }));
 }
 
@@ -262,7 +272,6 @@ export function ItemPlaque() {
   return (
     <group ref={group} visible={false}>
       <group ref={card}>
-        <mesh geometry={plane()} material={flat(ink.ink, 0.55)} scale={[size.w, size.h, 1]} position={[TEXEL * 3, -TEXEL * 3, -0.004]} renderOrder={3} />
         <mesh geometry={plane()} material={parchment()} scale={[size.w - TEXEL * 4, size.h - TEXEL * 4, 1]} renderOrder={4} />
         <PixelFrame width={size.w} height={size.h} frame={text?.frame ?? "brass"} texel={TEXEL} position={[0, 0, 0.001]} renderOrder={5} />
       </group>

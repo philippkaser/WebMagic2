@@ -2,6 +2,7 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import { Color, DataTexture, Mesh, NearestFilter, PlaneGeometry, RGBAFormat, ShaderMaterial, SRGBColorSpace, UnsignedByteType } from "three";
 import { uiNow } from "./clock";
+import { LIGHT_BLENDING } from "./holo/holoMaterial";
 import { frameFor, ink, type FrameColors, type FrameKind } from "./theme";
 
 /** A pixel-art frame around a rectangle — the grimoire's brass trim, in 3D.
@@ -93,53 +94,58 @@ void main() {
 }
 `;
 
+/** The frame as cast light (the UI is magic, not carpentry): no ink
+ * outline and no bevel — a thread of the frame's light two texels in,
+ * pulsing as power flows round it, a faint dithered glow outside it, and a
+ * bright rune-dot at each corner. It still draws itself round from the
+ * bottom centre (uProgress) with a white-hot leading spark. Pure added
+ * light in display values (no colour-space step). */
 const FRAG = /* glsl */ `
 uniform sampler2D uFrame;
 uniform vec2 uSize;      // quad size, world units
 uniform float uTexel;    // world size of one frame texel
 uniform float uProgress; // 0..1 forge-in
-uniform float uFade;     // 1 → 0 on close
+uniform float uFade;
 uniform float uTime;
 uniform vec3 uHot;
 varying vec2 vUv;
 
-// Nine-slice: world position → texel of the 12×12 source (row 0 = top).
-int sliceAxis(float p, float size) {
-  float t = p / uTexel;
-  float n = size / uTexel;
-  if (t < 4.0) return int(floor(t));
-  if (t > n - 4.0) return 11 - int(floor(n - t));
-  return 4 + int(mod(floor(t - 4.0), 4.0));
-}
-
 void main() {
-  vec2 p = vUv * uSize;              // from bottom-left
-  vec2 fromTop = vec2(p.x, uSize.y - p.y);
-  float border = 4.0 * uTexel;
-  bool inBand = p.x < border || p.y < border || p.x > uSize.x - border || p.y > uSize.y - border;
-  if (!inBand) discard;
-  ivec2 tx = ivec2(sliceAxis(fromTop.x, uSize.x), sliceAxis(fromTop.y, uSize.y));
-  vec4 c = texelFetch(uFrame, tx, 0);
-  if (c.a < 0.01) discard;
+  vec2 p = vUv * uSize;
+  vec2 n = floor(uSize / uTexel);
+  vec2 t = min(floor(p / uTexel), n - 1.0);
+  float d = min(min(t.x, t.y), min(n.x - 1.0 - t.x, n.y - 1.0 - t.y));
+  if (d > 3.5) discard;
+  // The frame's lit tone (its bitmap's top edge), decoded to display values.
+  vec3 light = pow(texelFetch(uFrame, ivec2(6, 1), 0).rgb, vec3(1.0 / 2.2));
 
-  // Perimeter position from the bottom centre (0) up both sides to the
-  // top centre (1), quantized to whole texels so the trim grows in steps.
-  vec2 q = floor(p / uTexel) * uTexel + 0.5 * uTexel;
-  float s;
+  // Perimeter position from the bottom centre (0) up both sides to the top
+  // centre (1), in whole texels, for the forge.
+  vec2 q = (t + 0.5) * uTexel;
   float dx = abs(q.x - uSize.x * 0.5);
-  float dBottom = q.y;
-  float dTop = uSize.y - q.y;
-  float dSide = uSize.x * 0.5 - dx;
-  if (dBottom <= min(dTop, dSide)) s = dx;
-  else if (dSide <= dTop) s = uSize.x * 0.5 + q.y;
+  float dB = q.y;
+  float dT = uSize.y - q.y;
+  float dS = uSize.x * 0.5 - dx;
+  float s;
+  if (dB <= min(dT, dS)) s = dx;
+  else if (dS <= dT) s = uSize.x * 0.5 + q.y;
   else s = uSize.x * 0.5 + uSize.y + (uSize.x * 0.5 - dx);
   s /= (uSize.x + uSize.y);
   float front = uProgress * 1.02;
   if (s > front) discard;
   float hot = step(front - 0.012, s) * step(uProgress, 0.999);
-  vec3 col = mix(c.rgb, uHot, hot);
-  gl_FragColor = vec4(col * c.a, c.a) * uFade;
-  #include <colorspace_fragment>
+
+  float flow = 0.5 + 0.5 * sin(s * 40.0 - uTime * 2.5);
+  float b = 0.0;
+  if (abs(d - 1.0) < 0.5) b = 0.32 + 0.22 * flow;
+  else if (abs(d - 2.0) < 0.5) b = 0.06;
+  else if (d < 0.5) b = mod(t.x + t.y, 2.0) < 1.0 ? 0.08 : 0.0;
+  // Rune-dots at the corners.
+  vec2 cd = min(t, n - 1.0 - t);
+  if (cd.x < 2.5 && cd.y < 2.5 && abs(cd.x - cd.y) < 1.5) b = max(b, cd.x + cd.y < 3.5 ? 0.85 : 0.2);
+  if (b <= 0.0) discard;
+  vec3 col = mix(light * b, uHot, hot);
+  gl_FragColor = vec4(col * uFade, 0.0);
 }
 `;
 
@@ -186,8 +192,8 @@ export function PixelFrame({
         vertexShader: VERT,
         fragmentShader: FRAG,
         transparent: true,
-        premultipliedAlpha: true,
         depthWrite: false,
+        ...LIGHT_BLENDING,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [colors.trim, colors.light, colors.dark],

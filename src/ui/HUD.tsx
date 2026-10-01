@@ -22,6 +22,7 @@
  * useEscapeClosesOverlay() from hooks.ts. */
 
 import { useEffect, useState, type CSSProperties } from "react";
+import { useMapCast } from "../ui3d/layers/map/mapStore";
 import { useGame } from "../state/gameStore";
 import { DevRoom } from "./DevRoom";
 import { PerfOverlay } from "./hud/PerfOverlay";
@@ -67,6 +68,11 @@ export function HUD() {
         } else if (state.overlay === "codex") {
           state.setOverlay("none");
         }
+      } else if (e.code === "KeyM") {
+        const state = useGame.getState();
+        if (state.phase !== "dungeon" || state.overlay !== "none") return;
+        e.preventDefault();
+        useMapCast.getState().toggle();
       } else if (e.code === "KeyI" || e.code === "Tab") {
         const state = useGame.getState();
         if (state.phase !== "village" && state.phase !== "dungeon") return;

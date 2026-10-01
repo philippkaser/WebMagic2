@@ -144,7 +144,7 @@ void main() {
   float a = core + ol * uOutline;
   float h = halo * uGlow * (1.0 - outline) * 0.55 * (1.0 + burning);
   col += mix(vColor, hot, vOut) * h;
-  a += h * 0.3;
+  a += h * 0.08;
 
   gl_FragColor = vec4(col, min(a, 1.0)) * uOpacity;
   if (gl_FragColor.a < 0.002 && dot(gl_FragColor.rgb, gl_FragColor.rgb) < 0.00001) discard;

@@ -61,6 +61,7 @@ export const CONTROLS: readonly { keys: readonly string[]; action: string }[] = 
   { keys: ["F"], action: "pact" },
   { keys: ["Q", "E"], action: "belt" },
   { keys: ["Tab"], action: "satchel" },
+  { keys: ["M"], action: "map" },
   { keys: ["C"], action: "codex" },
   { keys: ["P"], action: "fps" },
   { keys: ["O"], action: "shadows" },

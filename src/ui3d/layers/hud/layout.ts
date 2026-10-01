@@ -28,31 +28,25 @@ const EDGE = apFrac(13);
 /** Gap between neighbouring panels. */
 const GAP = apFrac(6);
 
-/** The vitals: two pixel flasks, each with its numbers beside it (ap
- * pixels). `texel` is one flask pixel — the world's chunky pixel size. */
+/** The vitals: two glass orbs, each with its numbers beside it (ap
+ * pixels). */
 export const VITALS = {
-  texel: 2.4,
-  /** Room for "100" and "/ 100" beside each flask. */
+  /** An orb's diameter. */
+  orb: 66,
+  /** Room for "100" and "/ 100" beside each orb. */
   numW: 40,
-  /** Flask → its numbers, and health block → mana block. */
-  gap: 3,
-  between: 8,
-  /** A flask's grid: 26 × 34 flask pixels (PixelFlask FLASK). */
-  get flaskW() {
-    return 26 * this.texel;
-  },
-  get flaskH() {
-    return 34 * this.texel;
-  },
+  /** Orb → its numbers, and health block → mana block. */
+  gap: 5,
+  between: 10,
   get blockW() {
-    return this.flaskW + this.gap + this.numW;
+    return this.orb + this.gap + this.numW;
   },
   /** The whole group's footprint (belt and purse are placed off it). */
   get outerW() {
     return this.blockW * 2 + this.between;
   },
   get outerH() {
-    return this.flaskH;
+    return this.orb;
   },
 };
 

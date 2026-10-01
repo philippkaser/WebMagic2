@@ -61,7 +61,7 @@ export function MerchantStall() {
   };
 
   return (
-    <Tablet width={spec.width} height={spec.height} tint={PANEL_TINT} frame="gold" seed={11} tile={0.17}>
+    <Tablet width={spec.width} height={spec.height} tint={PANEL_TINT} frame="gold" seed={11} projector tile={0.17}>
       <group ref={face}>
         <TitlePlate text="MERCHANT" y={STALL.height / 2 + 0.006} frame="gold" />
         <Headline text="Maro's Wares" x={-m} y={STALL.titleY} />

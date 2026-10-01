@@ -15,21 +15,22 @@ import { kickSlosh, makeGauge, makeSlosh, stepGauge, stepSlosh } from "./gauge";
 import { HudAnchor } from "./HudAnchor";
 import { HUD_LAYOUT, VITALS } from "./layout";
 import { useCarrierMotion, type CarrierMotion } from "./motion";
-import { FLASK_PALETTES, makeFlaskMaterial, PixelFlask } from "./PixelFlask";
+import { makeOrbMaterial, ORB_PALETTES, PixelOrb } from "./PixelOrb";
 import { useEntryDelay, useSettled } from "./useSettled";
 
-/** Health and mana as two glass flasks carried at the lower left, drawn as
- * pixel art (PixelFlask) — their liquid stands exactly as high as the
- * value. Carry them and they slosh: the surface leans as you turn and run,
- * ripples when you land, bubbles (mana fizzes while it refills), pours in
- * as you heal. A blow jars the health flask in whole pixels, blanches its
- * liquid white-hot and leaves a pale ghost of what it took, fizzing away a
- * moment later; under 30 % the liquid throbs like a pulse. The numbers
- * stand beside each flask, the max dim beneath. */
+/** Health and mana as two glass orbs carried at the lower left — real
+ * spheres, shaded in gritty pixels (PixelOrb) — their liquid standing
+ * exactly as high as the value and level with the world (look down and
+ * you see its surface from above). Carry them and they slosh: the surface
+ * leans as you turn and run, ripples when you land, bubbles and sparks
+ * (mana churns while it refills), pours in as you heal. A blow jars the
+ * health orb, blanches its liquid white-hot and leaves a pale ghost of
+ * what it took, fizzing away a moment later; under 30 % the liquid throbs
+ * like a pulse. The numbers stand beside each orb, the max dim beneath. */
 
 const L = HUD_LAYOUT.vitals;
 const A = apx(L.distance);
-const T = VITALS.texel * A;
+const R = (VITALS.orb / 2) * A;
 const NUM = fontPx(21, "body", L.distance);
 const MAX = fontPx(10, "label", L.distance);
 
@@ -80,8 +81,8 @@ function FlaskBlock({
   const low = kind === "health" && value / max < 0.3;
   const d = useEntryDelay(0.35);
 
-  const material = useMemo(() => makeFlaskMaterial(FLASK_PALETTES[kind]), [kind]);
-  // Starts empty: the flask fills once its glass has popped in.
+  const material = useMemo(() => makeOrbMaterial(ORB_PALETTES[kind]), [kind]);
+  // Starts empty: the orb fills once its glass has popped in.
   const gauge = useRef(makeGauge(0));
   const slosh = useRef(makeSlosh());
   const last = useRef(-1);
@@ -120,28 +121,28 @@ function FlaskBlock({
     // Mana is a living thing: it fizzes while it refills.
     u.uBubbles.value = kind === "mana" ? (frac < 0.999 ? 0.9 : 0.3) : 0.15 + (gauge.current.ghost - gauge.current.level) * 3;
     const since = now - hit.current.at;
-    // A blow blanches the health flask, in three hard steps.
+    // A blow blanches the health orb, in three hard steps.
     const flare = kind === "health" && since < 0.35 ? hit.current.amp * (1 - since / 0.35) : 0;
     u.uFlash.value = Math.ceil(flare * 3) / 3;
     // Low health: the liquid throbs like a pulse (stepped).
     const beat = kind === "health" && frac < 0.3 ? Math.max(0, Math.sin(now * 7)) ** 4 : 0;
     u.uBright.value = 1 + (Math.round(beat * 3) / 3) * 0.5;
 
-    // The blow jars the flask in whole flask pixels, like a sprite.
+    // The blow jars the orb.
     const g = shaker.current;
     if (g) {
       const a = kind === "health" && since < 0.35 ? hit.current.amp * (1 - since / 0.35) : 0;
-      g.position.set(Math.round(Math.sin(now * 83) * a * 1.6) * T, Math.round(Math.sin(now * 61) * a * 0.9) * T, 0);
+      g.position.set(Math.sin(now * 83) * a * R * 0.09, Math.sin(now * 61) * a * R * 0.05, 0);
     }
   });
 
   const color = kind === "health" ? (low ? HUD_COLORS.lowText : "#f6d2c8") : "#cfe0ff";
-  const numX = x + (VITALS.flaskW + VITALS.gap) * A;
+  const numX = x + (VITALS.orb + VITALS.gap) * A;
   return (
     <>
-      <group position={[x + (VITALS.flaskW / 2) * A, (VITALS.flaskH / 2) * A, 0]}>
+      <group position={[x + R, R, 0]}>
         <group ref={shaker}>
-          <PixelFlask material={material} texel={T} />
+          <PixelOrb material={material} radius={R} />
         </group>
       </group>
       <RuneText
@@ -150,7 +151,7 @@ function FlaskBlock({
         color={color}
         anchor={[0, 0.5]}
         align="left"
-        position={[numX, 16 * T, 0]}
+        position={[numX, R * 1.22, 0]}
         inDuration={0.2}
         stagger={0.04}
         glow={low ? 1.2 : 0.3}
@@ -164,7 +165,7 @@ function FlaskBlock({
         color={ink.faded}
         anchor={[0, 0.5]}
         align="left"
-        position={[numX, 8 * T, 0]}
+        position={[numX, R * 0.62, 0]}
         glow={0.3}
         outline={0.6}
         delay={d * 1.3}

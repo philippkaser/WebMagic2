@@ -1,6 +1,7 @@
 import {
   DataTexture,
   DoubleSide,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   NearestFilter,
   RepeatWrapping,
@@ -8,12 +9,15 @@ import {
   SRGBColorSpace,
   UnsignedByteType,
 } from "three";
+import { LIGHT_BLENDING } from "../../holo/holoMaterial";
 
-/** The codex's materials, painted in typed-array math like the tablets'
- * stone (materials.ts): soot-dark vellum for the pages (the grimoire's
- * parchment ink needs the dark ground its panels have), fine stripes for
- * the page edges, oxblood leather with a pixel grain for the boards.
- * Shared singletons — the tome is the only thing that uses them. */
+/** The codex's materials — a SPECTRAL tome, cast like every other menu: its
+ * pages are dark vellum you can faintly see through, lit from within by
+ * the caster's arcane light; the stacked page edges glow as lines of that
+ * light; the leather boards are a ghost of leather, a translucent shell
+ * with a pixel grain. Painted in typed-array math (pixel textures, like
+ * the world's). Shared singletons — the tome is the only thing that uses
+ * them. */
 
 const SIZE = 64;
 
@@ -114,8 +118,8 @@ function leatherTexture(base: [number, number, number]): DataTexture {
 let mats: {
   vellum: MeshStandardMaterial;
   leaf: MeshStandardMaterial;
-  edgesU: MeshStandardMaterial;
-  edgesV: MeshStandardMaterial;
+  edgesU: MeshBasicMaterial;
+  edgesV: MeshBasicMaterial;
   leather: MeshStandardMaterial;
   leatherDark: MeshStandardMaterial;
 } | null = null;
@@ -123,13 +127,16 @@ let mats: {
 export function tomeMaterials() {
   if (mats) return mats;
   const vellum = vellumTexture();
+  const page = { map: vellum, roughness: 0.92, metalness: 0, transparent: true, opacity: 0.84, emissive: "#0b3a33", emissiveIntensity: 0.55 };
+  const light = { color: "#2bb894", ...LIGHT_BLENDING, transparent: true, depthWrite: false, toneMapped: false };
+  const ghost = { roughness: 0.6, metalness: 0.05, transparent: true, opacity: 0.38, emissive: "#0f3f36", emissiveIntensity: 0.9, depthWrite: false };
   mats = {
-    vellum: new MeshStandardMaterial({ map: vellum, roughness: 0.92, metalness: 0 }),
-    leaf: new MeshStandardMaterial({ map: vellum, roughness: 0.92, metalness: 0, side: DoubleSide }),
-    edgesU: new MeshStandardMaterial({ map: edgesTexture("u"), roughness: 0.95 }),
-    edgesV: new MeshStandardMaterial({ map: edgesTexture("v"), roughness: 0.95 }),
-    leather: new MeshStandardMaterial({ map: leatherTexture([96, 44, 34]), roughness: 0.62, metalness: 0.05 }),
-    leatherDark: new MeshStandardMaterial({ map: leatherTexture([52, 24, 20]), roughness: 0.7, metalness: 0.05 }),
+    vellum: new MeshStandardMaterial(page),
+    leaf: new MeshStandardMaterial({ ...page, side: DoubleSide }),
+    edgesU: new MeshBasicMaterial({ map: edgesTexture("u"), ...light }),
+    edgesV: new MeshBasicMaterial({ map: edgesTexture("v"), ...light }),
+    leather: new MeshStandardMaterial({ map: leatherTexture([96, 44, 34]), ...ghost }),
+    leatherDark: new MeshStandardMaterial({ map: leatherTexture([52, 24, 20]), ...ghost }),
   };
   return mats;
 }

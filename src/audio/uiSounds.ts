@@ -1,21 +1,21 @@
 import { synthNoise, synthTone } from "./sound";
 
-/** Sounds of the in-world UI: stone slabs grinding together, runes igniting,
- * buttons that are really small stone plaques. Kept apart from the game
+/** Sounds of the in-world UI: panes of light humming into being and
+ * collapsing, runes igniting, buttons ticking and pinging. Kept apart from the game
  * sounds so UI work never touches the combat bank. All synthesized. */
 
-/** A tablet assembles: a low stone grind under a rising chime. */
-export function playTabletBuild(): void {
-  synthNoise({ dur: 0.55, vol: 0.07, filterFreq: 180, filterEnd: 420, q: 1.2 });
-  synthNoise({ dur: 0.25, vol: 0.05, filterFreq: 900, filterEnd: 300, type: "bandpass", q: 3, delay: 0.32 });
-  synthTone({ type: "sine", freq: 392, freqEnd: 523, dur: 0.7, vol: 0.035, delay: 0.3 });
-  synthTone({ type: "sine", freq: 784, dur: 0.6, vol: 0.02, delay: 0.42 });
+/** A pane is cast: a sigil hums awake, light pours up and tunes in. */
+export function playHoloCast(): void {
+  synthTone({ type: "sine", freq: 110, freqEnd: 220, dur: 0.5, vol: 0.04 });
+  synthNoise({ dur: 0.45, vol: 0.03, filterFreq: 1800, filterEnd: 5200, type: "bandpass", q: 4, delay: 0.12 });
+  synthTone({ type: "triangle", freq: 523, freqEnd: 784, dur: 0.35, vol: 0.022, delay: 0.22 });
+  synthTone({ type: "sine", freq: 1046, freqEnd: 1318, dur: 0.4, vol: 0.012, delay: 0.38 });
 }
 
-/** A tablet breaks apart. */
-export function playTabletBreak(): void {
-  synthNoise({ dur: 0.5, vol: 0.06, filterFreq: 600, filterEnd: 140, q: 1 });
-  synthTone({ type: "triangle", freq: 330, freqEnd: 196, dur: 0.4, vol: 0.02 });
+/** A pane collapses back into its sigil. */
+export function playHoloCollapse(): void {
+  synthTone({ type: "sine", freq: 660, freqEnd: 165, dur: 0.32, vol: 0.025 });
+  synthNoise({ dur: 0.25, vol: 0.02, filterFreq: 4200, filterEnd: 900, type: "bandpass", q: 3 });
 }
 
 /** The pointer finds a button: a faint rune tick. */
