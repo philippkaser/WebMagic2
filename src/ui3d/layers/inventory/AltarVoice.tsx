@@ -2,19 +2,23 @@ import { useEffect, useState } from "react";
 import { gameEvents } from "../../../core/events";
 import { pxFor } from "../../anchors";
 import { uiNow } from "../../clock";
-import { RuneText } from "../../text/RuneText";
-import { INK } from "./materials";
+import { Plate } from "../../Plate";
+import { UiShow } from "../../presence";
+import { measureText, RuneText } from "../../text/RuneText";
+import { ink } from "../../theme";
 import { ALTAR, SCENE_DISTANCE } from "./layout";
 
 /** What the game says while the altar is up — "Sold … for 26 gold", "A
  * wizard never drops their staff" — written in the band of air above the
  * tablets. The world's own message layer hangs its words further off, where
  * the tablets would hide them; here they stay in view, newest at the bottom,
- * each burning away after a few seconds. */
+ * each on a small iron-framed plate (the grimoire's message), burning away
+ * after a few seconds. */
 
 const MAX = 2;
-const PX = pxFor(SCENE_DISTANCE, 0.02);
-const LINE = PX * 13;
+const PX = pxFor(SCENE_DISTANCE, 0.019);
+const MAX_COLS = 60;
+const LINE = PX * 15;
 
 interface Line {
   id: number;
@@ -57,19 +61,23 @@ export function AltarVoice({ sceneY }: { sceneY: number }) {
     <>
       {lines.map((l) => {
         const slot = l.shown ? live.length - 1 - live.indexOf(l) : 0;
+        const size = measureText(l.text, PX, MAX_COLS);
         return (
-          <RuneText
-            key={l.id}
-            text={l.text}
-            px={PX}
-            maxCols={60}
-            color={INK.bright}
-            glow={0.9}
-            show={l.shown}
-            anchor={[0.5, 1]}
-            position={[0, base + slot * LINE, 0.02]}
-            onHidden={() => setLines((prev) => prev.filter((x) => x.id !== l.id))}
-          />
+          <group key={l.id} position={[0, base + slot * LINE + (size.height + PX * 6) / 2, 0.02]}>
+            <UiShow show={l.shown}>
+              <Plate width={size.width + PX * 10} height={size.height + PX * 6} frame={/sold|bought/i.test(l.text) ? "gold" : "iron"} texel={PX * 1.1} fillOpacity={0.86}>
+                <RuneText
+                  text={l.text}
+                  px={PX}
+                  maxCols={MAX_COLS}
+                  color={ink.parchment}
+                  glow={0.7}
+                  depth={-0.3}
+                  onHidden={() => setLines((prev) => prev.filter((x) => x.id !== l.id))}
+                />
+              </Plate>
+            </UiShow>
+          </group>
         );
       })}
     </>

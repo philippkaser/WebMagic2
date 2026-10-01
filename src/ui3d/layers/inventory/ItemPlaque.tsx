@@ -1,26 +1,33 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BoxGeometry, Color, Group, MeshStandardMaterial, Vector3 } from "three";
+import { Group, ShaderMaterial, Vector3 } from "three";
 import { resolveItem, type ResolvedItem } from "../../../items/catalog";
 import { GAMBLE_PRICE, merchantPrice } from "../../../items/economy";
 import { readSlot } from "../../../items/inventory";
 import { useGame } from "../../../state/gameStore";
 import { pxFor } from "../../anchors";
-import { uiNow } from "../../clock";
-import { stoneMaterial } from "../../materials";
-import { useUiShow } from "../../presence";
+import type { FontId } from "../../font/faces";
+import type { TextInput } from "../../font/layout";
+import { PixelFrame } from "../../PixelFrame";
+import { UiShow, useUiShow } from "../../presence";
 import { UiTextStyleProvider } from "../../style";
 import { measureText, RuneText } from "../../text/RuneText";
+import { ink } from "../../theme";
 import { sellOffer } from "./dropTarget";
 import { carriedNow, useInventory, useInventoryVersion, type InventoryInteraction } from "./interaction";
 import { GAMBLE_WARE, placePlaque, SCENE_DISTANCE, slotKey, TEXT, viewHalfExtent } from "./layout";
-import { fortuneText, plaqueText, wornCounterpart, type PlaqueText } from "./plaqueText";
+import { flat, plane } from "./materials";
+import { fortuneText, plaqueText, quickHint, wornCounterpart, type PlaqueText } from "./plaqueText";
+import { PixelSprite, spriteSize, type SpriteName } from "./sprites";
 
-/** The plaque that reads an item to you: hover anything and a slate plaque
- * unfolds beside it — off the tablet's edge where there's room — and its
- * name, kind, stats and footnotes write themselves on. Moving to the next
- * socket re-writes only what differs; moving away burns the words off and
- * folds the plaque away.
+/** The plaque that reads an item to you — artpass's parchment tooltip as a
+ * thin card hanging in the air: hover anything and it unfolds beside it (off
+ * the tablet's edge where there's room) in hard steps, framed in brass (gold
+ * for the legendary), and its sections write themselves on: the name in its
+ * grade's colour, the gem and small-caps grade line, what it is, its stats
+ * with ▲/▼ against what you wear, a rule, and the footnotes. Moving to the
+ * next socket re-writes only what differs; moving away burns the words off
+ * and folds it away.
  *
  * It hangs a little in front of the tablets (PLAQUE_Z), so it's never
  * clipped by a tablet turned toward you; its text is sized for that nearer
@@ -30,11 +37,12 @@ const PLAQUE_Z = 0.24;
 const DIST = SCENE_DISTANCE - PLAQUE_Z;
 const NAME_PX = pxFor(DIST, TEXT.plaqueName);
 const LINE_PX = pxFor(DIST, TEXT.plaqueLine);
-const MAX_COLS = 38;
-const PAD = 0.045;
-const GAP = 0.022;
+const SMALL_PX = pxFor(DIST, TEXT.label);
+const MAX_COLS = 40;
+const PAD = 0.036;
+const TEXEL = 0.004;
+const UNFOLD_STEPS = 5;
 
-const box = new BoxGeometry(1, 1, 1);
 const tmpA = new Vector3();
 
 interface Reading {
@@ -59,19 +67,107 @@ function readSocket(ix: InventoryInteraction, key: string | null): Reading | nul
   const stack = readSlot(inv, spec.ref);
   if (!stack) return null;
   const item = resolveItem(stack.defId);
+  const readingWorn = spec.ref.container === "equipment";
   let worn: ResolvedItem | null = null;
   if (item.def.slot !== "consumable") {
     const w = inv.equipment[item.def.slot];
-    worn = wornCounterpart(item, w ? resolveItem(w.defId) : null, spec.ref.container === "equipment");
+    worn = wornCounterpart(item, w ? resolveItem(w.defId) : null, readingWorn);
   }
+  const inVillage = state.phase === "village";
+  const selling = ix.mode === "merchant" && inVillage;
   return {
     key,
     text: plaqueText(item, worn, {
       qty: stack.qty,
       runLoot: stack.runLoot,
-      sellFor: ix.mode === "merchant" && state.phase === "village" ? sellOffer(inv, spec.ref) : null,
+      worn: readingWorn,
+      sellFor: selling ? sellOffer(inv, spec.ref) : null,
+      hint: quickHint(spec.ref, item.def.slot === "consumable", ix.mode === "chest" && inVillage),
     }),
   };
+}
+
+// ── Layout: the tooltip's sections stacked top-down ─────────────────────────
+
+interface TextRow {
+  kind: "text";
+  text: TextInput;
+  font: FontId;
+  px: number;
+  maxCols?: number;
+  color?: string;
+  /** Left inset (an icon before it), and its top, from the card's top-left. */
+  x: number;
+  y: number;
+  icon?: { name: SpriteName; tint: string; px: number };
+}
+interface RuleRow {
+  kind: "rule";
+  y: number;
+}
+type Row = TextRow | RuleRow;
+
+function layoutPlaque(t: PlaqueText): { rows: Row[]; w: number; h: number } {
+  const rows: Row[] = [];
+  let y = 0;
+  let w = 0.36;
+  const add = (text: TextInput, font: FontId, px: number, gap: number, opts: { maxCols?: number; color?: string; icon?: TextRow["icon"] } = {}) => {
+    const m = measureText(text, px, opts.maxCols, font);
+    const x = opts.icon ? spriteSize(opts.icon.name).w * opts.icon.px + px * 3 : 0;
+    y += rows.length ? gap : 0;
+    rows.push({ kind: "text", text, font, px, maxCols: opts.maxCols, color: opts.color, x, y, icon: opts.icon });
+    w = Math.max(w, x + m.width);
+    y += m.height;
+  };
+  add(t.title, "body", NAME_PX, 0, { maxCols: MAX_COLS - 6 });
+  add(t.sub, "label", SMALL_PX, SMALL_PX * 4, { icon: { name: "gem", tint: t.gem, px: SMALL_PX } });
+  if (t.desc) add(t.desc, "body", LINE_PX, LINE_PX * 5, { maxCols: MAX_COLS, color: ink.parchment });
+  if (t.statsHead) add(t.statsHead, "label", SMALL_PX, LINE_PX * 5, { color: ink.faded });
+  if (t.stats.length) add(t.stats, "body", LINE_PX, SMALL_PX * 3, { maxCols: MAX_COLS });
+  if (t.notes.length) {
+    y += LINE_PX * 4;
+    rows.push({ kind: "rule", y });
+    y += TEXEL;
+    t.notes.forEach((n, i) =>
+      add(n.text, "body", LINE_PX, i === 0 ? LINE_PX * 4 : LINE_PX * 2.5, {
+        maxCols: MAX_COLS,
+        icon: n.icon ? { name: n.icon, tint: n.iconTint ?? ink.parchment, px: (LINE_PX * 7) / spriteSize(n.icon).h } : undefined,
+      }),
+    );
+  }
+  return { rows, w: w + PAD * 2, h: y + PAD * 2 };
+}
+
+// ── Parchment ────────────────────────────────────────────────────────────────
+
+let parchmentMat: ShaderMaterial | null = null;
+
+/** Aged dark parchment (artpass parchmentImage under its tooltip's dark
+ * wash): per-texel noise in warm olive, a few lighter flecks. World-space
+ * texels, so it never stretches with the card. */
+function parchment(): ShaderMaterial {
+  return (parchmentMat ??= new ShaderMaterial({
+    uniforms: { uTexel: { value: TEXEL } },
+    vertexShader: /* glsl */ `
+      varying vec2 vPos;
+      void main() {
+        vPos = (modelMatrix * vec4(position, 1.0)).xy;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTexel;
+      varying vec2 vPos;
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      void main() {
+        float n = hash(floor(vPos / uTexel));
+        float v = 0.118 + n * 0.03 + (n > 0.97 ? 0.035 : 0.0);
+        vec3 col = vec3(v * 1.2, v * 1.06, v * 0.74);
+        gl_FragColor = vec4(pow(col, vec3(2.2)), 1.0);
+        #include <colorspace_fragment>
+      }
+    `,
+  }));
 }
 
 export function ItemPlaque() {
@@ -92,7 +188,7 @@ export function ItemPlaque() {
     [ix, hoverKey, gold, bag, belt, chest, equipment, ix.mode],
   );
 
-  // Hovering a bag item faintly kindles the gear socket it would replace.
+  // Hovering a bag item lights the gear card it would replace.
   useEffect(() => {
     let compare: string | null = null;
     if (reading && hoverKey) {
@@ -113,19 +209,13 @@ export function ItemPlaque() {
   }, [reading]);
   const on = !!reading && shown;
   const text = (reading ?? last)?.text ?? null;
-
-  const size = useMemo(() => {
-    if (!text) return { w: 0.4, h: 0.2, nameH: 0 };
-    const n = measureText(text.title, NAME_PX, MAX_COLS - 6);
-    const b = measureText(text.body, LINE_PX, MAX_COLS);
-    return { w: Math.max(n.width, b.width) + PAD * 2, h: n.height + GAP + b.height + PAD * 2, nameH: n.height };
-  }, [text]);
+  const lay = useMemo(() => (text ? layoutPlaque(text) : null), [text]);
+  const size = lay ? { w: lay.w, h: lay.h } : { w: 0.4, h: 0.2 };
 
   // Where it hangs: computed when the reading or the view changes, not per
   // frame (the sockets don't move in the scene's frame).
   const viewSize = useThree((s) => s.size);
   const target = useRef(new Vector3());
-  const placed = useRef(false);
   useEffect(() => {
     if (!reading || !ix.root) return;
     const entry = ix.sockets.get(reading.key);
@@ -144,80 +234,79 @@ export function ItemPlaque() {
       tmpA.x < -0.05 ? -1 : 1,
     );
     target.current.set(p.x, p.y, PLAQUE_Z);
-  }, [reading, size, viewSize, ix]);
-
-  const accent = useMemo(() => new Color(text?.accent ?? "#46ffd0"), [text?.accent]);
-  const seam = useMemo(
-    () => new MeshStandardMaterial({ color: "#050407", emissive: accent, emissiveIntensity: 0.9, toneMapped: false, roughness: 0.5 }),
-    [accent],
-  );
-  useEffect(() => () => seam.dispose(), [seam]);
+  }, [reading, size.w, size.h, viewSize, ix]);
 
   const group = useRef<Group>(null);
-  const plate = useRef<Group>(null);
-  const k = useRef({ open: 0, w: size.w, h: size.h });
+  const card = useRef<Group>(null);
+  const k = useRef({ open: 0 });
   const [textOn, setTextOn] = useState(false);
   useFrame((_, dt) => {
     const g = group.current;
-    const pl = plate.current;
-    if (!g || !pl) return;
+    const c = card.current;
+    if (!g || !c) return;
     const s = k.current;
-    const q = 1 - Math.exp(-dt * 16);
-    s.open += ((on ? 1 : 0) - s.open) * (1 - Math.exp(-dt * (on ? 14 : 8)));
-    if (!placed.current || s.open < 0.02) {
-      g.position.copy(target.current);
-      s.w = size.w;
-      s.h = size.h;
-      placed.current = on;
-    } else {
-      g.position.lerp(target.current, q);
-      s.w += (size.w - s.w) * q;
-      s.h += (size.h - s.h) * q;
-    }
-    // Unfolds downward from its top edge, like a hinged plaque.
-    const open = s.open;
-    pl.scale.set(s.w * (0.7 + 0.3 * open), Math.max(0.0001, s.h * open), 1);
-    pl.position.y = (s.h * (1 - open)) / 2;
-    g.visible = open > 0.01;
-    const wantText = on && open > 0.75;
+    s.open = on ? Math.min(1, s.open + dt * 9) : Math.max(0, s.open - dt * 7);
+    // It hangs where it's needed at once — a card, not a cloud.
+    g.position.copy(target.current);
+    // Unfolds downward from its top edge, like a hinged plaque, in steps.
+    const open = Math.ceil(s.open * UNFOLD_STEPS) / UNFOLD_STEPS;
+    c.scale.set(1, Math.max(0.0001, open), 1);
+    c.position.y = (size.h * (1 - open)) / 2;
+    g.visible = s.open > 0.01;
+    const wantText = on && s.open > 0.75;
     if (wantText !== textOn) setTextOn(wantText);
-    seam.emissiveIntensity = 0.7 + Math.sin(uiNow() * 3) * 0.2;
   });
 
+  const left = -size.w / 2 + PAD;
+  const top = size.h / 2 - PAD;
   return (
     <group ref={group} visible={false}>
-      <group ref={plate}>
-        <mesh geometry={box} material={seam} scale={[1 + 0.016 / size.w, 1 + 0.016 / size.h, 0.012]} position={[0, 0, -0.006]} />
-        <mesh geometry={box} material={stoneMaterial("#221f28")} scale={[1, 1, 0.02]} />
+      <group ref={card}>
+        <mesh geometry={plane()} material={flat(ink.ink, 0.55)} scale={[size.w, size.h, 1]} position={[TEXEL * 3, -TEXEL * 3, -0.004]} renderOrder={3} />
+        <mesh geometry={plane()} material={parchment()} scale={[size.w - TEXEL * 4, size.h - TEXEL * 4, 1]} renderOrder={4} />
+        <PixelFrame width={size.w} height={size.h} frame={text?.frame ?? "brass"} texel={TEXEL} position={[0, 0, 0.001]} renderOrder={5} />
       </group>
-      {text && (
+      {lay && (
         <UiTextStyleProvider value={{ depth: -0.35 }}>
-          <RuneText
-            text={text.title}
-            px={NAME_PX}
-            maxCols={MAX_COLS - 6}
-            align="left"
-            anchor={[0, 0]}
-            position={[-size.w / 2 + PAD, size.h / 2 - PAD, 0.012]}
-            show={textOn}
-            glow={1}
-            inDuration={0.3}
-            outDuration={0.25}
-            stagger={0.15}
-          />
-          <RuneText
-            text={text.body}
-            px={LINE_PX}
-            maxCols={MAX_COLS}
-            align="left"
-            anchor={[0, 0]}
-            position={[-size.w / 2 + PAD, size.h / 2 - PAD - size.nameH - GAP, 0.012]}
-            show={textOn}
-            glow={0.6}
-            inDuration={0.3}
-            outDuration={0.25}
-            stagger={0.3}
-          />
+          {lay.rows.map((r, i) =>
+            r.kind === "rule" ? (
+              <group key={`r${i}`} visible={textOn} position={[0, top - r.y, 0.006]}>
+                <mesh geometry={plane()} material={flat(ink.brassDark)} scale={[size.w - PAD * 2, TEXEL, 1]} />
+                <mesh geometry={plane()} material={flat(ink.brass)} scale={[(size.w - PAD * 2) * 0.6, TEXEL, 1]} position={[0, 0, 0.0002]} />
+              </group>
+            ) : (
+              <group key={`t${i}`}>
+                {r.icon && (
+                  <UiShow show={textOn}>
+                    <PixelSprite
+                      name={r.icon.name}
+                      tint={r.icon.tint}
+                      px={r.icon.px}
+                      anchor={[0, 1]}
+                      position={[left, top - r.y + (r.icon.px * spriteSize(r.icon.name).h - r.px * 7) / 2, 0.008]}
+                      delay={0.05 * i}
+                    />
+                  </UiShow>
+                )}
+                <RuneText
+                  text={r.text}
+                  font={r.font}
+                  px={r.px}
+                  maxCols={r.maxCols}
+                  color={r.color}
+                  align="left"
+                  anchor={[0, 0]}
+                  position={[left + r.x, top - r.y, 0.008]}
+                  show={textOn}
+                  glow={r.font === "label" ? 0.3 : 0.6}
+                  inDuration={0.25}
+                  outDuration={0.2}
+                  delay={0.03 * i}
+                  stagger={0.15}
+                />
+              </group>
+            ),
+          )}
         </UiTextStyleProvider>
       )}
     </group>

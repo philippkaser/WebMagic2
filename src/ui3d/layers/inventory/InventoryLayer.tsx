@@ -1,13 +1,15 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { BoxGeometry, Group, Vector3 } from "three";
+import { Group, Vector3 } from "three";
 import { useGame } from "../../../state/gameStore";
 import { useEscapeClosesOverlay } from "../../../ui/hooks";
 import { ViewAnchor, pxFor } from "../../anchors";
-import { stoneMaterial } from "../../materials";
+import { KeyCap, keyCapWidth } from "../../KeyCap";
+import { PixelFrame } from "../../PixelFrame";
 import { UiPresence, useUiShow } from "../../presence";
 import { TABLET_EXIT } from "../../Tablet";
-import { RuneText } from "../../text/RuneText";
+import { measureText, RuneText } from "../../text/RuneText";
+import { ink } from "../../theme";
 import { AltarTablet } from "./AltarTablet";
 import { AltarVoice } from "./AltarVoice";
 import { ChestTablet } from "./ChestTablet";
@@ -26,7 +28,7 @@ import {
   type Placement,
   type TabletId,
 } from "./layout";
-import { bronze, INK } from "./materials";
+import { flat, plane } from "./materials";
 import { MerchantStall } from "./MerchantStall";
 import { PointerController } from "./PointerController";
 
@@ -144,42 +146,72 @@ function Placed({ at, children }: { at: Placement; children: React.ReactNode }) 
   );
 }
 
-/** The pillar that joins a pair of tablets like the hinge of a triptych
- * (and closes the gap between them). It rises out of the dark with the
- * stones and sinks again when they break. */
+/** The spine that joins a pair of tablets into one open book (artpass's
+ * `.wm-inv__book`), closing the gap between them: a soot strip in a brass
+ * pixel frame with brass bands. It rises out of the dark with the stones
+ * and sinks again when they break — in hard steps. */
 function Hinge({ x, y }: { x: number; y: number }) {
   const show = useUiShow();
   const group = useRef<Group>(null);
   const k = useRef(0);
   useFrame((_, dt) => {
-    k.current += ((show ? 1 : 0) - k.current) * (1 - Math.exp(-dt * (show ? 4 : 7)));
+    k.current = show ? Math.min(1, k.current + dt * 2.5) : Math.max(0, k.current - dt * 5);
     const g = group.current;
     if (!g) return;
-    g.scale.set(1, Math.max(0.0001, k.current), 1);
-    g.visible = k.current > 0.01;
+    const step = Math.ceil(k.current * 6) / 6;
+    g.scale.set(1, Math.max(0.0001, step), 1);
+    g.visible = step > 0;
   });
-  const h = ALTAR.height + 0.08;
+  const h = ALTAR.height + 0.06;
+  const w = 0.1;
+  const texel = 0.0055;
   return (
-    <group ref={group} position={[x, y, -0.12]} visible={false}>
-      <mesh geometry={unitBox} material={stoneMaterial("#4a4654")} scale={[0.15, h, 0.1]} />
-      {[1, -1].map((s) => (
-        <mesh key={s} geometry={unitBox} material={bronze()} scale={[0.18, 0.05, 0.13]} position={[0, (s * h) / 2, 0]} />
+    <group ref={group} position={[x, y, -0.1]} visible={false}>
+      <mesh geometry={plane()} material={flat("#140f18")} scale={[w, h, 1]} />
+      {[-0.36, 0, 0.36].map((b) => (
+        <mesh key={b} geometry={plane()} material={flat(ink.brassDark)} scale={[w, texel * 3, 1]} position={[0, b * h, 0.001]} />
       ))}
-      <mesh geometry={unitBox} material={bronze()} scale={[0.03, h * 0.8, 0.105]} />
+      <PixelFrame width={w + texel * 2} height={h + texel * 2} frame="brass" texel={texel} position={[0, 0, 0.002]} />
     </group>
   );
 }
 
-const unitBox = new BoxGeometry(1, 1, 1);
+const HINT_PX = pxFor(SCENE_DISTANCE, TEXT.hint);
 
-/** How to handle things, hanging in the air under the altar. */
+type HintPart = { key: string } | { text: string; color?: string };
+
+/** How to handle things, under the altar (artpass's inventory footer): key
+ * caps and faded words. */
 function UsageHint({ mode, y }: { mode: InventoryMode; y: number }) {
   const phase = useGame((s) => s.phase);
-  const text =
-    mode === "chest"
-      ? "drag between bag and chest · shift-click: quick move · I: close"
-      : mode === "merchant"
-        ? "drag onto Maro's stall to sell · shift-click: quick move · I: close"
-        : `drag to move · shift-click: quick move · off the altar: ${phase === "dungeon" ? "drop" : "discard"} · I: close`;
-  return <RuneText text={text} px={pxFor(SCENE_DISTANCE, TEXT.label)} color={INK.faint} glow={0.5} position={[0, y, 0]} delay={0.7} stagger={0.5} />;
+  const parts: HintPart[] = [
+    { text: mode === "merchant" ? "drag onto Maro's stall to sell" : mode === "chest" ? "drag between satchel and chest" : "drag to move" },
+    { text: "·", color: ink.stoneLight },
+    { key: "Shift" },
+    { text: "+ click: quick move" },
+    ...(mode === "inventory"
+      ? [{ text: "·", color: ink.stoneLight }, { text: `off the altar: ${phase === "dungeon" ? "drop" : "discard"}` }]
+      : []),
+    { text: "·", color: ink.stoneLight },
+    { key: "I" },
+    { key: "Esc" },
+    { text: "close" },
+  ];
+  const gap = HINT_PX * 3;
+  const widths = parts.map((p) => ("key" in p ? keyCapWidth(p.key, HINT_PX * 0.85) : measureText(p.text, HINT_PX).width));
+  const total = widths.reduce((a, b) => a + b, 0) + gap * (parts.length - 1);
+  let x = -total / 2;
+  return (
+    <group position={[0, y, 0]}>
+      {parts.map((p, i) => {
+        const cx = x + widths[i]! / 2;
+        x += widths[i]! + gap;
+        return "key" in p ? (
+          <KeyCap key={i} k={p.key} px={HINT_PX * 0.85} position={[cx, 0, 0]} />
+        ) : (
+          <RuneText key={i} text={p.text} px={HINT_PX} color={p.color ?? ink.faded} glow={0.4} position={[cx, 0, 0]} delay={0.7 + i * 0.03} />
+        );
+      })}
+    </group>
+  );
 }

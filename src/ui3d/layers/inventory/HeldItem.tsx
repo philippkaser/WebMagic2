@@ -1,11 +1,13 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { BoxGeometry, Color, Group, MeshBasicMaterial, Vector3 } from "three";
+import { Group, Vector3 } from "three";
 import { pxFor } from "../../anchors";
 import { uiNow } from "../../clock";
 import { ItemModel } from "../../ItemModel";
-import { stoneMaterial } from "../../materials";
+import { Plate } from "../../Plate";
+import { UiShow } from "../../presence";
 import { measureText, RuneText } from "../../text/RuneText";
+import { ink, type FrameKind } from "../../theme";
 import { emitUiSparks } from "../../UiSparks";
 import type { HintTone } from "./dropTarget";
 import { DRAG_Z, useInventory, useInventoryVersion, type Flight } from "./interaction";
@@ -16,24 +18,17 @@ import { restPose } from "./Socket";
 
 /** The item in your hand while you drag it: bigger than at rest (it's
  * nearer), trailing the pointer with a little weight and swinging with its
- * motion. Under it hangs a small slate tag whose runes say what letting go
- * will do — EQUIP, SWAP, SELL · 12 GOLD, DROP — and over empty air the item
- * starts to shed embers, the way things do just before they fall. */
+ * motion. Under it hangs a small grimoire plate whose small caps say what
+ * letting go will do — EQUIP, SWAP, SELL · 12 GOLD, DROP — framed in the
+ * deed's colour (arcane, gold, blood, iron), forging itself each time the
+ * meaning changes; and over empty air the item starts to shed embers, the
+ * way things do just before they fall. */
 
 const HINT_PX = pxFor(SCENE_DISTANCE - DRAG_Z, TEXT.hint);
-const TONE: Record<HintTone, string> = { accent: INK.accent, gold: INK.gold, danger: INK.danger, dim: INK.dim };
+const TONE: Record<HintTone, string> = { accent: ink.arcane, gold: INK.gold, danger: "#ff6a5a", dim: ink.parchmentDim };
+const TONE_FRAME: Record<HintTone, FrameKind> = { accent: "arcane", gold: "gold", danger: "blood", dim: "iron" };
 
 const tmpW = new Vector3();
-const box = new BoxGeometry(1, 1, 1);
-const seams = new Map<HintTone, MeshBasicMaterial>();
-function seamFor(tone: HintTone): MeshBasicMaterial {
-  let m = seams.get(tone);
-  if (!m) {
-    m = new MeshBasicMaterial({ color: new Color(TONE[tone]).multiplyScalar(0.8), toneMapped: false });
-    seams.set(tone, m);
-  }
-  return m;
-}
 
 export function HeldItem() {
   const ix = useInventory();
@@ -70,9 +65,9 @@ export function HeldItem() {
     const d = ix.drag;
     if (!g || !d) return;
     const dt = Math.max(1e-3, Math.min(rawDt, 0.05));
-    tagOpen.current += ((ix.held?.hint ? 1 : 0) - tagOpen.current) * (1 - Math.exp(-dt * 18));
+    // The plate forges and fades itself; the tag only lingers long enough.
+    tagOpen.current = ix.held?.hint ? 1 : Math.max(0, tagOpen.current - dt * 3);
     if (tag.current) {
-      tag.current.scale.set(Math.max(0.0001, tagOpen.current), Math.max(0.0001, tagOpen.current * tagOpen.current), 1);
       tag.current.visible = tagOpen.current > 0.01;
     }
     g.position.lerp(d.point, 1 - Math.exp(-dt * 28));
@@ -91,16 +86,16 @@ export function HeldItem() {
       if (sparkClock.current > 0.06) {
         sparkClock.current = 0;
         g.getWorldPosition(tmpW);
-        emitUiSparks({ position: [tmpW.x, tmpW.y - 0.03, tmpW.z], color: INK.danger, count: 2, speed: 0.06, up: -0.1, size: 0.008, spread: 0.06, ttl: 0.6 });
+        emitUiSparks({ position: [tmpW.x, tmpW.y - 0.03, tmpW.z], color: "#ff6a5a", count: 2, speed: 0.06, up: -0.1, size: 0.008, spread: 0.06, ttl: 0.6 });
       }
     }
   });
 
   if (!held || !pose) return null;
   const hintOn = !!held.hint;
-  const tagSize = hint ? measureText(hint.text, HINT_PX) : { width: 0, height: 0 };
-  const tw = tagSize.width + HINT_PX * 6;
-  const th = tagSize.height + HINT_PX * 4;
+  const tagSize = hint ? measureText(hint.text, HINT_PX, undefined, "label") : { width: 0, height: 0 };
+  const tw = tagSize.width + HINT_PX * 8;
+  const th = HINT_PX * 7 + HINT_PX * 6;
   return (
     <group ref={group}>
       <group ref={swing}>
@@ -110,19 +105,20 @@ export function HeldItem() {
       </group>
       {hint && (
         <group ref={tag} position={[0, -size * 0.95, 0.02]} visible={false}>
-          <mesh geometry={box} material={seamFor(hint.tone)} scale={[tw + HINT_PX * 1.6, th + HINT_PX * 1.6, 0.004]} position={[0, 0, -0.005]} />
-          <mesh geometry={box} material={stoneMaterial("#1d1a22")} scale={[tw, th, 0.008]} />
-          <RuneText
-            text={hint.text}
-            px={HINT_PX}
-            color={TONE[hint.tone]}
-            glow={1.1}
-            show={hintOn}
-            depth={-0.3}
-            position={[0, 0, 0.0045]}
-            inDuration={0.2}
-            outDuration={0.2}
-          />
+          <UiShow show={hintOn}>
+            <Plate key={hint.text} width={tw} height={th} frame={TONE_FRAME[hint.tone]} texel={HINT_PX * 0.9} fillOpacity={0.94} forgeTime={0.18}>
+              <RuneText
+                text={hint.text}
+                font="label"
+                px={HINT_PX}
+                color={TONE[hint.tone]}
+                glow={0.9}
+                depth={-0.3}
+                inDuration={0.15}
+                outDuration={0.15}
+              />
+            </Plate>
+          </UiShow>
         </group>
       )}
     </group>
@@ -196,7 +192,7 @@ function FlightItem({ flight, onDone }: { flight: Flight; onDone: () => void }) 
       if (sparkClock.current > 0.03) {
         sparkClock.current = 0;
         g.getWorldPosition(tmpW);
-        emitUiSparks({ position: [tmpW.x, tmpW.y, tmpW.z], color: k < 0.5 ? INK.danger : "#ffb070", count: 4, speed: 0.15, up: 0.12, size: 0.01, spread: 0.08 * (1 - k * 0.5), ttl: 0.8 });
+        emitUiSparks({ position: [tmpW.x, tmpW.y, tmpW.z], color: k < 0.5 ? "#ff6a5a" : "#ffb070", count: 4, speed: 0.15, up: 0.12, size: 0.01, spread: 0.08 * (1 - k * 0.5), ttl: 0.8 });
       }
     } else {
       // Into Maro's trough in an arc; coins answer.

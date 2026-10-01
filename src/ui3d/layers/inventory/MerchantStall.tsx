@@ -1,27 +1,35 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Group, Mesh, TorusGeometry, Vector3 } from "three";
-import { ENCHANT_COLOR } from "../../../items/affixes";
-import { getItemDef } from "../../../items/catalog";
+import { getItemDef, resolveItem } from "../../../items/catalog";
 import { GAMBLE_PRICE, merchantPrice } from "../../../items/economy";
 import { useGame } from "../../../state/gameStore";
 import { pxFor } from "../../anchors";
 import { uiNow } from "../../clock";
 import { glowMaterial } from "../../materials";
+import { Plate } from "../../Plate";
+import { useUiShow } from "../../presence";
 import { RuneButton } from "../../RuneButton";
 import { Tablet } from "../../Tablet";
-import { RuneText } from "../../text/RuneText";
+import { measureText, RuneText } from "../../text/RuneText";
+import { FRAMES, ink } from "../../theme";
+import { PANEL_TINT } from "./AltarTablet";
+import { cardFrame, cardMaterial, cardQuad } from "./card";
 import { landedCell } from "./dropTarget";
+import { EMPTY_FRAME, GRADES, gradeOf, litFrame } from "./grade";
 import { carriedNow, useInventory, useInventoryVersion } from "./interaction";
 import { GAMBLE_WARE, SCENE_DISTANCE, slotKey, STALL, stallLayout, TEXT, wareKey } from "./layout";
-import { bronze, frameGeometry, INK, plane, spillMaterial, wellMaterial } from "./materials";
-import { Socket, SocketItem } from "./Socket";
+import { INK, plane } from "./materials";
+import { Headline, LABEL_PX, Lore, PANEL_TEXEL, TitlePlate } from "./parts";
+import { CARD_TEXEL, Socket, SocketItem } from "./Socket";
+import { PixelSprite, spriteSize } from "./sprites";
 
-/** Maro's stall: his wares on a warm stone shelf, each resting in its own
- * bronze-rimmed socket with its name and price beside it and a BUY plaque to
- * press; the Orb of Fortune swirls on the bottom shelf. Along the foot of the
- * stall runs his trough — drag anything of yours onto the stall and it
- * kindles gold with his offer; let go and it's sold, the coins come back.
+/** Maro's stall, as the merchant's page: each ware is a framed row — its
+ * item card, its name in its grade's colour, the price beside a coin, and a
+ * gold BUY button (the Orb of Fortune's row is violet and says TEMPT).
+ * Along the foot runs his trough — drag anything of yours onto the stall
+ * and the trough's frame turns gold and blinks; over the stall it lights
+ * with his offer; let go and it's sold, the coins come back.
  *
  * All prices and rules are the store's (buyItem / gamble / sellStack); the
  * stall only shows them and, when something is bought, flies it from the
@@ -29,7 +37,9 @@ import { Socket, SocketItem } from "./Socket";
 
 const NAME_PX = pxFor(SCENE_DISTANCE, TEXT.plaqueLine);
 const PRICE_PX = pxFor(SCENE_DISTANCE, TEXT.label);
-const TITLE_PX = pxFor(SCENE_DISTANCE, TEXT.title * 0.9);
+const BUTTON_PX = pxFor(SCENE_DISTANCE, 0.015);
+const COIN_PX = (PRICE_PX * 8) / spriteSize("coin").h;
+const ORB = GRADES.enchanted;
 
 export function MerchantStall() {
   const ix = useInventory();
@@ -37,6 +47,7 @@ export function MerchantStall() {
   const face = useRef<Group>(null);
   useLayoutEffect(() => ix.registerSurface("stall", { spec, object: face.current! }), [ix, spec]);
   const gold = useGame((s) => s.gold);
+  const m = STALL.marginX;
 
   const buy = (ware: string) => {
     const before = carriedNow();
@@ -50,61 +61,67 @@ export function MerchantStall() {
   };
 
   return (
-    <Tablet width={spec.width} height={spec.height} tint="#5a4a42" accent={INK.gold} seed={11} tile={0.17}>
+    <Tablet width={spec.width} height={spec.height} tint={PANEL_TINT} frame="gold" seed={11} tile={0.17}>
       <group ref={face}>
-        <RuneText text="MARO THE PROVISIONER" px={TITLE_PX} color={INK.bright} glow={0.9} position={[0, STALL.titleY, 0.002]} />
-        <RuneText
-          text="coin up front · no credit"
-          px={PRICE_PX}
-          color={INK.faint}
-          glow={0.4}
-          position={[0, STALL.subtitleY, 0.002]}
-          delay={0.2}
-        />
+        <TitlePlate text="MERCHANT" y={STALL.height / 2 + 0.006} frame="gold" />
+        <Headline text="Maro's Wares" x={-m} y={STALL.titleY} />
+        <Lore text="Coin up front · no credit." x={-m} y={STALL.subtitleY} />
         {spec.sockets.map((s, i) => {
           const isOrb = s.ware === GAMBLE_WARE;
           const price = isOrb ? GAMBLE_PRICE : merchantPrice(s.ware!) ?? 0;
           const affordable = gold >= price;
+          const grade = isOrb ? ORB : gradeOf(resolveItem(s.ware!));
           const name = isOrb ? "Orb of Fortune" : getItemDef(s.ware!).name;
-          const color = isOrb ? ENCHANT_COLOR : getItemDef(s.ware!).color;
+          const priceText = `${price}`;
           return (
             <group key={s.key}>
+              <Plate
+                width={STALL.rowWidth}
+                height={STALL.rowHeight}
+                frame={isOrb ? "violet" : "iron"}
+                texel={PANEL_TEXEL}
+                fill="#0e0a12"
+                fillOpacity={0.92}
+                position={[0, s.y, 0.0005]}
+              />
               {isOrb ? (
-                <Socket spec={s} accent={INK.gold}>
+                <Socket spec={s} grade={ORB}>
                   {(riseAt) => <SocketItem spec={s} itemId={GAMBLE_WARE} model={<FortuneOrb />} riseAt={riseAt} />}
                 </Socket>
               ) : (
-                <Socket spec={s} accent={INK.gold} wareItem={s.ware!} />
+                <Socket spec={s} wareItem={s.ware!} />
               )}
               <RuneText
                 text={name}
                 px={NAME_PX}
-                color={color}
-                glow={0.8}
-                align="left"
-                anchor={[0, 0.5]}
-                position={[STALL.textX, s.y + 0.032, 0.002]}
-                delay={0.1 + i * 0.08}
-              />
-              <RuneText
-                text={[
-                  { text: `${price} gold`, color: affordable ? INK.gold : "#7d6a3a" },
-                  ...(isOrb ? [{ text: " · random gear", color: INK.faint }] : []),
-                ]}
-                px={PRICE_PX}
+                color={grade.color}
                 glow={0.6}
                 align="left"
                 anchor={[0, 0.5]}
-                position={[STALL.textX, s.y - 0.038, 0.002]}
+                position={[STALL.textX, s.y + 0.028, 0.004]}
+                delay={0.1 + i * 0.08}
+              />
+              <PixelSprite name="coin" tint={ink.gold} px={COIN_PX} anchor={[0, 0.5]} position={[STALL.textX, s.y - 0.032, 0.004]} delay={0.2 + i * 0.08} />
+              <RuneText
+                text={[
+                  { text: priceText, color: affordable ? INK.gold : ink.blood },
+                  ...(isOrb ? [{ text: "  random gear", color: ink.faded }] : affordable ? [] : [{ text: "  not enough", color: ink.faded }]),
+                ]}
+                font="label"
+                px={PRICE_PX}
+                glow={0.4}
+                align="left"
+                anchor={[0, 0.5]}
+                position={[STALL.textX + COIN_PX * 12, s.y - 0.032, 0.004]}
                 delay={0.18 + i * 0.08}
               />
               <RuneButton
                 label={isOrb ? "TEMPT" : "BUY"}
-                accent={isOrb ? ENCHANT_COLOR : INK.gold}
-                px={PRICE_PX}
+                variant={isOrb ? ORB.color : "gold"}
+                px={BUTTON_PX}
                 width={STALL.buttonWidth}
                 disabled={!affordable}
-                position={[STALL.buttonX, s.y, 0.004]}
+                position={[STALL.buttonX, s.y, 0.006]}
                 onPress={() => buy(s.ware!)}
                 delay={0.25 + i * 0.08}
               />
@@ -117,89 +134,98 @@ export function MerchantStall() {
   );
 }
 
-/** The trough along the stall's foot: idle, it says how selling works; while
- * you drag something sellable it kindles gold, and over the stall it names
- * Maro's price. */
+/** The trough along the stall's foot, drawn as a wide card: idle, its frame
+ * is dark iron and it says how selling works; while you drag something
+ * sellable its frame turns gold and blinks; over the stall it lights solid
+ * gold and names Maro's price. */
 function SellTrough() {
   const ix = useInventory();
+  const show = useUiShow();
   useInventoryVersion(ix);
   const drag = ix.drag;
   const selling = drag?.action.kind === "sell" ? drag.action.gold : null;
   const canSell = !!drag && !(drag.from.container === "equipment" && drag.from.slot === "staff");
-  const well = useMemo(() => wellMaterial(INK.gold, "#120d0a"), []);
-  const spill = useMemo(() => spillMaterial(INK.gold, 0.5), []);
-  useEffect(
-    () => () => {
-      well.dispose();
-      spill.dispose();
-    },
-    [well, spill],
-  );
-  const spillMesh = useRef<Mesh>(null);
-  const k = useRef({ seam: 0, pool: 0, spill: 0 });
-  useFrame((_, dt) => {
-    const s = k.current;
-    const pulse = 0.8 + 0.2 * Math.sin(uiNow() * 6);
-    const [seam, pool, sp] = selling !== null ? [2.4, 0.5, 1] : canSell ? [1.1 * pulse, 0.1, 0.25 * pulse] : [0.25, 0, 0];
-    const q = 1 - Math.exp(-dt * 10);
-    s.seam += (seam - s.seam) * q;
-    s.pool += (pool - s.pool) * q;
-    s.spill += (sp - s.spill) * q;
-    well.uniforms.uSeam.value = s.seam;
-    well.uniforms.uPool.value = s.pool;
-    spill.uniforms.uIntensity.value = s.spill;
-    if (spillMesh.current) spillMesh.current.visible = s.spill > 0.01;
-  });
   const w = STALL.trayWidth;
   const h = STALL.trayHeight;
+  const material = useMemo(() => cardMaterial(w, h, CARD_TEXEL, EMPTY_FRAME, "#140f08"), [w, h]);
+  useEffect(() => () => material.dispose(), [material]);
+  const gold = useMemo(() => ({ base: cardFrame(FRAMES.gold), lit: cardFrame(litFrame(FRAMES.gold)), idle: cardFrame(EMPTY_FRAME) }), []);
+  const shownAt = useRef(uiNow());
+  useEffect(() => {
+    if (show) shownAt.current = uiNow();
+  }, [show]);
+  const quad = cardQuad(w, h, material.uniforms.uShadow.value);
+  useFrame(() => {
+    const u = material.uniforms;
+    const t = uiNow() - shownAt.current - 0.2;
+    const k = show ? Math.min(1, Math.max(0, t / 0.35)) : 0;
+    u.uProgress.value = k;
+    u.uBody.value = Math.round(k * 4) / 4;
+    u.uFade.value = show ? 1 : 0;
+    const blink = Math.floor(uiNow() * 4) % 2 === 0;
+    u.uGlow.value.set(ink.gold);
+    u.uRing.value.set(ink.gold);
+    u.uWash.value.set(ink.gold);
+    if (selling !== null) {
+      u.uFrame.value = gold.lit;
+      u.uRingK.value = 1;
+      u.uWashK.value = 0.16;
+      u.uGlowK.value = 0.5;
+    } else if (canSell) {
+      u.uFrame.value = gold.base;
+      u.uRingK.value = blink ? 1 : 0;
+      u.uWashK.value = 0;
+      u.uGlowK.value = 0.25;
+    } else {
+      u.uFrame.value = gold.idle;
+      u.uRingK.value = 0;
+      u.uWashK.value = 0;
+      u.uGlowK.value = 0;
+    }
+  });
   const label =
     selling !== null
       ? [{ text: `SELL FOR ${selling} GOLD`, color: INK.gold }]
       : canSell
         ? [{ text: "LET GO ON THE STALL TO SELL", color: INK.gold }]
-        : [{ text: "drag your things here to sell", color: INK.faint }];
+        : [{ text: "DRAG YOUR THINGS HERE TO SELL", color: ink.faded }];
+  const labelW = measureText(label, LABEL_PX, undefined, "label").width;
   return (
     <group position={[0, STALL.trayY, 0]}>
-      <mesh ref={spillMesh} geometry={plane()} material={spill} scale={[w + 0.3, h + 0.3, 1]} position={[0, 0, 0.0005]} renderOrder={3} visible={false} />
-      <WideFrame w={w} h={h} />
-      <mesh geometry={plane()} material={well} scale={[w, h, 1]} position={[0, 0, 0.002]} />
-      <RuneText text={label} px={PRICE_PX} glow={selling !== null ? 1.3 : 0.6} position={[0, 0, 0.01]} delay={0.3} />
+      <mesh geometry={plane()} material={material} scale={quad.scale} position={[quad.offset[0], quad.offset[1], 0.001]} renderOrder={5} />
+      <PixelSprite name="coin" tint={selling !== null || canSell ? ink.gold : ink.faded} px={COIN_PX} position={[-labelW / 2 - COIN_PX * 8, 0, 0.004]} delay={0.4} />
+      <RuneText text={label} font="label" px={LABEL_PX} glow={selling !== null ? 1 : 0.4} position={[0, 0, 0.004]} delay={0.3} />
     </group>
   );
-}
-
-/** A bronze rim for the trough. */
-function WideFrame({ w, h }: { w: number; h: number }) {
-  return <mesh geometry={frameGeometry(w, h, 0.02, 0.014)} material={bronze()} />;
 }
 
 // ── The Orb of Fortune ───────────────────────────────────────────────────────
 
 let orbRing: TorusGeometry | null = null;
 
-/** Not an item: a swirl of violet light caught in two turning bronze rings.
- * Sized like an ItemModel (~1 unit) so it rests in a socket like one. */
+/** Not an item: a swirl of violet light caught in two turning rings. Sized
+ * like an ItemModel (~1 unit) so it stands in a card like one. */
 function FortuneOrb() {
   const a = useRef<Group>(null);
   const b = useRef<Group>(null);
   const core = useRef<Mesh>(null);
-  orbRing ??= new TorusGeometry(0.34, 0.025, 6, 32);
+  orbRing ??= new TorusGeometry(0.34, 0.03, 4, 16);
   useFrame(() => {
     const t = uiNow();
     if (a.current) a.current.rotation.set(t * 0.9, t * 0.5, 0.4);
     if (b.current) b.current.rotation.set(-t * 0.6, 0.3, t * 0.8);
-    if (core.current) core.current.scale.setScalar(0.2 + Math.sin(t * 3.1) * 0.02);
+    if (core.current) core.current.scale.setScalar(Math.floor(t * 3) % 2 === 0 ? 0.2 : 0.18);
   });
   return (
     <group>
-      <mesh ref={core} material={glowMaterial(ENCHANT_COLOR, 2.8)}>
-        <icosahedronGeometry args={[1, 1]} />
+      <mesh ref={core} material={glowMaterial(ORB.color, 2.8)}>
+        <icosahedronGeometry args={[1, 0]} />
       </mesh>
       <group ref={a}>
-        <mesh geometry={orbRing} material={glowMaterial("#ffcf4d", 1.2)} />
+        <mesh geometry={orbRing} material={glowMaterial(ink.gold, 1.2)} />
       </group>
       <group ref={b}>
-        <mesh geometry={orbRing} material={glowMaterial(ENCHANT_COLOR, 1.6)} scale={0.8} />
+        <mesh geometry={orbRing} material={glowMaterial(ORB.color, 1.6)} scale={0.8} />
       </group>
     </group>
   );
