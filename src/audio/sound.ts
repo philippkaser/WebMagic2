@@ -226,15 +226,22 @@ export function playWeighing(): void {
 // ── Travel: portals, the tunnel, death and the way back ─────────────────────
 // (transition/TransitionSystem plays these on the journey's stage changes.)
 
-/** Being pulled into a portal: a rush of air swelling into a whistle, a
- * chord bending upward, and a sub "thoom" as the vortex closes over you.
- * `bright` 0…1 lifts the pitch — cyan descents sit lower than gold homecomings. */
+/** Being pulled into a rift: a rush of air swelling into a whistle, a chord
+ * bending upward, the artpass warp's rising sweep and sparkle over a deep
+ * sub that sinks as you go, and a "thoom" as the tear closes over you.
+ * `bright` 0…1 lifts the pitch — cyan descents sit lower than gold
+ * homecomings. */
 export function playPortalEnter(bright = 0.5): void {
   noise({ dur: 1, vol: 0.17, filterFreq: 240, filterEnd: 3600, type: "bandpass", q: 1.4, attack: 0.75 });
   noise({ dur: 0.9, vol: 0.05, filterFreq: 1800, filterEnd: 7200, type: "bandpass", q: 6, delay: 0.15, attack: 0.6 });
   const base = 170 + bright * 90;
   tone({ type: "sine", freq: base, freqEnd: base * 3.2, dur: 0.95, vol: 0.07, attack: 0.6 });
   tone({ type: "triangle", freq: base * 1.5, freqEnd: base * 4.6, dur: 0.9, vol: 0.03, delay: 0.05, attack: 0.55 });
+  // The warp (artpass playWarp): a rising rush through space, a glittering
+  // top, and a sub sinking under it all.
+  tone({ type: "sine", freq: 110, freqEnd: 560, dur: 1.1, vol: 0.06, attack: 0.3 });
+  tone({ type: "triangle", freq: 880, freqEnd: 2400, dur: 0.8, vol: 0.022, delay: 0.3, attack: 0.2 });
+  tone({ type: "sine", freq: 55, freqEnd: 38, dur: 1.3, vol: 0.12, attack: 0.2 });
   tone({ type: "sine", freq: 96, freqEnd: 30, dur: 0.7, vol: 0.22, delay: 0.84 });
 }
 
@@ -343,22 +350,28 @@ export function playFeatherLift(): void {
   }
 }
 
-/** A sealed portal refuses you: a dull knock, and the seal's glass rings. */
+/** A sealed rift refuses you: a dull knock on stone, and the wound flinches
+ * — a short, low, torn growl. */
 export function playSealedTouch(): void {
   tone({ type: "sine", freq: 124, freqEnd: 70, dur: 0.18, vol: 0.16 });
   noise({ dur: 0.12, vol: 0.07, filterFreq: 520, filterEnd: 110 });
-  tone({ type: "sine", freq: 1568, dur: 0.7, vol: 0.022, delay: 0.03 });
-  tone({ type: "sine", freq: 2349, dur: 0.5, vol: 0.012, delay: 0.05 });
+  tone({ type: "sawtooth", freq: 82, freqEnd: 61, dur: 0.45, vol: 0.045, delay: 0.04, attack: 0.03 });
+  tone({ type: "sawtooth", freq: 87, freqEnd: 58, dur: 0.4, vol: 0.035, delay: 0.06, attack: 0.03 });
+  noise({ dur: 0.35, vol: 0.05, filterFreq: 1400, filterEnd: 300, type: "bandpass", q: 4, delay: 0.05 });
 }
 
-/** A seal breaks (the Warden has fallen): glass shatters, and the portal
- * breathes open. */
+/** A seal breaks (the Warden has fallen, the Tithe is paid): space RIPS —
+ * a tearing burst whose pitch races down, crackles along the tear — and the
+ * wound breathes open with a rising swell. */
 export function playSealBreak(): void {
-  noise({ dur: 0.4, vol: 0.14, filterFreq: 5200, filterEnd: 1400, type: "bandpass", q: 0.9 });
-  for (let i = 0; i < 6; i++) {
-    tone({ type: "sine", freq: 1800 + Math.random() * 2600, dur: 0.2 + Math.random() * 0.35, vol: 0.025, delay: i * 0.035 });
+  noise({ dur: 0.5, vol: 0.16, filterFreq: 6200, filterEnd: 500, type: "bandpass", q: 1.2 });
+  noise({ dur: 0.35, vol: 0.1, filterFreq: 900, filterEnd: 160, delay: 0.04 });
+  for (let i = 0; i < 7; i++) {
+    noise({ dur: 0.04, vol: 0.06, filterFreq: 2400 + Math.random() * 3000, type: "bandpass", q: 8, delay: 0.05 + i * 0.045 + Math.random() * 0.02 });
   }
-  tone({ type: "sine", freq: 196, freqEnd: 392, dur: 1.3, vol: 0.06, delay: 0.1, attack: 0.3 });
+  tone({ type: "sine", freq: 70, freqEnd: 36, dur: 0.6, vol: 0.18 });
+  tone({ type: "sine", freq: 196, freqEnd: 392, dur: 1.3, vol: 0.06, delay: 0.15, attack: 0.3 });
+  tone({ type: "triangle", freq: 880, freqEnd: 1760, dur: 1, vol: 0.02, delay: 0.3, attack: 0.3 });
   noise({ dur: 1.2, vol: 0.05, filterFreq: 400, filterEnd: 1800, type: "bandpass", q: 2, delay: 0.1, attack: 0.4 });
 }
 
