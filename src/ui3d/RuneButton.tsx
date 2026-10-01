@@ -45,13 +45,15 @@ interface ButtonLook {
   frame: FrameKind | string;
   fill: string;
   hover: string;
-  glyph: string;
+  /** Colour of the ✦ marks either side of the label; null = plain label
+   * (the grimoire's ghost buttons carry no marks). */
+  glyph: string | null;
 }
 
 /** The grimoire's four buttons (after artpass's .wm-btn variants). */
 const LOOKS: Record<string, ButtonLook> = {
   arcane: { frame: "arcane", fill: "#0a1e1c", hover: "#1a4840", glyph: ink.arcaneDim },
-  ghost: { frame: "iron", fill: "#0e0a12", hover: "#282030", glyph: ink.faded },
+  ghost: { frame: "iron", fill: "#0e0a12", hover: "#282030", glyph: null },
   danger: { frame: "blood", fill: "#280808", hover: "#5a1212", glyph: "#ff6a5a" },
   gold: { frame: "gold", fill: "#281c06", hover: "#50380a", glyph: ink.gold },
 };
@@ -89,21 +91,19 @@ export function RuneButton({
   // Mounted hidden = already sunk away (not "sinking now").
   const lift = useRef(show ? 0 : -0.02);
   const glow = useRef(0);
-  const size = useMemo(() => measureText([{ text: "✦ " }, ...(typeof label === "string" ? [{ text: label }] : label), { text: " ✦" }], px), [label, px]);
+  const look = buttonLook(variant ?? accent);
+  const decorated = useMemo<TextInput>(() => {
+    const body = typeof label === "string" ? [{ text: label }] : [...label];
+    return look.glyph
+      ? [{ text: "✦ ", color: look.glyph }, ...body, { text: " ✦", color: look.glyph }]
+      : body;
+  }, [label, look.glyph]);
+  const size = useMemo(() => measureText(decorated, px), [decorated, px]);
   const w = width ?? size.width + px * 16;
   const h = size.height + px * 10;
-  const look = buttonLook(variant ?? accent);
   const fill = useMemo(() => new MeshBasicMaterial({ color: look.fill, toneMapped: false }), [look.fill]);
   useEffect(() => () => fill.dispose(), [fill]);
   const frameTexel = px * 1.35;
-  const decorated = useMemo<TextInput>(
-    () => [
-      { text: "✦ ", color: look.glyph },
-      ...(typeof label === "string" ? [{ text: label }] : label),
-      { text: " ✦", color: look.glyph },
-    ],
-    [label, look.glyph],
-  );
 
   const active = show && !disabled;
   useEffect(() => {
