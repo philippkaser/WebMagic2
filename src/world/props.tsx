@@ -40,7 +40,8 @@ import { registerPortalAnchor } from "../transition/portals";
 import { smoothstep } from "../transition/timeline";
 import { isTraveling } from "../transition/travel";
 import { PEDESTAL_ORB_Y, PedestalModel } from "../render/models/PedestalModel";
-import { PORTAL_RING_Y, PortalModel, newPortalDrive, portalSpinDir } from "../render/models/PortalModel";
+import { RIFT_Y, PortalModel, newPortalDrive, riftActivity } from "../render/models/PortalModel";
+import { RIFT_STONES } from "../render/models/RiftFrameModel";
 import { BarrelModel, CrateModel, PotModel } from "../render/models/PropModels";
 import { TORCH_EMBER_INTENSITY, TorchModel } from "../render/models/TorchModel";
 import type { PropKind, Vec3 } from "./types";
@@ -326,20 +327,32 @@ export function Torch({
   );
 }
 
-/** Interactive portal ring. The look is render/models/PortalModel; this is
- * the behaviour: the pooled light, the sparks and the motes being drawn in,
- * the prompt, and the numbers that drive the vortex (proximity, the seal, the
- * surge when a journey starts here). While `locked` it burns dim behind its
- * rune seal and refuses use — trying it makes the seal flare; when it unlocks
- * mid-floor (the Warden falls) the seal visibly breaks. Open portals register
- * a travel anchor so the journey (transition/) opens around this ring. */
+/** Rift stones are architecture: solid to wizards, monsters, spells and
+ * tumbling props alike. */
+const RIFT_STONE_GROUPS = interactionGroups(GROUPS.WORLD, [
+  GROUPS.PLAYER,
+  GROUPS.ENEMY,
+  GROUPS.FRIENDLY_PROJECTILE,
+  GROUPS.ENEMY_PROJECTILE,
+  GROUPS.PROP,
+]);
+
+/** Interactive rift. The look is render/models/PortalModel (the tear, its
+ * mote swarm, the rune dais and standing stones); this is the behaviour: the
+ * pooled light, sparks thrown off the tear's rim, the stones' colliders, the
+ * prompt, and the numbers that drive the wound (proximity, the seal, the
+ * surge when a journey starts here). While `locked` the wound is nearly shut
+ * — a dim slit that refuses use; trying it makes it flinch; when it unlocks
+ * mid-floor (the Warden falls) the seal breaks and it rips open. Open rifts
+ * register a travel anchor so the journey (transition/) tears open around
+ * this one. */
 export function Portal({
   position,
   color,
   prompt,
   onUse,
   locked = false,
-  lockedPrompt = "The portal is sealed…",
+  lockedPrompt = "The rift is sealed…",
 }: {
   position: Vec3;
   color: string;
@@ -353,51 +366,26 @@ export function Portal({
   const light = useRef<DynamicLightSource | null>(null);
   const sparkClock = useRef(0);
   const wasLocked = useRef(locked);
-  /** Motes spiralling into the ring, drawn as trails of short-lived sparks:
-   * per mote an angle, a radius and the countdown to its next spark. */
-  const [comets] = useState(() =>
-    Array.from({ length: PORTAL_COMETS }, (_, i) => ({
-      angle: (i / PORTAL_COMETS) * Math.PI * 2,
-      radius: 0,
-      side: i % 2 ? 1 : -1,
-      emit: 0,
-    })),
-  );
-  // Reusable burst options (rim sparks, mote trails) — no per-frame garbage.
-  const fx = useMemo(
+  // Reusable burst options (rim sparks) — no per-frame garbage.
+  const rim = useMemo(
     () => ({
-      spin: portalSpinDir(color),
-      rim: {
-        position: [0, 0, 0] as [number, number, number],
-        count: 1,
-        color,
-        speed: 0.4,
-        upward: 0.7,
-        ttl: 0.9,
-        size: 0.05,
-        gravity: 0,
-        drag: 0.5,
-        style: "spark" as const,
-      },
-      trail: {
-        position: [0, 0, 0] as [number, number, number],
-        count: 1,
-        color,
-        speed: 0.05,
-        upward: 0,
-        ttl: 0.4,
-        size: 0.05,
-        gravity: 0,
-        drag: 0.5,
-        style: "glow" as const,
-      },
+      position: [0, 0, 0] as [number, number, number],
+      count: 1,
+      color,
+      speed: 0.4,
+      upward: 0.7,
+      ttl: 0.9,
+      size: 0.05,
+      gravity: 0,
+      drag: 0.5,
+      style: "spark" as const,
     }),
     [color],
   );
 
   useEffect(() => {
     const src = addLightSource({
-      position: [position[0], position[1] + 1.6, position[2] + 0.8],
+      position: [position[0], position[1] + RIFT_Y - 0.1, position[2] + 0.8],
       color,
       intensity: 9,
       distance: 12,
@@ -414,7 +402,7 @@ export function Portal({
     if (locked) return;
     return registerPortalAnchor({
       x: position[0],
-      y: position[1] + PORTAL_RING_Y,
+      y: position[1] + RIFT_Y,
       z: position[2],
       surge: () => {
         drive.surge = 1;
@@ -426,14 +414,15 @@ export function Portal({
     const dt = Math.min(rawDt, 0.1);
     const t = clock.elapsedTime;
     const cx = position[0];
-    const cy = position[1] + PORTAL_RING_Y;
+    const cy = position[1] + RIFT_Y;
     const cz = position[2];
 
-    // The seal: holds at 1 while locked; breaks over ~1.3 s once unlocked.
+    // The seal: holds at 1 while locked; tears open over ~1.3 s once
+    // unlocked (the model eases the wound's width along it).
     if (wasLocked.current && !locked) {
       playSealBreak();
       spawnBurst({ position: [cx, cy, cz], count: 40, color: [color, "#ffffff"], speed: 7, upward: 1, ttl: 1, size: 0.08, gravity: -6, style: "spark" });
-      runeBurstFx([cx, position[1] + 0.05, cz], color);
+      runeBurstFx([cx, position[1] + 0.25, cz], color);
       flashLight([cx, cy, cz + 0.6], color, 34, 14);
     }
     wasLocked.current = locked;
@@ -447,56 +436,40 @@ export function Portal({
     const near = 1 - smoothstep(1.4, 9, Math.sqrt(d2));
     drive.proximity += (near - drive.proximity) * Math.min(1, dt * 3);
     const prox = drive.proximity;
+    const act = riftActivity(drive.seal);
 
     if (light.current) {
-      light.current.intensity = locked
-        ? 1.5 + drive.refusal * 7
-        : (8 + prox * 5 + drive.surge * 16) * (1 - drive.seal * 0.8) + Math.sin(t * 2.2) * 1.2;
+      light.current.intensity =
+        act * (8 + prox * 5 + drive.surge * 16 + Math.sin(t * 2.2) * 1.2) +
+        drive.refusal * 6 +
+        4 * drive.seal * (1 - drive.seal) * 20;
     }
 
-    // Sparks and motes only near the player: far away they're a few pixels
+    // Sparks thrown off the tear's rim (in its facing plane) — more of them
+    // as you come close; only near the player: far away they're a few pixels
     // in the fog, and every one costs the shared particle pool a slot.
     if (!locked && d2 < PORTAL_FX_RANGE_SQ) {
-      // Sparks thrown off the rim — more of them as you come close.
       sparkClock.current -= dt;
       if (sparkClock.current <= 0) {
         sparkClock.current = 0.09 / (1 + prox * 1.5);
         const a = Math.random() * Math.PI * 2;
-        fx.rim.position[0] = cx + Math.cos(a) * 1.1;
-        fx.rim.position[1] = cy + Math.sin(a) * 1.1;
-        fx.rim.position[2] = cz;
-        spawnBurst(fx.rim);
-      }
-      // Motes drawn in: each spirals toward the heart, leaving a trail of
-      // sparks, then respawns out in the air around the ring.
-      const pull = 1 + prox * 1.4 + drive.surge * 3;
-      for (const m of comets) {
-        if (m.radius <= 0.12) {
-          m.radius = 1.9 + Math.random() * 0.9;
-          m.angle = Math.random() * Math.PI * 2;
-        }
-        m.radius -= dt * pull * (0.35 + (2.4 - Math.min(m.radius, 2.4)) * 0.9);
-        m.angle += dt * pull * (1.2 + 2.2 / Math.max(m.radius, 0.3)) * fx.spin;
-        m.emit -= dt;
-        if (m.emit <= 0 && m.radius > 0.12) {
-          m.emit = 0.05;
-          const depth = Math.min(1, (m.radius - 1) / 1.4);
-          fx.trail.position[0] = cx + Math.cos(m.angle) * m.radius;
-          fx.trail.position[1] = cy + Math.sin(m.angle) * m.radius;
-          fx.trail.position[2] = cz + m.side * Math.max(0, depth) * 0.7;
-          fx.trail.size = 0.05 + prox * 0.02;
-          spawnBurst(fx.trail);
-        }
+        const across = Math.cos(a) * 0.75 * act;
+        rim.position[0] = cx + Math.cos(drive.yaw) * across;
+        rim.position[1] = cy + Math.sin(a) * 1.6;
+        rim.position[2] = cz - Math.sin(drive.yaw) * across;
+        spawnBurst(rim);
       }
     }
 
     if (d2 < 7 && !isTraveling()) {
-      const above: [number, number, number] = [position[0], position[1] + 3, position[2]];
+      // Low on the tear's face, in front of it: readable from the dais
+      // without craning up past the wound.
+      const at: [number, number, number] = [position[0], position[1] + 3.1, position[2]];
       if (locked) {
         offerInteraction(lockedPrompt, d2, () => {
           playSealedTouch();
           drive.refusal = 1;
-        }, above);
+        }, at);
       } else {
         offerInteraction(
           prompt,
@@ -505,7 +478,7 @@ export function Portal({
             playPortal();
             onUse();
           },
-          above,
+          at,
         );
       }
     }
@@ -513,14 +486,18 @@ export function Portal({
 
   return (
     <group position={position}>
-      <PortalModel color={color} locked={locked} drive={drive} />
+      <PortalModel color={color} drive={drive} />
+      {/* The standing stones are solid; the dais stays walk-through. */}
+      <RigidBody type="fixed" colliders={false}>
+        {RIFT_STONES.map((s, i) => (
+          <CuboidCollider key={i} position={s.pos} args={s.half} collisionGroups={RIFT_STONE_GROUPS} />
+        ))}
+      </RigidBody>
     </group>
   );
 }
 
-/** Motes spiralling into each open portal (see Portal). */
-const PORTAL_COMETS = 3;
-/** Beyond this (m, squared) a portal throws no sparks or motes. */
+/** Beyond this (m, squared) a rift throws no sparks. */
 const PORTAL_FX_RANGE_SQ = 20 * 20;
 
 // ── Floor treasure networking ────────────────────────────────────────────────

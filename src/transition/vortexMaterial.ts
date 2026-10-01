@@ -1,26 +1,31 @@
 import { Color, ShaderMaterial, Vector2 } from "three";
-import { VORTEX_NOISE_GLSL } from "./vortexGlsl";
+import { PIXEL_NOISE_GLSL } from "./vortexGlsl";
 
 /** The travel overlay: ONE fullscreen quad, ONE draw call, drawn in the world
- * canvas (so bloom feeds on it) after everything else (renderOrder high,
- * depthTest off). It is a pure function of a handful of uniforms that
- * TransitionSystem fills from timeline.ts each frame:
+ * canvas after everything else (renderOrder high, depthTest off) — so it is
+ * rendered at the world's own low resolution and upscaled with the same
+ * nearest-neighbour pixels, and bloom feeds on its light like any emissive.
+ * A pure function of a handful of uniforms that TransitionSystem fills from
+ * timeline.ts each frame, in the gritty pixel style of the artpass warp:
+ * blocky star squares on a coarse grid, hash-lane streaks, stepped colour.
  *
- * - The TUNNEL is analytic, not geometry: each pixel's view ray is intersected
- *   with an infinite tube (depth = 1 / radius), so it covers the view
- *   completely at any FOV or roll and costs a few noise lookups per pixel.
- *   Walls are two layers of periodic fbm in (turns, depth) twisted into a
- *   spiral, light streaks race along 48 angular lanes, flecks float at two
- *   inner radii for parallax, and the far end blazes (bloom does the rest).
- * - ENTER draws that same tunnel inside an iris centred on the portal's
- *   on-screen position, starting at the portal's own apparent size, ringed by
- *   a wobbling event horizon, while spiral arms of the portal's colour wind
- *   over the still-visible world.
- * - ARRIVE tears a growing hole in the tunnel at the screen centre, riding a
- *   white-hot ring.
- * - Death has no vortex: a noise-threshold dissolve eats the view from the
- *   edges in, glowing ember-red along the burn line, leaving smouldering
- *   black-red ash with sparks drifting up.
+ * - The WARP (the journey's middle) is a parallel starry world seen in
+ *   swirled polar coordinates: three parallax layers of chunky star blocks
+ *   and a dark nebula drifting past (sinking or rising — `uDrift`) by an
+ *   integrated fall distance (`uFall`). Being SUCKED IN (`uSuck`) spins it
+ *   up, zooms it toward its heart, lights it in the rift's colour and sends
+ *   spiral streaks screaming past; HOVERING it goes dark with only hints of
+ *   colour; being SPAT OUT (`uEject`) kicks it outward past you, surges it
+ *   back into the rift's colour and flashes.
+ * - ENTER draws that warp inside the rift's own tear (the silhouette the rift
+ *   shader draws — vortexGlsl's tearSd) ripping open over the view from the
+ *   rift's on-screen position and size, with a ragged burning rim, while
+ *   pixel shards of the world spiral into it.
+ * - ARRIVE rips a tear open at the screen centre, riding the burning rim,
+ *   onto the new place.
+ * - Death has no warp: the view burns away in chunky blocks from the edges
+ *   in, glowing ember-red along the burn line, leaving smouldering black-red
+ *   ash with square embers drifting up.
  *
  * At dpr 0.35 the whole thing is ~70k fragments; nothing here allocates. */
 
@@ -37,13 +42,18 @@ const FRAGMENT = /* glsl */ `
 varying vec2 vNdc;
 uniform float uTime;
 uniform float uAspect;
-uniform float uTanHalf;
 uniform float uRoll;
 uniform vec2 uCenter;
+uniform float uIris;
 uniform float uIrisR;
+uniform float uReveal;
 uniform float uRevealR;
 uniform float uRing;
 uniform float uSwirl;
+uniform float uSuck;
+uniform float uEject;
+uniform float uFall;
+uniform float uDrift;
 uniform float uDissolve;
 uniform float uDark;
 uniform float uFlash;
@@ -54,169 +64,192 @@ uniform vec3 uHot;
 uniform vec3 uDeep;
 uniform float uSpinDir;
 uniform float uSpin;
-uniform float uSpeed;
 uniform float uStreaks;
 uniform float uRings;
 uniform float uFeathers;
 
-${VORTEX_NOISE_GLSL}
+${PIXEL_NOISE_GLSL}
 
 const float TAU = 6.2831853;
+const float INV_TAU = 0.1591549;
 
-vec3 tunnel(vec2 q) {
-  // Screen point (in half-heights) × tan(fov/2) = the view ray's slope.
-  vec2 d = q * uTanHalf;
+/** The parallel starry world, around q (screen half-heights from the warp's
+ * heart). Ported from the artpass TRANSITION_FRAG warp, with its scripted
+ * progress replaced by live phases (suck / hover / eject). */
+vec3 warp(vec2 q) {
+  // The artpass units: the screen's half-height is 0.5.
+  vec2 uv = q * 0.5;
   float cs = cos(uRoll);
   float sn = sin(uRoll);
-  d = vec2(cs * d.x - sn * d.y, sn * d.x + cs * d.y);
-  float r = max(length(d), 1e-4);
-  float ang = atan(d.y, d.x);
-  float z = 1.0 / r;
-  float t = uTime;
-  float fly = t * uSpeed * 12.0;
-  float v = z + fly;
-  float turns = ang / TAU + uSpinDir * (z * 0.07 + t * uSpin * 0.14);
+  uv = vec2(cs * uv.x - sn * uv.y, sn * uv.x + cs * uv.y);
+  // (Capped below the artpass extreme: at a full suck the zoom shrinks the
+  // stars below a pixel and the void turns to static.)
+  float suckIn = uSuck * 0.7;
+  float suckOut = uEject;
+  float mid = (1.0 - suckIn) * (1.0 - suckOut);
+  // Colour arc: saturated in the rift's colour at the ends, a dark void with
+  // only hints of it in the middle.
+  float colorAmt = max(uSuck, suckOut);
 
-  // Walls: dark swirling bands in the deep shade and the base colour, with
-  // hot filaments only on the noise peaks — most of the tube stays under the
-  // bloom threshold so the streaks and rings are what glow.
-  float n1 = vxFbmP(vec2(turns * 10.0, v * 0.3), 10.0);
-  float n2 = vxFbmP(vec2(turns * 22.0 + 5.0, v * 0.9 - t * 0.8), 22.0);
-  float bands = smoothstep(0.42, 0.8, n1);
-  vec3 col = uDeep * (0.45 + 0.9 * n1);
-  col = mix(col, uColor * 0.5, bands * 0.85);
-  col += uColor * pow(n2, 5.0) * 2.0 * (0.25 + bands);
+  float r = length(uv);
+  float a = atan(uv.y, uv.x);
+  // Swirl spikes while being sucked, calms to a slow drift while hovering.
+  a += uSpinDir * ((suckIn * 3.6 + suckOut * 4.0 + 0.22) * (1.2 - r) + uTime * 0.12 * uSpin);
+  // Radial zoom: rushes toward the heart as you are pulled in, then blasts
+  // outward past you as you are ejected — a hard outward kick for force.
+  float zoom = 1.0 + suckIn * 4.5 - suckOut * 1.9;
+  vec2 sp = vec2(cos(a), sin(a)) * r * zoom;
 
-  // Light streaks racing along the walls: thin lanes, short bright heads.
-  float cells = 96.0;
-  float cu = turns * cells;
-  float ci = mod(floor(cu), cells);
-  float rnd = vxHash11(ci * 7.13 + 1.0);
-  float lane = 1.0 - smoothstep(0.1, 0.3, abs(fract(cu) - 0.5));
-  float sv = fract(v * (0.04 + rnd * 0.05) + rnd * 13.0);
-  float on = step(1.0 - uStreaks * 0.32, vxHash11(ci * 3.71 + 9.0));
-  float head = smoothstep(0.84, 1.0, sv);
-  // (Faded right at the screen edge, where the nearest wall would blow a
-  // streak up into a slab.)
-  col += (uHot * 1.25 + uColor * 0.4) * head * head * lane * on * smoothstep(0.4, 1.2, z);
+  // The fall: you sink (or rise) through the parallel world floor by floor.
+  float vy = uFall * uDrift;
 
-  // Rune rings rushing past.
-  float rv = fract(v * 0.06);
-  float ringBand = smoothstep(0.9, 0.93, rv) * (1.0 - smoothstep(0.955, 0.975, rv));
-  float glyph = step(0.42, vxHash21(vec2(mod(floor(turns * 18.0), 18.0), floor(v * 0.06))));
-  col += uColor * 1.9 * ringBand * uRings * (0.25 + 0.75 * glyph);
-
-  // Flecks floating inside the tube at two radii: parallax depth.
-  for (int k = 0; k < 2; k++) {
-    float rho = k == 0 ? 0.55 : 0.28;
-    float per = k == 0 ? 20.0 : 12.0;
-    float zk = rho / r;
-    float vk = (zk + fly * 1.15) * 0.7;
-    float uk = (ang / TAU) * per + t * 0.25 * uSpinDir * float(k + 1);
-    vec2 cell = vec2(mod(floor(uk), per), floor(vk));
-    float h = vxHash21(cell + float(k) * 31.0);
-    vec2 f = vec2(fract(uk), fract(vk)) - 0.5;
-    f.y -= (h - 0.5) * 0.4;
-    float fleck = 1.0 - smoothstep(0.05, 0.22, length(f * vec2(1.0, 0.3)));
-    float present = step(0.86 - uStreaks * 0.1, h);
-    col += uHot * 1.3 * fleck * present * (1.0 - smoothstep(3.0, 10.0, zk));
+  vec3 col = vec3(0.0);
+  // Three parallax layers of chunky star blocks — bright at the colourful
+  // ends, dim in the dark middle.
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i);
+    float depth = 1.0 + fi * 1.7;
+    vec2 cell = pix(vec2(sp.x * depth, sp.y * depth - vy * (0.5 + fi * 0.45)), 42.0);
+    float h = hash21(floor(cell * 20.0) + fi * 31.0);
+    float star = step(0.93 - 0.015 * fi - 0.02 * uStreaks, h);
+    float tw = 0.55 + 0.45 * sin(uTime * 3.0 + h * 30.0);
+    col += (uColor * 0.7 + 0.3) * star * tw * (0.55 - fi * 0.13) * (0.35 + 0.65 * colorAmt);
   }
-
-  // Feathers: soft pale flakes drifting slowly, rocking as they go.
+  // Feathers (the Feather of Safe Passage): big pale flakes rocking upward.
   if (uFeathers > 0.0) {
-    float fr = 0.8 / r;
-    float fu = (ang / TAU) * 14.0;
-    float fv = fr * 0.9 + t * 1.3;
-    vec2 fc = vec2(mod(floor(fu), 14.0), floor(fv));
-    float h = vxHash21(fc + 7.0);
-    vec2 f = vec2(fract(fu), fract(fv)) - 0.5;
-    float sway = sin(t * 2.3 + h * 20.0) * 0.6;
-    f = vec2(cos(sway) * f.x - sin(sway) * f.y, sin(sway) * f.x + cos(sway) * f.y);
-    float flake = 1.0 - smoothstep(0.08, 0.3, length(f * vec2(2.4, 0.8)));
-    col = mix(col, uHot * 1.2, flake * step(0.55, h) * uFeathers * (1.0 - smoothstep(2.0, 7.0, fr)));
+    vec2 fp = vec2(sp.x + 0.04 * sin(uTime * 2.3 + sp.y * 6.0), sp.y - vy * 0.35);
+    float h = hash21(floor(fp * vec2(30.0, 18.0)) + 7.0);
+    col += uHot * 0.7 * step(0.975, h) * uFeathers * (0.55 + 0.45 * sin(uTime * 2.0 + h * 20.0));
+  }
+  // The dark nebula of the parallel world — only a hint of colour mid-way.
+  float neb = pow(fbm(pix(vec2(sp.x * 1.8, sp.y * 1.8 - vy * 0.5), 60.0)), 2.0);
+  col += uColor * neb * (0.10 + 0.5 * colorAmt);
+  col += mix(vec3(0.006, 0.005, 0.02) + uDeep * 0.08, uColor * 0.05, r) * (0.5 + 0.5 * colorAmt);
+
+  // Rune rings rushing out past you (the Weighing reads you on the way
+  // down): broken bands of glyph blocks, only while hovering.
+  if (uRings > 0.0) {
+    float lr = log(max(r * zoom, 0.02));
+    float band = lr * 2.2 - uTime * 1.4;
+    float seg = step(0.45, hash21(vec2(floor((a * INV_TAU + 0.5) * 36.0), floor(band))));
+    float glyph = step(0.35, hash21(vec2(floor((a * INV_TAU + 0.5) * 144.0), floor(band) + 4.0)));
+    col += uColor * 0.6 * step(0.93, fract(band)) * seg * glyph * uRings * mid * smoothstep(0.05, 0.3, r);
   }
 
-  // Depth: the far end brightens into the light at the end of the tunnel;
-  // the nearest wall darkens so the tube has volume.
-  float far = smoothstep(3.0, 12.0, z);
-  col = mix(col, uColor * 0.75, far * 0.7);
-  col = mix(col, uHot * 2.2, smoothstep(13.0, 34.0, z));
-  col *= mix(0.3, 1.0, smoothstep(0.25, 1.4, z));
+  // Spiral streaks screaming past — heavier on the forceful eject.
+  float streak = pow(hash21(vec2(floor((a * INV_TAU + 0.5) * 210.0), 3.0)), 20.0);
+  col += (uColor + 0.3) * streak * (suckIn + suckOut * 2.0) * smoothstep(0.0, 0.6, r) * 2.6 * (0.5 + 0.5 * uStreaks);
+
+  // Eject: surge back into the rift's colour, then a hard white flash.
+  // (Kept nearer 1 than the artpass canvas did: this quad feeds the bloom,
+  // and a full-screen surge any hotter would fog the tear opening onto the
+  // new place.)
+  col = mix(col, uColor * 1.15 + 0.1, suckOut * 0.85);
+  col = mix(col, uHot * 0.9 + 0.1, pow(suckOut, 2.5) * 0.8);
   return col;
 }
 
+/** Signed distance (screen units, < 0 inside) of a tear centred at c with
+ * s screen units per tear-metre, ripping wider as 'open' grows; at open = 1
+ * it covers everything. */
+float screenTear(vec2 q, vec2 c, float s, float open, float seed, out float spine) {
+  vec2 m = (q - c) / max(s, 1e-3);
+  m.x /= 1.0 + 2.2 * open * open;   // rips wider than it grows tall
+  float d = tearSd(m, uTime, seed, 1.0, spine) * s;
+  float o2 = open * open;
+  return d - o2 * o2 * 4.0;
+}
+
 vec4 vortex(vec2 q) {
-  vec2 qc = q - uCenter;
-  float dist = length(qc);
-  float ang = atan(qc.y, qc.x);
+  float spine;
+  // ── ENTER: the rift's tear rips open over the view ──
+  float d = screenTear(q, uCenter, uIrisR, uIris, 3.7, spine);
+  float inside = step(d, 0.0);
+  // The ragged burning rim — a few world pixels wide whatever the scale.
+  float band = clamp(0.24 * uIrisR, 0.02, 0.07);
+  float rim = smoothstep(band, 0.0, abs(d)) * uRing * step(0.001, uIrisR);
 
-  // The iris: the tunnel, inside a living, wobbling event horizon.
-  float wob = vxNoiseP(vec2(ang / TAU * 9.0, uTime * 3.0), 9.0) - 0.5;
-  float edgeR = uIrisR * (1.0 + wob * 0.16);
-  float inside = step(dist, edgeR);
   vec3 col = vec3(0.0);
-  float a = 0.0;
-  if (inside > 0.5) col = tunnel(qc);
-  float ring = exp(-abs(dist - edgeR) * 26.0) * uRing * step(0.001, uIrisR);
+  if (inside > 0.5) col = warp(q - uCenter);
 
-  // Outside: spiral arms of light winding into the iris.
-  float lr = log(max(dist, 1e-3));
-  float warp = vxNoise(qc * 2.5 + uTime * 0.6) * 2.5;
-  float s = sin(ang * 3.0 + uSpinDir * (lr * 5.5 - uTime * 7.0) + warp) * 0.5 + 0.5;
-  float reach = 1.0 - smoothstep(edgeR + 0.2, edgeR + 0.35 + 2.4 * uSwirl, dist);
-  float arm = smoothstep(0.8 - 0.35 * uSwirl, 1.0, s) * uSwirl * reach;
-  vec3 outCol = mix(uDeep * 0.5, uColor * 1.4 + uHot * 0.5 * arm, arm);
-  float outA = max(arm * 0.92, uSwirl * 0.4 * smoothstep(0.2, 1.8, dist));
-
-  col = mix(outCol, col, inside);
-  a = mix(outA, 1.0, inside);
-  col += (uHot * 1.6 + uColor * 0.8) * ring;
-  a = max(a, min(ring, 1.0));
-
-  // ARRIVE: the tunnel tears open from the centre on a white-hot ring.
-  if (uRevealR > 0.0) {
-    float rd = length(q);
-    float ra = atan(q.y, q.x);
-    float rw = vxNoiseP(vec2(ra / TAU * 9.0, uTime * 3.0 + 7.0), 9.0) - 0.5;
-    float er = uRevealR * (1.0 + rw * 0.12);
-    float hole = step(rd, er);
-    float rring = exp(-abs(rd - er) * 22.0) * uRing;
-    a *= 1.0 - hole;
-    col *= 1.0 - 0.45 * smoothstep(0.0, 2.0, uRevealR);
-    col += (uHot * 2.0 + uColor) * rring;
-    a = max(a, min(rring, 1.0));
+  // Outside: shards of the world spiral into the tear over a creeping dark —
+  // two layers of chunky blocks whose coordinates keep zooming out, so every
+  // block is drawn in toward the tear, shrinking as it goes, and is reborn
+  // at the edge of the view (the rift's mote cycle, writ large).
+  vec2 qc = q - uCenter;
+  vec3 outCol = uDeep * 0.4;
+  float outA = uSwirl * 0.45 * smoothstep(0.0, 1.2, d);
+  if (uSwirl > 0.0) {
+    float r = max(length(qc), 1e-3);
+    float shard = 0.0;
+    float hot = 0.0;
+    for (int k = 0; k < 2; k++) {
+      float z = fract(uTime * 0.7 * (0.5 + uSwirl) + float(k) * 0.5);
+      float ang = uSpinDir * (uSwirl * 1.2 / (r + 0.3) + z * 1.6);
+      float ca = cos(ang);
+      float sa = sin(ang);
+      vec2 sp = vec2(ca * qc.x - sa * qc.y, sa * qc.x + ca * qc.y) * exp2(z * 2.0);
+      float h = hash21(floor(sp * 16.0) + float(k) * 17.0);
+      float on = step(0.978 - 0.022 * uSwirl, h) * step(0.15, sin(z * 3.14159));
+      shard = max(shard, on);
+      hot = max(hot, on * step(0.992, h));
+    }
+    shard *= smoothstep(0.0, 0.12, d) * (1.0 - smoothstep(1.4, 2.4, r));
+    float streak = pow(hash21(vec2(floor((atan(qc.y, qc.x) * INV_TAU + 0.5) * 160.0 + log(r) * 6.0 * uSpinDir), 9.0)), 24.0);
+    float streakA = streak * uSwirl * smoothstep(0.0, 0.1, d) * (1.0 - smoothstep(0.3, 1.2, d));
+    float lit = max(shard, streakA);
+    outCol = mix(outCol, mix(uColor, uHot, hot) * 1.3, lit);
+    outA = max(outA, lit * uSwirl);
   }
 
-  // Respawn: the death screen's black lifts off the tunnel.
+  col = mix(outCol, col, inside);
+  float alpha = mix(outA, 1.0, inside);
+  float flick = 0.78 + 0.22 * sin(uTime * 11.0 + q.y * 20.0);
+  col += (uColor * 1.6 + uHot * 0.6) * rim * flick;
+  alpha = max(alpha, min(rim, 1.0));
+
+  // ── ARRIVE: a tear rips open at the centre onto the new place ──
+  if (uRevealR > 0.0) {
+    float rd = screenTear(q, vec2(0.0), uRevealR, uReveal, 9.1, spine);
+    float hole = step(rd, 0.0);
+    float rb = clamp(0.24 * uRevealR, 0.02, 0.07);
+    float rrim = smoothstep(rb, 0.0, abs(rd)) * uRing;
+    alpha *= 1.0 - hole;
+    col += (uHot * 1.2 + uColor) * rrim * flick;
+    alpha = max(alpha, min(rrim, 1.0));
+  }
+
+  // Respawn: the death screen's black lifts off the void.
   col *= 1.0 - uDark;
-  a = max(a, uDark);
-  col += uHot * uFlash * 1.6;
-  a = max(a, uFlash * 0.9);
-  return vec4(col, a);
+  alpha = max(alpha, uDark);
+  col += uHot * uFlash * 1.4;
+  alpha = max(alpha, uFlash * 0.9);
+  return vec4(col, alpha);
 }
 
 vec4 dissolve(vec2 q) {
+  // The world burns away in chunky blocks, from the edges inward.
+  vec2 qb = pix(q, 36.0);
   float maxR = length(vec2(uAspect, 1.0));
-  float edgeD = length(q) / maxR;
-  float n = vxFbm(q * 2.4 + vec2(0.0, uTime * 0.05));
-  float n2 = vxNoise(q * 11.0 + 3.0);
-  // High in the middle: the world burns away from the edges inward.
+  float edgeD = length(qb) / maxR;
+  float n = fbm(qb * 2.4 + vec2(0.0, uTime * 0.05));
+  float n2 = hash21(floor(qb * 36.0) + 3.0);
   float field = (1.0 - edgeD) * 0.6 + n * 0.32 + n2 * 0.08;
   float th = uDissolve * 1.02;
   float burned = step(field, th);
-  float edge = (1.0 - smoothstep(0.0, 0.05, abs(field - th))) * (1.0 - step(0.999, uDissolve));
+  float edge = step(abs(field - th), 0.035) * (1.0 - step(0.999, uDissolve));
 
-  // Ash: smouldering black-red, sparks drifting up through it, and a slow
-  // pulse — the last of the heartbeat.
+  // Ash: smouldering black-red, square embers drifting up through it, and a
+  // slow pulse — the last of the heartbeat.
   float beat = pow(max(0.0, sin(uTime * 3.2)), 16.0);
   vec3 ash = mix(vec3(0.012, 0.0, 0.003), uDeep * (2.0 + beat * 1.5), n * n);
-  vec2 ec = q * 26.0 + vec2(0.0, -uTime * 2.2);
-  float eh = vxHash21(floor(ec));
-  float ember = step(0.984, eh) * (0.55 + 0.45 * sin(uTime * 5.0 + eh * 50.0))
-    * (1.0 - smoothstep(0.15, 0.45, length(fract(ec) - 0.5)));
+  vec2 ec = floor(vec2(q.x * 22.0, q.y * 22.0 - uTime * 2.2));
+  float eh = hash21(ec + 5.0);
+  float ember = step(0.975, eh) * (0.55 + 0.45 * sin(uTime * 5.0 + eh * 50.0));
   ash += uColor * ember * 1.7;
 
-  vec3 burnCol = uColor * 2.0 + uHot * 0.8 * edge * edge;
+  // (Hot, but not so hot the bloom smears the chunky burn line into a blur.)
+  vec3 burnCol = uColor * 1.3 + uHot * 0.5;
   // Before it burns, the world bleeds dark red — at once, so the death reads
   // from the first frame.
   vec3 washCol = uDeep * 0.9 + uColor * 0.08;
@@ -232,20 +265,32 @@ vec4 dissolve(vec2 q) {
 void main() {
   vec2 q = vec2(vNdc.x * uAspect, vNdc.y);
   vec4 c = uLook > 0.5 ? dissolve(q) : vortex(q);
-  gl_FragColor = vec4(c.rgb, clamp(c.a, 0.0, 1.0) * uFade);
+  // Hard stepped palette → deliberate pixel-magic banding.
+  vec3 col = floor(c.rgb * 13.0) / 13.0;
+  // The palette above is meant as DISPLAY values (the artpass warp drew it
+  // on a raw canvas); this quad renders into the linear scene buffer that
+  // the composer encodes for display, so decode it first — otherwise every
+  // step comes out washed and bright. Steps stay steps.
+  col = pow(max(col, 0.0), vec3(2.2));
+  gl_FragColor = vec4(col, clamp(c.a, 0.0, 1.0) * uFade);
 }
 `;
 
 export interface VortexUniforms {
   uTime: { value: number };
   uAspect: { value: number };
-  uTanHalf: { value: number };
   uRoll: { value: number };
   uCenter: { value: Vector2 };
+  uIris: { value: number };
   uIrisR: { value: number };
+  uReveal: { value: number };
   uRevealR: { value: number };
   uRing: { value: number };
   uSwirl: { value: number };
+  uSuck: { value: number };
+  uEject: { value: number };
+  uFall: { value: number };
+  uDrift: { value: number };
   uDissolve: { value: number };
   uDark: { value: number };
   uFlash: { value: number };
@@ -256,7 +301,6 @@ export interface VortexUniforms {
   uDeep: { value: Color };
   uSpinDir: { value: number };
   uSpin: { value: number };
-  uSpeed: { value: number };
   uStreaks: { value: number };
   uRings: { value: number };
   uFeathers: { value: number };
@@ -266,13 +310,18 @@ export function createVortexMaterial(): ShaderMaterial & { uniforms: VortexUnifo
   const uniforms: VortexUniforms = {
     uTime: { value: 0 },
     uAspect: { value: 1.6 },
-    uTanHalf: { value: 0.8 },
     uRoll: { value: 0 },
     uCenter: { value: new Vector2() },
+    uIris: { value: 0 },
     uIrisR: { value: 0 },
+    uReveal: { value: 0 },
     uRevealR: { value: 0 },
     uRing: { value: 0 },
     uSwirl: { value: 0 },
+    uSuck: { value: 0 },
+    uEject: { value: 0 },
+    uFall: { value: 0 },
+    uDrift: { value: 1 },
     uDissolve: { value: 0 },
     uDark: { value: 0 },
     uFlash: { value: 0 },
@@ -283,7 +332,6 @@ export function createVortexMaterial(): ShaderMaterial & { uniforms: VortexUnifo
     uDeep: { value: new Color() },
     uSpinDir: { value: 1 },
     uSpin: { value: 1 },
-    uSpeed: { value: 1 },
     uStreaks: { value: 1 },
     uRings: { value: 0 },
     uFeathers: { value: 0 },

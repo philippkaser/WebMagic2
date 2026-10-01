@@ -433,29 +433,44 @@ limiting and hit/pickup sanitization already run server-/authority-side.
 
 ## Portal journeys (`transition/`)
 
-Every scene switch is a journey you watch: the view is pulled into the
-portal (FOV stretch, a slight roll, the gaze turned toward the ring), you
-fly through a vortex tunnel while the next floor loads, and a bright ring
-opens onto the new place. Death is a dark-red dissolve instead, respawn
-rises out of that black.
+Every scene switch is a journey you watch, drawn in the gritty pixel style
+of the rifts themselves (ported from the artpass branch's warp): the view is
+pulled toward the rift (FOV stretch, a slight roll, the gaze turned toward
+the tear) while its tear rips open over the screen and you are sucked in;
+you hover in a dark parallel world of blocky stars drifting past (sinking on
+the way down, rising on the way home) while the next floor loads; then you
+are spat out — the void kicks outward, surges into the rift's colour and
+flashes — through a tear that rips open onto the new place. Death burns the
+view away in chunky ember-red blocks instead; respawn rises out of that
+black into the starry void.
 
 - `timeline.ts` (pure, tested): per-kind styles (gate, descend, home,
-  feather, death, respawn), easing, and samplers that turn (stage,
-  progress) into camera offsets and overlay parameters — ARRIVE ends at an
-  exact identity, so the FOV is always restored to the base 78°.
+  feather, death, respawn — colour, beats, drift direction), easing, and
+  samplers that turn (stage, progress) into camera offsets and overlay
+  parameters (iris, suck, rush, eject, reveal, …) — ARRIVE ends at an exact
+  identity, so the FOV is always restored to the base 78°.
 - `travel.ts`: `travel(kind, doSwitch)` plays ENTER, runs the store's scene
   switch under the TUNNEL (waiting for the new scene to render a few frames
   and at least one tunnel beat), then plays ARRIVE. The store's
   `enterDungeon`, `descend`, `walkHome`, the feather escape, death and
-  `respawn` are wrapped in it; their logic and phases are unchanged.
+  `respawn` are wrapped in it; their logic and phases are unchanged. Dev:
+  `__travel.freeze(stage, kind, p)` / `.preview(kind, p)` /
+  `__previewTransition(kind, p)` hold a frame for screenshots.
 - `TransitionSystem.tsx`: a camera system that runs after the player
   controller and layers FOV/roll/dolly on top (never leaking into
-  mouse-look), and ONE fullscreen quad in the world scene (so bloom applies)
-  that draws the analytic tunnel. Pointer lock and mouse-look survive the
-  journey — you land in control.
-- Portals themselves (`render/models/PortalModel.tsx`) are a log-polar fbm
-  vortex with a burning rim that quickens as you approach; sealed portals
-  freeze into cracked frosted glass and shatter when the seal breaks.
+  mouse-look), and ONE fullscreen quad in the world scene — rendered at the
+  world's own low resolution, so its blocks are the world's pixels, and
+  bloom feeds on it. Pointer lock and mouse-look survive the journey — you
+  land in control.
+- Rifts (`render/models/PortalModel.tsx` + `RiftFrameModel.tsx`) are a
+  jagged tear computed on a coarse pixel grid (hard stepped silhouette,
+  ragged burning rim, a blocky star vortex seen through it, stepped
+  palette), billboarded around Y and breathing, with a swarm of tetrahedron
+  motes spiralling in and a rune dais framed by broken standing stones.
+  The tear's silhouette lives in `transition/vortexGlsl.ts`, shared with the
+  overlay, so the ENTER iris IS the rift tearing open over the view. Sealed
+  rifts are a dim thin slit that flinches when tried and rips open when the
+  seal breaks; the wound quickens and burns brighter as you approach.
 
 ## In-world UI (`ui3d/`)
 
