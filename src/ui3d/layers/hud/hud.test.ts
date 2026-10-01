@@ -1,22 +1,31 @@
 import { describe, expect, test } from "bun:test";
 import { RUN } from "../../../run/rules";
 import { OMEN_DEFS, rollOmen } from "../../../world/omens";
+import { apx, fontPx, plateSize } from "./ap";
 import {
   arrivalTitle,
+  bossTitle,
   coinsFor,
   heartbeat,
   heartRate,
   mixHex,
   netStatus,
   presenceMood,
-  titheShort,
+  titheLine,
+  titheRunes,
   titheStones,
-  vitalNumbers,
+  VILLAGE_LORE,
+  vitalText,
 } from "./copy";
+import { stepRamp } from "./fade";
+import { hudUnit } from "./HudAnchor";
+import { apFrac, slotStrip, VITALS } from "./layout";
+import { pactParts } from "./PactPrompt";
+import { RUNES, spriteRows, type SpriteName } from "./sprites";
 import { edgeSpot, screenToWorld, tanHalf, undistortion, viewPoint } from "./frame";
 import { HEAP_CAPACITY, heapSlots } from "./heap";
 import { settleDelay } from "./useSettled";
-import { GAUGE, kickSlosh, levelToHeight, makeGauge, makeSlosh, resetGauge, SLOSH, stepGauge, stepSlosh } from "./gauge";
+import { GAUGE, kickSlosh, makeGauge, makeSlosh, resetGauge, SLOSH, stepGauge, stepSlosh } from "./gauge";
 
 const T = tanHalf(78);
 
@@ -173,17 +182,6 @@ describe("slosh", () => {
     expect(Math.abs(s.z)).toBeLessThanOrEqual(SLOSH.max);
     expect(Number.isFinite(s.vx)).toBe(true);
   });
-
-  test("level → height: empty is below the bulb, full is under the neck, monotonic", () => {
-    expect(levelToHeight(0)).toBeLessThan(-0.92);
-    expect(levelToHeight(1)).toBeCloseTo(0.84);
-    let last = -Infinity;
-    for (let l = 0.01; l <= 1; l += 0.01) {
-      const h = levelToHeight(l);
-      expect(h).toBeGreaterThan(last);
-      last = h;
-    }
-  });
 });
 
 describe("heap", () => {
@@ -215,11 +213,11 @@ describe("settle", () => {
 });
 
 describe("copy", () => {
-  test("vital numbers round the value up and the max to nearest", () => {
-    expect(vitalNumbers(86.2, 100)).toEqual({ now: "87", max: "/100" });
-    expect(vitalNumbers(0.001, 120.4)).toEqual({ now: "1", max: "/120" });
-    expect(vitalNumbers(-5, 100).now).toBe("0");
-    expect(vitalNumbers(100, 100).now).toBe("100");
+  test("vital text rounds the value up and the max to nearest (artpass '87 / 100')", () => {
+    expect(vitalText(86.2, 100)).toBe("87 / 100");
+    expect(vitalText(0.001, 120.4)).toBe("1 / 120");
+    expect(vitalText(-5, 100)).toBe("0 / 100");
+    expect(vitalText(100, 100)).toBe("100 / 100");
   });
 
   test("coin heaps grow logarithmically and cap", () => {
@@ -235,28 +233,39 @@ describe("copy", () => {
     expect(titheStones(3)).toEqual([true, true, true, false, false]);
     expect(titheStones(9).every(Boolean)).toBe(true);
     expect(titheStones(1)).toHaveLength(RUN.floorsBeforeExit);
-    expect(titheShort(5)).toBe("home is open");
-    expect(titheShort(4)).toBe("1 more");
+  });
+
+  test("tithe runes: kindled behind you, pulsing underfoot, all gold once home is open", () => {
+    expect(titheRunes(0)).toEqual(["dark", "dark", "dark", "dark", "dark"]);
+    expect(titheRunes(1)).toEqual(["now", "dark", "dark", "dark", "dark"]);
+    expect(titheRunes(3)).toEqual(["done", "done", "now", "dark", "dark"]);
+    expect(titheRunes(5).every((r) => r === "home")).toBe(true);
+    expect(titheRunes(8).every((r) => r === "home")).toBe(true);
+    expect(titheLine(1)).toBe("Survive 4 more to open the way home");
+    expect(titheLine(5)).toContain("way home is open");
   });
 
   test("net status", () => {
     expect(netStatus("online", true, true).text).toBe("◉ online · host");
     expect(netStatus("online", true, false).text).toBe("◉ online");
     expect(netStatus("offline", false, true).text).toBe("○ offline");
+    expect(netStatus("online", false, true).color).not.toBe(netStatus("offline", false, true).color);
     expect(netStatus("connecting", false, false).text).toContain("connecting");
   });
 
   test("arrival titles: village, calm floor, omen floor", () => {
-    expect(arrivalTitle(false, 0, 0, 0).title).toBe("THE VILLAGE");
-    expect(arrivalTitle(false, 0, 0, 23).subtitle).toBe("deepest: floor 23");
-    const calm = arrivalTitle(true, 1, 12345, 0);
-    expect(calm.title).toBe("FLOOR 1");
+    const village = arrivalTitle(false, 0, 0);
+    expect(village).toMatchObject({ label: "Sanctuary", title: "The Village", subtitle: null, lore: VILLAGE_LORE, omen: null });
+    const calm = arrivalTitle(true, 1, 12345);
+    expect(calm.label).toBe("You descend to");
+    expect(calm.title).toBe("Floor 1");
     expect(calm.subtitle).toBe("The Catacombs");
+    expect(calm.lore.length).toBeGreaterThan(10); // the biome's epithet
     expect(calm.omen).toBeNull(); // floor 1 is always calm
     // Find a seed whose floor 12 carries an omen and check it's reported.
     let seed = 1;
     while (!rollOmen(seed, 12)) seed++;
-    const omen = arrivalTitle(true, 12, seed, 0).omen;
+    const omen = arrivalTitle(true, 12, seed).omen;
     expect(omen).not.toBeNull();
     expect(OMEN_DEFS.some((o) => o.name === omen!.name && o.whisper === omen!.whisper)).toBe(true);
   });
@@ -268,9 +277,24 @@ describe("copy", () => {
     const near = presenceMood(1, 3);
     expect(near.threat).toBeGreaterThan(far.threat);
     expect(near.open).toBeGreaterThan(far.open);
-    expect(near.line).toBe("they are close");
-    expect(far.line).toBe("you are not alone");
-    expect(presenceMood(2, 20).line).toBe("something is near");
+    expect(near.line).toBe("It is close");
+    expect(far.line).toBe("Something else walks these halls");
+    expect(presenceMood(2, 20).line).toBe("It draws nearer…");
+    expect(presenceMood(1, null).line).toBe("An ally walks with you");
+  });
+
+  test("boss names shouted in caps read as blackletter titles", () => {
+    expect(bossTitle("WARDEN OF THE DEEP")).toBe("Warden of the Deep");
+    expect(bossTitle("THE HOLLOW KING")).toBe("The Hollow King");
+    expect(bossTitle("Morgana the Pale")).toBe("Morgana the Pale");
+  });
+
+  test("pact prompt: key cap, words, the name picked out", () => {
+    const p = pactParts("F — Offer a pact to Morgana");
+    expect(p.key).toBe("F");
+    expect(p.spans.map((s) => s.text).join("")).toBe("Offer a pact to Morgana");
+    expect(p.spans[1]!.text).toBe("Morgana");
+    expect(pactParts("Hello").key).toBeNull();
   });
 
   test("mixHex", () => {
@@ -286,5 +310,46 @@ describe("copy", () => {
     expect(heartbeat(0.25, bpm)).toBeGreaterThan(0.5);
     expect(heartbeat(0.6, bpm)).toBeLessThan(0.05);
     expect(heartbeat(1.05, bpm)).toBeCloseTo(heartbeat(0.05, bpm), 5);
+  });
+});
+
+describe("artpass pixels", () => {
+  test("one ap pixel is HUD_SCALE/800 of the screen height, at any distance", () => {
+    expect(apx(1) / hudUnit(1)).toBeCloseTo(1.25 / 800, 8);
+    expect(apx(2.4) / apx(1.2)).toBeCloseTo(2, 8);
+    expect(apFrac(800 / 1.25)).toBeCloseTo(1, 8);
+  });
+
+  test("font sizes: an 8 px label has a 5 px cap, Jacquard 21 px a 12 px cap", () => {
+    expect(fontPx(8, "label", 1) * 7).toBeCloseTo(5 * apx(1), 10);
+    expect(fontPx(21, "title", 1) * 7).toBeCloseTo(12 * apx(1), 10);
+  });
+
+  test("panels: plate size wraps a CSS padding box in the 8 px frame", () => {
+    const [w, h] = plateSize(264, 82);
+    // Plate draws its frame one texel (2 px) outside its size: border-box.
+    expect(w + 4).toBe(VITALS.outerW);
+    expect(h + 4).toBe(VITALS.outerH);
+    expect(VITALS.outerW).toBe(280); // artpass .wm-vitals
+    expect(slotStrip(4).outerW).toBe(252); // artpass .wm-equip, four small cards
+  });
+
+  test("stepped ramps hit their steps exactly", () => {
+    expect(stepRamp(0, 1, 4)).toBe(0);
+    expect(stepRamp(0.01, 1, 4)).toBe(0.25);
+    expect(stepRamp(0.5, 1, 4)).toBe(0.5);
+    expect(stepRamp(2, 1, 4)).toBe(1);
+  });
+
+  test("sprites are rectangular and only use palette keys", () => {
+    const names: SpriteName[] = ["heart", "drop", "gem", "skull", "pact", "staff", "amulet", "cloak", "boots", "flask", "hourglass", "coin", ...RUNES];
+    for (const n of names) {
+      const rows = spriteRows(n);
+      expect(rows.length).toBeGreaterThan(0);
+      for (const r of rows) {
+        expect(r.length).toBe(rows[0]!.length);
+        expect(/^[.oabcwWdmMnksSg]+$/.test(r)).toBe(true);
+      }
+    }
   });
 });

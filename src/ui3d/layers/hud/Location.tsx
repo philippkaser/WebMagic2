@@ -1,187 +1,197 @@
-import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Vector3, type Group } from "three";
+import { useEffect, useMemo, useState } from "react";
 import { selectIsHost, useNet } from "../../../net/netStore";
+import { canLeave, entryFloorForGear, gearLevel } from "../../../run/rules";
 import { useGame } from "../../../state/gameStore";
-import { palette } from "../../../ui/theme";
-import { placeInFront, pxFor } from "../../anchors";
+import { useTravel } from "../../../transition/store";
+import { Plate } from "../../Plate";
 import { UiPresence } from "../../presence";
-import { Tablet, TABLET_EXIT } from "../../Tablet";
-import { RuneText } from "../../text/RuneText";
-import { arrivalTitle, netStatus, titheShort, titheStones, type ArrivalTitle } from "./copy";
-import { HudAnchor, hudUnit } from "./HudAnchor";
+import { measureText, RuneText } from "../../text/RuneText";
+import { ink } from "../../theme";
+import { apx, fontPx, FRAME_TEXEL, plateSize } from "./ap";
+import { ArrivalBanner } from "./ArrivalBanner";
+import { arrivalTitle, netStatus, titheLine, titheRunes } from "./copy";
+import { Divider } from "./Divider";
+import { HudAnchor } from "./HudAnchor";
 import { HUD_LAYOUT } from "./layout";
-import { TitheStone } from "./TitheStone";
+import { PixelSprite } from "./PixelSprite";
+import { RUNE_BOX, TitheRune } from "./TitheRune";
 import { usePresenceList } from "./usePresenceList";
 
 /** Where you are.
  *
- * On arriving — at the village, or on a floor — the place names itself: a
- * big title burns into the air ahead ("FLOOR 12", the biome beneath it, and
- * if the floor arrives under an omen, its name and its whispered line), hangs
- * there a few breaths, and burns away. What it leaves behind is a small
- * stone plaque that builds itself at the top left: the floor and biome, the
- * Tithe of Five as five rune-stones that kindle as floors are played, and
- * whether you're connected. In the village: the village, and the deepest
- * floor you've walked home from. */
+ * On arriving — at the village, or on a floor — the place names itself: the
+ * arrival banner burns into the air ahead (ArrivalBanner), hangs a few
+ * breaths, and burns away. It waits for the journey's tunnel to clear, so
+ * it lands as the new place is revealed. What it leaves behind is the
+ * location panel at the top left (artpass hud/LocationPanel): a brass-framed
+ * soot panel with FLOOR, the floor number and biome, the Tithe of Five as
+ * five rune squares that kindle as floors are played, how many more the
+ * deep wants before it lets you go, and your gear and connection. In the
+ * village: SANCTUARY, The Village, and the floor the rift will cast you to. */
 
-const TITLE_D = 3.2;
-/** How long the arrival title hangs before it burns away, seconds. */
 const TITLE_HOLD = 4.2;
 const TITLE_HOLD_OMEN = 8.5;
-/** When the omen's lines follow the title (floorAtmosphere's own whisper
- * arrives about then too). */
-const OMEN_DELAY = 1.6;
 
 export function Location() {
   const phase = useGame((s) => s.phase);
   const floor = useGame((s) => s.floor);
   const floorSeed = useGame((s) => s.floorSeed);
   const instanceId = useGame((s) => s.instanceId);
-  const deepest = useGame((s) => s.deepest);
+  const traveling = useTravel((s) => s.stage === "entering" || s.stage === "tunnel");
   const inDungeon = phase === "dungeon";
   const key = inDungeon ? `floor:${floor}:${instanceId}` : "village";
-  // Deliberately keyed on the arrival only: a new deepest while standing in
-  // the village shouldn't re-announce it.
+  // Keyed on the arrival only.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const title = useMemo(() => arrivalTitle(inDungeon, floor, floorSeed, deepest), [key]);
-  const [titleUp, setTitleUp] = useState(true);
+  const title = useMemo(() => arrivalTitle(inDungeon, floor, floorSeed), [key]);
+  // The arrival whose banner has already been read (the panel stands then).
+  const [doneKey, setDoneKey] = useState<string | null>(null);
+  const titleUp = !traveling && doneKey !== key;
   useEffect(() => {
-    setTitleUp(true);
-    const timer = setTimeout(() => setTitleUp(false), (title.omen ? TITLE_HOLD_OMEN : TITLE_HOLD) * 1000);
+    if (!titleUp) return;
+    const timer = setTimeout(() => setDoneKey(key), (title.omen ? TITLE_HOLD_OMEN : TITLE_HOLD) * 1000);
     return () => clearTimeout(timer);
-  }, [key, title]);
+  }, [titleUp, key, title]);
   const { entries, remove } = usePresenceList(titleUp ? title : null, titleUp ? key : null);
 
   return (
     <>
       {entries.map((e) => (
-        <Title key={e.id} title={e.value} shown={e.shown} onHidden={() => remove(e.id)} />
+        <ArrivalBanner key={e.id} title={e.value} shown={e.shown} onHidden={() => remove(e.id)} />
       ))}
-      <UiPresence show={!titleUp} exit={TABLET_EXIT}>
-        <Plaque inDungeon={inDungeon} floor={floor} deepest={deepest} subtitle={title.subtitle} />
+      <UiPresence show={doneKey === key && !traveling} exit={0.8}>
+        <LocationPanel key={key} inDungeon={inDungeon} floor={floor} biome={title.subtitle ?? ""} />
       </UiPresence>
     </>
   );
 }
 
-const target = new Vector3();
-
-/** The arrival title: appears where you're looking and stays in the world
- * there, drifting only lazily after your gaze. */
-function Title({ title, shown, onHidden }: { title: ArrivalTitle; shown: boolean; onHidden: () => void }) {
-  const group = useRef<Group>(null);
-  const camera = useThree((s) => s.camera);
-  const placed = useRef(false);
-  useFrame((_, dt) => {
-    const g = group.current;
-    if (!g) return;
-    // Just below the aim: the upper centre is the message feed's.
-    placeInFront(camera, TITLE_D, [0, -0.048 * hudUnit(TITLE_D)], target);
-    if (!placed.current) {
-      g.position.copy(target);
-      g.quaternion.copy(camera.quaternion);
-      placed.current = true;
-      return;
-    }
-    if (shown) g.position.lerp(target, 1 - Math.exp(-Math.min(dt, 0.1) * 1.6));
-    g.quaternion.slerp(camera.quaternion, 1 - Math.exp(-Math.min(dt, 0.1) * 3));
-  });
-
-  const big = pxFor(TITLE_D, 0.06);
-  const sub = pxFor(TITLE_D, 0.026);
-  const omenPx = pxFor(TITLE_D, 0.024);
-  const whisperPx = pxFor(TITLE_D, 0.018);
-  const U = hudUnit(TITLE_D);
-  return (
-    <group ref={group}>
-      <RuneText text={title.title} px={big} color={palette.bright} glow={1.6} outline={0.35} position={[0, 0, 0]} inDuration={0.9} stagger={0.55} show={shown} onHidden={onHidden} />
-      <RuneText text="— ✦ —" px={sub * 0.7} color={palette.accent} glow={1.2} position={[0, -0.046 * U, 0]} delay={0.5} show={shown} />
-      <RuneText text={title.subtitle} px={sub} color={palette.lavender} glow={1} position={[0, -0.072 * U, 0]} delay={0.7} show={shown} />
-      {title.omen && (
-        <>
-          <RuneText text={title.omen.name} px={omenPx} color="#ff8f6a" glow={1.4} position={[0, -0.112 * U, 0]} delay={OMEN_DELAY} show={shown} />
-          <RuneText
-            text={title.omen.whisper}
-            px={whisperPx}
-            color={palette.body}
-            maxCols={46}
-            anchor={[0.5, 0]}
-            position={[0, -0.132 * U, 0]}
-            delay={OMEN_DELAY + 0.5}
-            glow={0.7}
-            show={shown}
-          />
-        </>
-      )}
-    </group>
-  );
-}
-
 const L = HUD_LAYOUT.plaque;
-const PU = hudUnit(L.distance);
-const PAD = 0.022 * PU;
-const TW = 0.33 * PU;
-const ROW = { title: 0.026, sub: 0.016, stones: 0.028, net: 0.014 } as const;
-const GAP = 0.009 * PU;
+const A = apx(L.distance);
+const LABEL = fontPx(8, "label", L.distance);
+const NUM = fontPx(30, "body", L.distance);
+const BODY = fontPx(13, "body", L.distance);
+/** Padding box (artpass .wm-loc: min-width 236, padding 4 8). */
+const CSS_W = 240;
+const PAD_X = 8;
+const PAD_Y = 4;
+const CW = CSS_W - PAD_X * 2;
 
-/** The plaque left behind at the top left: a small stone tablet. */
-function Plaque({ inDungeon, floor, deepest, subtitle }: { inDungeon: boolean; floor: number; deepest: number; subtitle: string }) {
+/** Row centres from the content top, ap pixels (artpass's CSS stack:
+ * label 11, number row 27, runes +4 · 24, label +3 · 11, rule, gear row). */
+const DUNGEON_ROWS = { label: 5.5, numBottom: 37, runes: 52, tithe: 72, rule: 84, gear: 96, height: 105 } as const;
+const VILLAGE_ROWS = { label: 5.5, numBottom: 37, range: 45.5, deepest: 57.5, height: 0 } as const;
+
+function LocationPanel({ inDungeon, floor, biome }: { inDungeon: boolean; floor: number; biome: string }) {
   const floorsPlayed = useGame((s) => s.run?.floorsPlayed ?? 0);
+  const equipment = useGame((s) => s.equipment);
+  const deepest = useGame((s) => s.deepest);
   const amHost = useNet(selectIsHost);
   const mode = useNet((s) => s.mode);
   const net = netStatus(mode, amHost, inDungeon);
-  const stones = titheStones(floorsPlayed);
-  const open = stones.every(Boolean);
+  const ids = useMemo(() => [equipment.staff.defId, equipment.amulet?.defId, equipment.cloak?.defId, equipment.boots?.defId], [equipment]);
+  const gear = Math.round(gearLevel(ids));
+  const entry = entryFloorForGear(ids);
+  const runes = titheRunes(floorsPlayed);
+  const home = inDungeon && canLeave(floorsPlayed);
 
-  // Rows top to bottom; the plaque is as tall as what it carries.
-  const rows: (keyof typeof ROW)[] = inDungeon ? ["title", "sub", "stones", "net"] : ["title", "sub", "net"];
-  const TH = rows.reduce((h, r) => h + ROW[r] * PU, 0) + GAP * (rows.length - 1) + PAD * 2;
-  let y = TH / 2 - PAD;
-  const at: Partial<Record<keyof typeof ROW, number>> = {};
-  for (const r of rows) {
-    at[r] = y - (ROW[r] * PU) / 2;
-    y -= ROW[r] * PU + GAP;
-  }
-  const x0 = -TW / 2 + PAD;
-  // Rows are written in cap heights; RuneText's cap is 7 of its 8 rows.
-  const px = (r: keyof typeof ROW) => pxFor(L.distance, ROW[r]);
-  const stoneColor = open ? palette.gold : palette.runLoot;
+  // The village stack: the deepest line only once there is one.
+  const rows = inDungeon ? DUNGEON_ROWS : VILLAGE_ROWS;
+  const villageEnd = deepest > 0 ? VILLAGE_ROWS.deepest + 5.5 : VILLAGE_ROWS.range + 5.5;
+  const ruleAt = inDungeon ? DUNGEON_ROWS.rule : villageEnd + 6;
+  const gearAt = inDungeon ? DUNGEON_ROWS.gear : ruleAt + 12;
+  const contentH = inDungeon ? DUNGEON_ROWS.height : gearAt + 9;
+  const cssH = contentH + PAD_Y * 2;
+  const [pw, ph] = plateSize(CSS_W, cssH);
+  const outerW = pw + FRAME_TEXEL * 2;
+  const outerH = ph + FRAME_TEXEL * 2;
+  // Plate-local ap pixels of a point `cy` down the content box.
+  const x0 = -CSS_W / 2 + PAD_X;
+  const yAt = (cy: number) => (cssH / 2 - PAD_Y - cy) * A;
+  const X = (cx: number) => (x0 + cx) * A;
+
+  const numText = inDungeon ? `${floor}` : "The Village";
+  const numW = measureText(numText, NUM, undefined, "body").width / A;
+  const gearLabelW = measureText("GEAR", LABEL, undefined, "label").width / A;
 
   return (
     <HudAnchor h={L.h} v={L.v} inset={L.inset} distance={L.distance}>
-      <group position={[TW / 2, -TH / 2, 0]}>
-        <Tablet width={TW} height={TH} tile={Math.min(TW, TH) / 2.2} tint="#4a4553" accent={open ? palette.gold : "#6f63a8"} float={false} quiet seed={3}>
-          <RuneText text={inDungeon ? `FLOOR ${floor}` : "THE VILLAGE"} px={px("title")} color={palette.bright} anchor={[0, 0.5]} align="left" position={[x0, at.title!, 0]} glow={0.9} />
+      <group position={[(outerW / 2) * A, -(outerH / 2) * A, 0]}>
+        <Plate width={pw * A} height={ph * A} frame={home ? "gold" : "brass"} texel={FRAME_TEXEL * A} fillOpacity={0.94}>
+          <RuneText text={inDungeon ? "FLOOR" : "SANCTUARY"} font="label" px={LABEL} color={ink.faded} anchor={[0, 0.5]} align="left" position={[X(0), yAt(rows.label), 0]} glow={0.25} outline={0.6} delay={0.15} />
           <RuneText
-            text={inDungeon ? subtitle : deepest > 0 ? `deepest: floor ${deepest}` : "deepest: —"}
-            px={px("sub")}
-            color={palette.lavender}
-            anchor={[0, 0.5]}
+            text={numText}
+            font="body"
+            px={NUM}
+            color={ink.parchment}
+            anchor={[0, 1]}
             align="left"
-            position={[x0, at.sub!, 0]}
-            glow={0.6}
-            delay={0.15}
+            position={[X(0), yAt(rows.numBottom), 0]}
+            glow={0.9}
+            outline={0.55}
+            delay={0.2}
           />
-          {inDungeon && (
+          {inDungeon ? (
             <>
-              {stones.map((lit, i) => (
-                <TitheStone key={i} index={i} lit={lit} color={stoneColor} size={ROW.stones * PU} position={[x0 + ROW.stones * PU * (0.45 + i * 1.02), at.stones!, 0]} />
+              <RuneText text={biome} font="body" px={BODY} color={ink.brassLight} anchor={[0, 1]} align="left" position={[X(numW + 8), yAt(DUNGEON_ROWS.numBottom - 1), 0]} glow={0.5} outline={0.6} delay={0.3} />
+              {runes.map((state, i) => (
+                <TitheRune
+                  key={i}
+                  index={i}
+                  state={state}
+                  unit={A}
+                  linkLit={state !== "dark"}
+                  position={[X(RUNE_BOX.w / 2 + i * (RUNE_BOX.w + RUNE_BOX.link)), yAt(DUNGEON_ROWS.runes), 0.0005]}
+                />
               ))}
               <RuneText
-                text={titheShort(floorsPlayed)}
-                px={pxFor(L.distance, 0.014)}
-                color={open ? palette.gold : palette.runLoot}
+                text={titheLine(floorsPlayed).toUpperCase()}
+                font={home ? "body" : "label"}
+                px={home ? BODY : LABEL}
+                color={home ? ink.gold : ink.faded}
                 anchor={[0, 0.5]}
                 align="left"
-                position={[x0 + ROW.stones * PU * 5.35, at.stones!, 0]}
-                glow={open ? 1.2 : 0.6}
-                delay={0.3}
+                position={[X(0), yAt(DUNGEON_ROWS.tithe + (home ? 2 : 0)), 0]}
+                glow={home ? 1.2 : 0.25}
+                outline={0.6}
+                delay={0.45}
               />
             </>
+          ) : (
+            <>
+              <RuneText
+                text={[{ text: "THE RIFT WILL CAST YOU TO FLOOR " }, { text: `${entry}`, color: ink.arcane }]}
+                font="label"
+                px={LABEL}
+                color={ink.faded}
+                anchor={[0, 0.5]}
+                align="left"
+                position={[X(0), yAt(VILLAGE_ROWS.range), 0]}
+                glow={0.3}
+                outline={0.6}
+                delay={0.3}
+              />
+              {deepest > 0 && (
+                <RuneText
+                  text={[{ text: "DEEPEST WALKED HOME FROM " }, { text: `${deepest}`, color: ink.brassLight }]}
+                  font="label"
+                  px={LABEL}
+                  color={ink.faded}
+                  anchor={[0, 0.5]}
+                  align="left"
+                  position={[X(0), yAt(VILLAGE_ROWS.deepest), 0]}
+                  glow={0.3}
+                  outline={0.6}
+                  delay={0.4}
+                />
+              )}
+            </>
           )}
-          <RuneText text={net.text} px={px("net")} color={net.color} anchor={[0, 0.5]} align="left" position={[x0, at.net!, 0]} glow={0.7} delay={0.25} />
-        </Tablet>
+          <Divider width={CW} unit={A} delay={0.35} position={[X(CW / 2), yAt(ruleAt), 0]} />
+          <PixelSprite name="gem" tint={ink.brassLight} texel={A} position={[X(3.5), yAt(gearAt), 0.0005]} delay={0.45} />
+          <RuneText text="GEAR" font="label" px={LABEL} color={ink.faded} anchor={[0, 0.5]} align="left" position={[X(13), yAt(gearAt), 0]} glow={0.25} outline={0.6} delay={0.45} />
+          <RuneText text={`${gear}`} font="body" px={BODY} color={ink.brassLight} anchor={[0, 0.5]} align="left" position={[X(13 + gearLabelW + 6), yAt(gearAt - 0.5), 0]} glow={0.6} outline={0.6} delay={0.5} />
+          <RuneText text={net.text.toUpperCase()} font="label" px={LABEL} color={net.color} anchor={[1, 0.5]} align="right" position={[X(CW), yAt(gearAt), 0]} glow={0.4} outline={0.6} delay={0.55} />
+        </Plate>
       </group>
     </HudAnchor>
   );

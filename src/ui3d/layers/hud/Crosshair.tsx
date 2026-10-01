@@ -2,24 +2,24 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { Color, ShaderMaterial, type Mesh } from "three";
 import { gameEvents } from "../../../core/events";
-import { palette } from "../../../ui/theme";
 import { ViewAnchor } from "../../anchors";
-import { uiNow } from "../../clock";
-import { useUiShow } from "../../presence";
-import { glowQuad } from "./glow";
-import { hudUnit } from "./HudAnchor";
+import { ink } from "../../theme";
+import { apx } from "./ap";
+import { useStepFade } from "./fade";
+import { unitQuad } from "./PixelSprite";
 
-/** The aim: a tiny rune reticle burning in the air dead ahead — four arcs
- * of a ring turning slowly round a point of light. Spells fly along the
+/** The aim (artpass hud/Crosshair): a 2 px bone-white dot and four short
+ * arms with a hard ink shadow, every pixel square. Spells fly along the
  * camera ray, so its centre is exactly where they go. Every cast (the
- * staff's kick) makes it flare: the arcs spin and spread, and a ring of
- * light ripples outward.
+ * staff's kick) snaps the arms outward a few whole pixels and lights them
+ * arcane, and they step back in.
  *
  * Rigidly carried (no lag): an aim that trails the view would lie. */
 
 const D = 1;
-/** Quad size: the reticle plus its glow, ~3.4% of the screen tall. */
-const SIZE = 0.034 * hudUnit(D);
+const A = apx(D);
+/** The pixel grid: 32 × 32 artpass pixels centred on a pixel corner. */
+const N = 32;
 
 const VERT = /* glsl */ `
 varying vec2 vUv;
@@ -30,52 +30,54 @@ void main() {
 `;
 
 const FRAG = /* glsl */ `
-uniform float uTime;
-uniform float uKick;
+uniform float uSpread;
 uniform float uShow;
-uniform float uSpin;
-uniform vec3 uColor;
-uniform vec3 uAccent;
+uniform float uHot;
+uniform vec3 uBone;
+uniform vec3 uArc;
 varying vec2 vUv;
-const float QUARTER = 1.5707963;
+
+// Arm pixels: four 5×2 bars starting 4 px (+ spread) from the centre.
+bool arm(vec2 p) {
+  bool midY = p.y >= -1.0 && p.y <= 0.0;
+  bool midX = p.x >= -1.0 && p.x <= 0.0;
+  float a = 4.0 + uSpread;
+  float b = a + 4.0;
+  bool h = midY && ((p.x >= a && p.x <= b) || (p.x <= -a - 1.0 && p.x >= -b - 1.0));
+  bool v = midX && ((p.y >= a && p.y <= b) || (p.y <= -a - 1.0 && p.y >= -b - 1.0));
+  return h || v;
+}
+bool dot_(vec2 p) {
+  return p.x >= -1.0 && p.x <= 0.0 && p.y >= -1.0 && p.y <= 0.0;
+}
+
 void main() {
-  vec2 p = (vUv - 0.5) * 2.0;
-  float r = length(p);
-  float a = atan(p.y, p.x) + uSpin;
-  // Four arcs, centred on the diagonals, spreading on a cast.
-  float ringR = 0.5 + uKick * 0.2;
-  float seg = abs(fract(a / QUARTER) - 0.5);
-  float d = abs(r - ringR);
-  float arc = smoothstep(0.3 - uKick * 0.08, 0.2 - uKick * 0.08, seg);
-  float ink = arc * smoothstep(0.075, 0.04, d);
-  float dotInk = smoothstep(0.12, 0.07, r);
-  float core = max(ink, dotInk);
-  // A dark rim keeps it legible over torchlight and pale bone alike.
-  float rim = max(smoothstep(0.34, 0.24, seg) * smoothstep(0.15, 0.09, d), smoothstep(0.21, 0.13, r));
-  float glow = arc * exp(-d * d * 90.0) * 0.45 + exp(-r * r * 22.0) * 0.35;
-  // The cast's ripple: a ring racing outward as the kick decays.
-  float pr = 0.35 + (1.0 - uKick) * 0.6;
-  float ripple = uKick * smoothstep(0.07, 0.0, abs(r - pr));
-  vec3 col = uColor * core * (1.0 + uKick * 0.8) + uAccent * (glow * (0.6 + uKick * 1.4) + ripple * 1.6);
-  float alpha = max(core, rim * 0.55);
-  gl_FragColor = vec4(col, alpha) * uShow;
+  vec2 p = floor(vUv * ${N}.0) - ${N / 2}.0;
+  vec3 col;
+  float a;
+  vec3 armCol = mix(uBone, uArc, uHot);
+  if (dot_(p)) { col = uBone; a = 1.0; }
+  else if (arm(p)) { col = armCol; a = 0.88; }
+  // The dot's ink ring, and the arms' hard 1 px shadow (down-right).
+  else if (abs(p.x + 0.5) <= 1.5 && abs(p.y + 0.5) <= 1.5) { col = vec3(0.0); a = 0.7; }
+  else if (arm(p + vec2(-1.0, 1.0))) { col = vec3(0.0); a = 0.7; }
+  else discard;
+  gl_FragColor = vec4(col * a * uShow, a * uShow);
   #include <colorspace_fragment>
 }
 `;
 
 export function Crosshair() {
-  const show = useUiShow();
   const mesh = useRef<Mesh>(null);
   const material = useMemo(
     () =>
       new ShaderMaterial({
         uniforms: {
-          uTime: { value: 0 },
-          uKick: { value: 0 },
+          uSpread: { value: 0 },
           uShow: { value: 0 },
-          uSpin: { value: 0 },
-          uColor: { value: new Color("#f4ead2") },
-          uAccent: { value: new Color(palette.accent) },
+          uHot: { value: 0 },
+          uBone: { value: new Color("#f4ecd8") },
+          uArc: { value: new Color(ink.arcane) },
         },
         vertexShader: VERT,
         fragmentShader: FRAG,
@@ -87,12 +89,13 @@ export function Crosshair() {
     [],
   );
   useEffect(() => () => material.dispose(), [material]);
-  const state = useRef({ kick: 0, spin: 0, shown: 0 });
+  const fade = useStepFade({ inTime: 0.3, outTime: 0.2, steps: 3 });
+  const kick = useRef(0);
 
   useEffect(
     () =>
       gameEvents.on("staffKick", (v) => {
-        state.current.kick = Math.min(1, Math.max(state.current.kick, v));
+        kick.current = Math.min(1, Math.max(kick.current, v));
       }),
     [],
   );
@@ -100,26 +103,18 @@ export function Crosshair() {
   useFrame((_, rawDt) => {
     // Clamped so a hitch doesn't swallow the cast's pulse.
     const dt = Math.min(rawDt, 1 / 20);
-    const s = state.current;
+    kick.current *= Math.exp(-dt * 7);
     const u = material.uniforms;
-    s.kick *= Math.exp(-dt * 5.5);
-    s.spin += dt * (0.35 + s.kick * 9);
-    s.shown += ((show ? 1 : 0) - s.shown) * (1 - Math.exp(-dt * (show ? 5 : 8)));
-    u.uTime!.value = uiNow();
-    u.uKick!.value = s.kick;
-    u.uSpin!.value = s.spin;
-    u.uShow!.value = s.shown;
-    const m = mesh.current;
-    if (m) {
-      m.visible = s.shown > 0.01;
-      // Arrives from a larger, looser ring, as if focusing.
-      m.scale.setScalar(SIZE * (1 + (1 - s.shown) * 1.2 + s.kick * 0.25));
-    }
+    // Whole pixels only: the arms jump out and step back in.
+    u.uSpread!.value = Math.round(kick.current * 3);
+    u.uHot!.value = kick.current > 0.25 ? 1 : 0;
+    u.uShow!.value = fade.current;
+    if (mesh.current) mesh.current.visible = fade.current > 0;
   });
 
   return (
     <ViewAnchor offset={[0, 0, -D]} follow={Infinity}>
-      <mesh ref={mesh} geometry={glowQuad()} material={material} renderOrder={60} />
+      <mesh ref={mesh} geometry={unitQuad()} material={material} scale={[N * A, N * A, 1]} renderOrder={60} />
     </ViewAnchor>
   );
 }

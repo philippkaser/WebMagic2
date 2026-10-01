@@ -1,53 +1,73 @@
-import { ADVANCE } from "../../font/glyphs";
+import { HUD_SCALE } from "./ap";
 
 /** Where every HUD piece hangs — in one place so they can't collide.
  *
- * Insets are fractions of the screen HEIGHT from the named edge (frame.ts),
- * distances are metres from the eye; sizes below are screen-height fractions
- * too (multiply by hudUnit(distance) for metres). The centre of the view
- * stays clear: the crosshair is the only thing there. The bottom centre
- * belongs to the interaction prompts (WorldPrompts), the upper centre to the
- * message feed (WorldMessages); the HUD keeps to the corners and the top.
+ * The arrangement is artpass's (hud/PlayHud): the centre stays the world.
  *
- *   top-left      location plaque (floor, biome, the Tithe, connection)
- *   top-centre    boss bar, and under it the presence eye
- *   bottom-left   row 1: health flask · number · mana flask · number · belt
- *                 row 2: the purse
- *   bottom-right  worn equipment */
+ *   location panel          presence eye / boss bar
+ *                              (arrival banner)
+ *                               crosshair
+ *   purse
+ *   vitals · belt                                  spells / gear slots
+ *
+ * Insets are fractions of the screen HEIGHT from the named edge (frame.ts),
+ * distances are metres from the eye. Panel sizes are artpass CSS pixels
+ * (ap.ts); `apFrac` turns them into screen-height fractions. The bottom
+ * centre belongs to the interaction prompts (WorldPrompts), the upper
+ * centre to the message feed (WorldMessages). */
 
-/** Cap height of a glyph → width of an n-character number, screen units. */
-function textWidth(chars: number, capFraction: number): number {
-  return ((chars * ADVANCE - 1) * capFraction) / 7;
+/** Screen-height fraction of `n` artpass pixels. */
+export function apFrac(n: number): number {
+  return (n * HUD_SCALE) / 800;
 }
 
-const EDGE = 0.032;
+/** Gap from the screen edges (artpass's 12–14 px). */
+const EDGE = apFrac(13);
+/** Gap between neighbouring panels. */
+const GAP = apFrac(6);
 
-/** Vitals row geometry (screen-height fractions from the cluster origin). */
+/** The vitals panel (artpass .wm-vitals: 280 wide, padding 6 10 8, rows
+ * gap 6): padding-box sizes in ap pixels. */
 export const VITALS = {
-  /** Bulb radius of a flask. */
-  flaskR: 0.034,
-  /** Cap height of the current value / of the "/max" under it. */
-  bigText: 0.027,
-  smallText: 0.017,
-  gap: 0.012,
-  /** Widest number the column must hold ("999"). */
-  get numW() {
-    return textWidth(3, this.bigText);
+  cssW: 264,
+  padX: 10,
+  padTop: 6,
+  gap: 6,
+  /** Two rows: head 16 + 2 + track 14, gap, head 18 + 2 + track 10. */
+  get contentW() {
+    return this.cssW - this.padX * 2;
   },
-  get manaX() {
-    return this.flaskR * 2 + this.gap + this.numW + this.gap * 1.5 + this.flaskR;
+  get cssH() {
+    return this.padTop + 16 + 2 + 14 + this.gap + 18 + 2 + 10 + 8;
   },
-  get width() {
-    return this.manaX + this.flaskR + this.gap + this.numW;
+  /** Border-box size (the 8 px frame on both sides). */
+  get outerW() {
+    return this.cssW + 16;
+  },
+  get outerH() {
+    return this.cssH + 16;
   },
 };
 
+/** One item slot (artpass .wm-card--sm: 48 wide, 40 px of art). */
+export const SLOT = { w: 48, h: 46, gap: 8 } as const;
+
+/** A strip of `n` slots in an iron panel (artpass .wm-equip: padding 10 10 6). */
+export function slotStrip(n: number): { cssW: number; cssH: number; outerW: number; outerH: number } {
+  const cssW = n * SLOT.w + (n - 1) * SLOT.gap + 20;
+  const cssH = SLOT.h + 16;
+  return { cssW, cssH, outerW: cssW + 16, outerH: cssH + 16 };
+}
+
+/** The purse panel's padding-box height. */
+export const PURSE_H = 22;
+
 export const HUD_LAYOUT = {
   vitals: { h: -1, v: -1, inset: [EDGE, EDGE], distance: 1 },
-  belt: { h: -1, v: -1, inset: [EDGE + VITALS.width + 0.03, EDGE + 0.028], distance: 1 },
-  purse: { h: -1, v: -1, inset: [EDGE, EDGE + 0.118], distance: 1 },
-  equipment: { h: 1, v: -1, inset: [EDGE, EDGE + 0.022], distance: 1 },
-  plaque: { h: -1, v: 1, inset: [0.03, 0.03], distance: 1.2 },
-  boss: { h: 0, v: 1, inset: [0, 0.075], distance: 1.5 },
-  presence: { h: 0, v: 1, inset: [0, 0.175], distance: 1.4 },
+  belt: { h: -1, v: -1, inset: [EDGE + apFrac(VITALS.outerW) + GAP, EDGE], distance: 1 },
+  purse: { h: -1, v: -1, inset: [EDGE, EDGE + apFrac(VITALS.outerH) + GAP], distance: 1 },
+  equipment: { h: 1, v: -1, inset: [EDGE, EDGE], distance: 1 },
+  plaque: { h: -1, v: 1, inset: [EDGE, EDGE], distance: 1 },
+  presence: { h: 0, v: 1, inset: [0, apFrac(10)], distance: 1.2 },
+  boss: { h: 0, v: 1, inset: [0, apFrac(74)], distance: 1.2 },
 } as const;

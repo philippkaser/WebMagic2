@@ -2,35 +2,35 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { CylinderGeometry, Euler, InstancedMesh, Matrix4, MeshStandardMaterial, Quaternion, Vector3 } from "three";
 import { useGame } from "../../../state/gameStore";
-import { palette } from "../../../ui/theme";
-import { pxFor } from "../../anchors";
 import { uiNow } from "../../clock";
+import { Plate } from "../../Plate";
 import { useUiShow } from "../../presence";
 import { measureText, RuneText } from "../../text/RuneText";
+import { ink } from "../../theme";
 import { emitUiSparks } from "../../UiSparks";
+import { apx, fontPx, FRAME_TEXEL, plateSize } from "./ap";
 import { coinsFor } from "./copy";
 import { HEAP_CAPACITY, heapSlots, type CoinSlot } from "./heap";
-import { HudAnchor, hudUnit, Undistort } from "./HudAnchor";
-import { HUD_LAYOUT } from "./layout";
+import { HudAnchor, Undistort } from "./HudAnchor";
+import { HUD_LAYOUT, PURSE_H } from "./layout";
 import { useEntryDelay } from "./useSettled";
 
-/** The purse, as what it is: a little heap of coins carried above the
- * flasks, growing as you get richer (one coin per doubling, roughly), with
- * the count burned into the air beside it. Banked gold is bright gold; the
- * gold gathered this run — lost if you die — is a second, duller copper heap
- * with its own "+N", kept apart because it isn't yours yet.
+/** The purse, as what it is: a little heap of coins in a small iron-framed
+ * panel above the vitals, growing as you get richer (one coin per doubling,
+ * roughly), the count beside it in gold. The gold gathered this run — lost
+ * if you die — is a second, duller copper heap with its own "+N" in brass,
+ * kept apart because it isn't yours yet.
  *
- * New coins drop onto the heap and settle; spent ones wink out. The
+ * The coins are chunky eight-sided pixel coins, flat-shaded: new ones drop
+ * onto the heap and settle with a chink of sparks, spent ones wink out. The
  * counters' changed digits re-write themselves (RuneText). */
 
 const L = HUD_LAYOUT.purse;
-const U = hudUnit(L.distance);
-/** Coin radius: ~2% of the screen tall. */
-const C = 0.0105 * U;
-const PX = pxFor(L.distance, 0.022);
-const RUN_PX = pxFor(L.distance, 0.019);
-/** Half-width of a full heap, m. */
-const HEAP_HALF = 3.2 * C;
+const A = apx(L.distance);
+/** Coin radius: 3 artpass pixels. */
+const C = 3 * A;
+const PX = fontPx(13, "body", L.distance);
+const RUN_PX = fontPx(11, "body", L.distance);
 
 let coinGeo: CylinderGeometry | null = null;
 const coinMats = new Map<string, MeshStandardMaterial>();
@@ -38,8 +38,9 @@ function coinMaterial(color: string, emissive: string): MeshStandardMaterial {
   let m = coinMats.get(color);
   if (!m) {
     // Not fully metallic: with no environment to reflect, a true metal reads
-    // black between highlights. A warm self-glow keeps it gold in the dark.
-    m = new MeshStandardMaterial({ color, metalness: 0.55, roughness: 0.32, emissive, emissiveIntensity: 0.55 });
+    // black between highlights. A warm self-glow keeps it gold in the dark;
+    // flat shading keeps every facet a hard-edged chunk of colour.
+    m = new MeshStandardMaterial({ color, metalness: 0.4, roughness: 0.45, emissive, emissiveIntensity: 0.7, flatShading: true });
     coinMats.set(color, m);
   }
   return m;
@@ -50,29 +51,42 @@ export function Purse() {
   const runGold = useGame((s) => s.runGold);
   const goldText = `${gold}`;
   const d = useEntryDelay(0.4);
-  const goldW = measureText(goldText, PX).width;
-  const runX = HEAP_HALF * 2 + C * 1.6 + goldW + C * 2.2;
+  // Layout in artpass pixels: heap 26, gap 6, gold, gap 10, heap 20, gap 4, +run.
+  const goldW = measureText(goldText, PX, undefined, "body").width / A;
+  const runText = `+${runGold}`;
+  const runW = runGold > 0 ? measureText(runText, RUN_PX, undefined, "body").width / A : 0;
+  const contentW = 26 + 6 + goldW + (runGold > 0 ? 10 + 20 + 4 + runW : 0);
+  const [pw, ph] = plateSize(contentW + 16, PURSE_H);
+  const outerW = pw + FRAME_TEXEL * 2;
+  const outerH = ph + FRAME_TEXEL * 2;
+  const x0 = -contentW / 2;
+  const runX = x0 + 26 + 6 + goldW + 10;
   return (
     <HudAnchor h={L.h} v={L.v} inset={L.inset} distance={L.distance}>
-      <Undistort at={[HEAP_HALF, C * 0.4, 0]}>
-        <Heap count={coinsFor(gold)} color="#e9b949" emissive="#6a4308" seed={1} />
-      </Undistort>
-      <RuneText text={goldText} px={PX} color={palette.gold} anchor={[0, 0.5]} align="left" position={[HEAP_HALF * 2 + C * 1.6, C * 1.1, 0]} glow={0.9} outline={0.55} delay={d} />
-      <Undistort at={[runX + HEAP_HALF * 0.7, C * 0.4, 0]}>
-        <Heap count={coinsFor(runGold, 18)} color="#b87a3a" emissive="#4a2406" seed={2} scale={0.8} />
-      </Undistort>
-      <RuneText
-        text={`+${runGold}`}
-        show={runGold > 0}
-        px={RUN_PX}
-        color={palette.runLoot}
-        anchor={[0, 0.5]}
-        align="left"
-        position={[runX + HEAP_HALF * 1.5 + C, C * 1.0, 0]}
-        glow={0.7}
-        outline={0.55}
-        delay={d * 1.2}
-      />
+      <group position={[(outerW / 2) * A, (outerH / 2) * A, 0]}>
+        <Plate width={pw * A} height={ph * A} frame="iron" texel={FRAME_TEXEL * A} fillOpacity={0.94}>
+          <Undistort at={[(x0 + 13) * A, -5 * A, 0.01]}>
+            <Heap count={coinsFor(gold)} color={ink.gold} emissive="#6a4308" seed={1} />
+          </Undistort>
+          <RuneText text={goldText} font="body" px={PX} color={ink.gold} anchor={[0, 0.5]} align="left" position={[(x0 + 32) * A, 0, 0]} glow={0.8} outline={0.6} delay={d} />
+          <Undistort at={[(runX + 10) * A, -5 * A, 0.01]}>
+            <Heap count={coinsFor(runGold, 18)} color="#b87a3a" emissive="#4a2406" seed={2} scale={0.8} />
+          </Undistort>
+          <RuneText
+            text={runText}
+            show={runGold > 0}
+            font="body"
+            px={RUN_PX}
+            color={ink.brass}
+            anchor={[0, 0.5]}
+            align="left"
+            position={[(runX + 24) * A, 0, 0]}
+            glow={0.6}
+            outline={0.6}
+            delay={d * 1.2}
+          />
+        </Plate>
+      </group>
     </HudAnchor>
   );
 }
@@ -90,7 +104,7 @@ function Heap({ count, color, emissive, seed, scale = 1 }: { count: number; colo
   const shown = useUiShow();
   const slots = useMemo<CoinSlot[]>(() => heapSlots(seed), [seed]);
   const mesh = useMemo(() => {
-    coinGeo ??= new CylinderGeometry(1, 1, 0.17, 18);
+    coinGeo ??= new CylinderGeometry(1, 1, 0.3, 8);
     const m = new InstancedMesh(coinGeo, coinMaterial(color, emissive), HEAP_CAPACITY);
     m.frustumCulled = false;
     m.count = 0;
