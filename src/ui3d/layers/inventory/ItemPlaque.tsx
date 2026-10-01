@@ -119,7 +119,7 @@ function layoutPlaque(t: PlaqueText): { rows: Row[]; w: number; h: number } {
     w = Math.max(w, x + m.width);
     y += m.height;
   };
-  add(t.title, "body", NAME_PX, 0, { maxCols: MAX_COLS - 6 });
+  add(t.title, "heading", NAME_PX, 0, { maxCols: MAX_COLS - 6 });
   add(t.sub, "label", SMALL_PX, SMALL_PX * 4, { icon: { name: "gem", tint: t.gem, px: SMALL_PX } });
   if (t.desc) add(t.desc, "body", LINE_PX, LINE_PX * 5, { maxCols: MAX_COLS, color: ink.parchment });
   if (t.statsHead) add(t.statsHead, "label", SMALL_PX, LINE_PX * 5, { color: ink.faded });

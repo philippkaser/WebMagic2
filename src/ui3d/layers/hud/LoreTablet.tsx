@@ -30,7 +30,7 @@ const A = apx(D);
 const LINGER = 9;
 const W = 0.6 * U;
 const PAD = 16 * A;
-const TITLE_PX = fontPx(26, "title", D);
+const TITLE_PX = fontPx(26, "heading", D);
 const BODY_PX = fontPx(14, "body", D);
 const KEY_PX = fontPx(9, "label", D);
 const HINT_PX = fontPx(8, "label", D);
@@ -101,7 +101,7 @@ function Carving({ fragment, shown }: { fragment: LoreFragment; shown: boolean }
   const placed = useRef(false);
   const cols = bodyCols();
   const body = measureText(fragment.text, BODY_PX, cols, "body");
-  const titleH = measureText(fragment.title, TITLE_PX, undefined, "title").height;
+  const titleH = measureText(fragment.title, TITLE_PX, undefined, "heading").height;
   const hintH = 14 * A;
   const H = PAD * 2 + titleH + 14 * A + body.height + 10 * A + hintH;
 
@@ -130,7 +130,7 @@ function Carving({ fragment, shown }: { fragment: LoreFragment; shown: boolean }
   return (
     <group ref={group}>
       <Tablet width={W} height={H} tile={0.16 * U} tint={VELLUM} frame="brass" frameTexel={2 * A} seed={11}>
-        <RuneText text={fragment.title} font="title" px={TITLE_PX} color={ink.brassLight} position={[0, top - titleH / 2, 0]} glow={0.9} outline={0.5} />
+        <RuneText text={fragment.title} font="heading" px={TITLE_PX} color={ink.brassLight} position={[0, top - titleH / 2, 0]} glow={0.9} outline={0.5} />
         <Divider width={(W - PAD * 2) / A} unit={A} diamond delay={0.25} position={[0, top - titleH - 6 * A, 0]} />
         <RuneText
           text={fragment.text}

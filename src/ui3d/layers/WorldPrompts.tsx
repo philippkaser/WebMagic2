@@ -7,7 +7,8 @@ import { KeyCap, keyCapWidth } from "../KeyCap";
 import { Plate } from "../Plate";
 import { UiShow } from "../presence";
 import { ink } from "../theme";
-import { ViewAnchor, pxFor } from "../anchors";
+import { pxFor } from "../anchors";
+import { CarriedAnchor } from "./hud/HudAnchor";
 import type { TextSpan } from "../font/layout";
 import { measureText, RuneText } from "../text/RuneText";
 
@@ -98,7 +99,7 @@ export function WorldPrompts() {
             onHidden={() => setEntries((prev) => prev.filter((x) => x.id !== e.id))}
           />
         ) : (
-          <ViewAnchor key={e.id} offset={[0, -0.42, -1.6]}>
+          <CarriedAnchor key={e.id} offset={[0, -0.42, -1.6]}>
             <UiShow show={e.shown}>
               <PromptPanel
                 parts={e.text === HINT_TEXT ? HINT : promptParts(e.text)}
@@ -107,7 +108,7 @@ export function WorldPrompts() {
                 onHidden={() => setEntries((prev) => prev.filter((x) => x.id !== e.id))}
               />
             </UiShow>
-          </ViewAnchor>
+          </CarriedAnchor>
         ),
       )}
     </>

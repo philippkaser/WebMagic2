@@ -106,11 +106,11 @@ corner — check it against the latest commit when testing.
   portals until it falls.
 - **Procedural everything**: painted pixel-art textures, normal maps, models
   and every sound are generated at runtime — no binary assets beyond the
-  three pixel fonts.
+  four pixel fonts.
 - **The UI lives in the world**: messages burn into the air ahead of you as
   runes that settle into letters, menus are dark stone tablets that build
-  themselves out of the dark and forge a brass pixel frame, items are small
-  3D objects. Portals are rifts torn in the air, and stepping through one is
+  themselves out of the dark and forge a brass pixel frame, health and mana
+  are pixel-art flasks that slosh as you move, items are small 3D objects. Portals are rifts torn in the air, and stepping through one is
   a journey — sucked in, through a void of blocky stars, spat out onto the
   new floor.
 

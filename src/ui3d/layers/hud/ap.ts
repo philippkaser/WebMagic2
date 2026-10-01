@@ -22,6 +22,7 @@ export function apx(distance: number): number {
  * rasterizes the pixel fonts where they are pixel-exact. */
 const FACE_METRICS: Record<Exclude<FontId, "pixel">, { size: number; cap: number }> = {
   title: { size: 21, cap: 12 },
+  heading: { size: 27, cap: 15 },
   body: { size: 8, cap: 5 },
   label: { size: 8, cap: 5 },
 };

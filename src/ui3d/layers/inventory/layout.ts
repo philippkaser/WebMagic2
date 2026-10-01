@@ -28,7 +28,7 @@ export const SCENE_DISTANCE = 1.35;
 /** Screen-height fractions for the scene's text (see anchors.pxFor). 0.016 is
  * the legibility floor at 600 px tall. */
 export const TEXT = {
-  /** Jacquard headlines ("The Wizard"). */
+  /** Panel headlines ("The Wizard", heading face). */
   title: 0.034,
   /** Silkscreen small caps (section labels, captions). */
   label: 0.0135,

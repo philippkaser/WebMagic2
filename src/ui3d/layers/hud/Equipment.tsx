@@ -6,7 +6,6 @@ import { useGame } from "../../../state/gameStore";
 import { getAbility } from "../../../weapons/spells";
 import { uiNow } from "../../clock";
 import { KeyCap, keyCapWidth } from "../../KeyCap";
-import { Plate } from "../../Plate";
 import { measureText, RuneText } from "../../text/RuneText";
 import { ink } from "../../theme";
 import { apx, fontPx, FRAME_TEXEL, plateSize } from "./ap";
@@ -15,8 +14,8 @@ import { HUD_LAYOUT, SLOT, slotStrip } from "./layout";
 import { SlotCard, type SlotPose } from "./SlotCard";
 
 /** Bottom right, as artpass lays it out (hud/EquipStrip): the staff's two
- * spells on their mouse buttons in a small iron panel, and under it the four
- * worn pieces as framed item slots — each with the piece itself, the 3D
+ * spells on their mouse buttons, and under them the four worn pieces as
+ * item cards carried in a row (no panel around them) — each with the piece itself, the 3D
  * model, turning in it. When a piece changes, the old one burns away as the
  * new one arrives, its slot flares in its colour and its name writes itself
  * above the strip for a moment. */
@@ -75,7 +74,7 @@ export function Equipment() {
   return (
     <HudAnchor h={L.h} v={L.v} inset={L.inset} distance={L.distance}>
       <group position={[-(outerW / 2) * A, (outerH / 2) * A, 0]}>
-        <Plate width={PW * A} height={PH * A} frame="iron" texel={FRAME_TEXEL * A} fillOpacity={0.94}>
+        <group position={[0, 0, 0.003]}>
           {SLOTS.map((slot, i) => (
             <GearSlotCard
               key={slot}
@@ -85,7 +84,7 @@ export function Equipment() {
               position={[(-STRIP.cssW / 2 + 10 + SLOT.w / 2 + i * (SLOT.w + SLOT.gap)) * A, (STRIP.cssH / 2 - 10 - SLOT.h / 2) * A, 0]}
             />
           ))}
-        </Plate>
+        </group>
       </group>
       <Spells staffId={equipment.staff.defId} bottom={outerH + 6} />
       <RuneText
@@ -134,7 +133,7 @@ function GearSlotCard({ slot, worn, index, position }: { slot: GearSlot; worn: I
 }
 
 /** The staff's spells on their mouse buttons (`.wm-abil`): [L] Bolt
- * [R] Force Blast, in a small iron panel right-aligned over the slots. */
+ * [R] Force Blast, key caps and names right-aligned over the slots. */
 function Spells({ staffId, bottom }: { staffId: string; bottom: number }) {
   const def = useMemo(() => resolveItem(staffId).def, [staffId]);
   const parts = useMemo(() => {
@@ -156,7 +155,7 @@ function Spells({ staffId, bottom }: { staffId: string; bottom: number }) {
   let x = -(contentW / 2);
   return (
     <group position={[-(outerW / 2) * A, (bottom + outerH / 2) * A, 0]}>
-      <Plate width={pw * A} height={ph * A} frame="iron" texel={FRAME_TEXEL * A} fillOpacity={0.94}>
+      <group position={[0, 0, 0.003]}>
         {items.map((it, i) => {
           const capX = x + it.capW / 2;
           const nameX = x + it.capW + 4;
@@ -179,7 +178,7 @@ function Spells({ staffId, bottom }: { staffId: string; bottom: number }) {
             </group>
           );
         })}
-      </Plate>
+      </group>
     </group>
   );
 }

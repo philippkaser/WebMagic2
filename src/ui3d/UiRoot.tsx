@@ -3,6 +3,7 @@ import { ViewAnchor, pxFor } from "./anchors";
 import { useFacesReady } from "./font/faces";
 import { ItemModel } from "./ItemModel";
 import { Hud } from "./layers/hud/Hud";
+import { HudRig } from "./layers/hud/HudAnchor";
 import { Menus } from "./layers/menus/Menus";
 import { InventoryLayer } from "./layers/inventory/InventoryLayer";
 import { WorldMessages } from "./layers/WorldMessages";
@@ -22,6 +23,7 @@ export function UiRoot() {
   useFacesReady();
   return (
     <>
+      <HudRig />
       <WorldMessages />
       <WorldPrompts />
       <Hud />

@@ -1,16 +1,20 @@
 import type { DataTexture } from "three";
 import jacquardUrl from "@fontsource/jacquard-12/files/jacquard-12-latin-400-normal.woff2?url";
+import jerseyUrl from "@fontsource/jersey-15/files/jersey-15-latin-400-normal.woff2?url";
 import silkscreenUrl from "@fontsource/silkscreen/files/silkscreen-latin-400-normal.woff2?url";
 import tiny5Url from "@fontsource/tiny5/files/tiny5-latin-400-normal.woff2?url";
 import { ATLAS_COLS, ATLAS_PAD, CELL_H, CELL_W, atlasTexture, glyphAtlas, inkToAtlas } from "./atlas";
 import { GLYPH_H, GLYPH_W, RUNE_BASE, RUNE_COUNT, glyphBitmap, glyphSlot, type Bitmap } from "./glyphs";
 import { PIXEL_METRICS, type FontMetrics } from "./metrics";
 
-/** The UI's typefaces — the grimoire trio:
+/** The UI's typefaces:
  *
- *   title  Jacquard 12 — pixel blackletter for titles, floor numbers, the
- *          big moments ("WebMagic", "Floor 12", "The Drowned Halls")
- *   body   Tiny5 — crisp pixel sans for everything you read
+ *   title    Jacquard 12 — pixel blackletter for the BIG moments only
+ *            ("WebMagic", "Floor 12", "You Died"); blackletter turns to
+ *            lace below ~3 % of the screen height
+ *   heading  Jersey 15 — a sturdy pixel face for every smaller title (biome
+ *            names, panel headlines, boss and item names): reads at a glance
+ *   body     Tiny5 — crisp pixel sans for everything you read
  *   label  Silkscreen — tiny all-caps labels and numbers
  *   pixel  the hand-set 5×7 fallback (glyphs.ts): symbols the web fonts
  *          lack, tests, and anything before the fonts arrive
@@ -18,14 +22,14 @@ import { PIXEL_METRICS, type FontMetrics } from "./metrics";
  * The web fonts come from @fontsource (bundled by Vite — the one exception
  * to "everything procedural": type is craft we don't redraw). They are
  * pixel fonts, so rasterized at their NATIVE size (measured: Jacquard 12 is
- * pixel-exact at 21 px with a 12 px cap, Tiny5 and Silkscreen at 8 px with a
- * 5 px cap) and thresholded to 1 bit, every glyph is its designer's exact
+ * pixel-exact at 21 px with a 12 px cap, Jersey 15 at 27 px with a 15 px
+ * cap, Tiny5 and Silkscreen at 8 px with a 5 px cap) and thresholded to 1 bit, every glyph is its designer's exact
  * pixels — then packed into the same halo/outline atlas the rune shader
  * already reads. Glyphs the font lacks (arrows, ◆, ○…) and the sixteen
  * materialize runes are drawn from the hand-set bitmaps, scaled by whole
  * pixels to the face's cap height. */
 
-export type FontId = "title" | "body" | "label" | "pixel";
+export type FontId = "title" | "heading" | "body" | "label" | "pixel";
 
 /** Everything RuneText needs: layout metrics plus where glyphs sit in the
  * atlas texture. All in font pixels. */
@@ -58,6 +62,7 @@ const SPECS: WebFaceSpec[] = [
   // Line pitches are tight on purpose: a 5 px cap with 3 px of air reads as
   // a page of a grimoire, not a spreadsheet.
   { id: "title", family: "Jacquard 12", url: jacquardUrl, size: 21, lineHeight: 21 },
+  { id: "heading", family: "Jersey 15", url: jerseyUrl, size: 27, lineHeight: 22 },
   { id: "body", family: "Tiny5", url: tiny5Url, size: 8, lineHeight: 8 },
   { id: "label", family: "Silkscreen", url: silkscreenUrl, size: 8, lineHeight: 8 },
 ];

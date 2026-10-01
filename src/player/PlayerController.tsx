@@ -12,7 +12,7 @@ import { playDash, playJump } from "../audio/sound";
 import { EYE_HEIGHT, GROUPS, PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
 import { dashFx, dustPuffFx, hoverWispFx, runeBurstFx } from "../fx/effects";
-import { playerPosition, playerVelocity, setPlayerBody } from "../game/player-state";
+import { playerGait, playerPosition, playerVelocity, setPlayerBody } from "../game/player-state";
 import { publishLocalPose } from "../net/players";
 import { getStats, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
@@ -207,6 +207,9 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
     bobAmp.current += (targetAmp - bobAmp.current) * Math.min(1, dt * 8);
     if (bobAmp.current > 0.01) bobPhase.current += dt * (5 + hSpeed * 1.1);
     const bobY = Math.sin(bobPhase.current * 2) * 0.034 * bobAmp.current;
+    playerGait.phase = bobPhase.current;
+    playerGait.amp = bobAmp.current;
+    playerGait.landDip = landDip.current;
 
     // Camera shake from trauma.
     trauma.current = Math.max(0, trauma.current - dt * 1.7);

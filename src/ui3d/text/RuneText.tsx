@@ -28,8 +28,9 @@ import { applyFace, createRuneTextMaterial, NEVER, type RuneTextMaterial } from 
  * text while shown re-writes only the glyphs that changed — a ticking gold
  * counter flickers its last digit, a new prompt writes itself anew.
  *
- * Faces (`font`): "body" (Tiny5, default), "title" (Jacquard 12 blackletter),
- * "label" (Silkscreen caps), "pixel" (the hand-set fallback) — font/faces.ts.
+ * Faces (`font`): "body" (Tiny5, default), "title" (Jacquard 12 blackletter,
+ * big moments only), "heading" (Jersey 15, every smaller title), "label"
+ * (Silkscreen caps), "pixel" (the hand-set fallback) — font/faces.ts.
  *
  * Size (`px`) is a seventh of the capital height in world units, whatever
  * the face — so `pxFor(distance, screenFraction)` sizes any face alike, and

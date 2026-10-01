@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useFrame } from "@react-three/fiber";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { playerPosition } from "../../../game/player-state";
 import { selectIsHost, useNet } from "../../../net/netStore";
 import { canLeave, entryFloorForGear, gearLevel } from "../../../run/rules";
 import { useGame } from "../../../state/gameStore";
@@ -21,7 +23,8 @@ import { usePresenceList } from "./usePresenceList";
  *
  * On arriving — at the village, or on a floor — the place names itself: the
  * arrival banner burns into the air ahead (ArrivalBanner), hangs a few
- * breaths, and burns away. It waits for the journey to arrive, so it lands
+ * breaths, and burns away — sooner if you set off walking: once it has
+ * been read (the title written, an omen named), a few steps dismiss it. It waits for the journey to arrive, so it lands
  * once the new place has been revealed. What it leaves behind is the
  * location panel at the top left (artpass hud/LocationPanel): a brass-framed
  * soot panel with FLOOR, the floor number and biome, the Tithe of Five as
@@ -31,6 +34,12 @@ import { usePresenceList } from "./usePresenceList";
 
 const TITLE_HOLD = 4.2;
 const TITLE_HOLD_OMEN = 8.5;
+/** Shortest the banner stays, seconds (the title has burned in; under an
+ * omen, its name has been written too). */
+const TITLE_MIN = 1.3;
+const TITLE_MIN_OMEN = 2.6;
+/** Metres walked (horizontally) that dismiss the banner early. */
+const WALK_AWAY = 1.2;
 
 export function Location() {
   const phase = useGame((s) => s.phase);
@@ -54,6 +63,7 @@ export function Location() {
     const timer = setTimeout(() => setDoneKey(key), (title.omen ? TITLE_HOLD_OMEN : TITLE_HOLD) * 1000);
     return () => clearTimeout(timer);
   }, [titleUp, key, title]);
+  useWalkAway(titleUp, title.omen ? TITLE_MIN_OMEN : TITLE_MIN, () => setDoneKey(key));
   const { entries, remove } = usePresenceList(titleUp ? title : null, titleUp ? key : null);
 
   return (
@@ -66,6 +76,29 @@ export function Location() {
       </UiPresence>
     </>
   );
+}
+
+/** Calls `onWalked` once, when the player has walked WALK_AWAY metres from
+ * where they stood when `active` began — but not before `minSeconds`. */
+function useWalkAway(active: boolean, minSeconds: number, onWalked: () => void) {
+  const start = useRef<{ x: number; z: number; t: number } | null>(null);
+  const fired = useRef(false);
+  const cb = useRef(onWalked);
+  cb.current = onWalked;
+  useEffect(() => {
+    start.current = null;
+    fired.current = false;
+  }, [active]);
+  useFrame(({ clock }) => {
+    if (!active || fired.current) return;
+    const t = clock.elapsedTime;
+    const s = (start.current ??= { x: playerPosition.x, z: playerPosition.z, t });
+    if (t - s.t < minSeconds) return;
+    if (Math.hypot(playerPosition.x - s.x, playerPosition.z - s.z) > WALK_AWAY) {
+      fired.current = true;
+      cb.current();
+    }
+  });
 }
 
 const L = HUD_LAYOUT.plaque;

@@ -1,9 +1,8 @@
-import { useFrame, useThree } from "@react-three/fiber";
+import { useFrame } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
-import { Group, Vector3 } from "three";
+import type { Group } from "three";
 import { playRuneWrite } from "../../audio/uiSounds";
 import { gameEvents } from "../../core/events";
-import { placeInFront, pxFor } from "../anchors";
 import { uiNow } from "../clock";
 import { useGame } from "../../state/gameStore";
 import { isInventoryMode } from "./inventory/layout";
@@ -11,20 +10,29 @@ import { Plate } from "../Plate";
 import { UiShow } from "../presence";
 import { measureText, RuneText } from "../text/RuneText";
 import { ink } from "../theme";
+import { apx, fontPx, FRAME_TEXEL } from "./hud/ap";
+import { HudAnchor } from "./hud/HudAnchor";
+import { HUD_LAYOUT } from "./hud/layout";
 
-/** The message feed, in the air: every `message` event burns itself into the
- * space ahead of you, hangs there, and burns away.
+/** The message feed: every `message` event burns itself onto a small
+ * framed plate carried at the left edge of your view, under the location
+ * panel — on the same rig as the rest of the HUD, so it sways with your
+ * stride but never hangs in the room where you could walk into it.
  *
- * A message appears where you're looking, then drifts lazily after your
- * gaze — you can turn away and it trails into view again, like smoke
- * following a draught, never glued to the screen. Newer messages push the
- * older ones up. */
+ * The newest message writes itself at the top and pushes the older ones
+ * down; each hangs a few breaths (longer for longer lines) and burns away,
+ * and the ones below slide up to close the gap. Omens, triumphs and pacts
+ * are told apart by the plate's frame and the ink (`toneOf`). */
 
-const DISTANCE = 2.4;
+const L = HUD_LAYOUT.feed;
+const A = apx(L.distance);
+const PX = fontPx(13, "body", L.distance);
 const MAX_VISIBLE = 4;
-/** Screen-height fraction of a glyph. */
-const SIZE = 0.021;
-const LINE_GAP = 0.2; // metres between stacked messages
+const MAX_COLS = 44;
+/** Plate padding and the gap between plates, artpass pixels. */
+const PAD_X = 6;
+const PAD_Y = 4;
+const GAP = 4;
 
 interface Entry {
   id: number;
@@ -35,6 +43,12 @@ interface Entry {
 }
 
 let nextId = 1;
+
+/** Outer size of a message's plate, world units. */
+function plateOf(text: string): { w: number; h: number; text: { width: number; height: number } } {
+  const size = measureText(text, PX, MAX_COLS, "body");
+  return { w: size.width + (PAD_X * 2 + FRAME_TEXEL * 6) * A, h: size.height + (PAD_Y * 2 + FRAME_TEXEL * 6) * A, text: size };
+}
 
 export function WorldMessages() {
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -76,61 +90,62 @@ export function WorldMessages() {
     return () => clearInterval(timer);
   }, [anyShown]);
 
-  const shown = entries.filter((e) => e.shown);
+  // Newest on top: walk the shown ones from newest to oldest, stacking down.
+  const tops = new Map<number, number>();
+  let y = 0;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]!;
+    if (!e.shown) continue;
+    tops.set(e.id, y);
+    y += plateOf(e.text).h + GAP * A;
+  }
+
   return (
-    <>
+    <HudAnchor h={L.h} v={L.v} inset={L.inset} distance={L.distance}>
       {entries.map((e) => (
         <Message
           key={e.id}
           text={e.text}
           shown={e.shown}
-          // Newest at the bottom (slot 0); dissolving ones keep their place.
-          slot={e.shown ? shown.length - 1 - shown.indexOf(e) : -1}
+          top={tops.get(e.id)}
           onHidden={() => setEntries((prev) => prev.filter((x) => x.id !== e.id))}
         />
       ))}
-    </>
+    </HudAnchor>
   );
 }
 
-const target = new Vector3();
-
-function Message({ text, shown, slot, onHidden }: { text: string; shown: boolean; slot: number; onHidden: () => void }) {
+function Message({ text, shown, top, onHidden }: { text: string; shown: boolean; top: number | undefined; onHidden: () => void }) {
   const group = useRef<Group>(null);
-  const camera = useThree((s) => s.camera);
+  // A dissolving message keeps the place it had.
+  const lastTop = useRef(top ?? 0);
+  if (top !== undefined) lastTop.current = top;
   const placed = useRef(false);
-  const lastSlot = useRef(Math.max(0, slot));
-  if (slot >= 0) lastSlot.current = slot;
+  const plate = plateOf(text);
 
   useFrame((_, dt) => {
     const g = group.current;
     if (!g) return;
-    placeInFront(camera, DISTANCE, [0, 0.38 + lastSlot.current * LINE_GAP], target);
+    const target = -lastTop.current - plate.h / 2;
     if (!placed.current) {
-      g.position.copy(target);
+      g.position.y = target;
       placed.current = true;
-    } else if (shown) {
-      // Lazy follow: catches up over ~half a second.
-      g.position.lerp(target, 1 - Math.exp(-dt * 3.2));
+    } else {
+      g.position.y += (target - g.position.y) * (1 - Math.exp(-Math.min(dt, 0.1) * 9));
     }
-    g.quaternion.slerp(camera.quaternion, placed.current ? 1 - Math.exp(-dt * 6) : 1);
   });
 
-  const px = pxFor(DISTANCE, SIZE);
   const tone = TONES[toneOf(text)];
-  const size = measureText(text, px, MAX_COLS);
   return (
-    <group ref={group}>
+    <group ref={group} position={[plate.w / 2, 0, 0]}>
       <UiShow show={shown}>
-        <Plate width={size.width + px * 10} height={size.height + px * 6} frame={tone.frame} texel={px * 1.1} fillOpacity={0.72}>
-          <RuneText text={text} px={px} maxCols={MAX_COLS} color={tone.ink} glow={0.7} depth={-0.4} onHidden={onHidden} />
+        <Plate width={plate.w - FRAME_TEXEL * 2 * A} height={plate.h - FRAME_TEXEL * 2 * A} frame={tone.frame} texel={FRAME_TEXEL * A} fillOpacity={0.9}>
+          <RuneText text={text} px={PX} maxCols={MAX_COLS} align="left" color={tone.ink} glow={0.5} outline={0.6} depth={-0.3} onHidden={onHidden} />
         </Plate>
       </UiShow>
     </group>
   );
 }
-
-const MAX_COLS = 46;
 
 type Tone = "plain" | "omen" | "good" | "ally";
 

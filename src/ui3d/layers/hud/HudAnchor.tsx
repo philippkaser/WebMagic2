@@ -1,17 +1,23 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { createContext, useContext, useMemo, useRef, type ReactNode } from "react";
-import type { Group } from "three";
-import { BASE_FOV, ViewAnchor } from "../../anchors";
+import { Vector3, type Group } from "three";
+import { playerGait, playerVelocity } from "../../../game/player-state";
+import { BASE_FOV } from "../../anchors";
 import { useUiShow } from "../../presence";
 import { edgeSpot, screenToWorld, tanHalf, undistortion } from "./frame";
+import { driveHudRig, hudRig } from "./rig";
 
 /** How HUD pieces hang in front of the eye.
  *
  *  - `<HudAnchor h v inset distance>` carries a piece at a screen edge or
- *    corner (placed by the real viewport aspect, sized by its height), with
- *    a stiffer, shorter lag than a plain ViewAnchor so corner pieces never
- *    swing off screen on a flick. While the HUD is stepped back (an overlay
- *    screen is open) the piece sinks toward its edge and away from the eye.
+ *    corner (placed by the real viewport aspect, sized by its height). All
+ *    anchors hang from ONE shared rig (rig.ts) that trails your turns on a
+ *    soft spring and swings in step with your stride — the HUD moves as one
+ *    carried thing. While the HUD is stepped back (an overlay screen is
+ *    open) the piece sinks toward its edge and away from the eye.
+ *  - `<CarriedAnchor offset>`: the same rig at any view-space offset (the
+ *    message feed, the free-pointer hint).
+ *  - `<HudRig />` steps the rig once per frame (mounted once, in UiRoot).
  *  - `<Undistort at>` wraps a SOLID object (flask, coin heap, item) so the
  *    wide field of view doesn't stretch it into an egg at the corners —
  *    see frame.ts#undistortion. Text never needs it: flat and parallel to
@@ -43,8 +49,6 @@ export function HudAnchor({
   v,
   inset = [0, 0],
   distance,
-  follow = 22,
-  maxLagDeg = 2,
   children,
 }: {
   h: -1 | 0 | 1;
@@ -52,8 +56,6 @@ export function HudAnchor({
   /** From the chosen edge toward the centre, in screen-height fractions. */
   inset?: readonly [number, number];
   distance: number;
-  follow?: number;
-  maxLagDeg?: number;
   children: ReactNode;
 }) {
   const aspect = useViewAspect();
@@ -62,14 +64,39 @@ export function HudAnchor({
     [h, v, inset, distance, aspect],
   );
   return (
-    <ViewAnchor offset={offset} follow={follow} maxLagDeg={maxLagDeg}>
+    <CarriedAnchor offset={offset}>
       <SpotContext.Provider value={offset}>
         <StepBack distance={distance} toward={v === 0 ? -1 : v}>
           {children}
         </StepBack>
       </SpotContext.Provider>
-    </ViewAnchor>
+    </CarriedAnchor>
   );
+}
+
+const tmpV = new Vector3();
+
+/** Hangs its children at a view-space `offset` from the eye, on the shared
+ * HUD rig. */
+export function CarriedAnchor({ offset, children }: { offset: Vec3; children: ReactNode }) {
+  const group = useRef<Group>(null);
+  const camera = useThree((s) => s.camera);
+  useFrame(() => {
+    const g = group.current;
+    if (!g) return;
+    g.quaternion.copy(camera.quaternion).multiply(hudRig.q);
+    tmpV.set(offset[0], offset[1], offset[2]).applyQuaternion(g.quaternion);
+    g.position.copy(camera.position).add(tmpV);
+  }, -50);
+  return <group ref={group}>{children}</group>;
+}
+
+/** Steps the shared HUD rig once per frame, after the UI camera has copied
+ * the world's (UiCanvas CameraSync runs at -100) and before any anchor
+ * reads it (-50). */
+export function HudRig() {
+  useFrame(({ camera }, dt) => driveHudRig(camera.quaternion, playerVelocity, playerGait, dt), -60);
+  return null;
 }
 
 /** Sinks the piece toward its edge (`toward` = -1 down, 1 up) and away while

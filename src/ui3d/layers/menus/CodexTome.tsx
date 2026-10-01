@@ -410,6 +410,7 @@ function PageText({
         <>
           <TitleText
             text={page.chapter.name}
+            font="heading"
             px={px(0.024)}
             color={ink.brassLight}
             shadow={null}

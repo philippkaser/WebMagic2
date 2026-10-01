@@ -93,10 +93,13 @@ The emotional loop we are chasing:
   words burn into the air ahead of you as runes that settle into letters
   and later burn away; menus are dark stone tablets that assemble out of the
   dark and forge a brass pixel frame around themselves; prompts and
-  messages are small framed plates hanging where they belong; items are
-  small objects you pick up and set down. The type is pixel type —
-  Jacquard 12 blackletter for titles, Tiny5 for text, Silkscreen for tiny
-  labels — in parchment on soot, arcane cyan for magic and the way onward,
+  messages are small framed plates hanging where they belong (never in
+  your way); your health and mana are two pixel-art flasks whose liquid
+  sloshes as you run and turn; the whole HUD is carried — it trails your
+  turns and swings with your stride; items are small objects you pick up
+  and set down. The type is pixel type — Jacquard 12 blackletter for the
+  big moments ("Floor 12", "You Died"), Jersey 15 for smaller titles,
+  Tiny5 for text, Silkscreen for tiny labels — in parchment on soot, arcane cyan for magic and the way onward,
   gold for home, blood for danger. New UI must follow this — if it could be
   a DOM panel, it's wrong.
 - **Post-processing chain:** bloom (feeds the emissive specks and magic) →
@@ -109,8 +112,9 @@ The emotional loop we are chasing:
 
 Everything — textures, normal maps, all sound — is **synthesized at runtime.**
 No image files, no audio files, no model files. The one exception is the
-three pixel fonts of the UI (Jacquard 12, Tiny5, Silkscreen, installed from
-@fontsource), because good pixel type is the heart of the look. This keeps the whole game a
+four pixel fonts of the UI (Jacquard 12, Jersey 15, Tiny5, Silkscreen,
+installed from @fontsource), because good pixel type is the heart of the
+look. This keeps the whole game a
 tiny, fast-loading bundle and makes it trivially themeable in code. Any new
 art is a new procedural painter function, not an asset pipeline.
 

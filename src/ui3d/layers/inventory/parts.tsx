@@ -35,12 +35,12 @@ export function TitlePlate({ text, y, frame = "brass" }: { text: string; y: numb
   );
 }
 
-/** A panel headline in Jacquard blackletter, left-aligned (`.wm-inv__h`). */
+/** A panel headline in the heading face, left-aligned (`.wm-inv__h`). */
 export function Headline({ text, x, y, delay = 0 }: { text: string; x: number; y: number; delay?: number }) {
   return (
     <RuneText
       text={text}
-      font="title"
+      font="heading"
       px={TITLE_PX}
       color={ink.parchment}
       glow={0.7}

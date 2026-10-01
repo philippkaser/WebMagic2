@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef } from "react";
 import { CylinderGeometry, Euler, InstancedMesh, Matrix4, MeshStandardMaterial, Quaternion, Vector3 } from "three";
 import { useGame } from "../../../state/gameStore";
 import { uiNow } from "../../clock";
-import { Plate } from "../../Plate";
 import { useUiShow } from "../../presence";
 import { measureText, RuneText } from "../../text/RuneText";
 import { ink } from "../../theme";
@@ -15,8 +14,8 @@ import { HudAnchor, Undistort } from "./HudAnchor";
 import { HUD_LAYOUT, PURSE_H } from "./layout";
 import { useEntryDelay } from "./useSettled";
 
-/** The purse, as what it is: a little heap of coins in a small iron-framed
- * panel above the vitals, growing as you get richer (one coin per doubling,
+/** The purse, as what it is: a little heap of coins carried above the
+ * vitals, growing as you get richer (one coin per doubling,
  * roughly), the count beside it in gold. The gold gathered this run — lost
  * if you die — is a second, duller copper heap with its own "+N" in brass,
  * kept apart because it isn't yours yet.
@@ -64,7 +63,7 @@ export function Purse() {
   return (
     <HudAnchor h={L.h} v={L.v} inset={L.inset} distance={L.distance}>
       <group position={[(outerW / 2) * A, (outerH / 2) * A, 0]}>
-        <Plate width={pw * A} height={ph * A} frame="iron" texel={FRAME_TEXEL * A} fillOpacity={0.94}>
+        <group position={[0, 0, 0.003]}>
           <Undistort at={[(x0 + 13) * A, -5 * A, 0.01]}>
             <Heap count={coinsFor(gold)} color={ink.gold} emissive="#6a4308" seed={1} />
           </Undistort>
@@ -85,7 +84,7 @@ export function Purse() {
             outline={0.6}
             delay={d * 1.2}
           />
-        </Plate>
+        </group>
       </group>
     </HudAnchor>
   );

@@ -357,7 +357,7 @@ limiting and hit/pickup sanitization already run server-/authority-side.
 
 ## Rendering
 
-- **Zero binary assets** (one exception: the UI's three pixel fonts, from
+- **Zero binary assets** (one exception: the UI's four pixel fonts, from
   @fontsource): every texture is painted at startup by pure painters
   (`render/textures/`) as deliberate pixel art — 5–6 tone palette ramps,
   running-bond masonry with dark mortar, Worley flagstones, weathering
@@ -486,15 +486,18 @@ arcane cyan for magic and the way onward, gold for home, blood for danger.
   full-resolution canvas (`UiCanvas.tsx`) sits on top and copies the world
   camera every frame (`bridge.tsx` — R3F runs all roots in one loop in
   creation order, so there is no frame of lag). UI objects live in world
-  space: prompts hang over the chest they belong to, messages hang in the
-  air where you were looking. The UI canvas has its own torchlight so its
+  space: prompts hang over the chest they belong to, menus and the arrival
+  banner hang ahead of you. The UI canvas has its own torchlight so its
   stone reads as stone. It is click-through during play (the world canvas
   below takes the click that locks the pointer — `PointerLockControls` is
   scoped to `#wm-world canvas`) and catches the pointer while a menu is up.
-- **Text** (`font/`, `text/`): three pixel faces (`faces.ts`, from the
+- **Text** (`font/`, `text/`): four pixel faces (`faces.ts`, from the
   @fontsource packages — the one exception to "no binary assets"): Jacquard
-  12 blackletter for titles (`font="title"`), Tiny5 for body text
-  (`"body"`, the default) and Silkscreen for tiny caps labels (`"label"`),
+  12 blackletter for the big moments only (`font="title"`: "Floor 12",
+  "You Died" — blackletter turns to lace below ~3 % of the screen height),
+  Jersey 15 for every smaller title (`"heading"`: biome, boss, item and
+  panel names), Tiny5 for body text (`"body"`, the default) and Silkscreen
+  for tiny caps labels (`"label"`),
   plus a hand-set fallback that also carries the sixteen runes and the UI
   symbols. Each face is rasterised once, with a hard alpha threshold, into an
   atlas whose channels hold the glyph, a halo and an outline; layout is
@@ -510,15 +513,30 @@ arcane cyan for magic and the way onward, gold for home, blood for danger.
   flag into its own — a tablet closing burns off all its words for free.
 - **Toolkit**: `theme.ts` (the palette and the frame colours), `PixelFrame`
   (the nine-slice grimoire frame as a hard-edged quad that can forge itself
-  in), `Plate` (a small framed soot panel for prompts, messages and
-  tooltips), `Tablet` (stones fly in, the frame forges around the rim),
+  in), `Plate` (a small framed slab of pixel slate for prompts, messages
+  and tooltips), `Tablet` (stones fly in, the frame forges around the rim),
   `KeyCap` (a parchment key), `RuneButton` ("✦ label ✦" in arcane, ghost,
   danger or gold), `ItemModel` (every item family as primitives — also used
   for loot in the world), `ViewAnchor`/`WorldAnchor`/`placeInFront`, UI
   sparks and `audio/uiSounds.ts`.
-- **Layers** (`layers/`, listed in `UiRoot.tsx`): messages, prompts, the
-  HUD (`hud/`: the location panel with the tithe runes, segmented vitality
-  and mana bars, belt and equipment slots, the arrival banner), the menus
+- **The carried HUD** (`hud/rig.ts`, `HudAnchor.tsx`): every piece held in
+  front of the eye — vitals, purse, belt, gear, location, the message feed,
+  the free-pointer hint — hangs from ONE rig, stepped once per frame. It
+  trails your turns on a soft spring (the lag grows with the turn's speed
+  and eases into a ~3° cap, then settles with one small overshoot), swings
+  in step with the view bob (`playerGait`, exported by PlayerController),
+  leans against strafing and drops a little further than the eye on a hard
+  landing. Yaw and pitch only — roll would twist the pixel art off its
+  grid. Pure and unit-tested (`rig.test.ts`).
+- **Layers** (`layers/`, listed in `UiRoot.tsx`): the message feed (framed
+  plates carried at the left edge under the location panel, newest on top —
+  never in the room, where you could walk into them), prompts, the HUD
+  (`hud/`: the location panel with the tithe runes; health and mana as two
+  pixel-art flasks (`PixelFlask.tsx`: one shader quad on a grid of chunky
+  flask pixels, the liquid leaning, rippling and bubbling as you move, a
+  blow blanching it and leaving a fizzing ghost); the coin heap, belt and
+  gear cards carried without panels; the arrival banner, which keeps its
+  distance as you move and burns away early once you walk off), the menus
   (`menus/`: title, the Weighing, death, codex) and the inventory family
   (`inventory/`). The DOM keeps only what isn't part of the fiction: the perf
   overlay, the build stamp and the dev room.

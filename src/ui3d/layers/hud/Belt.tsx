@@ -3,7 +3,6 @@ import { Vector3, type Group } from "three";
 import type { ItemStack } from "../../../items/types";
 import { useGame } from "../../../state/gameStore";
 import { uiNow } from "../../clock";
-import { Plate } from "../../Plate";
 import { emitUiSparks } from "../../UiSparks";
 import { apx, FRAME_TEXEL, plateSize } from "./ap";
 import { itemColor, POSE } from "./Equipment";
@@ -12,9 +11,9 @@ import { HUD_LAYOUT, SLOT, slotStrip } from "./layout";
 import { SlotCard } from "./SlotCard";
 
 /** The belt: the two consumables bound to Q and E, beside the vitals they
- * mend — two framed item slots in a small iron panel, each with its key cap
- * on the corner, the potion itself turning in the slot and the stack count
- * as its badge. Using one makes its slot flare and puff sparks; swapping
+ * mend — two item cards carried side by side (no panel around them), each
+ * with its key cap on the corner, the potion itself turning in the slot
+ * and the stack count as its badge. Using one makes its slot flare and puff sparks; swapping
  * one out makes the old one burn away as the new one arrives. */
 
 const L = HUD_LAYOUT.belt;
@@ -30,7 +29,7 @@ export function Belt() {
   return (
     <HudAnchor h={L.h} v={L.v} inset={L.inset} distance={L.distance}>
       <group position={[(outerW / 2) * A, (outerH / 2) * A, 0]}>
-        <Plate width={PW * A} height={PH * A} frame="iron" texel={FRAME_TEXEL * A} fillOpacity={0.94}>
+        <group position={[0, 0, 0.003]}>
           {(["Q", "E"] as const).map((key, i) => (
             <BeltSlot
               key={key}
@@ -40,7 +39,7 @@ export function Belt() {
               position={[(-STRIP.cssW / 2 + 10 + SLOT.w / 2 + i * (SLOT.w + SLOT.gap)) * A, (STRIP.cssH / 2 - 10 - SLOT.h / 2) * A, 0]}
             />
           ))}
-        </Plate>
+        </group>
       </group>
     </HudAnchor>
   );

@@ -328,10 +328,15 @@ describe("artpass pixels", () => {
   test("panels: plate size wraps a CSS padding box in the 8 px frame", () => {
     const [w, h] = plateSize(264, 82);
     // Plate draws its frame one texel (2 px) outside its size: border-box.
-    expect(w + 4).toBe(VITALS.outerW);
-    expect(h + 4).toBe(VITALS.outerH);
-    expect(VITALS.outerW).toBe(280); // artpass .wm-vitals
+    expect(w + 4).toBe(280); // artpass .wm-vitals
+    expect(h + 4).toBe(98);
     expect(slotStrip(4).outerW).toBe(252); // artpass .wm-equip, four small cards
+  });
+
+  test("the vitals flasks fit side by side with their numbers", () => {
+    expect(VITALS.flaskW).toBeCloseTo(26 * VITALS.texel, 10);
+    expect(VITALS.outerW).toBeCloseTo(2 * (VITALS.flaskW + VITALS.gap + VITALS.numW) + VITALS.between, 10);
+    expect(VITALS.outerH).toBeCloseTo(34 * VITALS.texel, 10);
   });
 
   test("stepped ramps hit their steps exactly", () => {

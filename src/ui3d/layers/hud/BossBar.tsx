@@ -32,7 +32,7 @@ const A = apx(L.distance);
 /** Bar length in artpass pixels (artpass: min(52vw, 560px)). */
 const BAR_W = 440;
 const BAR_H = 12;
-const NAME_PX = fontPx(24, "title", L.distance);
+const NAME_PX = fontPx(24, "heading", L.distance);
 const [PW, PH] = plateSize(BAR_W + 4, BAR_H + 4);
 
 export function BossBar() {
@@ -50,13 +50,13 @@ export function BossBar() {
     [],
   );
   if (name) lastName.current = bossTitle(name);
-  const nameW = measureText(lastName.current, NAME_PX, undefined, "title").width / A;
+  const nameW = measureText(lastName.current, NAME_PX, undefined, "heading").width / A;
   const outerH = PH + FRAME_TEXEL * 2;
 
   return (
     <UiPresence show={!!name} exit={1}>
       <HudAnchor h={L.h} v={L.v} inset={L.inset} distance={L.distance}>
-        <RuneText text={lastName.current} font="title" px={NAME_PX} color={HUD_COLORS.boss} position={[0, -14 * A, 0]} glow={1.3} outline={0.6} delay={0.3} />
+        <RuneText text={lastName.current} font="heading" px={NAME_PX} color={HUD_COLORS.boss} position={[0, -14 * A, 0]} glow={1.3} outline={0.6} delay={0.3} />
         <PixelSprite name="skull" tint="#ffffff" texel={2 * A} position={[-(nameW / 2 + 22) * A, -14 * A, 0]} delay={0.2} />
         <PixelSprite name="skull" tint="#ffffff" texel={2 * A} position={[(nameW / 2 + 22) * A, -14 * A, 0]} delay={0.2} />
         <group position={[0, -(32 + outerH / 2) * A, 0]}>

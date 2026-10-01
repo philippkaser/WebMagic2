@@ -174,7 +174,7 @@ function Ritual() {
       />
       <TitleText text={`Floor ${entryFloor}`} px={px(0.078)} position={[0, FLOOR_Y * U, 0.03]} delay={T.floor} inDuration={0.8} stagger={0.45} />
       <Delayed by={T.floor + 0.35}>
-        <TitleText text={biome.name} px={px(0.028)} color={ink.brassLight} shadow={null} diagonal position={[0, (FLOOR_Y - 0.084) * U, 0.02]} stagger={0.4} depth={1} />
+        <TitleText text={biome.name} font="heading" px={px(0.028)} color={ink.brassLight} shadow={null} diagonal position={[0, (FLOOR_Y - 0.084) * U, 0.02]} stagger={0.4} depth={1} />
         <Flourish width={0.34 * U} texel={0.0016 * U} position={[0, (FLOOR_Y - 0.118) * U, 0.02]} delay={0.2} />
       </Delayed>
       <RitualBeats present={present} />
