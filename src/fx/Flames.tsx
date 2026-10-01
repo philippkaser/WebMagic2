@@ -148,9 +148,9 @@ void main() {
   vec3 tint = vTint.rgb;
   vec3 col;
   float add = 0.0;
-  if (heat > 0.62) col = mix(tint, vec3(1.0, 0.96, 0.84), 0.72) * 1.8;
-  else if (heat > 0.4) col = mix(tint, vec3(1.0, 0.8, 0.4), 0.4) * 1.35;
-  else if (heat > 0.2) col = tint * 1.1;
+  if (heat > 0.7) col = mix(tint, vec3(1.0, 0.96, 0.84), 0.7) * 1.8;
+  else if (heat > 0.48) col = mix(tint, vec3(1.0, 0.78, 0.3), 0.3) * 1.35;
+  else if (heat > 0.24) col = tint * 1.1;
   else if (heat > 0.08) { col = tint * vec3(0.8, 0.32, 0.2); add = 1.0; }
   else discard;
   // The owner's flicker, switched between a few levels rather than dimmed.

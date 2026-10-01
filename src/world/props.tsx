@@ -218,7 +218,7 @@ export function Breakable({
       {kind === "pot" && (
         <>
           <BallCollider args={[0.3]} mass={spec.mass} collisionGroups={PROP_GROUPS} />
-          <PotModel />
+          <PotModel seed={entityId} />
         </>
       )}
     </RigidBody>
@@ -233,6 +233,22 @@ export function Breakable({
  * Halls, small and warm in the Hollow). */
 /** Torches farther than this (m) from the player stop shedding particles. */
 const TORCH_FX_RANGE_SQ = 22 * 22;
+
+/** How far world gen pushes a wall torch from its tile centre toward the
+ * wall (gen/population.ts: TILE × 0.42); tile centres sit on odd metres. */
+const TORCH_INSET = 0.84;
+
+/** The bracket direction for a torch at `position`: dungeon torches hang on
+ * the north or south edge of a room, inset from the tile centre toward the
+ * wall, so the inset's sign says which wall (yaw 0 → bracket to −z/north,
+ * π → +z/south). Anything else (village posts) stands free: null. */
+export function torchWallYaw(position: Vec3): number | null {
+  const z = position[2];
+  const centre = Math.round((z - 1) / 2) * 2 + 1;
+  const dz = z - centre;
+  if (Math.abs(Math.abs(dz) - TORCH_INSET) > 0.05) return null;
+  return dz < 0 ? 0 : Math.PI;
+}
 
 export function Torch({
   position,
@@ -253,6 +269,7 @@ export function Torch({
   const flame = useRef<FlameHandle | null>(null);
   const top = useRef(new Vector3());
   const seed = useMemo(() => hashSeed(position.join(",")) % 100, [position]);
+  const wallYaw = useMemo(() => torchWallYaw(position), [position]);
 
   useEffect(() => {
     // Torches can be nested (village posts) — register the light at the
@@ -322,7 +339,7 @@ export function Torch({
 
   return (
     <group ref={group} position={position}>
-      <TorchModel emberRef={ember} emberColor={color} />
+      <TorchModel emberRef={ember} emberColor={color} wallYaw={wallYaw} />
     </group>
   );
 }
