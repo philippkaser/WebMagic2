@@ -56,7 +56,17 @@ const game = (w) => w.page.evaluate(() => {
     instanceId: s.instanceId, equipment: s.equipment, lastDeath: s.lastDeath };
 });
 async function waitPhase(w, phase, timeout = 30000) {
-  await w.page.waitForFunction((p) => window.__game.getState().phase === p, phase, { timeout });
+  try {
+    await w.page.waitForFunction((p) => window.__game.getState().phase === p, phase, { timeout });
+  } catch (err) {
+    // Say where the wizard got stuck, not just that it did.
+    const where = await w.page.evaluate(() => {
+      const s = window.__game.getState();
+      const t = window.__travel?.state?.();
+      return { phase: s.phase, health: s.health, overlay: s.overlay, floor: s.floor, travel: t && `${t.stage}/${t.kind}` };
+    });
+    throw new Error(`waiting for phase "${phase}": ${JSON.stringify(where)}`, { cause: err });
+  }
 }
 
 // ── Solo run ────────────────────────────────────────────────────────────────
@@ -108,9 +118,9 @@ async function waitPhase(w, phase, timeout = 30000) {
   await sleep(3000);
   const idA = await state(a, () => window.__session.playerId);
   const idB = await state(b, () => window.__session.playerId);
-  // PvP: A stands a few metres from B and shoots. Rooms have pillars now, so
-  // a single fixed offset can put one in the line of fire: try the four
-  // sides until a volley lands (the check is about damage, not geometry).
+  // PvP: A stands a few metres from B and shoots. A single fixed offset can
+  // put a wall or a prop in the line of fire: try the four sides until a
+  // volley lands (the check is about damage, not geometry).
   const hpBefore = (await game(b)).health;
   const target = await b.page.evaluate(() => window.__playerPos?.());
   if (target) {
@@ -167,7 +177,7 @@ async function waitPhase(w, phase, timeout = 30000) {
   check("the fallen-to-be picks up host-granted loot", mira.equipment.amulet?.defId === "amulet_vigor@3",
     JSON.stringify(mira.equipment.amulet));
   await b.page.evaluate((killer) => window.__game.getState().takeDamage(10_000, { kind: "wizard", id: killer }), idA);
-  await waitPhase(b, "dead", 20000) // the death dissolve plays first;
+  await waitPhase(b, "dead", 20000); // the death dissolve plays first
   const death = (await game(b)).lastDeath;
   check("death names the killer and leaves a grave", death?.killer === "Oswin" && death?.grave === true,
     JSON.stringify(death));
