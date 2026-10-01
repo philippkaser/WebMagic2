@@ -38,7 +38,7 @@ import { quickMoveTarget } from "./quickMove";
 const DRAG_START_PX = 5;
 const DOUBLE_CLICK_S = 0.35;
 /** The held item is drawn this much bigger than it rests. */
-export const HELD_SCALE = 1.35;
+export const HELD_SCALE = 1.8;
 
 const tmpInv = new Matrix4();
 const tmpRay = new Ray();
@@ -163,6 +163,7 @@ export function PointerController({ mode }: { mode: InventoryMode }) {
         const action = resolveDrop(inv, drag.from, toPointerHit(hit), dropContext(ix));
         drag.action = action;
         drag.targetKey = action.kind === "move" ? slotKey(action.to) : null;
+        drag.overKey = hit.socket?.key ?? null;
         if (ix.held) ix.held = { ...ix.held, hint: dropHint(action, inv, drag.from) };
         ix.emit();
       }
@@ -215,6 +216,7 @@ function beginDrag(ix: InventoryInteraction, p: Press): void {
     point,
     action: { kind: "none" },
     targetKey: null,
+    overKey: null,
   };
   ix.held = { itemId: stack.defId, qty: stack.qty, hint: null };
   ix.hover = null;

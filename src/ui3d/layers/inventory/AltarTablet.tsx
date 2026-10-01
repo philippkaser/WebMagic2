@@ -1,49 +1,21 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Group } from "three";
-import { pxFor } from "../../anchors";
+import { BAG_SLOTS } from "../../../items/inventory";
+import { useGame } from "../../../state/gameStore";
 import { useUiShow } from "../../presence";
 import { Tablet } from "../../Tablet";
-import { RuneText } from "../../text/RuneText";
+import { ink } from "../../theme";
 import { GoldHoard } from "./GoldHoard";
 import { useInventory } from "./interaction";
-import { ALTAR, altarLayout, SCENE_DISTANCE, TEXT } from "./layout";
-import { stoneMaterial } from "../../materials";
-import { bronze, frameGeometry, INK, plane, slate } from "./materials";
-import { Socket } from "./Socket";
+import { ALTAR, altarLayout, type TabletSpec } from "./layout";
+import { GoldRule, Headline, LABEL_PX, Recess, SectionLabel, TitlePlate } from "./parts";
+import { CARD_TEXEL, Socket } from "./Socket";
 import { WizardShrine } from "./WizardShrine";
 
-const LABEL_PX = pxFor(SCENE_DISTANCE, TEXT.label);
-
-/** Shallow slate trays sunk into the altar behind the belt and the bag, so
- * the two rows read as two things (Q/E are quick to hand; the bag is
- * carried). Their caption is carved at the tray's left end. */
-function RowTrays({ spec }: { spec: ReturnType<typeof altarLayout> }) {
-  const shown = useUiShow();
-  const trays = useMemo(() => {
-    const row = spec.sockets.filter((s) => s.variant === "belt" || s.variant === "bag");
-    const span = (variant: string) => {
-      const xs = row.filter((s) => s.variant === variant).map((s) => s.x);
-      const half = ALTAR.rowSize / 2 + 0.035;
-      return { x: (Math.min(...xs) + Math.max(...xs)) / 2, w: Math.max(...xs) - Math.min(...xs) + half * 2 };
-    };
-    return [span("belt"), span("bag")];
-  }, [spec]);
-  // From just above the sockets down past their carved numbers, so the
-  // labels sit on the dark slate.
-  const top = ALTAR.rowY + ALTAR.rowSize / 2 + 0.03;
-  const bottom = ALTAR.rowY - ALTAR.rowSize / 2 - 0.02 - LABEL_PX * 7 - LABEL_PX * 5;
-  const h = top - bottom;
-  return (
-    <group visible={shown}>
-      {trays.map((t, i) => (
-        <group key={i} position={[t.x, (top + bottom) / 2, 0]}>
-          <mesh geometry={frameGeometry(t.w, h, 0.012, 0.006)} material={i === 0 ? bronze() : stoneMaterial("#5d5767")} />
-          <mesh geometry={plane()} material={slate()} scale={[t.w, h, 1]} position={[0, 0, 0.0008]} />
-        </group>
-      ))}
-    </group>
-  );
-}
+/** The soot of every inventory panel (artpass `.wm-panel--solid`): the
+ * stones are still stones, but dark enough that brass and parchment carry
+ * the page. */
+export const PANEL_TINT = "#18151d";
 
 /** Tells the scene when the altar's face is showing (the Tablet reveals its
  * children only once the stones have locked together). */
@@ -56,24 +28,50 @@ function ReadyFlag() {
   return null;
 }
 
-/** The altar: the tablet that is your inventory. Your wizard stands in a
- * niche at its heart, the four gear sockets flank the figure, the belt (Q/E)
- * and the bag's five sockets run along the bottom, and your gold lies in a
- * hollow in the corner. */
+/** The span of a socket row, for its recess and caption. */
+function rowSpan(spec: TabletSpec, variant: "belt" | "bag") {
+  const xs = spec.sockets.filter((s) => s.variant === variant).map((s) => s.x);
+  const half = ALTAR.rowSize / 2 + CARD_TEXEL * 3;
+  return { x0: Math.min(...xs) - half, x1: Math.max(...xs) + half };
+}
+
+/** "SATCHEL · 3/5" — how full the bag is, like artpass's item count. */
+function BagCount({ x, y }: { x: number; y: number }) {
+  const used = useGame((s) => s.bag.filter(Boolean).length);
+  return <SectionLabel text={`${used}/${BAG_SLOTS}`} x={x} y={y} align="right" color={used >= BAG_SLOTS ? ink.blood : ink.faded} delay={0.2} />;
+}
+
+/** The altar: your inventory as one grimoire page. "The Wizard" heads it with
+ * your gold on the right; your wizard stands in a window at its heart with
+ * the four gear cards around the figure (the paper doll); the belt (Q/E)
+ * and the satchel's five cards sit in wells along the bottom. */
 export function AltarTablet({ tilt = false }: { tilt?: boolean }) {
   const ix = useInventory();
   const spec = useMemo(() => altarLayout(), []);
   const face = useRef<Group>(null);
   useLayoutEffect(() => ix.registerSurface("altar", { spec, object: face.current! }), [ix, spec]);
+  const belt = rowSpan(spec, "belt");
+  const bag = rowSpan(spec, "bag");
+  const wellTop = ALTAR.rowY + ALTAR.rowSize / 2 + CARD_TEXEL * 3;
+  const wellBottom = ALTAR.rowY - ALTAR.rowSize / 2 - CARD_TEXEL * 3 - LABEL_PX * 8.5;
+  const captionY = wellTop + LABEL_PX * 4.5;
+  const m = ALTAR.marginX;
 
   return (
-    <Tablet width={spec.width} height={spec.height} tint="#4a4654" seed={3} tile={0.17} tilt={tilt}>
+    <Tablet width={spec.width} height={spec.height} tint={PANEL_TINT} frame="brass" seed={3} tile={0.17} tilt={tilt}>
       <group ref={face}>
-        <RuneText text="INVENTORY" px={pxFor(SCENE_DISTANCE, TEXT.title)} color={INK.bright} glow={0.9} position={[0, ALTAR.titleY, 0.002]} />
-        <GoldHoard position={[ALTAR.goldX, ALTAR.titleY - 0.005, 0]} />
+        <TitlePlate text="INVENTORY" y={ALTAR.height / 2 + 0.006} />
+        <Headline text="The Wizard" x={-m} y={ALTAR.titleY} />
+        <GoldHoard position={[ALTAR.goldX, ALTAR.titleY + 0.012, 0]} />
+        <GoldRule x0={-m} x1={m} y={ALTAR.ruleY} />
+        <SectionLabel text="EQUIPPED" x={-m} y={ALTAR.ruleY - LABEL_PX * 5} />
         <WizardShrine />
         <ReadyFlag />
-        <RowTrays spec={spec} />
+        <SectionLabel text="BELT" x={belt.x0} y={captionY} />
+        <SectionLabel text="SATCHEL" x={bag.x0} y={captionY} />
+        <BagCount x={bag.x1} y={captionY} />
+        <Recess x={(belt.x0 + belt.x1) / 2} y={(wellTop + wellBottom) / 2} w={belt.x1 - belt.x0} h={wellTop - wellBottom} />
+        <Recess x={(bag.x0 + bag.x1) / 2} y={(wellTop + wellBottom) / 2} w={bag.x1 - bag.x0} h={wellTop - wellBottom} />
         {spec.sockets.map((s) => (
           <Socket key={s.key} spec={s} />
         ))}

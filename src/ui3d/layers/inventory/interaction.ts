@@ -37,6 +37,8 @@ export interface DragState {
   action: DropAction;
   /** Key of the accepting socket under the pointer, if any. */
   targetKey: string | null;
+  /** Key of ANY socket under the pointer (a refusing one turns to blood). */
+  overKey: string | null;
 }
 
 /** A reusable, mutable pointer hit (see hitTest). */

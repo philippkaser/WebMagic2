@@ -28,12 +28,16 @@ export const SCENE_DISTANCE = 1.35;
 /** Screen-height fractions for the scene's text (see anchors.pxFor). 0.016 is
  * the legibility floor at 600 px tall. */
 export const TEXT = {
-  title: 0.028,
-  label: 0.016,
+  /** Jacquard headlines ("The Wizard"). */
+  title: 0.034,
+  /** Silkscreen small caps (section labels, captions). */
+  label: 0.0135,
+  /** Tiny5 lore lines under a headline. */
+  lore: 0.0165,
   gold: 0.022,
-  plaqueName: 0.02,
+  plaqueName: 0.021,
   plaqueLine: 0.0165,
-  hint: 0.018,
+  hint: 0.016,
 } as const;
 
 /** The Orb of Fortune's ware key (it isn't an item). */
@@ -85,20 +89,24 @@ export function wareKey(ware: string): string {
 export const ALTAR = {
   width: 1.62,
   height: 1.36,
-  titleY: 0.52,
+  /** The headline row ("The Wizard" … gold) and the rule under it. */
+  titleY: 0.565,
+  ruleY: 0.485,
+  /** Left/right text margin from the centre, m. */
+  marginX: 0.745,
   gearSize: 0.2,
   gearX: 0.5,
-  gearRows: [0.26, -0.04] as const,
-  rowY: -0.4,
+  gearRows: [0.255, -0.06] as const,
+  rowY: -0.44,
   rowSize: 0.17,
   rowPitch: 0.2,
   /** Extra gap between the belt pair and the bag, m. */
   beltGap: 0.06,
-  /** The wizard's niche: feet on the ledge at `ledgeY`, arch top at `archTop`. */
+  /** The wizard's window: feet on the ledge at `ledgeY`, arch top at `archTop`. */
   ledgeY: -0.2,
-  archTop: 0.46,
-  archWidth: 0.52,
-  goldX: 0.52,
+  archTop: 0.43,
+  archWidth: 0.46,
+  goldX: 0.745,
 } as const;
 
 /** Gear around the wizard: weapon and jewel on the left, what's worn on the
@@ -166,11 +174,13 @@ export function altarLayout(): TabletSpec {
 export const CHEST = {
   width: 1.3,
   height: 1.36,
-  titleY: 0.56,
+  titleY: 0.565,
+  loreY: 0.485,
+  marginX: 0.585,
   cols: 6,
   size: 0.16,
   pitch: 0.19,
-  gridY: -0.06,
+  gridY: -0.09,
 } as const;
 
 export function chestLayout(): TabletSpec {
@@ -200,20 +210,24 @@ export function chestLayout(): TabletSpec {
 export const STALL = {
   width: 1.44,
   height: 1.36,
-  titleY: 0.56,
-  subtitleY: 0.465,
-  firstRowY: 0.3,
-  rowPitch: 0.215,
-  socketX: -0.54,
-  size: 0.18,
+  titleY: 0.565,
+  subtitleY: 0.485,
+  marginX: 0.65,
+  firstRowY: 0.305,
+  rowPitch: 0.205,
+  /** A ware's framed row card. */
+  rowWidth: 1.28,
+  rowHeight: 0.18,
+  socketX: -0.535,
+  size: 0.15,
   /** Left edge of a ware's name/price column. */
-  textX: -0.415,
-  buttonX: 0.45,
-  buttonWidth: 0.19,
+  textX: -0.43,
+  buttonX: 0.47,
+  buttonWidth: 0.2,
   /** The sell trough along the bottom. */
-  trayY: -0.555,
-  trayWidth: 1.24,
-  trayHeight: 0.12,
+  trayY: -0.535,
+  trayWidth: 1.28,
+  trayHeight: 0.13,
 } as const;
 
 /** Every ware on the stall, in shelf order: the fixed stock, then the orb. */
