@@ -1,18 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { ARCHITECTURE, TILE, WALL_HEIGHT } from "../../core/config";
+import { TILE, WALL_HEIGHT } from "../../core/config";
 import { generateFloor } from "../../world/gen";
-import type { FloorArchitecture } from "../../world/types";
-import { type MeshData, buildArchitectureMeshes, ribProfile, worldUv } from "./architectureMesh";
+import { TEXELS_PER_METRE, WALL_TEX_H, WALL_TEX_W, WALL_VARIANTS, wallAtlasU } from "../textures/surfaces";
+import { type MeshData, buildWallMesh, faceHash, pickVariant, worldUv } from "./architectureMesh";
 
-/** The stone mesh replaced the instanced wall cubes, so it inherits their
- * contract — a face on every rock/floor boundary, none anywhere else — plus
- * its own: consistent winding, square world-scaled texels, and a base
- * course with no gaps or overlaps round corners. */
-
-const NONE: FloorArchitecture = { pillars: [], ribs: [], shafts: [], crystals: [] };
-const T = ARCHITECTURE.texMetres;
-const PH = ARCHITECTURE.plinthHeight;
-const PD = ARCHITECTURE.plinthDepth;
+/** The wall mesh replaced the instanced wall cubes, so it inherits their
+ * contract — a full-height face on every rock/floor boundary, none anywhere
+ * else — plus its own: consistent winding, one painted wall texture per
+ * face with square texels, and set-pieces that never repeat side by side. */
 
 /** A size×size grid with one w×h room carved at (x0, y0). */
 function room(size: number, x0: number, y0: number, w: number, h: number): Uint8Array {
@@ -51,31 +46,24 @@ function faceNormal(t: Tri): [number, number, number] {
 
 const area = (t: Tri) => Math.hypot(...faceNormal(t)) / 2;
 
-describe("architecture mesh", () => {
+describe("wall mesh", () => {
   const floor = generateFloor(4242, 40);
-  const meshes = buildArchitectureMeshes(
-    { tiles: floor.tiles, size: floor.size, architecture: floor.architecture },
-    { seamChance: 0.2 },
-  );
+  const mesh = buildWallMesh({ tiles: floor.tiles, size: floor.size, seed: floor.seed });
+  const tris = triangles(mesh);
 
   test("every triangle is wound to face along its normals", () => {
-    for (const m of [meshes.stone, meshes.seams, meshes.seamGlow]) {
-      for (const t of triangles(m)) {
-        if (area(t) < 1e-9) continue;
-        const g = faceNormal(t);
-        for (const n of t.n) expect(g[0] * n[0] + g[1] * n[1] + g[2] * n[2]).toBeGreaterThan(0);
-      }
+    for (const t of tris) {
+      const g = faceNormal(t);
+      for (const n of t.n) expect(g[0] * n[0] + g[1] * n[1] + g[2] * n[2]).toBeGreaterThan(0);
     }
   });
 
   test("buffers are consistent and indices in range", () => {
-    for (const m of [meshes.stone, meshes.seams, meshes.seamGlow]) {
-      const verts = m.positions.length / 3;
-      expect(m.normals.length).toBe(m.positions.length);
-      expect(m.uvs.length).toBe(verts * 2);
-      for (const i of m.indices) expect(i).toBeLessThan(verts);
-      for (const v of m.positions) expect(Number.isFinite(v)).toBe(true);
-    }
+    const verts = mesh.positions.length / 3;
+    expect(mesh.normals.length).toBe(mesh.positions.length);
+    expect(mesh.uvs.length).toBe(verts * 2);
+    for (const i of mesh.indices) expect(i).toBeLessThan(verts);
+    for (const v of mesh.positions) expect(Number.isFinite(v)).toBe(true);
   });
 
   test("one full-height wall face per rock/floor boundary, and nothing else", () => {
@@ -96,126 +84,81 @@ describe("architecture mesh", () => {
         }
       }
     }
-    const plain = buildArchitectureMeshes({ tiles, size, architecture: NONE });
-    const wallTris = triangles(plain.stone).filter(
-      (t) => Math.abs(Math.min(...t.p.map((p) => p[1])) - PH) < 1e-6 && Math.abs(Math.max(...t.p.map((p) => p[1])) - WALL_HEIGHT) < 1e-6,
-    );
-    expect(wallTris.length).toBe(boundaries * 2);
-    // Each wall face sits on a tile edge with floor in front and rock behind.
-    for (const t of wallTris) {
+    expect(tris.length).toBe(boundaries * 2);
+    for (const t of tris) {
+      expect(Math.min(...t.p.map((p) => p[1]))).toBeCloseTo(0, 6);
+      expect(Math.max(...t.p.map((p) => p[1]))).toBeCloseTo(WALL_HEIGHT, 6);
+      // Each face sits on a tile edge with floor in front and rock behind.
       const n = t.n[0];
       const cx = (t.p[0][0] + t.p[1][0] + t.p[2][0]) / 3;
       const cz = (t.p[0][2] + t.p[1][2] + t.p[2][2]) / 3;
-      const tile = (wx: number, wz: number) => {
-        const x = Math.floor(wx / TILE + size / 2);
-        const y = Math.floor(wz / TILE + size / 2);
-        return tiles[y * size + x];
-      };
+      const tile = (wx: number, wz: number) =>
+        tiles[Math.floor(wz / TILE + size / 2) * size + Math.floor(wx / TILE + size / 2)];
       expect(tile(cx + n[0] * 0.5, cz + n[2] * 0.5)).toBe(1);
       expect(tile(cx - n[0] * 0.5, cz - n[2] * 0.5)).toBe(0);
     }
   });
 
-  test("texels are square and world-scaled on every flat face", () => {
-    for (const t of triangles(meshes.stone)) {
-      const n = t.n[0];
-      if (t.n.some((m) => Math.abs(m[0] - n[0]) + Math.abs(m[1] - n[1]) + Math.abs(m[2] - n[2]) > 1e-6)) continue;
-      if (area(t) < 1e-6) continue;
-      // UV area = world area / T² when the mapping is an isometry / T.
-      const [a, b, c] = t.uv;
-      const uvArea = Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) / 2;
-      expect(uvArea).toBeCloseTo(area(t) / (T * T), 6);
+  test("each face shows one whole wall texture with square texels", () => {
+    const atlasW = WALL_TEX_W * WALL_VARIANTS;
+    for (const t of tris) {
+      // v runs from the floor (0) to the vault (1)…
+      t.p.forEach((p, k) => expect(t.uv[k][1]).toBeCloseTo(p[1] / WALL_HEIGHT, 6));
+      // …and u stays inside one variant's column of the atlas.
+      const us = t.uv.map((uv) => uv[0]);
+      const col = Math.floor(Math.min(...us) * WALL_VARIANTS);
+      expect(Math.floor(Math.max(...us) * WALL_VARIANTS - 1e-9)).toBe(col);
+      // Texel density: texels per metre equal across and up the face.
+      const uvArea = Math.abs(
+        (t.uv[1][0] - t.uv[0][0]) * (t.uv[2][1] - t.uv[0][1]) - (t.uv[2][0] - t.uv[0][0]) * (t.uv[1][1] - t.uv[0][1]),
+      ) / 2;
+      const texels = uvArea * atlasW * WALL_TEX_H;
+      expect(texels / area(t)).toBeCloseTo(TEXELS_PER_METRE * TEXELS_PER_METRE, -2);
     }
   });
 
-  test("courses flow unbroken along a straight wall (shared edges share UVs)", () => {
-    const size = 12;
-    const plain = buildArchitectureMeshes({ tiles: room(size, 3, 3, 6, 5), size, architecture: NONE });
-    const walls = triangles(plain.stone).filter((t) => t.n[0][2] === -1 && Math.min(...t.p.map((p) => p[1])) >= PH - 1e-6);
-    // Every vertex position on this wall maps to one UV, whichever face it's on.
-    const seen = new Map<string, string>();
-    for (const t of walls) {
-      t.p.forEach((p, k) => {
-        const key = p.map((v) => v.toFixed(4)).join(",");
-        const uv = t.uv[k].map((v) => v.toFixed(4)).join(",");
-        if (seen.has(key)) expect(seen.get(key)).toBe(uv);
-        seen.set(key, uv);
-      });
-    }
-    expect(seen.size).toBeGreaterThan(4);
+  test("mostly the common wall; set-pieces present but never twice in a row", () => {
+    const counts = [0, 0, 0];
+    const variantOf = (t: Tri) => Math.floor(Math.min(...t.uv.map((uv) => uv[0])) * WALL_VARIANTS);
+    for (let i = 0; i < tris.length; i += 2) counts[variantOf(tris[i])]++;
+    expect(counts[0]).toBeGreaterThan(counts[1] + counts[2]);
+    expect(counts[1]).toBeGreaterThan(0);
+    expect(counts[2]).toBeGreaterThan(0);
+    // Faces on one straight wall of a plain room: no identical neighbours.
+    const size = 40;
+    const m = triangles(buildWallMesh({ tiles: room(size, 2, 2, 36, 4), size, seed: 7 }));
+    const north = m
+      .filter((t, i) => i % 2 === 0 && t.n[0][2] === 1)
+      .map((t) => ({ x: Math.min(...t.p.map((p) => p[0])), v: variantOf(t) }))
+      .sort((a, b) => a.x - b.x);
+    expect(north.length).toBe(36);
+    for (let i = 1; i < north.length; i++) if (north[i].v !== 0) expect(north[i].v).not.toBe(north[i - 1].v);
   });
 
-  test("worldUv puts v = height on walls and keeps u running along the wall", () => {
-    expect(worldUv([1, 2, 3], [0, 0, 1])).toEqual([1 / T, 2 / T]);
-    expect(worldUv([1, 2, 3], [0, 0, -1])).toEqual([-1 / T, 2 / T]);
-    expect(worldUv([1, 2, 3], [1, 0, 0])).toEqual([-3 / T, 2 / T]);
-    expect(worldUv([1, 2, 3], [-1, 0, 0])).toEqual([3 / T, 2 / T]);
-    expect(worldUv([1, 2, 3], [0, 1, 0])).toEqual([1 / T, -3 / T]);
+  test("deterministic per seed; a different seed reshuffles the variants", () => {
+    const again = buildWallMesh({ tiles: floor.tiles, size: floor.size, seed: floor.seed });
+    expect(Array.from(again.uvs)).toEqual(Array.from(mesh.uvs));
+    const other = buildWallMesh({ tiles: floor.tiles, size: floor.size, seed: floor.seed + 1 });
+    expect(Array.from(other.uvs)).not.toEqual(Array.from(mesh.uvs));
   });
 
-  test("the base course rings a room with no gaps and no overlaps", () => {
-    const size = 14;
-    const [w, h] = [6, 4];
-    const plain = buildArchitectureMeshes({ tiles: room(size, 4, 5, w, h), size, architecture: NONE });
-    const tops = triangles(plain.stone).filter((t) => t.p.every((p) => Math.abs(p[1] - PH) < 1e-6) && t.n[0][1] > 0.99);
-    const topArea = tops.reduce((s, t) => s + area(t), 0);
-    // North/south strips run the full wall; east/west ones stop short of
-    // the corners by the course depth, where they abut the others.
-    const expected = PD * (2 * w * TILE + 2 * (h * TILE - 2 * PD));
-    expect(topArea).toBeCloseTo(expected, 6);
+  test("variant picks follow the weights", () => {
+    expect(pickVariant(0)).toBe(0);
+    expect(pickVariant(0.75)).toBe(1);
+    expect(pickVariant(0.99)).toBe(2);
+    let ones = 0;
+    for (let i = 0; i < 4000; i++) if (pickVariant(faceHash(i % 63, Math.floor(i / 63), i % 4, 5)) === 1) ones++;
+    expect(ones / 4000).toBeGreaterThan(0.1);
+    expect(ones / 4000).toBeLessThan(0.22);
+    const [u0, u1] = wallAtlasU(1);
+    expect(u0).toBeGreaterThan(1 / 3);
+    expect(u1).toBeLessThan(2 / 3);
   });
 
-  test("convex corners are wrapped and capped", () => {
-    // A plus-shaped hole: a 1-tile rock in the middle of a 3×3 room has
-    // four convex corners; its course area covers the full ring round it.
-    const size = 9;
-    const tiles = room(size, 2, 2, 5, 5);
-    tiles[4 * size + 4] = 0;
-    const plain = buildArchitectureMeshes({ tiles, size, architecture: NONE });
-    const tops = triangles(plain.stone).filter(
-      (t) =>
-        t.p.every((p) => Math.abs(p[1] - PH) < 1e-6 && Math.abs(p[0]) < TILE && Math.abs(p[2]) < TILE) && t.n[0][1] > 0.99,
-    );
-    const ring = (TILE + 2 * PD) ** 2 - TILE * TILE;
-    expect(tops.reduce((s, t) => s + area(t), 0)).toBeCloseTo(ring, 6);
-    // Four caps close the grown ends (vertical faces 0.14 wide at the column).
-    const caps = triangles(plain.stone).filter((t) => {
-      const xs = t.p.map((p) => p[0]);
-      const zs = t.p.map((p) => p[2]);
-      const w = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs));
-      return Math.abs(t.n[0][1]) < 1e-6 && Math.abs(w - PD) < 1e-6 && Math.max(...t.p.map((p) => p[1])) <= PH + 1e-6;
-    });
-    expect(caps.length).toBe(4 * 2);
-  });
-
-  test("seams only where asked, deterministically", () => {
-    const again = buildArchitectureMeshes(
-      { tiles: floor.tiles, size: floor.size, architecture: floor.architecture },
-      { seamChance: 0.2 },
-    );
-    expect(again.seams.positions).toEqual(meshes.seams.positions);
-    expect(meshes.seams.indices.length).toBeGreaterThan(0);
-    const none = buildArchitectureMeshes({ tiles: floor.tiles, size: floor.size, architecture: floor.architecture });
-    expect(none.seams.indices.length).toBe(0);
-    expect(none.seamGlow.indices.length).toBe(0);
-  });
-
-  test("ribs rise with their span but stay well above head height", () => {
-    for (const span of [10, 14, 20]) {
-      const { springY, crownY, rise } = ribProfile(span);
-      expect(springY).toBeGreaterThan(3.3);
-      expect(crownY).toBeLessThan(WALL_HEIGHT);
-      expect(crownY - springY).toBeCloseTo(rise, 9);
-    }
-    expect(ribProfile(20).rise).toBeGreaterThan(ribProfile(10).rise);
-  });
-
-  test("pillars and ribs add geometry that stays inside the vault", () => {
-    const plain = buildArchitectureMeshes({ tiles: floor.tiles, size: floor.size, architecture: NONE });
-    expect(meshes.stone.indices.length).toBeGreaterThan(plain.stone.indices.length);
-    for (let i = 1; i < meshes.stone.positions.length; i += 3) {
-      expect(meshes.stone.positions[i]).toBeGreaterThanOrEqual(-1e-6);
-      expect(meshes.stone.positions[i]).toBeLessThanOrEqual(WALL_HEIGHT + 1e-6);
-    }
+  test("worldUv: floors and ceilings map at `span` metres per repeat", () => {
+    expect(worldUv([1, 2, 3], [0, 1, 0], 4)).toEqual([1 / 4, -3 / 4]);
+    expect(worldUv([1, 2, 3], [0, -1, 0], 2)).toEqual([1 / 2, 3 / 2]);
+    expect(worldUv([1, 2, 3], [0, 0, 1], 2)).toEqual([1 / 2, 2 / 2]);
+    expect(worldUv([1, 2, 3], [1, 0, 0], 2)).toEqual([-3 / 2, 2 / 2]);
   });
 });

@@ -1,27 +1,27 @@
-import { useFrame, useThree } from "@react-three/fiber";
+import { useThree } from "@react-three/fiber";
 import { CuboidCollider, interactionGroups, RigidBody } from "@react-three/rapier";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { getEnemyDef } from "../enemies/registry";
 import { SpawnedEnemies } from "../enemies/SpawnedEnemies";
-import { ARCHITECTURE, GROUPS, WALL_HEIGHT } from "../core/config";
+import { GROUPS, TILE, WALL_HEIGHT } from "../core/config";
 import { AmbientParticles } from "../fx/AmbientParticles";
-import { addLightSource, removeLightSource, type DynamicLightSource } from "../fx/DynamicLights";
+import { addLightSource, removeLightSource } from "../fx/DynamicLights";
 import { resetRegistries } from "../game/registry";
 import { hashSeed } from "../core/rng";
 import { resetNetEntities, setExpectedEntities } from "../net/entities";
 import { useNet } from "../net/netStore";
 import { PlayerController } from "../player/PlayerController";
-import { CRYSTAL_COLORS, CrystalClusters } from "../render/models/CrystalClusterModel";
 import { DungeonGround } from "../render/models/DungeonGround";
 import { DungeonStone } from "../render/models/DungeonStone";
 import { LightShafts } from "../render/models/LightShaftModel";
+import { RuneCircleModel } from "../render/models/RuneCircleModel";
 import { floorsUntilExit } from "../run/rules";
 import { useGame } from "../state/gameStore";
 import { LoreRunes } from "../world/loreRunes";
 import { Breakable, Portal, Torch, TreasurePedestal } from "../world/props";
 import { Trap } from "../world/traps";
 import { getBiomeDef } from "../world/biomes";
-import type { FloorLayout } from "../world/types";
+import type { FloorLayout, Vec3 } from "../world/types";
 import { useFloorAtmosphere } from "./floorAtmosphere";
 
 const WORLD_GROUPS = interactionGroups(GROUPS.WORLD, [
@@ -159,15 +159,18 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
   );
 }
 
-/** The floor's architecture, dressed in its biome's surfaces: world-mapped
- * stonework (walls, base course, arch ribs, pillars) under a 7 m vault, a
- * floor that mirrors the torches (quality flag `reflections`), light
- * shafts, the Crystal Deep's clusters — and every collider they need. */
+/** The floor's architecture, dressed in its band's painted surfaces (the
+ * artpass look): walls one painted face per tile under a 6 m vault, the
+ * floor and ceiling world-mapped, light shafts falling through the vault,
+ * the arrival sigil at the spawn — and every collider they need. The floor
+ * mirror only runs when the `reflections` quality flag is on (default off).
+ * The generator still plans arcades and crystal clusters
+ * (layout.architecture); for now only the shafts render. */
 function WallsAndFloor({ layout }: { layout: FloorLayout }) {
   const biome = getBiomeDef(layout.biome);
   const reflections = useGame((s) => s.reflections);
-  const { pillars, crystals, shafts } = layout.architecture;
-  const B = ARCHITECTURE.pillarBase;
+  const { shafts } = layout.architecture;
+  const sigilRadius = useMemo(() => arrivalSigilRadius(layout), [layout]);
 
   return (
     <group>
@@ -191,94 +194,68 @@ function WallsAndFloor({ layout }: { layout: FloorLayout }) {
           position={[0, WALL_HEIGHT + 0.5, 0]}
           collisionGroups={WORLD_GROUPS}
         />
-        {pillars.map((p, i) => (
-          <CuboidCollider
-            key={`p${i}`}
-            args={[B, WALL_HEIGHT / 2, B]}
-            position={[p.pos[0], WALL_HEIGHT / 2, p.pos[2]]}
-            collisionGroups={WORLD_GROUPS}
-          />
-        ))}
-        {crystals.map((c, i) => (
-          <CuboidCollider
-            key={`c${i}`}
-            args={[0.42 * c.scale, 0.9 * c.scale, 0.42 * c.scale]}
-            position={[c.pos[0], 0.9 * c.scale, c.pos[2]]}
-            collisionGroups={WORLD_GROUPS}
-          />
-        ))}
       </RigidBody>
 
       <DungeonStone
         tiles={layout.tiles}
         size={layout.size}
         extent={layout.extent}
-        architecture={layout.architecture}
+        seed={layout.seed}
         wall={biome.surfaces.wall}
         ceiling={biome.surfaces.ceiling}
-        look={biome.look.stone}
-        seamChance={biome.look.seams?.chance ?? 0}
-        seamColor={biome.look.seams?.color ?? "#000000"}
+        glow={biome.glow}
       />
       <DungeonGround
         extent={layout.extent}
         surface={biome.surfaces.floor}
         reflection={reflections ? biome.look.reflection : null}
+        glow={biome.glow}
       />
+      {sigilRadius > 0 && <RuneCircleModel position={layout.spawn} radius={sigilRadius} accent={biome.accent} />}
       <LightShafts shafts={shafts} look={biome.look.shaft} />
-      <CrystalClusters crystals={crystals} />
-      <ArchitectureLights layout={layout} />
+      <ShaftLights layout={layout} />
     </group>
   );
 }
 
-/** Pooled light sources for the architecture that glows: a soft light under
- * each shaft (so the pool on the floor is real light the reflector and the
- * stone pick up) and one per crystal cluster, breathing slowly. They go
- * through fx/DynamicLights like torches — never a real light of their own. */
-function ArchitectureLights({ layout }: { layout: FloorLayout }) {
-  const biome = getBiomeDef(layout.biome);
-  const crystalLights = useRef<DynamicLightSource[]>([]);
+/** The arrival sigil's radius: up to 2.4 m (the artpass circle), shrunk to
+ * stay a little clear of the walls of the room the spawn stands in; 0 = no
+ * room for one. */
+function arrivalSigilRadius(layout: FloorLayout): number {
+  const [sx, , sz] = layout.spawn;
+  const half = layout.size / 2;
+  let clearance = 0;
+  for (const room of layout.rooms) {
+    const x0 = (room.x - half) * TILE;
+    const x1 = (room.x + room.w - half) * TILE;
+    const z0 = (room.y - half) * TILE;
+    const z1 = (room.y + room.h - half) * TILE;
+    if (sx < x0 || sx > x1 || sz < z0 || sz > z1) continue;
+    clearance = Math.max(clearance, Math.min(sx - x0, x1 - sx, sz - z0, z1 - sz));
+  }
+  const r = Math.min(2.4, clearance - 0.4);
+  return r >= 1 ? r : 0;
+}
 
+/** A soft pooled light under each shaft, so the pool on the floor is real
+ * light the painted stone picks up. Through fx/DynamicLights like torches —
+ * never a real light of its own. */
+function ShaftLights({ layout }: { layout: FloorLayout }) {
+  const biome = getBiomeDef(layout.biome);
   useEffect(() => {
-    const { shafts, crystals } = layout.architecture;
     const shaft = biome.look.shaft;
-    const shaftLights = shafts.map((s) =>
+    const lights = layout.architecture.shafts.map((s) =>
       addLightSource({
-        position: [s.pos[0], shaft.rising ? 0.6 : 2.2, s.pos[2]],
+        position: [s.pos[0], shaft.rising ? 0.6 : 2.2, s.pos[2]] as Vec3,
         color: shaft.color,
         intensity: (shaft.rising ? 10 : 16) * shaft.strength,
         distance: 6 + s.radius * 1.5,
         priority: 1,
       }),
     );
-    const crystalSources = crystals.map((c) =>
-      addLightSource({
-        position: [c.pos[0] + Math.sin(c.facing) * 0.4, 1 * c.scale, c.pos[2] + Math.cos(c.facing) * 0.4],
-        color: CRYSTAL_COLORS[c.hue],
-        intensity: 6 * c.scale,
-        distance: 9,
-        priority: 1,
-      }),
-    );
-    crystalLights.current = crystalSources;
     return () => {
-      crystalLights.current = [];
-      for (const l of shaftLights) removeLightSource(l);
-      for (const l of crystalSources) removeLightSource(l);
+      for (const l of lights) removeLightSource(l);
     };
   }, [layout, biome]);
-
-  // The Deep sings: each cluster's light swells and fades on its own beat.
-  useFrame(({ clock }) => {
-    const t = clock.elapsedTime;
-    const { crystals } = layout.architecture;
-    const lights = crystalLights.current;
-    for (let i = 0; i < lights.length; i++) {
-      const c = crystals[i];
-      lights[i].intensity = 6 * c.scale * (0.8 + 0.2 * Math.sin(t * 0.9 + c.pos[0] * 1.7 + c.pos[2]));
-    }
-  });
-
   return null;
 }

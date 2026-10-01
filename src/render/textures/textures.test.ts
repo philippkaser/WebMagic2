@@ -1,31 +1,31 @@
 import { describe, expect, test } from "bun:test";
-import {
-  ARCH_SURFACES,
-  CEILING_SURFACES,
-  FLOOR_SURFACES,
-  SURFACE_KINDS,
-  WALL_SURFACES,
-  type SurfaceKind,
-} from "./kinds";
-import { decodeNormal, heightToNormal, packRoughness } from "./normalMap";
-import { ARCH_SIZE, TEX_SIZE, ashlarField, blockField, layeredNoise, splitSpan, tileNoise } from "./paint";
-import { SURFACE_DEFS, paintSurface } from "./painters";
-import { RUNE_TABLET_SIZE, glyphMask, paintGlyphAtlas, paintRuneTablet } from "./painters/glyphs";
 import { Rng } from "../../core/rng";
+import { TILE, WALL_HEIGHT } from "../../core/config";
+import { blank, decodeNormal, heightToNormal, scalarToRgba } from "./canvas";
+import { RUNE_CIRCLE_SIZE, paintRuneCircle } from "./decals";
+import { RUNE_TABLET_SIZE, glyphMask, paintGlyphAtlas, paintRuneTablet } from "./glyphs";
+import { SURFACE_DEFS, paintSurface } from "./index";
+import { ARCH_SURFACES, SURFACE_KINDS, archPart, setSurfaces, type SurfaceKind } from "./kinds";
+import { fbm, worley } from "./noise";
+import { ramp } from "./palette";
+import {
+  CEIL_SPAN,
+  CEIL_TEX,
+  FLOOR_SPAN,
+  FLOOR_TEX,
+  SURFACE_SETS,
+  TEXELS_PER_METRE,
+  VARIANT_WEIGHTS,
+  WALL_TEX_H,
+  WALL_TEX_W,
+  WALL_VARIANTS,
+  wallAtlasU,
+} from "./surfaces";
 
 /** Painters are pure, so the whole art pipeline short of the canvas upload
- * is testable here: sizes, ranges, determinism, the normal-map convention,
- * and which kinds carry roughness layers — plus the art direction itself:
- * architecture albedo must stay calm (the old busy forge and crystal walls
- * are what read as clutter). */
-
-/** No surface paints a glow any more: glow is geometry and pooled light
- * (seams, crystals, runes), never wallpaper that repeats every 4 m. */
-const EMISSIVE: ReadonlySet<SurfaceKind> = new Set();
-/** Every architecture surface ships a roughness map — wet, polished and
- * glassy stone all glint under the torches. */
-const ROUGHNESS: ReadonlySet<SurfaceKind> = new Set(ARCH_SURFACES);
-const ARCH: ReadonlySet<SurfaceKind> = new Set(ARCH_SURFACES);
+ * is testable here: sizes (square texels everywhere), determinism, which
+ * surfaces glow and glint, the normal-map convention, and the glyph and
+ * decal painters. */
 
 function fnv(bytes: ArrayLike<number> & Iterable<number>): number {
   let h = 2166136261 >>> 0;
@@ -39,150 +39,143 @@ function fnv(bytes: ArrayLike<number> & Iterable<number>): number {
 // Paint each kind once for the whole file.
 const painted = new Map(SURFACE_KINDS.map((k) => [k, paintSurface(k)] as const));
 
+/** Which architecture parts paint a glow layer (the artpass sets). */
+const GLOWS: Record<string, boolean> = {
+  "catacombs-wall": false,
+  "catacombs-floor": false,
+  "catacombs-ceiling": false,
+  "drowned-wall": true, // lume specks in the moss, kelp beads
+  "drowned-floor": false,
+  "drowned-ceiling": true,
+  "forge-wall": true,
+  "forge-floor": true,
+  "forge-ceiling": true,
+  "crystal-wall": true,
+  "crystal-floor": true,
+  "crystal-ceiling": true,
+  "abyss-wall": true,
+  "abyss-floor": true,
+  "abyss-ceiling": true,
+};
+
 describe("surface table", () => {
   test("every kind has a painter and hints, and nothing extra", () => {
     expect(new Set(Object.keys(SURFACE_DEFS))).toEqual(new Set(SURFACE_KINDS));
-    for (const k of SURFACE_KINDS) {
-      expect(typeof SURFACE_DEFS[k].paint).toBe("function");
-      expect(SURFACE_DEFS[k].hints).toBeDefined();
-    }
     expect(new Set(SURFACE_KINDS).size).toBe(SURFACE_KINDS.length);
   });
 
-  test("biome surface names are the fixed contract", () => {
-    expect([...WALL_SURFACES]).toEqual(["tomb", "wetstone", "basalt", "slate", "palestone"]);
-    expect([...FLOOR_SURFACES]).toEqual(["flagstone", "wetslab", "obsidian", "polished", "ashflag"]);
-    expect([...CEILING_SURFACES]).toEqual(["void"]);
-  });
-
-  test("architecture surfaces are mipmapped; props are not", () => {
-    for (const k of SURFACE_KINDS) expect(SURFACE_DEFS[k].mipmaps ?? false).toBe(ARCH.has(k));
+  test("architecture kinds are <set>-<part> for every surface set", () => {
+    expect(ARCH_SURFACES.length).toBe(SURFACE_SETS.length * 3);
+    for (const set of SURFACE_SETS) {
+      const s = setSurfaces(set);
+      for (const [part, kind] of Object.entries(s)) expect(archPart(kind)).toEqual({ set, part: part as never });
+    }
+    // Props and village kinds the models call by name keep working.
+    for (const k of ["planks", "barrel", "ceramic", "stone", "slab", "dirt", "runestone", "cobble", "timber"])
+      expect(SURFACE_KINDS).toContain(k as SurfaceKind);
+    expect(archPart("planks")).toBeNull();
   });
 
   test("hints are sane material params", () => {
     for (const k of SURFACE_KINDS) {
       const h = SURFACE_DEFS[k].hints;
-      expect(h.roughness).toBeGreaterThanOrEqual(0);
-      expect(h.roughness).toBeLessThanOrEqual(1);
-      expect(h.metalness).toBeGreaterThanOrEqual(0);
-      expect(h.metalness).toBeLessThanOrEqual(1);
+      for (const v of [h.roughness, h.metalness]) expect(v >= 0 && v <= 1).toBe(true);
       expect(h.envMapIntensity).toBeGreaterThanOrEqual(0);
-      // An emissive map is invisible without an emissive color, and an
-      // emissive color without a map would glow the whole surface.
-      expect(h.emissive !== undefined).toBe(EMISSIVE.has(k));
-      expect(h.emissiveIntensity !== undefined).toBe(EMISSIVE.has(k));
       // With a roughness map three.js multiplies — the hint must not dampen it.
-      if (ROUGHNESS.has(k)) expect(h.roughness).toBe(1);
+      if (painted.get(k)!.rough) expect(h.roughness).toBe(1);
     }
+  });
+
+  test("slab is the waystone basalt (same bytes as runestone)", () => {
+    expect(fnv(painted.get("slab")!.color)).toBe(fnv(painted.get("runestone")!.color));
   });
 });
 
 describe("painters", () => {
-  test.each([...SURFACE_KINDS])("%s is deterministic", (k) => {
-    const a = painted.get(k)!;
-    const b = paintSurface(k);
-    expect(fnv(b.color)).toBe(fnv(a.color));
-    expect(fnv(new Uint8Array(b.height.buffer))).toBe(fnv(new Uint8Array(a.height.buffer)));
-    if (a.emissive) expect(fnv(b.emissive!)).toBe(fnv(a.emissive));
-    if (a.roughness) expect(fnv(new Uint8Array(b.roughness!.buffer))).toBe(fnv(new Uint8Array(a.roughness.buffer)));
-  });
-
-  test.each([...SURFACE_KINDS])("%s has square buffers of its family's size, values in range", (k) => {
-    const p = painted.get(k)!;
-    const size = ARCH.has(k) ? ARCH_SIZE : TEX_SIZE;
-    const n = size * size;
-    expect(p.size).toBe(size);
-    expect(p.color.length).toBe(n * 4);
-    expect(p.height.length).toBe(n);
-    for (let i = 0; i < n; i++) {
-      expect(p.color[i * 4 + 3]).toBe(255);
-      const h = p.height[i];
-      if (!(h >= 0 && h <= 1)) throw new Error(`${k} height[${i}] = ${h}`);
-    }
-    if (p.emissive) {
-      expect(p.emissive.length).toBe(n * 4);
-      for (let i = 0; i < n; i++) expect(p.emissive[i * 4 + 3]).toBe(255);
-    }
-    if (p.roughness) {
-      expect(p.roughness.length).toBe(n);
-      for (const r of p.roughness) if (!(r >= 0 && r <= 1)) throw new Error(`${k} roughness ${r}`);
+  test("texels are square in the world: 32 per metre on every architecture part", () => {
+    expect(WALL_TEX_W).toBe(TILE * TEXELS_PER_METRE);
+    expect(WALL_TEX_H).toBe(Math.round(WALL_HEIGHT * TEXELS_PER_METRE));
+    expect(FLOOR_TEX / FLOOR_SPAN).toBe(TEXELS_PER_METRE);
+    expect(CEIL_TEX / CEIL_SPAN).toBe(TEXELS_PER_METRE);
+    for (const set of SURFACE_SETS) {
+      const s = setSurfaces(set);
+      const wall = painted.get(s.wall)!;
+      expect([wall.w, wall.h]).toEqual([WALL_TEX_W * WALL_VARIANTS, WALL_TEX_H]);
+      expect([painted.get(s.floor)!.w, painted.get(s.floor)!.h]).toEqual([FLOOR_TEX, FLOOR_TEX]);
+      expect([painted.get(s.ceiling)!.w, painted.get(s.ceiling)!.h]).toEqual([CEIL_TEX, CEIL_TEX]);
     }
   });
 
-  test.each([...SURFACE_KINDS])("%s has emissive/roughness layers only where declared", (k) => {
-    const p = painted.get(k)!;
-    expect(p.emissive !== undefined).toBe(EMISSIVE.has(k));
-    expect(p.roughness !== undefined).toBe(ROUGHNESS.has(k));
+  test("buffers are complete: opaque colour, finite heights, roughness in 0..1", () => {
+    for (const k of SURFACE_KINDS) {
+      const p = painted.get(k)!;
+      expect(p.color.length).toBe(p.w * p.h * 4);
+      expect(p.height.length).toBe(p.w * p.h);
+      for (let i = 3; i < p.color.length; i += 4) if (p.color[i] !== 255) throw new Error(`${k} has a hole at ${i >> 2}`);
+      for (const v of p.height) if (!(v >= -0.5 && v <= 2)) throw new Error(`${k} height ${v}`);
+      if (p.rough) for (const v of p.rough) if (!(v >= 0 && v <= 1)) throw new Error(`${k} roughness ${v}`);
+    }
   });
 
-  test.each([...ARCH_SURFACES])("%s is calm: low-contrast, low-frequency albedo", (k) => {
-    // Mean luminance step between neighbouring texels, relative to the mean
-    // (high-frequency "busyness"), and the overall spread. The old biome
-    // walls scored 0.14–0.37 and 0.26–0.67; clutter starts around there.
-    const p = painted.get(k)!;
-    const S = p.size;
-    const lum = (i: number) => 0.2126 * p.color[i * 4] + 0.7152 * p.color[i * 4 + 1] + 0.0722 * p.color[i * 4 + 2];
-    let step = 0;
-    let sum = 0;
-    let sum2 = 0;
-    for (let y = 0; y < S; y++) {
-      for (let x = 0; x < S; x++) {
-        const l = lum(y * S + x);
-        step += Math.abs(l - lum(y * S + ((x + 1) % S)));
-        sum += l;
-        sum2 += l * l;
+  test("deterministic: the same kind paints the same bytes every time", () => {
+    for (const k of ["drowned-wall", "forge-floor", "abyss-wall", "planks", "cobble"] as const) {
+      expect(fnv(paintSurface(k).color)).toBe(fnv(painted.get(k)!.color));
+    }
+  });
+
+  test("the bands glow where the artpass painted light — and only there", () => {
+    for (const k of ARCH_SURFACES) {
+      const p = painted.get(k)!;
+      expect(p.emit !== null).toBe(GLOWS[k]);
+      if (!p.emit) continue;
+      let lit = 0;
+      for (let i = 0; i < p.emit.length; i += 4) if (p.emit[i] + p.emit[i + 1] + p.emit[i + 2] > 60) lit++;
+      // Specks and seams, not wallpaper.
+      expect(lit).toBeGreaterThan(0);
+      expect(lit / (p.w * p.h)).toBeLessThan(0.25);
+    }
+  });
+
+  test("the drowned halls: moss hangs from the vault, the tide line is wet and dark at the foot", () => {
+    const p = painted.get("drowned-wall")!;
+    const rowStats = (y: number) => {
+      let g = 0;
+      let rough = 0;
+      for (let x = 0; x < p.w; x++) {
+        const i = (y * p.w + x) * 4;
+        g += p.color[i + 1] - (p.color[i] + p.color[i + 2]) / 2;
+        rough += p.rough![y * p.w + x];
       }
-    }
-    const n = S * S;
-    const mean = sum / n;
-    expect(step / n / mean).toBeLessThan(0.12);
-    expect(Math.sqrt(sum2 / n - mean * mean) / mean).toBeLessThan(0.35);
+      return { green: g / p.w, rough: rough / p.w };
+    };
+    // Top rows: moss — clearly greener than the stone below.
+    expect(rowStats(2).green).toBeGreaterThan(rowStats(Math.floor(p.h * 0.6)).green + 10);
+    // Bottom rows: the tide line — slick (low roughness).
+    expect(rowStats(p.h - 3).rough).toBeLessThan(0.45);
+    expect(rowStats(Math.floor(p.h * 0.6)).rough).toBeGreaterThan(0.6);
+    // Standing water on the floor: some texels mirror-wet.
+    const floor = painted.get("drowned-floor")!;
+    expect(floor.rough!.some((r) => r < 0.15)).toBe(true);
   });
 
-  test("floors shine where the biome says: glass and polish glossy, ash dull, wet flags both", () => {
-    const median = (k: SurfaceKind) => {
-      const r = [...painted.get(k)!.roughness!].sort((a, b) => a - b);
-      return r[r.length >> 1];
+  test("the forge's heat pools at the foot of its walls", () => {
+    const p = painted.get("forge-wall")!;
+    const glowAt = (y: number) => {
+      let e = 0;
+      for (let x = 0; x < p.w; x++) e += p.emit![(y * p.w + x) * 4];
+      return e;
     };
-    const share = (k: SurfaceKind, below: number) => {
-      const r = painted.get(k)!.roughness!;
-      return r.filter((v) => v < below).length / r.length;
-    };
-    expect(median("polished")).toBeLessThan(0.2);
-    expect(median("obsidian")).toBeLessThan(0.3);
-    expect(median("ashflag")).toBeGreaterThan(0.85);
-    // Wet floors: real puddles (near-mirror) but mostly stone.
-    for (const k of ["wetslab", "flagstone"] as const) {
-      expect(share(k, 0.2)).toBeGreaterThan(0.05);
-      expect(share(k, 0.2)).toBeLessThan(0.4);
-    }
-    expect(share("wetslab", 0.05)).toBeGreaterThan(0.05);
+    expect(glowAt(p.h - 1)).toBeGreaterThan(glowAt(Math.floor(p.h * 0.5)));
   });
 
-  test.each([...WALL_SURFACES])("%s wall has glinting texels and dry ones", (k) => {
-    const r = painted.get(k)!.roughness!;
-    const glossy = r.filter((v) => v < 0.5).length;
-    const dry = r.filter((v) => v > 0.7).length;
-    // Every wall catches some light; only the Hollow's is almost all matte.
-    if (k !== "palestone") expect(glossy).toBeGreaterThan(ARCH_SIZE * 4);
-    expect(dry).toBeGreaterThan(ARCH_SIZE * 2);
-  });
-
-  test("props and fixtures are byte-identical to the original painters", () => {
-    // Regression guard: pedestals, portals, graves, runes, huts and props
-    // keep their look. Hashes taken from the pre-split textures.ts output.
-    const expected: Record<string, [number, number]> = {
-      stone: [0x79e52e15, 0x27aa2712],
-      slab: [0x5ac66b44, 0x6b607880],
-      planks: [0x0fb396c0, 0x4db65650],
-      barrel: [0x21fd7e7f, 0xac39e4fe],
-      ceramic: [0x6738fc13, 0x6ada1508],
-      dirt: [0x5189f0dd, 0x4a226132],
-    };
-    for (const [k, [color, height]] of Object.entries(expected)) {
-      const p = painted.get(k as SurfaceKind)!;
-      expect(fnv(p.color)).toBe(color);
-      expect(fnv(new Uint8Array(p.height.buffer))).toBe(height);
+  test("variant atlas: three columns, mostly the common wall, insets inside their own column", () => {
+    expect(VARIANT_WEIGHTS.length).toBe(WALL_VARIANTS);
+    expect(VARIANT_WEIGHTS.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 6);
+    expect(VARIANT_WEIGHTS[0]).toBeGreaterThan(0.5);
+    for (let v = 0; v < WALL_VARIANTS; v++) {
+      const [u0, u1] = wallAtlasU(v);
+      expect(Math.floor(u0 * WALL_TEX_W * WALL_VARIANTS)).toBe(v * WALL_TEX_W);
+      expect(Math.floor(u1 * WALL_TEX_W * WALL_VARIANTS)).toBe((v + 1) * WALL_TEX_W - 1);
     }
   });
 });
@@ -190,129 +183,80 @@ describe("painters", () => {
 describe("normal map", () => {
   test.each([...SURFACE_KINDS])("%s encodes unit normals facing out", (k) => {
     const p = painted.get(k)!;
-    const nm = heightToNormal(p.height, p.size, SURFACE_DEFS[k].normalStrength ?? 2.2);
-    expect(nm.length).toBe(p.size * p.size * 4);
-    for (let i = 0; i < p.size * p.size; i++) {
+    const nm = heightToNormal(p, SURFACE_DEFS[k].normalStrength, SURFACE_DEFS[k].tileW ?? p.w);
+    expect(nm.length).toBe(p.w * p.h * 4);
+    for (let i = 0; i < p.w * p.h; i++) {
       const [x, y, z] = decodeNormal(nm, i);
       const len = Math.hypot(x, y, z);
       // 8-bit quantization allows a little slack.
       if (Math.abs(len - 1) > 0.02) throw new Error(`${k} normal ${i} length ${len}`);
       if (z <= 0) throw new Error(`${k} normal ${i} faces into the wall`);
-      expect(nm[i * 4 + 3]).toBe(255);
-    }
-  });
-
-  test("flat height gives a flat normal", () => {
-    const S = 8;
-    const nm = heightToNormal(new Float32Array(S * S).fill(0.5), S, 2.2);
-    for (let i = 0; i < S * S; i++) {
-      const [x, y, z] = decodeNormal(nm, i);
-      expect(Math.abs(x)).toBeLessThan(0.01);
-      expect(Math.abs(y)).toBeLessThan(0.01);
-      expect(z).toBeGreaterThan(0.99);
     }
   });
 
   test("follows three.js's +Y-up convention (upper lip of a block lights from above)", () => {
-    // A raised band on rows 6..9 of a 16×16 field. Row 5 sits just above
-    // it (higher v): the slope there faces UP the texture → +G. Row 10
-    // sits below → −G. Column-wise, a block's right edge faces +x → +R.
-    const S = 16;
-    const h = new Float32Array(S * S);
-    for (let y = 6; y < 10; y++) for (let x = 4; x < 12; x++) h[y * S + x] = 1;
-    const nm = heightToNormal(h, S, 2.2);
-    expect(decodeNormal(nm, 5 * S + 8)[1]).toBeGreaterThan(0.2);
-    expect(decodeNormal(nm, 10 * S + 8)[1]).toBeLessThan(-0.2);
-    expect(decodeNormal(nm, 8 * S + 12)[0]).toBeGreaterThan(0.2);
-    expect(decodeNormal(nm, 8 * S + 3)[0]).toBeLessThan(-0.2);
+    // A raised band on rows 6..9 of a 16×16 field. Its top row slopes up
+    // the texture (toward row 0) → +G; its bottom row → −G. Its right
+    // edge faces +x → +R.
+    const p = blank(16, 16);
+    for (let y = 6; y < 10; y++) for (let x = 4; x < 12; x++) p.height[y * 16 + x] = 1;
+    const nm = heightToNormal(p, 2.4);
+    expect(decodeNormal(nm, 6 * 16 + 8)[1]).toBeGreaterThan(0.2);
+    expect(decodeNormal(nm, 9 * 16 + 8)[1]).toBeLessThan(-0.2);
+    expect(decodeNormal(nm, 8 * 16 + 11)[0]).toBeGreaterThan(0.2);
+    expect(decodeNormal(nm, 8 * 16 + 4)[0]).toBeLessThan(-0.2);
+  });
+
+  test("an atlas wraps each tile onto itself, not onto its neighbour", () => {
+    // Two 8-wide tiles: the left one flat, the right one raised. The left
+    // tile's edges must stay flat (they wrap to their own column).
+    const p = blank(16, 4);
+    for (let y = 0; y < 4; y++) for (let x = 8; x < 16; x++) p.height[y * 16 + x] = 1;
+    const nm = heightToNormal(p, 2.4, 8);
+    for (const x of [0, 7, 8, 15]) expect(Math.abs(decodeNormal(nm, 16 + x)[0])).toBeLessThan(0.02);
   });
 
   test("roughness packs into the green channel", () => {
-    const rgba = packRoughness(new Float32Array([0, 0.5, 1]));
+    const rgba = scalarToRgba(new Float32Array([0, 0.5, 1]));
     expect([rgba[1], rgba[5], rgba[9]]).toEqual([0, 128, 255]);
     expect(rgba[3]).toBe(255);
   });
 });
 
-describe("paint toolkit", () => {
-  test("splitSpan always sums to the total", () => {
-    const rng = new Rng(7);
-    for (let i = 0; i < 200; i++) {
-      const runs = splitSpan(rng, 64, rng.int(3, 8), rng.int(9, 30));
-      expect(runs.reduce((a, b) => a + b, 0)).toBe(64);
-      for (const r of runs) expect(r).toBeGreaterThan(0);
+describe("noise and palette", () => {
+  test("fbm is periodic over the texture, so every surface tiles", () => {
+    for (let y = 0; y < 64; y += 7) {
+      expect(fbm(64, y, 64, 64, 6, 3)).toBeCloseTo(fbm(0, y, 64, 64, 6, 3), 9);
+      expect(fbm(y, 64, 64, 64, 6, 3)).toBeCloseTo(fbm(y, 0, 64, 64, 6, 3), 9);
     }
   });
 
-  test("tileNoise tiles seamlessly and stays in 0..1", () => {
-    const S = 64;
-    const n = tileNoise(new Rng(3), 4, S);
-    for (const v of n) expect(v >= 0 && v <= 1).toBe(true);
-    // Neighbours across the wrap edge differ no more than neighbours inside.
-    let maxInside = 0;
-    let maxSeam = 0;
-    for (let y = 0; y < S; y++) {
-      for (let x = 0; x < S - 1; x++) maxInside = Math.max(maxInside, Math.abs(n[y * S + x] - n[y * S + x + 1]));
-      maxSeam = Math.max(maxSeam, Math.abs(n[y * S + S - 1] - n[y * S]));
-    }
-    expect(maxSeam).toBeLessThanOrEqual(maxInside + 1e-6);
+  test("worley gives ordered distances and stable ids", () => {
+    const a = worley(10, 20, 64, 64, 4, 4, 9);
+    expect(a.f2).toBeGreaterThanOrEqual(a.f1);
+    expect(worley(10, 20, 64, 64, 4, 4, 9)).toEqual(a);
   });
 
-  test("ashlarField tiles, marks joints, and gives every stone local coords", () => {
-    const f = ashlarField(new Rng(5), 128, [16, 28], [28, 60], 0.3);
-    let joints = 0;
-    for (let i = 0; i < f.edge.length; i++) {
-      expect(f.edge[i]).toBeLessThanOrEqual(6);
-      if (f.edge[i] === 0) joints++;
-      expect(f.u[i] >= 0 && f.u[i] <= 1).toBe(true);
-      expect(f.v[i] >= 0 && f.v[i] <= 1).toBe(true);
-    }
-    expect(joints).toBeGreaterThan(128 * 4);
-    expect(joints).toBeLessThan(128 * 128 * 0.2);
-    // Column mode (basalt): stones change far more often across a row than
-    // down a column.
-    const col = ashlarField(new Rng(5), 64, [18, 30], [40, 64], 0, true);
-    let across = 0;
-    let down = 0;
-    for (let y = 0; y < 64; y++) {
-      for (let x = 0; x < 64; x++) {
-        if (col.id[y * 64 + x] !== col.id[y * 64 + ((x + 1) % 64)]) across++;
-        if (col.id[y * 64 + x] !== col.id[((y + 1) % 64) * 64 + x]) down++;
-      }
-    }
-    expect(across).toBeGreaterThan(down * 1.5);
-  });
-
-  test("layeredNoise stays in 0..1", () => {
-    for (const v of layeredNoise(new Rng(2), 64, [[4, 1], [8, 0.5]])) expect(v >= 0 && v <= 1).toBe(true);
-  });
-
-  test("blockField marks joints and bounds edge distance", () => {
-    const f = blockField(new Rng(11), 64, [6, 9], [12, 22]);
-    let joints = 0;
-    for (const e of f.edge) {
-      expect(e).toBeLessThanOrEqual(4);
-      if (e === 0) joints++;
-    }
-    expect(joints).toBeGreaterThan(64 * 4);
-    expect(joints).toBeLessThan(64 * 64 * 0.4);
+  test("stepped ramps band (no blending between stops)", () => {
+    const r = ramp(["#000000", "#ffffff"]);
+    expect(r(0.2)).toEqual([0, 0, 0]);
+    expect(r(0.8)).toEqual([255, 255, 255]);
   });
 });
 
-describe("runes", () => {
+describe("runes and decals", () => {
   test("a lore tablet is deterministic per seed and differs between seeds", () => {
     const a = paintRuneTablet("fragment-a");
     const b = paintRuneTablet("fragment-a");
     const c = paintRuneTablet("fragment-b");
-    expect(a.size).toBe(RUNE_TABLET_SIZE);
-    expect(a.emissive).toBeDefined();
-    expect(a.roughness).toBeUndefined();
-    expect(fnv(b.emissive!)).toBe(fnv(a.emissive!));
-    expect(fnv(c.emissive!)).not.toBe(fnv(a.emissive!));
+    expect(a.w).toBe(RUNE_TABLET_SIZE);
+    expect(a.emit).not.toBeNull();
+    expect(fnv(b.emit!)).toBe(fnv(a.emit!));
+    expect(fnv(c.emit!)).not.toBe(fnv(a.emit!));
   });
 
   test("the tablet glyph glows and is grayscale (tinted by the model)", () => {
-    const e = paintRuneTablet("x").emissive!;
+    const e = paintRuneTablet("x").emit!;
     let lit = 0;
     for (let i = 0; i < e.length; i += 4) {
       expect(e[i]).toBe(e[i + 1]);
@@ -337,5 +281,22 @@ describe("runes", () => {
     expect(height).toBe(16);
     expect(rgba.length).toBe(128 * 16 * 4);
     for (let i = 3; i < rgba.length; i += 4) expect(rgba[i]).toBe(255);
+  });
+
+  test("the arrival rune circle is a grayscale ring pattern with an empty outside", () => {
+    const p = paintRuneCircle();
+    const S = RUNE_CIRCLE_SIZE;
+    let lit = 0;
+    for (let i = 0; i < S * S; i++) {
+      const v = p.color[i * 4];
+      expect(p.color[i * 4 + 1]).toBe(v);
+      if (v > 0) lit++;
+    }
+    expect(lit).toBeGreaterThan(400);
+    // Corners lie outside the outer ring.
+    expect(p.color[0]).toBe(0);
+    expect(p.color[(S * S - 1) * 4]).toBe(0);
+    // Deterministic.
+    expect(fnv(paintRuneCircle().color)).toBe(fnv(p.color));
   });
 });
