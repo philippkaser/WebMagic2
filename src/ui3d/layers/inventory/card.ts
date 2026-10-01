@@ -22,10 +22,9 @@ import type { FrameColors } from "../../theme";
 
 const frames = new Map<string, DataTexture>();
 
-/** PixelFrame's bitmap, re-wrapped as an sRGB texture so the frame's bytes
- * mean the same colours as the uniforms they're mixed with — and with the
- * corner rivets in the frame's own light tone instead of white-hot: a page
- * of thirty cards shouldn't sparkle at every corner. */
+/** PixelFrame's bitmap with the corner rivets in the frame's own light tone
+ * instead of white-hot: a page of thirty cards shouldn't sparkle at every
+ * corner. */
 export function cardFrame(c: FrameColors): DataTexture {
   const key = `${c.trim}|${c.light}|${c.dark}`;
   let t = frames.get(key);

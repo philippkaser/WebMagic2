@@ -1,4 +1,4 @@
-import { DataTexture, NearestFilter, RGBAFormat, UnsignedByteType } from "three";
+import { DataTexture, NearestFilter, RGBAFormat, SRGBColorSpace, UnsignedByteType } from "three";
 import { ink, shade } from "../../theme";
 
 /** The grimoire's little pixel sprites — heart, drop, gem, skull, the pact
@@ -212,6 +212,7 @@ export function spriteTexture(name: SpriteName, tint: string = ink.parchment): S
     }
   });
   const texture = new DataTexture(data, w, h, RGBAFormat, UnsignedByteType);
+  texture.colorSpace = SRGBColorSpace; // the bytes are sRGB hex colours
   texture.magFilter = texture.minFilter = NearestFilter;
   texture.generateMipmaps = false;
   texture.needsUpdate = true;

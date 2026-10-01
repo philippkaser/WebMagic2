@@ -1,6 +1,6 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
-import { Color, DataTexture, Mesh, NearestFilter, PlaneGeometry, RGBAFormat, ShaderMaterial, UnsignedByteType } from "three";
+import { Color, DataTexture, Mesh, NearestFilter, PlaneGeometry, RGBAFormat, ShaderMaterial, SRGBColorSpace, UnsignedByteType } from "three";
 import { uiNow } from "./clock";
 import { frameFor, ink, type FrameColors, type FrameKind } from "./theme";
 
@@ -75,6 +75,9 @@ export function frameTexture(c: FrameColors): DataTexture {
       put(S - 1 - x, S - 1 - y, hex);
     }
   const t = new DataTexture(data, S, S, RGBAFormat, UnsignedByteType);
+  // The bytes are sRGB hex colours: decode on fetch, or the output pass
+  // encodes them twice and brass turns pale cream.
+  t.colorSpace = SRGBColorSpace;
   t.magFilter = t.minFilter = NearestFilter;
   t.generateMipmaps = false;
   t.needsUpdate = true;
