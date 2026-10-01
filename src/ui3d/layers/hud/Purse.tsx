@@ -68,7 +68,7 @@ export function Purse() {
           <Undistort at={[(x0 + 13) * A, -5 * A, 0.01]}>
             <Heap count={coinsFor(gold)} color={ink.gold} emissive="#6a4308" seed={1} />
           </Undistort>
-          <RuneText text={goldText} font="body" px={PX} color={ink.gold} anchor={[0, 0.5]} align="left" position={[(x0 + 32) * A, 0, 0]} glow={0.8} outline={0.6} delay={d} />
+          <RuneText text={goldText} font="body" px={PX} color={ink.gold} anchor={[0, 0.5]} align="left" position={[(x0 + 32) * A, 0, 0]} glow={0.3} outline={0.6} delay={d} />
           <Undistort at={[(runX + 10) * A, -5 * A, 0.01]}>
             <Heap count={coinsFor(runGold, 18)} color="#b87a3a" emissive="#4a2406" seed={2} scale={0.8} />
           </Undistort>
@@ -81,7 +81,7 @@ export function Purse() {
             anchor={[0, 0.5]}
             align="left"
             position={[(runX + 24) * A, 0, 0]}
-            glow={0.6}
+            glow={0.25}
             outline={0.6}
             delay={d * 1.2}
           />

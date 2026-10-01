@@ -61,7 +61,7 @@ void main() {
     col = vec3(0.07, 0.055, 0.09) * (0.68 + 0.42 * v);
     vec2 c = (p + 0.5 - uPx * vec2(0.5, 0.55)) / (uPx * 0.5);
     float r = length(c);
-    float pool = (1.0 - uEmpty) * (r < 0.42 ? 0.22 : r < 0.58 ? 0.13 : r < 0.72 ? 0.06 : 0.0);
+    float pool = (1.0 - uEmpty) * (r < 0.5 ? 0.14 : r < 0.72 ? 0.06 : 0.0);
     col = mix(col, uColor, pool + uFlash * 0.35);
   }
   gl_FragColor = vec4(col * uShow, uShow);

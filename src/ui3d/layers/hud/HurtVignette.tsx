@@ -57,20 +57,22 @@ void main() {
   // A blow bites deeper where it landed.
   float near = exp(-pow(length(p - uImpact) / 0.32, 2.0));
   float n = noise(cell * 0.22 + uSeed) * 0.6 + noise(cell * 0.07 - uSeed) * 0.4;
-  float hurtReach = uHurt * (0.13 + near * 0.12);
-  float lowReach = uLow * (0.15 + uBeat * 0.05);
+  float hurtReach = uHurt * (0.09 + near * 0.08);
+  float lowReach = uLow * (0.2 + uBeat * 0.05);
   float edgeIn = 1.0 - s4;
   float hurt = clamp(1.0 - (edgeIn - (n - 0.5) * 0.08) / max(0.001, hurtReach), 0.0, 1.0) * step(0.001, uHurt);
   float low = clamp(1.0 - (edgeIn - (n - 0.5) * 0.06) / max(0.001, lowReach), 0.0, 1.0) * step(0.001, uLow);
   // Flat bands, as a pixel artist would shade it.
-  hurt = floor(hurt * 4.0 + 0.5) / 4.0;
-  low = floor(low * 4.0 + 0.5) / 4.0;
-  // artpass: rgba(190,22,22,0.55) for a blow, rgba(120,0,0,0.6) near death.
-  float aH = hurt * 0.6;
-  float aL = low * 0.62;
+  // Steeper than linear (a blur's falloff), then flat bands.
+  hurt = floor(hurt * hurt * 4.0 + 0.5) / 4.0;
+  low = floor(low * low * 4.0 + 0.5) / 4.0;
+  // artpass: rgba(190,22,22,0.55) for a blow, rgba(120,0,0,0.6) near death
+  // (colours in linear light: the output is converted to sRGB below).
+  float aH = hurt * 0.42;
+  float aL = low * 0.55;
   float a = max(aH, aL);
   if (a < 0.01) discard;
-  vec3 col = aH >= aL ? vec3(0.745, 0.086, 0.086) : vec3(0.47, 0.0, 0.0);
+  vec3 col = aH >= aL ? vec3(0.515, 0.008, 0.008) : vec3(0.188, 0.0, 0.0);
   gl_FragColor = vec4(col * a, a);
   #include <colorspace_fragment>
 }

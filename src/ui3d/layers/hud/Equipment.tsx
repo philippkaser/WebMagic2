@@ -37,7 +37,7 @@ export const POSE: Record<GearSlot | "consumable", SlotPose> = {
   amulet: { scale: 33, rot: [0.1, 0, 0] },
   cloak: { scale: 30, rot: [0.15, 0, 0] },
   boots: { scale: 33, rot: [0.3, -0.5, 0] },
-  consumable: { scale: 28, rot: [0.15, 0, 0] },
+  consumable: { scale: 36, rot: [0.15, 0, 0] },
 };
 
 /** An item's card colour: its own, or the enchantment's violet. */

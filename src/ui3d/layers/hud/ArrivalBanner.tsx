@@ -2,6 +2,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useRef } from "react";
 import { Vector3, type Group } from "three";
 import { placeInFront } from "../../anchors";
+import { uiNow } from "../../clock";
 import { UiShow } from "../../presence";
 import { RuneText } from "../../text/RuneText";
 import { ink } from "../../theme";
@@ -38,21 +39,24 @@ const target = new Vector3();
 export function ArrivalBanner({ title, shown, onHidden }: { title: ArrivalTitle; shown: boolean; onHidden: () => void }) {
   const group = useRef<Group>(null);
   const camera = useThree((s) => s.camera);
-  const placed = useRef(false);
+  const bornAt = useRef(-1);
   const U = hudUnit(TITLE_D);
 
   useFrame((_, rawDt) => {
     const g = group.current;
     if (!g) return;
     const dt = Math.min(rawDt, 0.1);
+    const now = uiNow();
+    if (bornAt.current < 0) bornAt.current = now;
     placeInFront(camera, TITLE_D, [0, (0.5 - TOP) * U], target);
-    if (!placed.current) {
+    // Written exactly where you look (held there while the first runes
+    // burn in, so a hitch on arrival can't misplace it) …
+    if (now - bornAt.current < 0.4) {
       g.position.copy(target);
       g.quaternion.copy(camera.quaternion);
-      placed.current = true;
       return;
     }
-    // Lazy: glance away and it waits; turn away and it drifts after you.
+    // … then lazy: glance away and it waits; turn away and it drifts after.
     if (shown) g.position.lerp(target, 1 - Math.exp(-dt * 1.6));
     g.quaternion.slerp(camera.quaternion, 1 - Math.exp(-dt * 3));
   });

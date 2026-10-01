@@ -21,8 +21,8 @@ import { usePresenceList } from "./usePresenceList";
  *
  * On arriving — at the village, or on a floor — the place names itself: the
  * arrival banner burns into the air ahead (ArrivalBanner), hangs a few
- * breaths, and burns away. It waits for the journey's tunnel to clear, so
- * it lands as the new place is revealed. What it leaves behind is the
+ * breaths, and burns away. It waits for the journey to arrive, so it lands
+ * once the new place has been revealed. What it leaves behind is the
  * location panel at the top left (artpass hud/LocationPanel): a brass-framed
  * soot panel with FLOOR, the floor number and biome, the Tithe of Five as
  * five rune squares that kindle as floors are played, how many more the
@@ -38,6 +38,9 @@ export function Location() {
   const floorSeed = useGame((s) => s.floorSeed);
   const instanceId = useGame((s) => s.instanceId);
   const traveling = useTravel((s) => s.stage === "entering" || s.stage === "tunnel");
+  // The banner waits until the journey has fully arrived: the arrival moves
+  // the camera, and the banner stays where it was first written.
+  const arrived = useTravel((s) => s.stage === "idle");
   const inDungeon = phase === "dungeon";
   const key = inDungeon ? `floor:${floor}:${instanceId}` : "village";
   // Keyed on the arrival only.
@@ -45,7 +48,7 @@ export function Location() {
   const title = useMemo(() => arrivalTitle(inDungeon, floor, floorSeed), [key]);
   // The arrival whose banner has already been read (the panel stands then).
   const [doneKey, setDoneKey] = useState<string | null>(null);
-  const titleUp = !traveling && doneKey !== key;
+  const titleUp = arrived && doneKey !== key;
   useEffect(() => {
     if (!titleUp) return;
     const timer = setTimeout(() => setDoneKey(key), (title.omen ? TITLE_HOLD_OMEN : TITLE_HOLD) * 1000);
@@ -67,7 +70,9 @@ export function Location() {
 
 const L = HUD_LAYOUT.plaque;
 const A = apx(L.distance);
-const LABEL = fontPx(8, "label", L.distance);
+/** Labels one px over artpass's 8: Silkscreen must keep a whole screen pixel
+ * per font pixel down to a 600 px tall window. */
+const LABEL = fontPx(9, "label", L.distance);
 const NUM = fontPx(30, "body", L.distance);
 const BODY = fontPx(13, "body", L.distance);
 /** Padding box (artpass .wm-loc: min-width 236, padding 4 8). */
@@ -126,7 +131,7 @@ function LocationPanel({ inDungeon, floor, biome }: { inDungeon: boolean; floor:
             anchor={[0, 1]}
             align="left"
             position={[X(0), yAt(rows.numBottom), 0]}
-            glow={0.9}
+            glow={0.15}
             outline={0.55}
             delay={0.2}
           />

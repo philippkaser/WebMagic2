@@ -32,7 +32,9 @@ import { useEntryDelay, useSettled } from "./useSettled";
 
 const L = HUD_LAYOUT.vitals;
 const A = apx(L.distance);
-const LABEL = fontPx(8, "label", L.distance);
+/** Labels one px over artpass's 8: Silkscreen must keep a whole screen pixel
+ * per font pixel down to a 600 px tall window. */
+const LABEL = fontPx(9, "label", L.distance);
 const [PW, PH] = plateSize(VITALS.cssW, VITALS.cssH);
 /** Content box top-left, plate-local ap pixels. */
 const X0 = -VITALS.cssW / 2 + VITALS.padX;
