@@ -20,13 +20,17 @@ import {
   type WebGLProgramParametersWithUniforms,
   type WebGLRenderer,
 } from "three";
-import { getSurface, type SurfaceKind } from "../textures";
+import { FLOOR_SPAN, getSurface, type FloorSurface } from "../textures";
 import { MeshBuilder } from "./architectureMesh";
 import { toGeometry } from "./meshGeometry";
+import { type SurfaceGlow, dungeonMaterial, useBreathingGlow } from "./wallMaterial";
 
-/** The dungeon floor: one world-mapped plane (texels square, 4 m repeat),
- * and — when the `reflections` quality flag is on and the biome's floor
- * shines at all — a real planar reflection.
+/** The dungeon floor: one world-mapped plane (the band's painted floor,
+ * FLOOR_SPAN metres per repeat, texels square) whose wet texels glint
+ * through their roughness map — and, only when the `reflections` quality
+ * flag is on (default off: a mirror floor reads smooth and modern next to
+ * the painted stone) and the biome's floor shines at all, a real planar
+ * reflection.
  *
  * The reflection is drei's MeshReflectorMaterial (its shader: normal-map
  * distortion, roughness-driven blur via its BlurPass), with two changes:
@@ -62,37 +66,37 @@ export function DungeonGround({
   extent,
   surface,
   reflection,
+  glow,
 }: {
   /** World half-extent of the floor square. */
   extent: number;
-  surface: SurfaceKind;
+  surface: FloorSurface;
   /** null = a matte floor: no mirror pass at all. */
   reflection: GroundReflection | null;
+  /** The band's painted glow (magma seams, veins) and its breathing. */
+  glow: SurfaceGlow;
 }) {
   const geometry = useMemo(() => groundGeometry(extent), [extent]);
   useEffect(() => () => geometry.dispose(), [geometry]);
   return reflection ? (
-    <ReflectiveGround geometry={geometry} surface={surface} reflection={reflection} />
+    <ReflectiveGround geometry={geometry} surface={surface} reflection={reflection} glow={glow} />
   ) : (
-    <mesh geometry={geometry} material={matteMaterial(surface)} receiveShadow />
+    <MatteGround geometry={geometry} surface={surface} glow={glow} />
   );
+}
+
+function MatteGround({ geometry, surface, glow }: { geometry: BufferGeometry; surface: FloorSurface; glow: SurfaceGlow }) {
+  const material = dungeonMaterial(surface);
+  const mats = useMemo(() => [material], [material]);
+  useBreathingGlow(mats, glow);
+  return <mesh geometry={geometry} material={material} receiveShadow />;
 }
 
 /** A flat, up-facing square at y = 0 with world-mapped UVs. */
 export function groundGeometry(extent: number): BufferGeometry {
-  const b = new MeshBuilder();
+  const b = new MeshBuilder(FLOOR_SPAN);
   b.quad([-extent, 0, -extent], [extent, 0, -extent], [extent, 0, extent], [-extent, 0, extent], [0, 1, 0]);
   return toGeometry(b.build());
-}
-
-const matte = new Map<SurfaceKind, MeshStandardMaterial>();
-function matteMaterial(kind: SurfaceKind): MeshStandardMaterial {
-  let m = matte.get(kind);
-  if (!m) {
-    m = new MeshStandardMaterial({ ...getSurface(kind).material });
-    matte.set(kind, m);
-  }
-  return m;
 }
 
 /** drei's final mix line, replaced by our additive version. Kept as a
@@ -117,7 +121,7 @@ interface Mirror {
   textureMatrix: Matrix4;
 }
 
-function createMirror(gl: WebGLRenderer, kind: SurfaceKind, reflection: GroundReflection): Mirror {
+function createMirror(gl: WebGLRenderer, kind: FloorSurface, reflection: GroundReflection): Mirror {
   const params = { minFilter: LinearFilter, magFilter: LinearFilter, type: HalfFloatType };
   const fbo = new WebGLRenderTarget(RESOLUTION, RESOLUTION, params);
   fbo.depthBuffer = true;
@@ -179,10 +183,12 @@ function ReflectiveGround({
   geometry,
   surface,
   reflection,
+  glow,
 }: {
   geometry: BufferGeometry;
-  surface: SurfaceKind;
+  surface: FloorSurface;
   reflection: GroundReflection;
+  glow: SurfaceGlow;
 }) {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
@@ -191,6 +197,8 @@ function ReflectiveGround({
   const mirror = useMemo(() => createMirror(gl, surface, reflection), [gl, surface, reflection]);
   const virtualCamera = useMemo(() => new PerspectiveCamera(), []);
   useEffect(() => () => disposeMirror(mirror), [mirror]);
+  const glowing = useMemo(() => [mirror.material as unknown as MeshStandardMaterial], [mirror]);
+  useBreathingGlow(glowing, glow);
 
   useFrame(() => {
     const floor = mesh.current;

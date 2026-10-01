@@ -1,5 +1,5 @@
-import { Rng, hashSeed } from "../../../core/rng";
-import { blank, put, glow, type Painted, type RGBA } from "../paint";
+import { Rng, hashSeed } from "../../core/rng";
+import { blank, glow, put, type Painted, type RGBA } from "./canvas";
 
 /** Procedural runes. No alphabet, no font: a rune is a few strokes between
  * the nodes of a tiny lattice (a main stave plus branches, like carved
@@ -102,9 +102,9 @@ function dilate(mask: Uint8Array, w: number, h: number): Uint8Array {
 }
 
 /** Carve a glyph into an already-painted surface: the stroke darkens and
- * sinks (so the Sobel normal map rims it with light), and — when the surface
- * has an emissive layer — glows `rgb` from the bottom of the groove. */
-export function carveGlyph(
+ * sinks (so the normal map rims it with light), and — when the surface has
+ * an emissive layer — glows `rgb` from the bottom of the groove. */
+export function carveRune(
   p: Painted,
   mask: Uint8Array,
   w: number,
@@ -117,11 +117,11 @@ export function carveGlyph(
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       if (!mask[y * w + x]) continue;
-      const px = (x0 + x) % p.size;
-      const py = (y0 + y) % p.size;
-      const i = (py * p.size + px) * 4;
+      const px = (x0 + x) % p.w;
+      const py = (y0 + y) % p.h;
+      const i = (py * p.w + px) * 4;
       put(p, px, py, p.color[i] * 0.45, p.color[i + 1] * 0.45, p.color[i + 2] * 0.45, depth);
-      if (rgb) glow(p, px, py, rgb[0], rgb[1], rgb[2]);
+      if (rgb) glow(p, px, py, rgb);
     }
   }
 }
@@ -137,7 +137,7 @@ export const RUNE_TABLET_SIZE = 32;
 export function paintRuneTablet(seed: string): Painted {
   const S = RUNE_TABLET_SIZE;
   const rng = new Rng(hashSeed(`rune:${seed}`));
-  const p = blank(S, { emissive: true });
+  const p = blank(S, S, { emit: true });
   for (let y = 0; y < S; y++) {
     for (let x = 0; x < S; x++) {
       const n = rng.next();
@@ -167,13 +167,13 @@ export function paintRuneTablet(seed: string): Painted {
   const gy = 4;
   const halo = dilate(main, gw, gh);
   for (let i = 0; i < halo.length; i++) {
-    if (halo[i]) glow(p, gx + (i % gw), gy + Math.floor(i / gw), 40, 40, 40);
+    if (halo[i]) glow(p, gx + (i % gw), gy + Math.floor(i / gw), [40, 40, 40]);
   }
-  carveGlyph(p, main, gw, gh, gx, gy, [255, 255, 255]);
+  carveRune(p, main, gw, gh, gx, gy, [255, 255, 255]);
   // A line of script: four small glyphs, dimmer than the main rune.
   for (let k = 0; k < 4; k++) {
     const m = glyphMask(rng, 3, 5, 1);
-    carveGlyph(p, m, 3, 5, 7 + k * 5, 22, [130, 130, 130], 0.3);
+    carveRune(p, m, 3, 5, 7 + k * 5, 22, [130, 130, 130], 0.3);
   }
   return p;
 }

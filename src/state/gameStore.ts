@@ -96,8 +96,8 @@ export interface GameState {
    * per frame, so it's opt-in. */
   shadows: boolean;
   /** Quality toggle: planar reflections on the dungeon floors (one extra
-   * low-res scene render per frame). On by default — the wet, glossy
-   * floors are half the look — but persisted, so weak GPUs can opt out. */
+   * low-res scene render per frame). Off by default — the painted floors
+   * carry their own wet glints — and persisted. */
   reflections: boolean;
   /** Display name shown to floor-mates. */
   playerName: string;
@@ -166,10 +166,12 @@ function loadShadowSetting(): boolean {
 
 function loadReflectionSetting(): boolean {
   try {
-    // Default ON: only an explicit "0" turns them off.
-    return localStorage.getItem(REFLECTIONS_KEY) !== "0";
+    // Default OFF: a mirror floor reads smooth and modern next to the
+    // painted pixel stone, whose wet texels glint on their own. Only an
+    // explicit "1" turns the planar reflection on.
+    return localStorage.getItem(REFLECTIONS_KEY) === "1";
   } catch {
-    return true;
+    return false;
   }
 }
 
