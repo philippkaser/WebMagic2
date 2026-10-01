@@ -6,11 +6,13 @@ import { computeStats } from "../../../items/catalog";
 import { useGame } from "../../../state/gameStore";
 import { uiNow } from "../../clock";
 
-/** Getting hurt, felt at the edge of sight: every blow strikes the air just
- * in front of your eye like glass — hairline cracks radiate from where it
- * landed on the rim of your vision — and blood splashes in from the edges,
- * then it all drains away. Near death the stain stays, beating faintly with
- * your pulse.
+/** Getting hurt, felt at the edge of sight (artpass hud/Vignettes): every
+ * blow bites a red rim in from the edges of the view — ragged, heaviest
+ * where it landed — that drains away in hard steps; near death a darker
+ * stain stays, throbbing with your pulse.
+ *
+ * Drawn the grimoire way: in coarse square blocks (about the world's own
+ * pixel size) and a handful of flat alpha bands, never a smooth gradient.
  *
  * The one piece drawn in clip space — a quad over the whole view, nearer
  * than anything else in the UI canvas — because it must cover every aspect
@@ -31,8 +33,8 @@ uniform float uLow;
 uniform float uBeat;
 uniform float uSeed;
 uniform float uAspect;
+uniform vec2 uRes;
 uniform vec2 uImpact;
-uniform float uCrack;
 varying vec2 vUv;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1)) + uSeed * 1.7) * 43758.5453); }
@@ -41,62 +43,47 @@ float noise(vec2 p) {
   vec2 u = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
 }
-float fbm(vec2 p) {
-  float v = 0.0, a = 0.5;
-  for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; }
-  return v;
-}
 
 void main() {
-  // Screen-height units, origin at the centre.
-  vec2 p = (vUv - 0.5) * vec2(uAspect, 1.0);
-  // Nearness to the rim of sight: a superellipse, so the stain hugs the
-  // edges but rounds into the corners instead of drawing a frame.
+  // Snap to blocks ~1/180 of the screen tall: the vignette is pixel art too.
+  float block = max(2.0, floor(uRes.y / 180.0));
+  vec2 cell = floor(vUv * uRes / block);
+  vec2 uv = (cell + 0.5) * block / uRes;
+  vec2 p = (uv - 0.5) * vec2(uAspect, 1.0);
+  // Nearness to the rim of sight: a superellipse, hugging the edges and
+  // rounding into the corners.
   vec2 e = abs(p) / vec2(0.5 * uAspect, 0.5);
   float s4 = pow(pow(e.x, 4.0) + pow(e.y, 4.0), 0.25);
-  float reach = 0.09 + max(uHurt, uLow) * 0.11;
-  float rim = smoothstep(1.0 - reach, 1.05, s4);
-
-  // Blood creeping in from the rim: big clots and fine spatter, so its
-  // inner edge is ragged, never a line.
-  float n = fbm(p * 3.2 + vec2(uSeed * 0.37, uSeed * 0.11)) * 0.7 + fbm(p * 14.0 - uSeed) * 0.3;
-  float amount = max(uHurt, uLow * (0.7 + uBeat * 0.3));
-  float blood = smoothstep(0.42, 0.72, rim + (n - 0.5) * 1.1 - (1.0 - amount) * 0.75);
-  // A red flush on the moment of the hit (and on each weak heartbeat).
-  float flush = rim * rim * rim * (uHurt * 0.6 + uLow * uBeat * 0.4);
-
-  // Struck glass: jagged spokes from the impact point plus a broken
-  // concentric fracture, fading with distance.
-  vec2 q = p - uImpact;
-  float dist = length(q);
-  float spokes = 11.0;
-  // Jagged, not wavy: a high-frequency kink along each spoke.
-  float wob = (noise(vec2(atan(q.y, q.x) * 5.0, dist * 45.0)) - 0.5) * 0.09;
-  float ang = atan(q.y, q.x) + wob;
-  float k = ang * spokes / 6.2832;
-  float across = abs(fract(k) - 0.5) * 6.2832 / spokes * dist;
-  float spoke = smoothstep(0.0028, 0.0, across) * step(0.35, hash(vec2(floor(k), 3.0)));
-  float ringN = noise(vec2(ang * 6.0, 1.0));
-  float rings = smoothstep(0.003, 0.0, abs(dist - 0.09 - ringN * 0.03)) * step(0.45, ringN);
-  float spread = 0.1 + uCrack * 0.3;
-  float crackMask = smoothstep(spread, spread * 0.3, dist) * uHurt;
-  float line = min(1.0, spoke + rings) * crackMask;
-  float shade = smoothstep(0.009, 0.0, across) * crackMask * 0.6;
-
-  // Blood reads as blood over dark stone only if it's a saturated red:
-  // a deep clot at the rim, brighter where it thins.
-  vec3 bloodCol = mix(vec3(0.32, 0.01, 0.015), vec3(0.1, 0.0, 0.004), smoothstep(0.5, 1.0, rim));
-  vec3 col = bloodCol * blood + vec3(0.3, 0.01, 0.01) * flush + vec3(1.0, 0.82, 0.78) * line * 0.8;
-  float a = clamp(blood * 0.72 + flush * 0.25 + shade * 0.3 + line * 0.5, 0.0, 0.88);
-  if (a < 0.003) discard;
-  gl_FragColor = vec4(col, a);
+  // A blow bites deeper where it landed.
+  float near = exp(-pow(length(p - uImpact) / 0.32, 2.0));
+  float n = noise(cell * 0.22 + uSeed) * 0.6 + noise(cell * 0.07 - uSeed) * 0.4;
+  float hurtReach = uHurt * (0.09 + near * 0.08);
+  float lowReach = uLow * (0.2 + uBeat * 0.05);
+  float edgeIn = 1.0 - s4;
+  float hurt = clamp(1.0 - (edgeIn - (n - 0.5) * 0.08) / max(0.001, hurtReach), 0.0, 1.0) * step(0.001, uHurt);
+  float low = clamp(1.0 - (edgeIn - (n - 0.5) * 0.06) / max(0.001, lowReach), 0.0, 1.0) * step(0.001, uLow);
+  // Flat bands, as a pixel artist would shade it.
+  // Steeper than linear (a blur's falloff), then flat bands.
+  hurt = floor(hurt * hurt * 4.0 + 0.5) / 4.0;
+  low = floor(low * low * 4.0 + 0.5) / 4.0;
+  // artpass: rgba(190,22,22,0.55) for a blow, rgba(120,0,0,0.6) near death
+  // (colours in linear light: the output is converted to sRGB below).
+  float aH = hurt * 0.42;
+  float aL = low * 0.55;
+  float a = max(aH, aL);
+  if (a < 0.01) discard;
+  vec3 col = aH >= aL ? vec3(0.515, 0.008, 0.008) : vec3(0.188, 0.0, 0.0);
+  gl_FragColor = vec4(col * a, a);
   #include <colorspace_fragment>
 }
 `;
 
 export function HurtVignette() {
   const size = useThree((s) => s.size);
+  const gl = useThree((s) => s.gl);
   const aspect = size.width / Math.max(1, size.height);
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
   const material = useMemo(
     () =>
       new ShaderMaterial({
@@ -106,8 +93,8 @@ export function HurtVignette() {
           uBeat: { value: 0 },
           uSeed: { value: 0 },
           uAspect: { value: 1 },
+          uRes: { value: new Vector2(1, 1) },
           uImpact: { value: new Vector2() },
-          uCrack: { value: 0 },
         },
         vertexShader: VERT,
         fragmentShader: FRAG,
@@ -154,7 +141,6 @@ export function HurtVignette() {
         const dy = Math.sin(a) * 0.5;
         const k = 0.97 / Math.max(Math.abs(dx) / half, Math.abs(dy) / 0.5);
         (u.uImpact!.value as Vector2).set(dx * k, dy * k);
-        u.uCrack!.value = Math.min(1, amount / 35);
       }),
     [material],
   );
@@ -174,9 +160,11 @@ export function HurtVignette() {
     const ph = (uiNow() % period) / period;
     const beat = Math.exp(-(((ph - 0.08) / 0.06) ** 2)) + 0.6 * Math.exp(-(((ph - 0.3) / 0.06) ** 2));
     const u = material.uniforms;
-    u.uHurt!.value = hurt.current;
+    // Stepped like artpass's steps(6) fade: the bite drains in hard steps.
+    u.uHurt!.value = Math.ceil(hurt.current * 6) / 6;
     u.uLow!.value = low;
-    u.uBeat!.value = beat;
+    u.uBeat!.value = Math.round(beat * 3) / 3;
+    (u.uRes!.value as Vector2).set(sizeRef.current.width * gl.getPixelRatio(), sizeRef.current.height * gl.getPixelRatio());
     u.uAspect!.value = aspectRef.current;
     mesh.visible = hurt.current > 0 || low > 0;
   });

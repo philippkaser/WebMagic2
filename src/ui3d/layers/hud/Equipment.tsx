@@ -1,59 +1,57 @@
-import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BoxGeometry, type Group } from "three";
+import { ENCHANT_COLOR } from "../../../items/affixes";
 import { resolveItem } from "../../../items/catalog";
 import type { GearSlot, ItemInstance } from "../../../items/types";
 import { useGame } from "../../../state/gameStore";
-import { ITEM_ICONS } from "../../../ui/itemInfo";
-import { palette } from "../../../ui/theme";
-import { pxFor } from "../../anchors";
+import { getAbility } from "../../../weapons/spells";
 import { uiNow } from "../../clock";
-import { ItemModel } from "../../ItemModel";
-import { stoneMaterial } from "../../materials";
-import { useUiShow } from "../../presence";
-import { RuneText } from "../../text/RuneText";
-import { glowQuad, makeGlowMaterial } from "./glow";
-import { HudAnchor, hudUnit, Undistort } from "./HudAnchor";
-import { HUD_LAYOUT } from "./layout";
-import { Materialize } from "./Materialize";
-import { usePresenceList } from "./usePresenceList";
+import { KeyCap, keyCapWidth } from "../../KeyCap";
+import { Plate } from "../../Plate";
+import { measureText, RuneText } from "../../text/RuneText";
+import { ink } from "../../theme";
+import { apx, fontPx, FRAME_TEXEL, plateSize } from "./ap";
+import { HudAnchor } from "./HudAnchor";
+import { HUD_LAYOUT, SLOT, slotStrip } from "./layout";
+import { SlotCard, type SlotPose } from "./SlotCard";
 
-/** What you're wearing, as the things themselves: staff, amulet, cloak and
- * boots hang in a row over a slim stone ledge at the lower right, dim and
- * quiet — until one changes: the old piece burns away, the new one arrives
- * in a flare, glows bright for a moment and its name writes itself under
- * the ledge. Unbanked run loot wears a small amber bead (lost on death until
- * banked); an empty slot is only a faint rune of what belongs there. */
+/** Bottom right, as artpass lays it out (hud/EquipStrip): the staff's two
+ * spells on their mouse buttons in a small iron panel, and under it the four
+ * worn pieces as framed item slots — each with the piece itself, the 3D
+ * model, turning in it. When a piece changes, the old one burns away as the
+ * new one arrives, its slot flares in its colour and its name writes itself
+ * above the strip for a moment. */
 
 const L = HUD_LAYOUT.equipment;
-const U = hudUnit(L.distance);
-const STEP = 0.07 * U;
-const ROW_Y = 0.05 * U;
-const LEDGE_Y = 0.008 * U;
-const HINT_Y = -0.016 * U;
-const NAME_PX = pxFor(L.distance, 0.017);
-const HINT_PX = pxFor(L.distance, 0.016);
-const ICON_PX = pxFor(L.distance, 0.024);
-
+const A = apx(L.distance);
 const SLOTS: readonly GearSlot[] = ["staff", "amulet", "cloak", "boots"];
+const STRIP = slotStrip(SLOTS.length);
+const [PW, PH] = plateSize(STRIP.cssW, STRIP.cssH);
+const KEY_PX = fontPx(9, "label", L.distance);
+const SPELL_PX = fontPx(12, "body", L.distance);
+const NAME_PX = fontPx(13, "body", L.distance);
 
 /** Per-slot presentation: size and lean so four very different shapes read
- * as one row. */
-const POSE: Record<GearSlot, { scale: number; rot: [number, number, number]; y: number }> = {
-  staff: { scale: 0.082, rot: [0, 0, -0.42], y: 0 },
-  amulet: { scale: 0.078, rot: [0.1, 0, 0], y: 0.004 },
-  cloak: { scale: 0.068, rot: [0.15, 0, 0], y: 0.002 },
-  boots: { scale: 0.08, rot: [0.3, -0.5, 0], y: 0 },
+ * as one row. Scales are in artpass pixels. */
+export const POSE: Record<GearSlot | "consumable", SlotPose> = {
+  staff: { scale: 40, rot: [0, 0, -0.62] },
+  amulet: { scale: 33, rot: [0.1, 0, 0] },
+  cloak: { scale: 30, rot: [0.15, 0, 0] },
+  boots: { scale: 33, rot: [0.3, -0.5, 0] },
+  consumable: { scale: 36, rot: [0.15, 0, 0] },
 };
 
-let ledgeGeo: BoxGeometry | null = null;
+/** An item's card colour: its own, or the enchantment's violet. */
+export function itemColor(defId: string): string {
+  const item = resolveItem(defId);
+  return item.affix ? ENCHANT_COLOR : item.def.color;
+}
 
 export function Equipment() {
   const equipment = useGame((s) => s.equipment);
   const [named, setNamed] = useState<{ id: number; text: string; color: string } | null>(null);
   const previous = useRef<Record<GearSlot, string | null> | null>(null);
 
-  // A changed piece gets its name written under the ledge for a moment.
+  // A changed piece gets its name written above the strip for a moment.
   useEffect(() => {
     const now: Record<GearSlot, string | null> = {
       staff: equipment.staff.defId,
@@ -67,98 +65,121 @@ export function Equipment() {
     const slot = SLOTS.find((s) => now[s] !== before[s] && now[s] !== null);
     if (!slot) return;
     const item = resolveItem(now[slot]!);
-    setNamed({ id: Date.now(), text: item.name, color: item.affix ? palette.enchant : palette.item });
+    setNamed({ id: Date.now(), text: item.name, color: item.affix ? ENCHANT_COLOR : ink.parchment });
     const timer = setTimeout(() => setNamed((n) => (n && n.text === item.name ? { ...n, id: -n.id } : n)), 3200);
     return () => clearTimeout(timer);
   }, [equipment]);
 
+  const outerW = PW + FRAME_TEXEL * 2;
+  const outerH = PH + FRAME_TEXEL * 2;
   return (
     <HudAnchor h={L.h} v={L.v} inset={L.inset} distance={L.distance}>
-      {/* The ledge is wide, not a small solid: no undistortion (it would
-          shear it into a slant). */}
-      <Materialize position={[-STEP * 1.5 - 0.035 * U, LEDGE_Y, 0]} delay={0.15} color="#8f86a0" size={0.05 * U} from={[0, -0.02 * U, -0.1 * U]} spin={0.4}>
-        <mesh
-          geometry={(ledgeGeo ??= new BoxGeometry(1, 1, 1))}
-          material={stoneMaterial("#3d3845")}
-          scale={[STEP * 4.1, 0.007 * U, 0.03 * U]}
-          rotation={[0.5, 0, 0]}
-        />
-      </Materialize>
-      {SLOTS.map((slot, i) => (
-        <GearPiece key={slot} slot={slot} worn={slot === "staff" ? equipment.staff : equipment[slot]} x={-0.035 * U - (SLOTS.length - 1 - i) * STEP} index={i} />
-      ))}
+      <group position={[-(outerW / 2) * A, (outerH / 2) * A, 0]}>
+        <Plate width={PW * A} height={PH * A} frame="iron" texel={FRAME_TEXEL * A} fillOpacity={0.94}>
+          {SLOTS.map((slot, i) => (
+            <GearSlotCard
+              key={slot}
+              slot={slot}
+              worn={slot === "staff" ? equipment.staff : equipment[slot]}
+              index={i}
+              position={[(-STRIP.cssW / 2 + 10 + SLOT.w / 2 + i * (SLOT.w + SLOT.gap)) * A, (STRIP.cssH / 2 - 10 - SLOT.h / 2) * A, 0]}
+            />
+          ))}
+        </Plate>
+      </group>
+      <Spells staffId={equipment.staff.defId} bottom={outerH + 6} />
       <RuneText
         text={named?.text ?? ""}
         show={!!named && named.id > 0}
+        font="body"
         px={NAME_PX}
-        color={named?.color ?? palette.item}
+        color={named?.color ?? ink.parchment}
         anchor={[1, 0.5]}
         align="right"
-        position={[-0.035 * U + 0.012 * U, HINT_Y, 0]}
+        position={[-2 * A, (outerH + 6 + 38 + 12) * A, 0]}
         glow={0.8}
         outline={0.6}
       />
-      <RuneText text="I — inventory" show={!named || named.id < 0} px={HINT_PX} color={palette.faint} anchor={[1, 0.5]} align="right" position={[-0.035 * U + 0.012 * U, HINT_Y, 0]} glow={0.3} outline={0.5} delay={0.9} />
     </HudAnchor>
   );
 }
 
-function GearPiece({ slot, worn, x, index }: { slot: GearSlot; worn: ItemInstance | null; x: number; index: number }) {
+function GearSlotCard({ slot, worn, index, position }: { slot: GearSlot; worn: ItemInstance | null; index: number; position: readonly [number, number, number] }) {
   const defId = worn?.defId ?? null;
   const item = useMemo(() => (defId ? resolveItem(defId) : null), [defId]);
-  const color = item?.def.color ?? palette.slotEmpty;
-  const glow = useMemo(() => makeGlowMaterial(color, 0.1), [color]);
-  useEffect(() => () => glow.dispose(), [glow]);
-  const { entries, remove } = usePresenceList(defId, defId);
-  const changedAt = useRef(-10);
+  const flashAt = useRef(-10);
   const first = useRef(true);
-  const sway = useRef<Group>(null);
-  const pose = POSE[slot];
-  // The glow isn't inside the item's Materialize: fade it with the HUD.
-  const visible = useUiShow();
-  const lit = useRef(0);
-
   useEffect(() => {
     if (first.current) {
       first.current = false;
       return;
     }
-    changedAt.current = uiNow();
+    flashAt.current = uiNow();
   }, [defId]);
-
-  useFrame((_, rawDt) => {
-    const now = uiNow();
-    const since = now - changedAt.current;
-    lit.current += ((visible ? 1 : 0) - lit.current) * (1 - Math.exp(-Math.min(rawDt, 0.05) * 5));
-    // Brightens when it changes, then settles back to a dim ember.
-    const bright = since < 3 ? Math.exp(-since * 1.4) : 0;
-    glow.uniforms.uIntensity.value = ((item ? 0.07 : 0) + bright * 1.1) * lit.current;
-    const s = sway.current;
-    if (s) {
-      s.rotation.y = Math.sin(now * 0.6 + index * 1.7) * 0.35;
-      s.position.y = ROW_Y + pose.y * U + Math.sin(now * 1.1 + index) * 0.0015 * U + bright * 0.012 * U;
-      s.scale.setScalar(1 + bright * 0.18);
-    }
-  });
-
   return (
-    <group position={[x, 0, 0]}>
-      <Undistort at={[0, ROW_Y, 0]}>
-        <mesh geometry={glowQuad()} material={glow} position={[0, 0, -0.03 * U]} scale={0.075 * U} renderOrder={1} />
-      </Undistort>
-      <Undistort>
-        <group ref={sway} position={[0, ROW_Y, 0]}>
-          {entries.map((e) => (
-            <Materialize key={e.id} show={e.shown} delay={0.25 + index * 0.08} color={color} size={0.03 * U} onHidden={() => remove(e.id)}>
-              <group rotation={pose.rot}>
-                <ItemModel itemId={e.value} scale={pose.scale * U} />
-              </group>
-            </Materialize>
-          ))}
-        </group>
-      </Undistort>
-      <RuneText text={ITEM_ICONS[slot]} show={!item} px={ICON_PX} color={palette.faint} position={[0, ROW_Y, 0]} glow={0.3} outline={0.4} />
-      <RuneText text="•" show={!!worn?.runLoot} px={NAME_PX} color={palette.runLoot} position={[0.022 * U, 0.018 * U, 0]} glow={1} outline={0.5} delay={0.8} />
+    <SlotCard
+      unit={A}
+      itemId={defId}
+      color={defId ? itemColor(defId) : "#2e2735"}
+      icon={slot}
+      pose={POSE[slot]}
+      badge={item && item.level > 0 ? `${item.level}` : null}
+      enchanted={!!item?.affix}
+      runLoot={!!worn?.runLoot}
+      flashAt={flashAt}
+      index={index}
+      position={position}
+    />
+  );
+}
+
+/** The staff's spells on their mouse buttons (`.wm-abil`): [L] Bolt
+ * [R] Force Blast, in a small iron panel right-aligned over the slots. */
+function Spells({ staffId, bottom }: { staffId: string; bottom: number }) {
+  const def = useMemo(() => resolveItem(staffId).def, [staffId]);
+  const parts = useMemo(() => {
+    const out: { key: string; name: string }[] = [];
+    if (def.primary) out.push({ key: "L", name: getAbility(def.primary).name });
+    if (def.secondary) out.push({ key: "R", name: getAbility(def.secondary).name });
+    return out;
+  }, [def]);
+  // Layout in artpass pixels: key cap, 4, name, 10, key cap, 4, name.
+  const items = parts.map((p) => ({
+    ...p,
+    capW: keyCapWidth(p.key, KEY_PX) / A,
+    nameW: measureText(p.name, SPELL_PX, undefined, "body").width / A,
+  }));
+  const contentW = items.reduce((w, it) => w + it.capW + 4 + it.nameW, 0) + Math.max(0, items.length - 1) * 10;
+  const [pw, ph] = plateSize(contentW + 8, 22);
+  const outerW = pw + FRAME_TEXEL * 2;
+  const outerH = ph + FRAME_TEXEL * 2;
+  let x = -(contentW / 2);
+  return (
+    <group position={[-(outerW / 2) * A, (bottom + outerH / 2) * A, 0]}>
+      <Plate width={pw * A} height={ph * A} frame="iron" texel={FRAME_TEXEL * A} fillOpacity={0.94}>
+        {items.map((it, i) => {
+          const capX = x + it.capW / 2;
+          const nameX = x + it.capW + 4;
+          x += it.capW + 4 + it.nameW + 10;
+          return (
+            <group key={it.key}>
+              <KeyCap k={it.key} px={KEY_PX} position={[capX * A, 0, 0.001]} />
+              <RuneText
+                text={it.name}
+                font="body"
+                px={SPELL_PX}
+                color={ink.parchmentDim}
+                anchor={[0, 0.5]}
+                align="left"
+                position={[nameX * A, 0, 0]}
+                glow={0.4}
+                outline={0.6}
+                delay={0.3 + i * 0.1}
+              />
+            </group>
+          );
+        })}
+      </Plate>
     </group>
   );
 }

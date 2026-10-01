@@ -6,8 +6,9 @@
  *    lingers where the level was before a loss and then drains after it.
  *    That lingering sliver is what makes a hit READ: you see how much you
  *    just lost boil away instead of the level simply being lower.
- *  - Slosh: a damped spring for the tilt of a liquid's surface, pushed by the
- *    carrier's motion (turning, running, jumping, getting hit). */
+ *  - Slosh: a damped spring for the lean of a liquid's surface (the vitals
+ *    bars' leading edge), pushed by the carrier's motion (turning, running,
+ *    jumping, getting hit). */
 
 export interface Gauge {
   /** Displayed level, 0..1. */
@@ -117,12 +118,4 @@ export function kickSlosh(s: Slosh, ix: number, iz: number, wave: number): void 
   s.vx += ix;
   s.vz += iz;
   s.wave = Math.min(1, s.wave + wave);
-}
-
-/** Liquid height in the flask's object space for a fill level 0..1. The
- * bulb is a unit sphere; `bottom`/`top` keep an empty flask truly empty and
- * a full one just under the neck. */
-export function levelToHeight(level: number, bottom = -0.92, top = 0.84): number {
-  const l = Math.min(1, Math.max(0, level));
-  return l <= 0 ? bottom - 0.05 : bottom + (top - bottom) * l;
 }
