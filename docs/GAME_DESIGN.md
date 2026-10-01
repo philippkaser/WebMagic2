@@ -69,30 +69,38 @@ The emotional loop we are chasing:
   glowing magic, and the player's own staff-light. Fog for depth. A heavy
   vignette. Real reflections in wet and polished floors — a torch across the
   hall glints in the puddle at your feet.
-- **The Drowned Halls rule** (one material language for every biome): big,
-  calm, low-contrast stone whose detail lives in the normal and roughness
-  maps; the biome's colour comes from its light and fog, not from paint;
-  glowing things are rare and physical (a crystal cluster, a heat seam), never
-  wallpaper. Tall, vaulted rooms (7 m ceilings, arch ribs, pillars, shafts of
-  dusty light) so the lighting has space to be beautiful in. Clutter is the
-  enemy; "boring" is fixed with light and architecture, not with more texture.
-- **Particles everywhere, and alive.** Explosions with core flash, fireball,
-  stretched sparks, lit smoke and a shockwave ring; comet-tailed bolts;
+- **Painted pixel surfaces** (the old Drowned Halls look, now every
+  biome's): each surface is painted texel by texel from a small palette
+  ramp — mortar lines, chipped edges, moss and grime — with a few emissive
+  specks that bloom. Each biome brings its own ramp, its own glow colour and
+  its own split-tone colour grade that eases in as you arrive, so a new
+  floor reads as the air changing. Rooms are plain on purpose (tall 6 m
+  walls, fog, shafts of dusty light, torches): the feel comes from texture,
+  light and fog, not from clutter.
+- **Particles everywhere, and alive — in pixels.** Every particle is a
+  crisp chunk on the pixel grid: explosions with a core flash, pixel-chain
+  sparks, dithered smoke and a stepped shockwave ring; comet-tailed bolts;
   enemies that dissolve upward as light; torches with real shader flames and
   embers; and the air itself moving — dust in torchlight, drowned spores and
   drips, forge embers, crystal glitter, falling ash.
-- **Portals are the showpiece.** A living vortex that quickens as you come
-  close, and using one is a journey: you're pulled in, fly the tunnel while
-  the next floor loads, and the ring opens onto the new place. Sealed portals
+- **Portals are the showpiece.** A rift: a jagged tear in the air, rimmed
+  in pixel fire and framed in runed stone, that quickens as you come close.
+  Using one is a journey: the tear rips open over your view and you are
+  sucked in, hover in a dark void of blocky stars while the next floor
+  loads, and are spat out through a tear onto the new place. Sealed rifts
   are frozen, cracked glass.
-- **The UI is in the world.** No flat screens: words burn into the air ahead
-  of you as runes that settle into letters and later burn away; menus are
-  stone tablets that assemble out of the dark; your health and mana are
-  glowing flasks, your gold a heap of coins, your items small objects you
-  pick up and set down. New UI must follow this — if it could be a DOM panel,
-  it's wrong.
-- **Post-processing chain:** bloom (feeds the emissive magic) → highlight
-  roll-off → film grain → vignette. The pixelation itself is *free*: the
+- **The UI is in the world, in the grimoire's hand.** No flat screens:
+  words burn into the air ahead of you as runes that settle into letters
+  and later burn away; menus are dark stone tablets that assemble out of the
+  dark and forge a brass pixel frame around themselves; prompts and
+  messages are small framed plates hanging where they belong; items are
+  small objects you pick up and set down. The type is pixel type —
+  Jacquard 12 blackletter for titles, Tiny5 for text, Silkscreen for tiny
+  labels — in parchment on soot, arcane cyan for magic and the way onward,
+  gold for home, blood for danger. New UI must follow this — if it could be
+  a DOM panel, it's wrong.
+- **Post-processing chain:** bloom (feeds the emissive specks and magic) →
+  split-tone colour grade (per biome) → film grain → heavy vignette. The pixelation itself is *free*: the
   world renders at ~1/3 resolution and the browser upscales it with
   `image-rendering: pixelated` (the UI canvas above it renders at full
   resolution so the pixel font stays crisp).
@@ -100,12 +108,15 @@ The emotional loop we are chasing:
 ### Hard constraint: **zero binary assets**
 
 Everything — textures, normal maps, all sound — is **synthesized at runtime.**
-No image files, no audio files, no model files. This keeps the whole game a
+No image files, no audio files, no model files. The one exception is the
+three pixel fonts of the UI (Jacquard 12, Tiny5, Silkscreen, installed from
+@fontsource), because good pixel type is the heart of the look. This keeps the whole game a
 tiny, fast-loading bundle and makes it trivially themeable in code. Any new
 art is a new procedural painter function, not an asset pipeline.
 
-- Textures: painted onto 64×64 canvases (stone brick, worn slabs, planks,
-  ceramic, barrel staves, dirt), each with a matching normal map.
+- Textures: pixel art painted texel by texel from small palette ramps
+  (stone brick, worn slabs, planks, ceramic, barrel staves, dirt, per-biome
+  walls and floors), each with a matching normal map and emissive specks.
 - Models: primitive geometry (boxes, cones, octahedra, icosahedra) with
   emissive materials. Enemies and wizards are readable silhouettes, not
   detailed meshes — which suits the pixel aesthetic.
@@ -602,10 +613,12 @@ table, and the extension guide.
   presence sense, pacts and wizard-vs-wizard combat, kill credit, grave
   chests, host-authority replication of enemies/props/boss/loot/graves,
   late-join sync, host migration, reconnect into the same instance.
-- The look: five biomes in one material language with vaulted 7 m rooms,
-  reflective floors, light shafts and ambient air; shader particles for every
-  effect; vortex portals and portal journeys for every scene switch; and the
-  whole UI in the world (rune text, stone-tablet menus, flask HUD, 3D items).
+- The look ("gritty pixel-magic"): five biomes of painted pixel-art
+  surfaces with their own colour grades, plain 6 m halls with fog, light
+  shafts and ambient air; pixel particles for every effect; rift portals and
+  portal journeys for every scene switch; and the whole UI in the world in
+  the grimoire style (rune text in pixel fonts, framed stone-tablet menus,
+  the framed HUD, 3D items).
 - Persistence of the deepest floor, banked inventory + gold, player name,
   and the shadows / reflections quality toggles (localStorage cache; server-authoritative
   online — including gold provenance and merchant purchase validation).

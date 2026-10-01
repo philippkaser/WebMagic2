@@ -401,21 +401,26 @@ limiting and hit/pickup sanitization already run server-/authority-side.
 - **Particles** (`fx/`): one CPU simulation (`particleSim.ts`, pure and
   unit-tested: a dense struct-of-floats pool of 8192, swap-remove, zero
   per-frame allocation) streams four instanced attributes into ONE draw call
-  (`particleMaterial.ts`). Premultiplied-alpha blending lets additive light
-  (glows, velocity-stretched sparks, embers, flares, shockwave rings) and
-  alpha-blended matter (smoke, dust, lit debris chunks) share that call.
-  Smoke, dust and debris are lit by the same pooled lights as the walls
-  (`fxUniforms.ts` mirrors the pool), everything respects fog, and the
-  shader never draws a particle below ~1.6 px (it pads it and gives back the
-  alpha) so sparks stay steady at dpr 0.35. Gameplay code calls named effects
-  (`effects.ts`: `explosionFx`, `shockwaveFx`, `castFlareFx`, `boltTrailFx`,
-  `blackHoleFx`, `hitSparksFx`, `soulDissolveFx`, `shatterFx`, …), which
-  thin themselves out as the pool fills; `spawnBurst()` remains for simple
-  bursts (`style` picks the look). Torch fire is a procedural shader flame
-  (`Flames.tsx`, one instanced call for every torch); the air of each biome
-  is `AmbientParticles.tsx` — seeds animated entirely on the GPU in a box that
-  follows the camera (dust, spores and drips, embers and ash, glints, falling
-  ash, village fireflies; the Weightless Hour makes it all float up).
+  (`particleMaterial.ts`), drawn in the pixel-magic look: crisp, hard-edged
+  chunks of colour on the render target's pixel grid, never soft blobs.
+  Chunks big enough on screen are real little tumbling cubes with three
+  stepped face tones; everything else is a grid-snapped sprite a whole
+  number of pixels wide — squares with a 1-px rim, stepped octagon glows,
+  pixel chains for sparks, stepped rings, plus-shaped star flares. Fades
+  never blend: small sprites pop out whole, glows burn down in whole pixels,
+  smoke erodes in an ordered dither, so every fragment is either opaque or
+  pure added light and premultiplied blending lets light and matter share
+  the call. Smoke, dust and debris are lit by the same pooled lights as the
+  walls (`fxUniforms.ts` mirrors the pool) and everything respects fog.
+  Gameplay code calls named effects (`effects.ts`: `explosionFx`,
+  `shockwaveFx`, `castFlareFx`, `boltTrailFx`, `blackHoleFx`, `hitSparksFx`,
+  `soulDissolveFx`, `shatterFx`, …), which thin themselves out as the pool
+  fills; `spawnBurst()` remains for simple bursts (`style` picks the look).
+  Torch fire is a stepped pixel flame in hard colour bands (`Flames.tsx`,
+  one instanced call for every torch); the air of each biome is
+  `AmbientParticles.tsx` — single pixels animated entirely on the GPU in a
+  box that follows the camera (dust, spores and drips, embers and ash,
+  glints, village fireflies; the Weightless Hour makes it all float up).
 - **Post chain**: bloom (feeds the emissive specks, torches and magic) →
   split-tone colour grade → film grain → heavy vignette
   (`render/Effects.tsx`). Each biome sets its grade on arrival
@@ -470,12 +475,14 @@ black into the starry void.
 ## In-world UI (`ui3d/`)
 
 There are no flat screens. Text burns into the air ahead of you as runes
-that settle into letters and later burn away into embers; menus are stone
-tablets that assemble out of the dark; items are small 3D objects; the HUD
-is flasks, coin heaps and rune-stones carried in front of the eye.
+that settle into letters and later burn away into embers; menus are dark
+stone tablets that assemble out of the dark and forge a pixel frame around
+their rim; items are small 3D objects. The look is the grimoire: soot
+panels in brass pixel frames with a hard drop shadow, parchment text,
+arcane cyan for magic and the way onward, gold for home, blood for danger.
 
-- **Two canvases.** The world renders at dpr 0.35 (the pixel look); a 5×7
-  pixel font rendered there would be mush. So a second, transparent,
+- **Two canvases.** The world renders at dpr 0.35 (the pixel look); a pixel
+  font rendered there would be mush. So a second, transparent,
   full-resolution canvas (`UiCanvas.tsx`) sits on top and copies the world
   camera every frame (`bridge.tsx` — R3F runs all roots in one loop in
   creation order, so there is no frame of lag). UI objects live in world
@@ -484,25 +491,37 @@ is flasks, coin heaps and rune-stones carried in front of the eye.
   stone reads as stone. It is click-through during play (the world canvas
   below takes the click that locks the pointer — `PointerLockControls` is
   scoped to `#wm-world canvas`) and catches the pointer while a menu is up.
-- **Text** (`font/`, `text/`): a hand-set pixel font plus sixteen runes,
-  packed by pure code into an atlas whose channels hold the glyph, a halo
-  and an outline. `RuneText` draws one instanced quad per glyph with the
-  whole lifecycle on the GPU (birth times per instance, a vanish time per
-  block): one draw call per text block and no per-frame CPU work. Changed
-  glyphs rewrite themselves alone (a ticking counter flickers one digit).
+- **Text** (`font/`, `text/`): three pixel faces (`faces.ts`, from the
+  @fontsource packages — the one exception to "no binary assets"): Jacquard
+  12 blackletter for titles (`font="title"`), Tiny5 for body text
+  (`"body"`, the default) and Silkscreen for tiny caps labels (`"label"`),
+  plus a hand-set fallback that also carries the sixteen runes and the UI
+  symbols. Each face is rasterised once, with a hard alpha threshold, into an
+  atlas whose channels hold the glyph, a halo and an outline; layout is
+  proportional (`layout.ts`, pure and tested). `RuneText` draws one
+  instanced quad per glyph with the whole lifecycle on the GPU (birth times
+  per instance, a vanish time per block): one draw call per text block and
+  no per-frame CPU work. Changed glyphs rewrite themselves alone (a ticking
+  counter flickers one digit). `px` is 1/7 of the cap height in every face,
+  so `pxFor(distance, fraction)` sizes them all alike.
 - **Choreography** (`presence.tsx`): nothing pops. `<UiPresence show exit>`
   keeps a subtree mounted while it plays its exit, and every toolkit piece
-  (RuneText, Tablet, RuneButton, ItemModel) ANDs the ambient "show" flag
-  into its own — a tablet closing burns off all its words for free.
-- **Toolkit**: `Tablet` (fitted stones fly in, a rune channel burns around
-  the rim), `RuneButton` (a stone plaque that lifts and kindles), `ItemModel`
-  (every item family as primitives — also used for loot in the world),
-  `ViewAnchor`/`WorldAnchor`/`placeInFront`, `pxFor(distance, fraction)`
-  (size by share of the screen height), UI sparks and `audio/uiSounds.ts`.
+  (RuneText, Tablet, Plate, RuneButton, ItemModel) ANDs the ambient "show"
+  flag into its own — a tablet closing burns off all its words for free.
+- **Toolkit**: `theme.ts` (the palette and the frame colours), `PixelFrame`
+  (the nine-slice grimoire frame as a hard-edged quad that can forge itself
+  in), `Plate` (a small framed soot panel for prompts, messages and
+  tooltips), `Tablet` (stones fly in, the frame forges around the rim),
+  `KeyCap` (a parchment key), `RuneButton` ("✦ label ✦" in arcane, ghost,
+  danger or gold), `ItemModel` (every item family as primitives — also used
+  for loot in the world), `ViewAnchor`/`WorldAnchor`/`placeInFront`, UI
+  sparks and `audio/uiSounds.ts`.
 - **Layers** (`layers/`, listed in `UiRoot.tsx`): messages, prompts, the
-  HUD (`hud/`), the menus (`menus/`: title, the Weighing, death, codex) and
-  the inventory family (`inventory/`). The DOM keeps only what isn't part of
-  the fiction: the perf overlay, the build stamp and the dev room.
+  HUD (`hud/`: the location panel with the tithe runes, segmented vitality
+  and mana bars, belt and equipment slots, the arrival banner), the menus
+  (`menus/`: title, the Weighing, death, codex) and the inventory family
+  (`inventory/`). The DOM keeps only what isn't part of the fiction: the perf
+  overlay, the build stamp and the dev room.
 
 ## Extending
 

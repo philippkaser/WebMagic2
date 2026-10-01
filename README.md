@@ -104,13 +104,15 @@ corner — check it against the latest commit when testing.
   explode; enemies get knocked around; force-blast at your feet to blast-jump.
 - **Bosses every 10th floor**: the Warden of the Deep seals the floor's
   portals until it falls.
-- **Procedural everything**: textures, normal maps, models, the pixel font
-  and every sound are generated at runtime — zero binary assets.
+- **Procedural everything**: painted pixel-art textures, normal maps, models
+  and every sound are generated at runtime — no binary assets beyond the
+  three pixel fonts.
 - **The UI lives in the world**: messages burn into the air ahead of you as
-  runes that settle into letters, menus are stone tablets that build
-  themselves out of the dark, health and mana are glowing flasks, items are
-  small 3D objects. Portals are living vortices, and stepping through one is
-  a journey — pulled in, through the tunnel, out into the new floor.
+  runes that settle into letters, menus are dark stone tablets that build
+  themselves out of the dark and forge a brass pixel frame, items are small
+  3D objects. Portals are rifts torn in the air, and stepping through one is
+  a journey — sucked in, through a void of blocky stars, spat out onto the
+  new floor.
 
 ### Multiplayer
 
