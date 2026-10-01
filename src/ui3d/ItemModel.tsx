@@ -165,8 +165,9 @@ function featherVane(): ExtrudeGeometry {
     s.lineTo(i % 4 === 1 ? -w * 0.55 : -w, y - 0.03);
   }
   s.closePath();
-  const g = new ExtrudeGeometry(s, { depth: 0.015, bevelEnabled: false });
-  g.translate(0, 0, -0.0075);
+  // A hair of bevel: three 0.175 builds no lids for an unbevelled extrude.
+  const g = new ExtrudeGeometry(s, { depth: 0.008, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.004, bevelSegments: 1 });
+  g.translate(0, 0, -0.004);
   return g;
 }
 
