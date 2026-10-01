@@ -15,7 +15,7 @@ import { WizardShrine } from "./WizardShrine";
 /** The soot of every inventory panel (artpass `.wm-panel--solid`): the
  * stones are still stones, but dark enough that brass and parchment carry
  * the page. */
-export const PANEL_TINT = "#1d1922";
+export const PANEL_TINT = "#18151d";
 
 /** Tells the scene when the altar's face is showing (the Tablet reveals its
  * children only once the stones have locked together). */

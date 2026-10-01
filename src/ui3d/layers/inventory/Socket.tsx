@@ -48,6 +48,7 @@ const SLOT_SPRITE: Record<GearSlot, SpriteName> = { staff: "staff", amulet: "amu
 const GHOST = "#3b3445";
 
 const ARCANE_LIT = litFrame(FRAMES.arcane);
+const NO_PLATE: [number, number] = [0, 0];
 const BLOOD_LIT: FrameColors = { trim: FRAMES.blood.light, light: "#ffd0c8", dark: FRAMES.blood.trim };
 
 let quadGeo: PlaneGeometry | null = null;
@@ -104,13 +105,14 @@ export function Socket({ spec, children, wareItem = null, grade: gradeProp = nul
     const h = Math.ceil((PLATE_PX * 7) / CARD_TEXEL) + 4;
     return { w, h };
   }, [plateText]);
+  const plateTexels = useMemo<[number, number]>(() => (plate ? [plate.w, plate.h] : NO_PLATE), [plate]);
   useEffect(() => {
-    material.uniforms.uPlate.value = plate ? [plate.w, plate.h] : [0, 0];
     if (grade) material.uniforms.uPlateEdge.value.set(grade.color);
     material.uniforms.uGlow.value.set(grade?.color ?? "#000000");
-  }, [material, plate, grade]);
+  }, [material, grade]);
 
   const body = useRef<Group>(null);
+  const marks = useRef<Group>(null);
   const shownAt = useRef(uiNow());
   const st = useRef({ rise: 0, fade: 0 });
   useEffect(() => {
@@ -181,6 +183,8 @@ export function Socket({ spec, children, wareItem = null, grade: gradeProp = nul
         break;
     }
     u.uFrame.value = frame;
+    u.uPlate.value = look === "from" ? NO_PLATE : plateTexels;
+    if (marks.current) marks.current.visible = look !== "from";
     u.uRingK.value = ringK;
     u.uWashK.value = washK;
     u.uDim.value = dim;
@@ -219,24 +223,26 @@ export function Socket({ spec, children, wareItem = null, grade: gradeProp = nul
             renderOrder={6}
           />
         )}
-        {grade && (itemId || children) && (
-          <PixelSprite name="gem" tint={grade.color} px={CARD_TEXEL * 0.8} anchor={[0, 1]} position={[-half + inset, half - inset, 0.004]} delay={0.35 + spec.order * RISE_SPREAD} />
-        )}
-        {spec.ref && cell.runLoot && (
-          <PixelSprite name="hourglass" tint="#ff8e5a" px={CARD_TEXEL * 0.8} anchor={[1, 1]} position={[half - inset, half - inset, 0.004]} delay={0.35 + spec.order * RISE_SPREAD} throb />
-        )}
-        {plate && plateText && (
-          <RuneText
-            text={plateText}
-            font="label"
-            px={PLATE_PX}
-            color={ink.parchment}
-            glow={0}
-            outline={0}
-            position={[half - (plate.w * CARD_TEXEL) / 2 + CARD_TEXEL * 0.5, -half + (plate.h * CARD_TEXEL) / 2, 0.004]}
-            delay={0.4 + spec.order * RISE_SPREAD}
-          />
-        )}
+        <group ref={marks}>
+          {grade && (itemId || children) && (
+            <PixelSprite name="gem" tint={grade.color} px={CARD_TEXEL * 0.8} anchor={[0, 1]} position={[-half + inset, half - inset, 0.004]} delay={0.35 + spec.order * RISE_SPREAD} />
+          )}
+          {spec.ref && cell.runLoot && (
+            <PixelSprite name="hourglass" tint="#ff8e5a" px={CARD_TEXEL * 0.8} anchor={[1, 1]} position={[half - inset, half - inset, 0.004]} delay={0.35 + spec.order * RISE_SPREAD} throb />
+          )}
+          {plate && plateText && (
+            <RuneText
+              text={plateText}
+              font="label"
+              px={PLATE_PX}
+              color={ink.parchment}
+              glow={0}
+              outline={0}
+              position={[half - (plate.w * CARD_TEXEL) / 2 + CARD_TEXEL * 0.5, -half + (plate.h * CARD_TEXEL) / 2, 0.004]}
+              delay={0.4 + spec.order * RISE_SPREAD}
+            />
+          )}
+        </group>
       </group>
       {spec.label && spec.variant === "belt" ? (
         <KeyCap k={spec.label} px={LABEL_PX * 0.8} position={[0, -half - CARD_TEXEL * 2 - LABEL_PX * 5, 0.004]} />
