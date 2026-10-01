@@ -3,21 +3,25 @@ import { DeathScreen } from "./DeathScreen";
 import { MainMenu } from "./MainMenu";
 import { WeighingScreen } from "./WeighingScreen";
 
-/** Every menu screen, as physical things in the world — the in-world
- * successors of the old DOM overlays (menu, the Weighing, death, codex).
+/** Every menu screen, as physical things in the world — in the grimoire's
+ * hand (after the artpass DOM screens), building themselves out of the dark.
  *
- *   MainMenu        phase "menu": WEBMAGIC burning in the air with wisps
- *                   circling it; an altarpiece of three tablets (name +
- *                   settings, the premise + ENTER, the controls)
- *   WeighingScreen  phase "weighing": the gear on pedestals, threads of
- *                   light to the RESONANCE, FLOOR N burning above
- *   DeathScreen     phase "dead": YOU DIED in blood; what was lost crumbles
- *                   to ash, or sinks into your grave
- *   CodexTome       overlay "codex": a tome whose pages really turn
+ *   MainMenu        phase "menu": "WebMagic" in blackletter before the
+ *                   turning arcane circle, the premise, the three laws on
+ *                   stone tablets, your name, the way in, settings, keys
+ *   WeighingScreen  phase "weighing": the gear as framed item cards, threads
+ *                   of light to the resonance, "Floor N" burning above, the
+ *                   gate's words on a brass panel
+ *   DeathScreen     phase "dead": "You Died" in blood before the blood
+ *                   circle; the lost things as item cards that crumble to
+ *                   ash or sink into your grave
+ *   CodexTome       overlay "codex": a leather grimoire whose pages turn
  *
- * Shared staging (stage.tsx: Stage, Veil, Delayed, Appear), light (fx.tsx),
- * copy (menuText.ts, codexPages.ts, lostItems.ts — pure and tested) and
- * sounds (menuSounds.ts) live beside them.
+ * Shared staging (stage.tsx: Stage, Veil, Delayed, Appear), the circle
+ * (ArcaneCircle.tsx), the grimoire's furniture (grimoire.tsx: TitleText,
+ * Flourish, PixelIcon, KeyLegend; ItemCard.tsx; icons.ts), light (fx.tsx),
+ * copy (menuText.ts, codexPages.ts, lostItems.ts, itemLook.ts — pure and
+ * tested) and sounds (menuSounds.ts) live beside them.
  *
  * Each screen decides for itself when it stands and plays its own entrance
  * and exit inside <UiPresence exit={TABLET_EXIT}>, so this is only the list.

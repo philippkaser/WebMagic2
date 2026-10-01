@@ -136,17 +136,21 @@ uniform float uHead;
 uniform float uTail;
 uniform float uFade;
 uniform float uTime;
+uniform float uSteps;
 varying float vAlong;
 varying float vAcross;
 void main() {
-  float d = abs(vAcross);
-  float core = smoothstep(0.45, 0.1, d);
-  float glow = exp(-d * d * 5.0) * 0.5;
-  float drawn = step(vAlong, uHead) * step(uTail, vAlong);
-  // Light flows along the thread toward its end, in beads.
-  float flow = 0.65 + 0.35 * pow(0.5 + 0.5 * sin(vAlong * 38.0 - uTime * 9.0), 3.0);
-  float head = exp(-abs(vAlong - uHead) * 30.0) * step(uHead, 0.999);
-  vec3 col = uColor * (core * 1.4 + glow) * drawn * flow + vec3(1.0, 0.97, 0.9) * head * (core + glow) * 2.5 * step(0.001, uHead);
+  // Hard-edged, like everything in the grimoire: a solid core (no soft
+  // falloff), the length cut into pixel-sized steps, and the light flowing
+  // along it as stepped dashes at 12 fps.
+  if (abs(vAcross) > 0.6) discard;
+  float s = floor(vAlong * uSteps) / uSteps;
+  float drawn = step(s, uHead) * step(uTail, s);
+  if (drawn < 0.5) discard;
+  float t = floor(uTime * 12.0) / 12.0;
+  float dash = step(0.5, fract(s * uSteps / 6.0 - t * 2.0));
+  float head = step(uHead - 2.5 / uSteps, s) * step(uHead, 0.999);
+  vec3 col = uColor * (0.75 + 0.5 * dash) + vec3(1.0, 0.97, 0.88) * head * 1.5;
   gl_FragColor = vec4(col * uFade, 0.0);
   #include <colorspace_fragment>
   gl_FragColor.a = 0.0;
@@ -154,8 +158,7 @@ void main() {
 `;
 
 /** A flat ribbon along a quadratic curve, `aAlong` 0 → 1 from start to end,
- * `aAcross` −1 → 1 across. Tapers toward the end so threads converge
- * cleanly into a point. */
+ * `aAcross` −1 → 1 across, of constant width (a pixel line). */
 function threadGeometry(from: Vector3, control: Vector3, to: Vector3, width: number, segments = 40): BufferGeometry {
   const curve = new QuadraticBezierCurve3(from, control, to);
   const pts = curve.getPoints(segments);
@@ -171,7 +174,7 @@ function threadGeometry(from: Vector3, control: Vector3, to: Vector3, width: num
     const ty = q.y - r.y;
     const len = Math.hypot(tx, ty) || 1;
     const s = i / segments;
-    const w = (width / 2) * (1 - s * 0.55);
+    const w = width / 2;
     const nx = (-ty / len) * w;
     const ny = (tx / len) * w;
     pos.push(p.x + nx, p.y + ny, p.z, p.x - nx, p.y - ny, p.z);
@@ -226,6 +229,8 @@ export function LightThread({
         uTail: { value: 0 },
         uFade: { value: 1 },
         uTime: { value: 0 },
+        // One step per thread-width of length: square pixels along it.
+        uSteps: { value: Math.max(8, Math.round(Math.hypot(tx - fx, ty - fy) / width)) },
       },
       vertexShader: THREAD_VERT,
       fragmentShader: THREAD_FRAG,
@@ -271,7 +276,7 @@ export function LightThread({
       }
     } else {
       u.uTail!.value = Math.min(1, t / 0.4);
-      u.uFade!.value = Math.max(0, 1 - t / 0.6);
+      u.uFade!.value = Math.max(0, Math.ceil((1 - t / 0.6) * 3) / 3);
       arrived.current = false;
     }
     mesh.visible = u.uHead!.value > 0 && u.uFade!.value > 0;

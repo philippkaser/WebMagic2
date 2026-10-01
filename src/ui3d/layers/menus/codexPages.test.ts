@@ -48,12 +48,9 @@ describe("codex pagination", () => {
     const pages = paginate(chapters(read, bands, bandOf), SIZE);
     const all = pages.map(pageText).join("|");
     for (const f of read) expect(all.split(f.title.toUpperCase()).length - 1).toBe(1);
-    for (const p of pages) {
-      const heads = new Set([p.head[0]?.text]);
-      expect(heads.size).toBe(1);
-    }
-    const upper = pages.filter((p) => p.head[0]?.text === "UPPER");
-    const lower = pages.filter((p) => p.head[0]?.text === "LOWER");
+    for (const p of pages) expect(p.chapter).not.toBeNull();
+    const upper = pages.filter((p) => p.chapter?.id === "a");
+    const lower = pages.filter((p) => p.chapter?.id === "b");
     expect(upper.length).toBeGreaterThan(0);
     expect(lower.length).toBeGreaterThan(0);
     expect(pages.indexOf(lower[0]!)).toBe(upper.length);

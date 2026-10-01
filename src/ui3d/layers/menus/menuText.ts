@@ -1,60 +1,91 @@
 import type { TextSpan } from "../../font/layout";
+import { ink } from "../../theme";
 
 /** Pure copy + formatting for the in-world menus — kept out of the
  * components so it can be unit-tested and so the words live in one place
  * (a screen's layout shouldn't have to know how a death is phrased). */
 
-/** Colours shared by the menu screens. The pixel font has no weights or
- * sizes to lean on inside a block, so colour is the only emphasis. */
+/** Colours shared by the menu screens — the grimoire's (theme.ts), named
+ * for what they do here. The pixel fonts have no weights inside a block, so
+ * colour (and the face) is the only emphasis. */
 export const MENU_INK = {
-  bright: "#efe6cf",
-  body: "#cfc5b0",
-  dim: "#958b7a",
-  faint: "#6f6878",
-  lavender: "#b3a7cc",
-  accent: "#46ffd0",
-  gold: "#ffcf4d",
-  loot: "#e0b54a",
-  violet: "#c3a6ff",
-  blood: "#d0142a",
+  bright: ink.parchment,
+  body: ink.parchmentDim,
+  dim: ink.faded,
+  faint: "#5a5262",
+  accent: ink.arcane,
+  gold: ink.gold,
+  loot: ink.brassLight,
+  violet: ink.violet,
+  blood: ink.blood,
+  /** Death's lighter red (labels and numbers on the blood screen). */
+  wound: "#ff8a7a",
 } as const;
 
-/** The title screen's premise, as the old DOM menu told it. */
+/** The title screen's premise: the breath of lore under the logo. The
+ * rules themselves are on the three cards below it. */
 export const PREMISE =
-  "For glory, fame and riches — and to find god at the bottom — the wizards of the village step through the portal. " +
-  "It weighs your gear and casts you as deep as you belong. The deep lets go only after five floors. " +
-  "Die, and everything you found stays below. You may not be alone down there.";
+  "Beneath the village, the portal opens onto a hundred floors of hungry dark. " +
+  "Wizards go down for glory, for riches — and for the god said to wait at the bottom. Few come back up.";
 
-/** The controls, key → what it does, in the order a new player needs them. */
-export const CONTROLS: readonly (readonly [key: string, action: string])[] = [
-  ["WASD", "move"],
-  ["SPACE", "jump"],
-  ["MOUSE", "cast (L / R)"],
-  ["SHIFT", "dash (cloak)"],
-  ["E", "interact"],
-  ["F", "pact"],
-  ["C", "codex"],
-  ["I, TAB", "inventory"],
-  ["Q, E", "belt items"],
-  ["P", "fps overlay"],
-  ["O", "shadows"],
+/** The title's three cards: the laws of the dungeon, one each. */
+export const TENETS: readonly { icon: "gem" | "hourglass" | "pact"; tint: string; title: string; text: string }[] = [
+  {
+    icon: "gem",
+    tint: ink.brassLight,
+    title: "The Weighing Gate",
+    text: "The portal weighs the gear you wear and casts you as deep as it belongs.",
+  },
+  {
+    icon: "hourglass",
+    tint: "#ff8e5a",
+    title: "The Tithe of Five",
+    text: "The deep lets go only after five floors. Die before, and all you found stays below.",
+  },
+  {
+    icon: "pact",
+    tint: ink.ally,
+    title: "Friend or Foe",
+    text: "Now and then another wizard walks your floor. Seal a pact — or take what they carry.",
+  },
 ];
 
-/** The legend as one block of spans: keys in the accent colour, padded into
- * a column (the font is monospaced, so spaces align), actions dim. One
- * RuneText = one draw call for the whole carving. */
-export function controlsLegend(
-  controls: readonly (readonly [string, string])[] = CONTROLS,
-  keyColor: string = MENU_INK.accent,
-  actionColor: string = MENU_INK.dim,
-): TextSpan[] {
-  const width = controls.reduce((w, [k]) => Math.max(w, k.length), 0) + 1;
-  const spans: TextSpan[] = [];
-  controls.forEach(([key, action], i) => {
-    spans.push({ text: key.padEnd(width, " "), color: keyColor });
-    spans.push({ text: action + (i < controls.length - 1 ? "\n" : ""), color: actionColor });
+/** The controls, in the order a new player needs them: the keys (each one
+ * key cap) and what they do. */
+export const CONTROLS: readonly { keys: readonly string[]; action: string }[] = [
+  { keys: ["W", "A", "S", "D"], action: "move" },
+  { keys: ["Space"], action: "jump" },
+  { keys: ["L", "R"], action: "cast" },
+  { keys: ["Shift"], action: "dash" },
+  { keys: ["E"], action: "interact" },
+  { keys: ["F"], action: "pact" },
+  { keys: ["Q", "E"], action: "belt" },
+  { keys: ["Tab"], action: "satchel" },
+  { keys: ["C"], action: "codex" },
+  { keys: ["P"], action: "fps" },
+  { keys: ["O"], action: "shadows" },
+];
+
+/** Greedy row wrap for things laid side by side (key-cap legends, card
+ * rows): indices per row, each row's widths plus gaps ≤ `maxWidth` (an
+ * item wider than a row gets a row of its own). */
+export function wrapRows(widths: readonly number[], maxWidth: number, gap: number): number[][] {
+  const rows: number[][] = [];
+  let row: number[] = [];
+  let w = 0;
+  widths.forEach((iw, i) => {
+    const next = row.length === 0 ? iw : w + gap + iw;
+    if (row.length > 0 && next > maxWidth) {
+      rows.push(row);
+      row = [i];
+      w = iw;
+    } else {
+      row.push(i);
+      w = next;
+    }
   });
-  return spans;
+  if (row.length > 0) rows.push(row);
+  return rows;
 }
 
 /** The same filter setPlayerName applies on commit, minus the trim — so
@@ -78,12 +109,15 @@ export interface DeathFacts {
   grave: boolean;
 }
 
-/** "ON FLOOR 12 · SLAIN BY MORGANA" — where and by whom, one line. */
-export function deathHeadline(d: Pick<DeathFacts, "floor" | "killer"> | null): TextSpan[] {
+/** "Slain by Morgana on floor 12 — The Drowned Halls": who and where, one
+ * line (the killer in violet, like artpass's death rites). */
+export function deathHeadline(d: Pick<DeathFacts, "floor" | "killer"> | null, biomeName: string | null): TextSpan[] {
   const floor = d ? String(d.floor) : "?";
-  const spans: TextSpan[] = [{ text: "ON FLOOR " }, { text: floor, color: MENU_INK.bright }, { text: " · " }];
-  if (d?.killer) spans.push({ text: "SLAIN BY " }, { text: d.killer.toUpperCase(), color: "#ff6a6a" });
-  else spans.push({ text: "THE DUNGEON TOOK YOU" });
+  const spans: TextSpan[] = d?.killer
+    ? [{ text: "Slain by " }, { text: d.killer, color: MENU_INK.violet }, { text: " on floor " }]
+    : [{ text: "The dungeon claimed you on floor " }];
+  spans.push({ text: floor, color: MENU_INK.bright });
+  if (biomeName) spans.push({ text: ` — ${biomeName}` });
   return spans;
 }
 
@@ -93,20 +127,21 @@ export function lostList(d: Pick<DeathFacts, "lostItems" | "lostGold"> | null): 
   return [...d.lostItems, ...(d.lostGold > 0 ? [`${d.lostGold} gold`] : [])];
 }
 
-/** The verdict under the lost things: legible, not a vague shrug — what
- * went, and whether it's gone for good or waiting in a grave. */
-export function lossSentence(d: DeathFacts | null): TextSpan[] {
-  const lost = lostList(d);
-  if (lost.length === 0) return [{ text: "You carried nothing the dungeon could take." }];
-  const names: TextSpan = { text: lost.join(", "), color: MENU_INK.loot };
+/** The verdict over the lost things: a caption and a line of lore — legible,
+ * not a vague shrug: what went, and whether it is gone for good or waiting
+ * in a grave. */
+export function lossVerdict(d: DeathFacts | null): { label: string | null; lore: string } {
+  if (lostList(d).length === 0) return { label: null, lore: "You carried nothing the dungeon could take." };
   if (d?.grave) {
-    return [
-      { text: "Other wizards stood witness, and the dungeon could not swallow it all. Your grave holds " },
-      names,
-      { text: " — for whoever reaches it first." },
-    ];
+    return {
+      label: "Your grave keeps what you carried",
+      lore: "Other wizards stood witness. It waits below — for whoever reaches it first.",
+    };
   }
-  return [{ text: "The dungeon keeps what you carried: " }, names, { text: "." }];
+  return {
+    label: "The dungeon keeps what you carried",
+    lore: "No one stood witness. It crumbles into the dark, and nothing of it waits below.",
+  };
 }
 
 /** A plain-text rendering of spans (for tests and logs). */

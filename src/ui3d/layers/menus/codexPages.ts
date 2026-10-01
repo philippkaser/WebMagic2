@@ -1,5 +1,6 @@
 import { layoutText, type TextSpan } from "../../font/layout";
-import { MENU_INK } from "./menuText";
+import { PIXEL_METRICS, type FontMetrics } from "../../font/metrics";
+import { ink } from "../../theme";
 
 /** The codex as a book: pure pagination of the fragments read so far into
  * pages and two-page spreads, measured with the same layout the pixel font
@@ -14,7 +15,11 @@ import { MENU_INK } from "./menuText";
  *   - A fragment is never split across pages unless it alone can't fit a
  *     page — then it breaks at a word and continues overleaf.
  *   - The first spread opens on a title page: how much has been read, and a
- *     table of contents naming the page each chapter starts on. */
+ *     table of contents naming the page each chapter starts on.
+ *
+ * Measuring takes the face the pages are set in (`metrics`, the body face
+ * at runtime — the fonts are proportional); tests use the fixed-width
+ * fallback. */
 
 export interface CodexFragment {
   id: string;
@@ -37,8 +42,10 @@ export interface CodexPageSize {
 }
 
 export interface CodexPage {
-  /** Running head (chapter name), or empty. */
-  head: TextSpan[];
+  /** The chapter this page belongs to (its running head), or null. */
+  chapter: CodexBand | null;
+  /** The title page (set as the book's title, not a running head). */
+  title?: boolean;
   body: TextSpan[];
   /** Body lines used (≤ size.lines). */
   lines: number;
@@ -48,17 +55,18 @@ export interface CodexPage {
 
 export type CodexSpread = readonly [left: CodexPage, right: CodexPage];
 
+/** The grimoire's ink on the codex's dark vellum. */
 export const CODEX_INK = {
-  head: "#b89cff",
-  title: "#d8c2ff",
-  text: "#e2d7c2",
-  dim: MENU_INK.dim,
-  faint: MENU_INK.faint,
+  head: ink.brassLight,
+  title: ink.brassLight,
+  text: ink.parchment,
+  dim: ink.parchmentDim,
+  faint: ink.faded,
 } as const;
 
 /** Lines `text` wraps to at `cols` — the renderer's own measure. */
-export function linesOf(text: string, cols: number): number {
-  return layoutText(text, { maxCols: cols }).lines;
+export function linesOf(text: string, cols: number, metrics: FontMetrics = PIXEL_METRICS): number {
+  return layoutText(text, { maxCols: cols }, metrics).lines;
 }
 
 /** Fragments by band, bands in depth order, empty bands dropped. */
@@ -80,76 +88,74 @@ export function chapters(
 
 /** Split `text` so the first part wraps to at most `maxLines` lines (at a
  * word boundary). Returns null when not even one word fits. */
-export function splitToFit(text: string, cols: number, maxLines: number): [string, string] | null {
+export function splitToFit(
+  text: string,
+  cols: number,
+  maxLines: number,
+  metrics: FontMetrics = PIXEL_METRICS,
+): [string, string] | null {
   const words = text.split(" ");
   let lo = 0;
   let hi = words.length;
   // Largest word count whose prefix fits.
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
-    if (linesOf(words.slice(0, mid).join(" "), cols) <= maxLines) lo = mid;
+    if (linesOf(words.slice(0, mid).join(" "), cols, metrics) <= maxLines) lo = mid;
     else hi = mid - 1;
   }
   if (lo === 0) return null;
   return [words.slice(0, lo).join(" "), words.slice(lo).join(" ")];
 }
 
-function bandHead(band: CodexBand): TextSpan[] {
-  const [from, to] = band.floors;
-  return [
-    { text: band.name.toUpperCase(), color: CODEX_INK.head },
-    { text: `  ${from}–${to}`, color: CODEX_INK.faint },
-  ];
-}
-
 /** Paginate the chapters' fragments into pages. */
 export function paginate(
   groups: readonly { band: CodexBand; entries: readonly CodexFragment[] }[],
   size: CodexPageSize,
+  metrics: FontMetrics = PIXEL_METRICS,
 ): CodexPage[] {
   const pages: CodexPage[] = [];
+  const lines = (t: string) => linesOf(t, size.cols, metrics);
   for (const { band, entries } of groups) {
-    const head = bandHead(band);
-    let page: CodexPage = { head, body: [], lines: 0, folio: pages.length + 1 };
+    let page: CodexPage = { chapter: band, body: [], lines: 0, folio: pages.length + 1 };
     const flush = () => {
       pages.push(page);
-      page = { head, body: [], lines: 0, folio: pages.length + 1 };
+      page = { chapter: band, body: [], lines: 0, folio: pages.length + 1 };
     };
     for (const entry of entries) {
       const title = entry.title.toUpperCase();
-      const titleLines = linesOf(title, size.cols);
+      const titleLines = lines(title);
       let text = entry.text;
       let first = true;
       while (text.length > 0) {
         const gap = page.lines > 0 ? 1 : 0;
         const heading = first ? titleLines : 0;
-        const need = gap + heading + linesOf(text, size.cols);
+        const need = gap + heading + lines(text);
         if (page.lines + need <= size.lines) {
-          push(page, gap, first ? title : null, titleLines, text, size.cols);
+          push(page, gap, first ? title : null, titleLines, text, lines);
           text = "";
           break;
         }
         // Doesn't fit here. On a used page, turn over and try again — unless
         // it wouldn't fit a whole page either, then break it where we are.
-        const wholePage = heading + linesOf(text, size.cols);
+        const wholePage = heading + lines(text);
         if (page.lines > 0 && wholePage <= size.lines) {
           flush();
           continue;
         }
         const room = size.lines - page.lines - gap - heading;
-        const split = room > 0 ? splitToFit(text, size.cols, room) : null;
+        const split = room > 0 ? splitToFit(text, size.cols, room, metrics) : null;
         if (!split) {
           if (page.lines === 0) {
             // Nothing fits even on an empty page (absurdly narrow): place
             // it anyway rather than looping forever.
-            push(page, 0, first ? title : null, titleLines, text, size.cols);
+            push(page, 0, first ? title : null, titleLines, text, lines);
             text = "";
             break;
           }
           flush();
           continue;
         }
-        push(page, gap, first ? title : null, titleLines, split[0], size.cols);
+        push(page, gap, first ? title : null, titleLines, split[0], lines);
         text = split[1];
         first = false;
         flush();
@@ -160,22 +166,23 @@ export function paginate(
   return pages;
 }
 
-function push(page: CodexPage, gap: number, title: string | null, titleLines: number, text: string, cols: number): void {
+function push(page: CodexPage, gap: number, title: string | null, titleLines: number, text: string, lines: (t: string) => number): void {
   const prefix = page.body.length > 0 ? "\n".repeat(1 + gap) : "";
   if (title !== null) {
     page.body.push({ text: `${prefix}${title}\n`, color: CODEX_INK.title });
     page.body.push({ text, color: CODEX_INK.text });
-    page.lines += gap + titleLines + linesOf(text, cols);
+    page.lines += gap + titleLines + lines(text);
   } else {
     page.body.push({ text: `${prefix}${text}`, color: CODEX_INK.text });
-    page.lines += gap + linesOf(text, cols);
+    page.lines += gap + lines(text);
   }
 }
 
 const EMPTY_TEXT =
   "You have read nothing yet. The walls down there are not silent — look for the faint violet glow of a carving, and press E.";
 
-/** The title page: the tally, and the contents. */
+/** The title page: the tally, and the contents with dot leaders measured
+ * in the page's own face, so the folios line up on the right. */
 export function titlePage(
   groups: readonly { band: CodexBand; entries: readonly CodexFragment[] }[],
   pages: readonly CodexPage[],
@@ -183,6 +190,7 @@ export function titlePage(
   readCount: number,
   total: number,
   cols: number,
+  metrics: FontMetrics = PIXEL_METRICS,
 ): CodexPage {
   const body: TextSpan[] = [
     { text: `${readCount} of ${total} carvings read\n\n`, color: CODEX_INK.dim },
@@ -190,16 +198,20 @@ export function titlePage(
   ];
   const startOf = new Map<string, number>();
   for (const p of pages) {
-    const name = p.head[0]?.text;
-    if (name && p.folio !== null && !startOf.has(name)) startOf.set(name, p.folio);
+    if (p.chapter && p.folio !== null && !startOf.has(p.chapter.id)) startOf.set(p.chapter.id, p.folio);
   }
+  const width = (t: string) => layoutText(t, {}, metrics).width;
+  const lineW = cols * metrics.avgAdvance;
+  const dotW = Math.max(1, width("..") - width("."));
+  const spaceW = Math.max(1, width("a a") - width("aa"));
   let lines = 4;
   bands.forEach((band, i) => {
     const name = band.name.toUpperCase();
     const read = groups.find((g) => g.band.id === band.id)?.entries.length ?? 0;
-    const folio = startOf.get(name);
+    const folio = startOf.get(band.id);
     const right = folio !== undefined ? String(folio) : "·";
-    const dots = Math.max(2, cols - name.length - right.length - 2);
+    const room = lineW - width(name) - width(right) - spaceW * 2 - 4;
+    const dots = Math.max(2, Math.floor(room / dotW));
     const last = i === bands.length - 1;
     body.push(
       { text: name, color: read > 0 ? CODEX_INK.text : CODEX_INK.faint },
@@ -208,7 +220,7 @@ export function titlePage(
     );
     lines += 1;
   });
-  return { head: [{ text: "THE CODEX", color: CODEX_INK.head }], body, lines, folio: null };
+  return { chapter: null, title: true, body, lines, folio: null };
 }
 
 /** The whole book as spreads: title page + first page, then pairs. */
@@ -218,16 +230,17 @@ export function codexSpreads(
   bands: readonly CodexBand[],
   bandOf: (floor: number) => string,
   size: CodexPageSize,
+  metrics: FontMetrics = PIXEL_METRICS,
 ): CodexSpread[] {
   const groups = chapters(read, bands, bandOf);
-  const pages = paginate(groups, size);
-  const title = titlePage(groups, pages, bands, read.length, total, size.cols);
+  const pages = paginate(groups, size, metrics);
+  const title = titlePage(groups, pages, bands, read.length, total, size.cols, metrics);
   const content: CodexPage[] =
     pages.length > 0
       ? pages
-      : [{ head: [], body: [{ text: EMPTY_TEXT, color: CODEX_INK.dim }], lines: linesOf(EMPTY_TEXT, size.cols), folio: null }];
+      : [{ chapter: null, body: [{ text: EMPTY_TEXT, color: CODEX_INK.dim }], lines: linesOf(EMPTY_TEXT, size.cols, metrics), folio: null }];
   const all = [title, ...content];
-  const blank: CodexPage = { head: [], body: [], lines: 0, folio: null };
+  const blank: CodexPage = { chapter: null, body: [], lines: 0, folio: null };
   const spreads: CodexSpread[] = [];
   for (let i = 0; i < all.length; i += 2) spreads.push([all[i]!, all[i + 1] ?? blank]);
   return spreads;

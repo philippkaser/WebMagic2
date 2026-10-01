@@ -6,37 +6,46 @@ import { robeColorOf } from "../../../game/wizardLook";
 import { useNet } from "../../../net/netStore";
 import { GraveModel } from "../../../render/models/GraveModel";
 import { useGame } from "../../../state/gameStore";
+import { biomeForFloor, getBiomeDef } from "../../../world/biomes";
 import { pxFor } from "../../anchors";
 import { uiNow } from "../../clock";
+import { getFace } from "../../font/faces";
 import { ItemModel } from "../../ItemModel";
 import { metalMaterial, stoneMaterial } from "../../materials";
-import { UiPresence, UiShow, useUiShow } from "../../presence";
+import { UiPresence, useUiShow } from "../../presence";
 import { RuneButton } from "../../RuneButton";
-import { Tablet, TABLET_EXIT } from "../../Tablet";
-import { RuneText } from "../../text/RuneText";
+import { TABLET_EXIT } from "../../Tablet";
+import { fontPixel, measureText, RuneText } from "../../text/RuneText";
+import { ink } from "../../theme";
 import { emitUiSparks, type UiSparkOptions } from "../../UiSparks";
+import { ArcaneCircle } from "./ArcaneCircle";
 import { AshFlakes, emitAsh, type AshOptions } from "./AshFlakes";
 import { SoftGlow } from "./fx";
+import { PixelIcon, spaced, TitleText } from "./grimoire";
+import { cardLayout, ItemCard } from "./ItemCard";
+import { itemLook, RARITY_COLOR } from "./itemLook";
 import { resolveLost, type LostThing } from "./lostItems";
 import { playCrumble, playDeathToll, playGraveTake } from "./menuSounds";
-import { deathHeadline, lossSentence, MENU_INK } from "./menuText";
-import { Appear, backOut, Delayed, screenUnit, smooth01, Stage, Veil } from "./stage";
+import { deathHeadline, lossVerdict, MENU_INK } from "./menuText";
+import { backOut, Delayed, screenUnit, smooth01, Stage, Veil } from "./stage";
 
-/** Death, told with the things themselves.
+/** Death, as the grimoire's death rites (artpass DeathScreen), told with the
+ * things themselves.
  *
- * YOU DIED burns into the air in blood — white-hot runes cooling to red,
- * smouldering embers rising off the letters — over a darkness that gathers
- * red at the edges. Beneath it, where you fell and to whom. Then what you
- * lost appears before you, one piece at a time… and is taken:
+ * The blood circle draws itself in the dark and "You Died" burns into the
+ * air in blackletter blood with its cast shadow, embers smouldering off the
+ * letters. Under it, between two skulls, who took you and where; the
+ * numbers of the run; and the verdict. Then what you lost stands before you
+ * as a row of framed item cards, the things themselves standing out of
+ * them… and is taken:
  *
  *   - alone, the dungeon swallows it — each piece shudders and crumbles to
- *     ash that falls away out of sight;
- *   - on a shared floor, your grave rises out of the dark (the same grave the
- *     others will find below, in your robe's colour) and each piece sinks
- *     into it, to wait for whoever reaches it first.
+ *     ash that falls away, and its card cools to an iron memorial;
+ *   - on a shared floor, your grave rises out of the dark below the cards
+ *     (the same grave the others will find, in your robe's colour) and each
+ *     piece is drawn down into it, to wait for whoever reaches it first.
  *
- * The verdict is spelled out under it in words, so nothing is left vague,
- * and a small tablet offers the way back to the village. */
+ * "✦ Return to the Village ✦" waits under it all. */
 
 const D = 1.6;
 const U = screenUnit(D);
@@ -45,22 +54,24 @@ const px = (cap: number) => pxFor(D, cap);
 const T = {
   toll: 0.15,
   title: 0.2,
-  headline: 1.3,
-  items: 1.6,
-  itemStep: 0.1,
-  grave: 1.9,
-  sentence: 2.1,
-  tablet: 2.3,
-  fate: 3.0,
+  headline: 1.2,
+  stats: 1.45,
+  verdict: 1.7,
+  cards: 1.9,
+  cardStep: 0.09,
+  grave: 2.1,
+  button: 2.3,
+  fate: 3.2,
   fateStep: 0.28,
 } as const;
 
-const TITLE_Y = 0.272;
-const TITLE_CAP = 0.13;
-const ITEM_H = 0.118;
+const TITLE_Y = 0.262;
+const TITLE_CAP = 0.108;
+const CARDS_Y = -0.118;
+const NAME_CAP = 0.0094;
 /** The grave marker's width on screen (H units) and where it stands. */
-const GRAVE_W = 0.165;
-const GRAVE_BASE_Y = -0.098;
+const GRAVE_W = 0.13;
+const GRAVE_BASE_Y = -0.33;
 
 /** The ids behind the most recent death — the store's record keeps only
  * names; the fall event carries ids (lostItems.ts explains the fallback). */
@@ -73,80 +84,113 @@ export function DeathScreen() {
   const phase = useGame((s) => s.phase);
   return (
     <UiPresence show={phase === "dead"} exit={TABLET_EXIT}>
-      <Veil color="#1c0206" strength={0.9} center={0.62} />
-      <Stage distance={D} width={1.1}>
+      <Veil color="#030102" inner="#1e0808" strength={0.95} center={0.85} cy={0.2} />
+      <Stage distance={D} width={1.0}>
+        <ArcaneCircle mood="blood" distance={3.2} stageDistance={D} cy={0.2} intensity={2} />
         <Death />
       </Stage>
     </UiPresence>
   );
 }
 
+type Thing = LostThing & { gold?: boolean };
+
 function Death() {
   const lastDeath = useGame((s) => s.lastDeath);
   const respawn = useGame((s) => s.respawn);
   const things = useMemo(() => {
-    const list: (LostThing & { gold?: boolean })[] = resolveLost(lastDeath?.lostItems ?? [], lastFell);
+    const list: Thing[] = resolveLost(lastDeath?.lostItems ?? [], lastFell);
     if (lastDeath && lastDeath.lostGold > 0) list.push({ id: null, qty: lastDeath.lostGold, name: `${lastDeath.lostGold} gold`, gold: true });
     return list;
   }, [lastDeath]);
   const grave = !!lastDeath?.grave && things.length > 0;
   const robe = useMemo(() => robeColorOf(useNet.getState().playerId || "self"), []);
-  const rowY = grave ? 0.068 : 0.01;
-  const step = Math.min(0.145, 1.0 / Math.max(1, things.length));
+  const biome = lastDeath ? getBiomeDef(biomeForFloor(lastDeath.floor)).name : null;
+  const verdict = lossVerdict(lastDeath);
+  // Cards shrink to fit a long loss on one row.
+  const n = things.length;
+  const cardW = Math.min(0.105, 0.86 / Math.max(1, n) - 0.035) * U;
+  const stepX = cardW + 0.036 * U;
+  const headline = deathHeadline(lastDeath, biome);
+  const headPx = px(0.0118);
+  const headW = measureText(headline, headPx).width;
+  const skullPx = 0.0024 * U;
+  const buttonY = grave ? -0.44 : n > 0 ? -0.29 : -0.08;
 
   return (
     <>
-      <SoftGlow color="#8a0014" width={1.35 * U} height={0.36 * U} position={[0, TITLE_Y * U, -0.06]} intensity={1.1} delay={T.title + 0.3} fadeIn={1.4} breathe={0.2} />
-      <RuneText
-        text="YOU DIED"
+      <SoftGlow color="#8a0014" width={1.0 * U} height={0.28 * U} position={[0, TITLE_Y * U, -0.06]} intensity={0.8} delay={T.title + 0.3} fadeIn={1.4} breathe={0.2} />
+      <TitleText
+        text="You Died"
         px={px(TITLE_CAP)}
+        color={ink.blood}
+        shadow="#4a0c0c"
         position={[0, TITLE_Y * U, 0]}
-        color="#d0142a"
-        glow={0}
-        flicker={0.12}
-        inDuration={1.5}
-        stagger={1.1}
         delay={T.title}
+        inDuration={1.4}
+        stagger={1}
         depth={3}
+        flicker={0.1}
       />
       <Smolder delay={T.title + 1.2} />
       <Toll />
-      <RuneText
-        text={deathHeadline(lastDeath)}
-        px={px(0.022)}
-        position={[0, 0.142 * U, 0]}
-        color="#d8b4ac"
-        delay={T.headline}
-        stagger={0.6}
-      />
+      <Delayed by={T.headline}>
+        <PixelIcon name="skull" tint="#ffffff" pixel={skullPx} position={[-headW / 2 - 0.028 * U, 0.15 * U, 0]} />
+        <RuneText text={headline} px={headPx} color={ink.parchmentDim} glow={0.3} position={[0, 0.15 * U, 0]} stagger={0.6} />
+        <PixelIcon name="skull" tint="#ffffff" pixel={skullPx} position={[headW / 2 + 0.028 * U, 0.15 * U, 0]} delay={0.2} />
+      </Delayed>
+      {lastDeath && (
+        <Delayed by={T.stats}>
+          <Stats
+            stats={[
+              [lastDeath.floor, "Last floor"],
+              [lastDeath.lostItems.length, "Things lost"],
+              [lastDeath.lostGold, "Gold lost"],
+            ]}
+          />
+        </Delayed>
+      )}
+      <Delayed by={T.verdict}>
+        {verdict.label && (
+          <RuneText text={spaced(verdict.label)} font="label" px={px(0.0085)} color={MENU_INK.wound} glow={0.4} position={[0, 0.012 * U, 0]} />
+        )}
+        <RuneText text={verdict.lore} px={px(0.0112)} color={ink.parchmentDim} glow={0.2} position={[0, (verdict.label ? -0.018 : 0.0) * U, 0]} delay={0.2} stagger={0.7} />
+      </Delayed>
       {things.map((t, i) => (
-        <LostPiece
-          key={`${t.name}:${i}`}
-          thing={t}
-          index={i}
-          fate={grave ? "grave" : "ash"}
-          position={[(i - (things.length - 1) / 2) * step * U, rowY * U, 0.04]}
-        />
+        <Delayed key={`${t.name}:${i}`} by={T.cards + i * T.cardStep}>
+          <LostCard
+            thing={t}
+            index={i}
+            fate={grave ? "grave" : "ash"}
+            width={cardW}
+            position={[(i - (n - 1) / 2) * stepX, CARDS_Y * U, 0.02]}
+            fateAt={T.fate + i * T.fateStep - (T.cards + i * T.cardStep)}
+          />
+        </Delayed>
       ))}
       {grave && <Grave robe={robe} />}
-      <RuneText
-        text={lossSentence(lastDeath)}
-        px={px(0.0175)}
-        maxCols={62}
-        anchor={[0.5, 0]}
-        position={[0, (grave ? -0.128 : things.length > 0 ? -0.105 : 0.04) * U, 0]}
-        color="#c9b8b0"
-        delay={T.sentence}
-        stagger={1}
-      />
-      <Delayed by={T.tablet}>
-        <group position={[0, -0.355 * U, 0]}>
-          <Tablet width={0.5 * U} height={0.13 * U} tile={0.15} thickness={0.05} tint="#4a4050" accent="#ff5a4a" tilt seed={13}>
-            <RuneButton label="RETURN TO THE VILLAGE" onPress={respawn} px={px(0.022)} accent="#ff6a5a" position={[0, 0, 0]} delay={0.2} />
-          </Tablet>
-        </group>
+      <Delayed by={T.button}>
+        <RuneButton label="Return to the Village" variant="danger" onPress={respawn} px={px(0.0135)} position={[0, buttonY * U, 0.02]} delay={0.15} />
       </Delayed>
       <AshFlakes />
+    </>
+  );
+}
+
+/** The run in big numerals over tiny captions (artpass RunStats). */
+function Stats({ stats }: { stats: [number, string][] }) {
+  const step = 0.19 * U;
+  return (
+    <>
+      {stats.map(([n, label], i) => {
+        const x = (i - (stats.length - 1) / 2) * step;
+        return (
+          <group key={label} position={[x, 0.083 * U, 0]}>
+            <RuneText text={String(n)} px={px(0.02)} color={MENU_INK.wound} glow={0.4} position={[0, 0.008 * U, 0]} delay={i * 0.08} />
+            <RuneText text={spaced(label)} font="label" px={px(0.0072)} color={ink.faded} glow={0.1} position={[0, -0.022 * U, 0]} delay={0.1 + i * 0.08} />
+          </group>
+        );
+      })}
     </>
   );
 }
@@ -168,7 +212,7 @@ const tmp = new Vector3();
 const ember: UiSparkOptions = { position: P, color: "#ff3a1a", count: 1 };
 const ash: AshOptions = { position: P, count: 2 };
 
-/** Embers rising off YOU DIED for as long as it stands. */
+/** Embers rising off "You Died" for as long as it stands. */
 function Smolder({ delay }: { delay: number }) {
   const show = useUiShow();
   const group = useRef<Group>(null);
@@ -177,15 +221,15 @@ function Smolder({ delay }: { delay: number }) {
   useEffect(() => {
     since.current = uiNow();
   }, [show]);
-  const w = ((8 * 6 - 1) / 7) * TITLE_CAP * U;
-  const h = TITLE_CAP * U;
+  const size = useMemo(() => measureText("You Died", px(TITLE_CAP), undefined, "title"), []);
+  const fp = fontPixel(getFace("title"), px(TITLE_CAP));
   useFrame((_, dt) => {
     const g = group.current;
     if (!g || !show || uiNow() - since.current < delay) return;
-    acc.current += Math.min(dt, 0.1) * 55;
+    acc.current += Math.min(dt, 0.1) * 40;
     while (acc.current >= 1) {
       acc.current -= 1;
-      tmp.set((Math.random() - 0.5) * w, (Math.random() - 0.3) * h, 0.02).applyMatrix4(g.matrixWorld);
+      tmp.set((Math.random() - 0.5) * size.width, (Math.random() - 0.4) * size.height * 0.8, 0.02).applyMatrix4(g.matrixWorld);
       P[0] = tmp.x;
       P[1] = tmp.y;
       P[2] = tmp.z;
@@ -193,7 +237,7 @@ function Smolder({ delay }: { delay: number }) {
       ember.count = 1;
       ember.speed = 0.04;
       ember.up = 0.16 + Math.random() * 0.1;
-      ember.size = 0.012;
+      ember.size = fp * 1.2;
       ember.spread = 0.01;
       ember.ttl = 1.4;
       emitUiSparks(ember);
@@ -223,17 +267,23 @@ function CoinStack() {
   );
 }
 
-/** One lost piece: appears, hangs a moment, then meets its fate. */
-function LostPiece({
+/** One lost thing on its card: it stands a moment, then meets its fate,
+ * and the card cools into a memorial of what was there. */
+function LostCard({
   thing,
   index,
   fate,
+  width,
   position,
+  fateAt,
 }: {
-  thing: LostThing & { gold?: boolean };
+  thing: Thing;
   index: number;
   fate: "ash" | "grave";
+  width: number;
   position: readonly [number, number, number];
+  /** Seconds after the card shows that its thing is taken. */
+  fateAt: number;
 }) {
   const show = useUiShow();
   const body = useRef<Group>(null);
@@ -243,30 +293,31 @@ function LostPiece({
     since.current = uiNow();
     stage.current = 0;
   }, [show]);
-  const start = T.fate + index * T.fateStep;
-  // Its light and its count go out as the piece is taken (one timer, not
-  // per-frame state).
+  const look = thing.id ? itemLook(thing.id) : null;
+  const color = thing.gold ? RARITY_COLOR.legendary : (look?.color ?? "#7d7288");
+  const L = cardLayout(width, px(NAME_CAP));
+  // The card cools once the thing is gone (one timer, not per-frame state).
   const [taken, setTaken] = useState(false);
   useEffect(() => {
     if (!show) return;
-    const timer = setTimeout(() => setTaken(true), (start + 0.3) * 1000);
+    const timer = setTimeout(() => setTaken(true), (fateAt + (fate === "ash" ? 0.7 : 0.75)) * 1000);
     return () => clearTimeout(timer);
-  }, [show, start]);
-  // The grave's mouth, relative to this piece.
+  }, [show, fateAt, fate]);
+  // The grave's mouth, relative to the art in this card.
   const mouth = useMemo<[number, number, number]>(
-    () => [-position[0], (GRAVE_BASE_Y + (GRAVE_W * 0.6) / 1.44) * U - position[1], -position[2]],
-    [position],
+    () => [-position[0], (GRAVE_BASE_Y * U + GRAVE_W * U * 0.42) - (position[1] + L.artY), -position[2] - 0.033],
+    [position, L.artY],
   );
 
   useFrame(() => {
     const b = body.current;
     if (!b || !show) return;
     const now = uiNow();
-    const t = now - since.current - start;
-    const bob = Math.sin(now * 1.7 + index) * 0.004 * U;
+    const t = now - since.current - fateAt;
     if (t < 0) {
-      b.position.set(0, bob, 0);
+      b.position.set(0, 0, 0);
       b.scale.setScalar(1);
+      b.visible = true;
       return;
     }
     if (stage.current === 0) {
@@ -275,9 +326,9 @@ function LostPiece({
     }
     if (fate === "ash") {
       // Shudder, then crumble: shrink and sink, shedding ash and embers.
-      const shake = t < 0.35 ? (Math.random() - 0.5) * 0.006 * U * (t / 0.35) : 0;
+      const shake = t < 0.35 ? (Math.random() - 0.5) * 0.005 * U * (t / 0.35) : 0;
       const k = smooth01((t - 0.3) / 0.6);
-      b.position.set(shake, bob - k * 0.03 * U, 0);
+      b.position.set(shake, -k * 0.02 * U, 0);
       b.scale.setScalar(Math.max(0.0001, 1 - k));
       b.visible = k < 1;
       if (t > 0.25 && k < 1) {
@@ -289,19 +340,19 @@ function LostPiece({
         if (stage.current === 1) {
           // The moment it gives: a slump of ash and a breath of embers.
           stage.current = 2;
-          emitAsh({ position: P, count: 36, size: 0.02, spread: ITEM_H * U * 0.35, speed: 0.16, ttl: 2 });
-          emitUiSparks({ position: P, color: "#ff6a2a", count: 14, speed: 0.22, up: 0.18, size: 0.014, spread: ITEM_H * U * 0.3, ttl: 1 });
+          emitAsh({ position: P, count: 30, size: 0.016, spread: L.art * 0.3, speed: 0.14, ttl: 2 });
+          emitUiSparks({ position: P, color: "#ff6a2a", count: 12, speed: 0.2, up: 0.16, size: 0.011, spread: L.art * 0.25, ttl: 1 });
         }
-        ash.size = 0.016;
-        ash.spread = ITEM_H * U * 0.3 * (1 - k * 0.5);
-        ash.speed = 0.08;
+        ash.size = 0.013;
+        ash.spread = L.art * 0.25 * (1 - k * 0.5);
+        ash.speed = 0.07;
         emitAsh(ash);
         if (Math.random() < 0.5) {
           ember.color = "#ff7a3a";
           ember.speed = 0.1;
           ember.up = 0.1;
-          ember.size = 0.01;
-          ember.spread = 0.03;
+          ember.size = 0.009;
+          ember.spread = 0.025;
           ember.ttl = 0.7;
           emitUiSparks(ember);
         }
@@ -309,8 +360,8 @@ function LostPiece({
     } else {
       // Drawn down into the grave along a falling arc.
       const k = smooth01(t / 0.75);
-      const arc = Math.sin(k * Math.PI) * 0.05 * U;
-      b.position.set(mouth[0] * k, bob * (1 - k) + mouth[1] * k + arc, mouth[2] * k);
+      const arc = Math.sin(k * Math.PI) * 0.04 * U;
+      b.position.set(mouth[0] * k, mouth[1] * k + arc, mouth[2] * k);
       b.scale.setScalar(Math.max(0.0001, 1 - k * 0.85));
       b.visible = k < 1;
       if (k >= 1 && stage.current === 1) {
@@ -321,55 +372,40 @@ function LostPiece({
         P[0] = tmp.x;
         P[1] = tmp.y;
         P[2] = tmp.z;
-        emitUiSparks({ position: P, color: "#c9a5ff", count: 12, speed: 0.2, up: 0.2, size: 0.012, spread: 0.03 });
+        emitUiSparks({ position: P, color: ink.violet, count: 12, speed: 0.2, up: 0.2, size: 0.01, spread: 0.03 });
       }
     }
   });
 
-  const scale = ITEM_H * U * 0.9;
+  const scale = L.art * 0.78;
   return (
-    <group position={position as [number, number, number]}>
-      {/* Held in the heat of the death: a backlight that makes the piece
-          read against whatever the world shows behind. */}
-      <UiShow show={!taken}>
-        <SoftGlow
-          color={fate === "grave" ? "#6a3fa0" : "#a3300c"}
-          width={ITEM_H * 1.25 * U}
-          height={ITEM_H * 1.25 * U}
-          position={[0, 0, -0.04]}
-          intensity={0.9}
-          delay={T.items + index * T.itemStep}
-          fadeIn={0.5}
-        />
-      </UiShow>
-      <Appear delay={T.items + index * T.itemStep}>
-        <group ref={body}>
-          {thing.gold ? (
-            <group scale={scale}>
-              <CoinStack />
-            </group>
-          ) : thing.id ? (
-            <ItemModel itemId={thing.id} scale={scale} spin />
-          ) : (
-            <mesh geometry={shard} material={stoneMaterial("#6a6070")} scale={scale * 0.18} rotation={[0.6, 0.4, 0.2]} />
-          )}
-        </group>
-      </Appear>
-      {thing.qty > 1 && (
-        <RuneText
-          text={thing.gold ? `${thing.qty}` : `×${thing.qty}`}
-          px={px(0.016)}
-          position={[0, -ITEM_H * 0.62 * U, 0]}
-          color={thing.gold ? MENU_INK.gold : MENU_INK.dim}
-          delay={T.items + index * T.itemStep + 0.3}
-          show={!taken}
-        />
-      )}
-    </group>
+    <ItemCard
+      width={width}
+      px={px(NAME_CAP)}
+      color={color}
+      name={thing.name}
+      level={look ? look.level : null}
+      qty={thing.gold ? 1 : thing.qty}
+      taken={taken}
+      position={position}
+    >
+      <group ref={body}>
+        {thing.gold ? (
+          <group scale={scale}>
+            <CoinStack />
+          </group>
+        ) : thing.id ? (
+          <ItemModel itemId={thing.id} scale={scale} spin />
+        ) : (
+          <mesh geometry={shard} material={stoneMaterial("#6a6070")} scale={scale * 0.18} rotation={[0.6, 0.4, 0.2]} />
+        )}
+      </group>
+    </ItemCard>
   );
 }
 
-/** Your grave, rising out of the dark to take what you carried. */
+/** Your grave, rising out of the dark below the cards to take what you
+ * carried. */
 function Grave({ robe }: { robe: string }) {
   const show = useUiShow();
   const group = useRef<Group>(null);
@@ -387,7 +423,7 @@ function Grave({ robe }: { robe: string }) {
     const t = uiNow() - since.current;
     k.current = show ? backOut((t - T.grave) / 0.8, 1.1) : from.current * (1 - smooth01(t / 0.5));
     const r = Math.max(0, k.current);
-    g.position.y = GRAVE_BASE_Y * U - (1 - Math.min(1, r)) * 0.25 * U;
+    g.position.y = GRAVE_BASE_Y * U - (1 - Math.min(1, r)) * 0.2 * U;
     g.scale.setScalar(Math.max(0.0001, s * Math.min(1, r * 1.3)));
     g.visible = r > 0.001;
   });
