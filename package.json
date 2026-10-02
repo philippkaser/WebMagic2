@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "test": "bun test src server",
     "typecheck": "tsc -b",
-    "e2e": "node scripts/e2e-smoke.mjs"
+    "e2e": "node scripts/e2e-smoke.mjs",
+    "audio-lab": "node scripts/audio-lab/render.mjs"
   },
   "dependencies": {
     "@fontsource/jacquard-12": "^5.3.0",

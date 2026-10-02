@@ -1,5 +1,5 @@
 import { audioCtx, ensureContext, masterBus, noiseBuf } from "./context";
-import { oneShotAt, selfOut, type At } from "./spatial";
+import { ambientAirOut, oneShotAt, selfOut, type At } from "./spatial";
 
 /** Procedural WebAudio — every sound is synthesized, keeping the zero-asset
  * pipeline. The context is created lazily on the first user gesture (autoplay
@@ -29,10 +29,12 @@ function routed(out: AudioNode | null, fn: () => void): void {
 }
 
 /** Play `fn`'s voices at `pos` in the world (for `life` seconds), or from
- * where you stand if no position is given. */
+ * where you stand if no position is given. (When every voice is busy with
+ * something louder, a placed sound is dropped — never moved into your head.) */
 export function atPoint(pos: At | undefined | null, life: number, fn: () => void, gain = 1): void {
   if (!audioCtx()) return;
-  routed(pos ? (oneShotAt(pos, life, gain) ?? selfOut()) : selfOut(), fn);
+  const out = pos ? oneShotAt(pos, life, gain) : selfOut();
+  if (out) routed(out, fn);
 }
 
 /** Play `fn`'s voices from where you stand: dry, and the room answering. */
@@ -130,7 +132,8 @@ function noise({
   g.gain.exponentialRampToValueAtTime(vol, t0 + Math.min(attack, dur * 0.95));
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   src.connect(filter).connect(g).connect(dst);
-  src.start(t0);
+  // From anywhere in the noise: no two bursts are the same grain of it.
+  src.start(t0, Math.random() * noiseBuffer.duration);
   src.stop(t0 + dur + 0.05);
 }
 
@@ -452,7 +455,13 @@ export function startAmbient(kind: "village" | "dungeon", mood?: AmbientMood): v
   bed.gain.value = 0;
   bed.gain.linearRampToValueAtTime(1, ctx.currentTime + 2);
   bed.connect(master);
-  nodes.push(bed);
+  // The wind is the place's air: it goes out through the acoustics, which
+  // fill it out in big spaces and lean it toward the open sky.
+  const airBed = ctx.createGain();
+  airBed.gain.value = 0;
+  airBed.gain.linearRampToValueAtTime(1, ctx.currentTime + 2);
+  airBed.connect(ambientAirOut() ?? master);
+  nodes.push(bed, airBed);
 
   for (const detune of [0, 0.6]) {
     const osc = ctx.createOscillator();
@@ -483,16 +492,18 @@ export function startAmbient(kind: "village" | "dungeon", mood?: AmbientMood): v
   lfoGain.gain.value = kind === "dungeon" ? 0.018 : 0.03;
   lfo.connect(lfoGain).connect(windGain.gain);
   lfo.start();
-  wind.connect(windFilter).connect(windGain).connect(bed);
+  wind.connect(windFilter).connect(windGain).connect(airBed);
   wind.start();
   sources.push(wind, lfo);
   nodes.push(windFilter, windGain, lfoGain);
 
   ambientStop = () => {
     const now = ctx.currentTime;
-    bed.gain.cancelScheduledValues(now);
-    bed.gain.setValueAtTime(bed.gain.value, now);
-    bed.gain.linearRampToValueAtTime(0, now + 0.6);
+    for (const g of [bed.gain, airBed.gain]) {
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(g.value, now);
+      g.linearRampToValueAtTime(0, now + 0.6);
+    }
     setTimeout(() => {
       for (const s of sources) {
         try {

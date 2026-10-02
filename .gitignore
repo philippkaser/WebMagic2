@@ -6,3 +6,4 @@ tsconfig.tsbuildinfo
 server-data.json
 .claude/worktrees/
 e2e-output/
+audio-lab-output/

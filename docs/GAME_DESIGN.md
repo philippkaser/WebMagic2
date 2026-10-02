@@ -140,13 +140,14 @@ art is a new procedural painter function, not an asset pipeline.
 - Audio: procedural WebAudio synthesis — spell casts, explosions (sized by
   blast radius), hits, hurt, pickups, jumps, dashes, portal shimmer, a boss
   roar, and looping ambient drone/wind beds per scene — heard through
-  **raytraced acoustics**: the room around you is measured with rays and
-  its reverb generated to match (each depth band's stone has its own
-  sound: dry catacombs, long bright Drowned Halls, dark short forge,
-  ringing crystal, the vast Hollow), the nearest walls answer as early
-  reflections, and every sound in the world is placed in 3D and reaches
-  you the way sound would — straight, or round corners from the doorway
-  it came through, muffled through rock. The world has its own voices:
+  **raytraced acoustics**: the room around you is measured with rays
+  bouncing off its walls and its reverb generated to match (each depth
+  band's stone has its own sound: dry catacombs, longer bright Drowned
+  Halls, dark short forge, ringing crystal, the vast Hollow — tuned for
+  play, a hall rings about a second, never a cathedral's wash), and every
+  sound in the world is placed and reaches you the way sound would —
+  straight, or round corners from the doorway it came through, duller the
+  further it bent, a thud through rock. The world has its own voices:
   footsteps on each ground (stone, wet stone, crystal, iron, ash, cobbles,
   grass), torches crackling, rifts humming, monsters waking, walking and
   dying, and the small sounds each place makes by itself.
@@ -556,8 +557,8 @@ src/
   player/      input, first-person controller, staff viewmodel
   fx/          shader particle system + named effects, ambient air, torch
                flames, dynamic light pool
-  audio/       procedural WebAudio synth; raytraced acoustics, placed HRTF
-               emitters, the world's own voices
+  audio/       procedural WebAudio synth; raytraced acoustics, a pool of
+               placed voices, the world's own voices
   render/      textures/ (pure painters + normal/emissive/roughness maps),
                models/ (every mesh), post-processing
   scenes/      village, dungeon floor, floor atmosphere, canvas composition

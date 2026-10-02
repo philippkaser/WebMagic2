@@ -40,10 +40,13 @@ export function playFootstep(ground: Ground, loud = 1, at?: At): void {
       tone({ type: "sine", freq: jitter(75), freqEnd: 45, dur: 0.07, vol: 0.04 * loud });
       return;
     }
-    // Hard ground: a heel's click and the thump under it.
-    const click = ground === "cobble" ? 2100 : ground === "iron" ? 2600 : 1600;
-    noise({ dur: 0.045, vol: 0.05 * loud * v, filterFreq: jitter(click), filterEnd: 800, type: "bandpass", q: 1.3 });
-    tone({ type: "sine", freq: jitter(95), freqEnd: 52, dur: 0.06, vol: 0.055 * loud });
+    // Hard ground: a heel's click and the thump under it, then the toe
+    // rolling down a few tens of milliseconds later — never quite the same
+    // step twice.
+    const click = jitter(ground === "cobble" ? 2100 : ground === "iron" ? 2600 : 1600, 0.15);
+    noise({ dur: 0.045, vol: 0.05 * loud * v, filterFreq: click, filterEnd: 800, type: "bandpass", q: 1.3 });
+    tone({ type: "sine", freq: jitter(88), freqEnd: 50, dur: 0.05, vol: 0.045 * loud });
+    noise({ dur: 0.03, vol: 0.022 * loud * v, filterFreq: click * 1.4, type: "bandpass", q: 1.6, delay: jitter(0.045, 0.3) });
     if (ground === "cobble") noise({ dur: 0.03, vol: 0.025 * loud, filterFreq: jitter(2600), type: "bandpass", q: 2, delay: 0.018 });
     if (ground === "wet") noise({ dur: 0.15, vol: 0.035 * loud * v, filterFreq: jitter(2800), filterEnd: 1200, type: "bandpass", q: 0.9, delay: 0.01 });
     if (ground === "crystal") tone({ type: "sine", freq: [2093, 2637, 3136][Math.floor(Math.random() * 3)]!, dur: 0.2, vol: 0.012 * loud });

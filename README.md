@@ -41,6 +41,15 @@ bunx vite --port 3000 &
 DATA_FILE=/tmp/wm-e2e.json bun run e2e   # CHROMIUM_PATH=… to pick a browser
 ```
 
+The audio lab renders scripted scenes (a walk out of a torch-lit hall, bare
+impulses for measuring the acoustics) through the real audio code to WAV
+files in `audio-lab-output/`, offline in headless Chromium:
+
+```sh
+bunx vite --port 3000 &
+bun run audio-lab            # or name scenes: bun run audio-lab walk imp-room
+```
+
 ## Controls
 
 | Input | Action |
@@ -111,11 +120,12 @@ corner — check it against the latest commit when testing.
 - **Procedural everything**: painted pixel-art textures, normal maps, models
   and every sound are generated at runtime — no binary assets beyond the
   four pixel fonts.
-- **Raytraced sound**: rays measure the room around you a few times a second
-  and its reverb is generated to match — a stone hall rings, a corridor
-  answers close, the village green is dry under the sky. Every sound is
-  placed in 3D (HRTF): a monster round a corner is heard muffled from the
-  doorway it's coming through, and torches, rifts, footsteps — yours, your
+- **Raytraced sound**: rays bounce round the room around you a few times a
+  second and its reverb is generated to match — a hall rings for about a
+  second, a corridor answers short, the village green is nearly dry under
+  the sky. Every sound is placed where it is: a monster round a corner is
+  heard muffled from the doorway it's coming through, more clearly through
+  a wide arch than a crack, and torches, rifts, footsteps — yours, your
   floor-mates', the monsters' — and the dungeon's own drips, groans and
   chimes all sound where they are.
 - **The UI lives in the world**: menus are tablets built from worn stones,
@@ -158,8 +168,8 @@ src/
   fx/          shader particles + named effects, ambient air, torch flames,
                the dynamic light pool
   audio/       procedural WebAudio synth; raytraced acoustics (room reverb,
-               early reflections, sound paths round corners), placed
-               HRTF emitters, the world's own voices
+               sound paths round corners, muffling), a pool of placed
+               voices, the world's own voices
   render/      textures/ (procedural painters), models/, post-processing
   scenes/      village, dungeon floor, floor atmosphere, canvas composition
   transition/  portal journeys (pulled through the rift, the starry warp, arrival)

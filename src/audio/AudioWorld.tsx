@@ -81,9 +81,9 @@ function sourcesFor(layout: FloorLayout | null): Source[] {
 }
 
 /** Torches and rifts sounding at once, at most (the nearest win). */
-const MAX_LOOPS = 7;
-/** Seconds between re-tracing the loops as you move. */
-const LOOP_TICK = 0.25;
+const MAX_LOOPS = 5;
+/** Seconds between re-tracing the loops as you move (they glide between). */
+const LOOP_TICK = 0.2;
 /** Metres a floor-mate walks between footfalls. */
 const PEER_STRIDE = 1.7;
 
@@ -106,10 +106,9 @@ export function AudioWorld({ layout }: { layout: FloorLayout | null }) {
     };
   }, [grid, layout]);
 
-  useFrame((state, rawDt) => {
-    const now = state.clock.elapsedTime;
+  useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.1);
-    updateListener(camera.position, camera.quaternion, now);
+    updateListener(camera.position, camera.quaternion);
     const L = listenerAt();
 
     // Torches and rifts: keep the nearest sounding, re-trace them as we move.
