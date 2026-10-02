@@ -63,8 +63,10 @@ const peerCast = peerMessage<CastMsg>("cast", (raw, meta) => {
     remote: true,
   });
   // Their staff flares too (we don't know their velocity; a peer's flare is
-  // seen from a distance, where the lag doesn't show).
+  // seen from a distance, where the lag doesn't show) — and is heard from
+  // where they stand.
   castFlareFx(replayOrigin, replayDir, staff.color);
+  playCast(msg.origin);
 });
 
 /** Cast one of the equipped staff's abilities from the staff tip, tell the

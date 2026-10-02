@@ -81,7 +81,7 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
         }, i * 170);
       }
       flashLight([t.x, t.y, t.z], WARDEN_COLOR, 60);
-      playBossRoar();
+      playBossRoar([t.x, t.y + 1.5, t.z]);
       // Guaranteed rich drops for the whole party (host-rolled).
       dropLoot([t.x - 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
       dropLoot([t.x + 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
@@ -151,7 +151,7 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
     if (!awake.current) {
       if (dist < WARDEN.wakeRange) {
         awake.current = true;
-        playBossRoar();
+        playBossRoar([t.x, t.y + 1.5, t.z]);
         gameEvents.emit("message", `${BOSS_NAME} wakes`);
         gameEvents.emit("bossHp", { name: BOSS_NAME, frac: 1 });
         gameEvents.emit("shake", 0.5);

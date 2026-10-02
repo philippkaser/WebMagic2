@@ -64,7 +64,7 @@ function SpikeTrap({ pos, floor }: { pos: Vec3; floor: number }) {
       armTimer.current = 1.2;
       pop.current = 1;
       useGame.getState().takeDamage(def.baseDamage * scale.enemyDamage);
-      playHit();
+      playHit(pos);
       spikeFx(pos);
     }
   });
@@ -166,7 +166,7 @@ function WarpTrap({ pos }: { pos: Vec3 }) {
       triggered.current = true;
       warpFx(pos, "#b46bff");
       flashLight([pos[0], pos[1] + 0.6, pos[2]], "#b46bff", 20);
-      playPortal();
+      playPortal(pos);
       // descend() requires an active floor session; from the dev village arena
       // there is none, so guard it (a rejected requestFloor would strand us on
       // the loading screen). In a real dungeon you're always connected.

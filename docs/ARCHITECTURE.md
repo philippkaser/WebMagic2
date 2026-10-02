@@ -431,6 +431,59 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   measured at roughly +50% frame time even at low resolution.
 - **F3 overlay** shows fps / p95 / worst frame for perf reports.
 
+## Sound (`audio/`)
+
+Every sound is synthesized (`sound.ts`, `voices.ts`) and, unless it's a
+UI blip, heard through a small raytraced acoustics model:
+
+- **The level as sound sees it** (`acoustics.ts`, pure and tested): an
+  `AcousticGrid` of solid/open cells — the dungeon's tiles (2 m, rock past
+  the edge, a 6 m vault), or the village green in 2 m cells with the
+  cottages solid under an open sky. Rays are traversed cell by cell
+  (Amanatides–Woo).
+- **The room** (`analyzeRoom`): a fan of 48 rays from the listener gives the
+  floor plan's area and wall length; with the vault (or the sky) that's a
+  volume and surface, and Sabine's formula with the biome's absorption
+  gives the reverb time. Rays that escape (sky, long halls) count as open,
+  absorbing. Out of the same rays come the pre-delay (mean free path),
+  how wet the room is, and the nearest wall in each eighth of the circle.
+- **The tail** (`impulseResponse`): a stereo impulse response generated to
+  match — decaying noise whose top end fades faster than its body
+  (brightness per biome), each side its own noise. `spatial.ts` keeps two
+  `ConvolverNode`s and crossfades a new tail in on the idle one whenever
+  the (quantized) room changes; tails are cached.
+- **Early reflections**: ten taps off the reverb send — the nearest walls,
+  the floor and the vault — each a delay of its round trip at 343 m/s, a
+  lowpass darker with distance and a pan toward its wall (relative to the
+  listener's facing, every frame).
+- **How a sound reaches you** (`soundPath`): in plain sight, straight. Else
+  the way round — a Dijkstra flood from the listener's cell (cached until
+  the listener crosses into another cell, so every source on the floor is
+  answered from one flood), the cell path pulled taut through the openings.
+  The sound is placed where it SEEMS to be: in the direction of the first
+  opening, as far away as it travelled. No way round within 60 m: heard
+  through the rock.
+- **Emitters** (`Emitter`): a sound's voices feed an input → lowpass (air
+  absorption, minus most of the highs per corner, a dull thud through
+  rock) → gain → HRTF `PannerNode` at the apparent position; and a send to
+  the room at much the same level wherever the sound is in the room (a
+  diffuse field), falling off for sounds halls away. One-shots
+  (`oneShotAt`) let go after their life; loops (`emitterAt`: torches,
+  rifts) re-trace as you move. At most 40 at once.
+- **The listener** follows the world camera (`AudioWorld.tsx`, mounted in the
+  world canvas), and the room is re-measured a few times a second when it
+  has moved. Sounds you make yourself go dry plus a room send (`selfOut`).
+- **The world's voices** (`voices.ts`, driven by `AudioWorld` and the
+  systems that own the events): footsteps per ground (the player's on
+  each low of the view bob, landings by impact, floor-mates' every 1.7 m
+  of their replicated poses), the nearest seven torches and rifts as
+  loops, enemies waking, walking and dying (`useEnemy` — on every client,
+  replicas walk too), and each place's own small sounds a few metres off
+  where the grid is open.
+
+Costs, measured: a room analysis ~0.03 ms; a path query ~0.03–0.15 ms; a
+flood ~1 ms, only when the listener changes cell.
+
 ## Portal journeys (`transition/`)
 
 Every scene switch is a journey you watch, drawn in the gritty pixel style

@@ -9,6 +9,7 @@ import {
 import { useEffect, useMemo, useRef } from "react";
 import { Vector3 } from "three";
 import { playDash, playJump } from "../audio/sound";
+import { groundAt, playFootstep, playLanding } from "../audio/voices";
 import { EYE_HEIGHT, GROUPS, PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
 import { dashFx, dustPuffFx, hoverWispFx, runeBurstFx } from "../fx/effects";
@@ -44,6 +45,7 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
   const bobPhase = useRef(0);
   const bobAmp = useRef(0);
   const landDip = useRef(0);
+  const lastStep = useRef(0);
   const trauma = useRef(0);
   const hoverClock = useRef(0);
 
@@ -192,6 +194,7 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
     b.setLinvel({ x: nvx, y: vy, z: nvz }, true);
 
     // Landing thump.
+    if (grounded && !wasGrounded.current && v.y < -3.5) playLanding(groundAt(t.x, t.z), Math.min(1, (-v.y - 3.5) / 14));
     if (grounded && !wasGrounded.current && v.y < -9) {
       landDip.current = Math.min(0.22, -v.y * 0.014);
       trauma.current = Math.min(1, trauma.current + 0.1);
@@ -207,6 +210,12 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
     bobAmp.current += (targetAmp - bobAmp.current) * Math.min(1, dt * 8);
     if (bobAmp.current > 0.01) bobPhase.current += dt * (5 + hSpeed * 1.1);
     const bobY = Math.sin(bobPhase.current * 2) * 0.034 * bobAmp.current;
+    // A footfall each time the bob bottoms out (twice a cycle of the phase).
+    const step = Math.floor((bobPhase.current - Math.PI * 0.75) / Math.PI);
+    if (step !== lastStep.current) {
+      lastStep.current = step;
+      if (grounded && bobAmp.current > 0.2) playFootstep(groundAt(t.x, t.z), 0.45 + 0.55 * Math.min(1, bobAmp.current));
+    }
     playerGait.phase = bobPhase.current;
     playerGait.amp = bobAmp.current;
     playerGait.landDip = landDip.current;

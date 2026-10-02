@@ -1,6 +1,8 @@
 import { interactionGroups, type RapierRigidBody } from "@react-three/rapier";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { playHit } from "../audio/sound";
+import { listenerAt } from "../audio/spatial";
+import { ENEMY_STRIDE, isEnemyVoice, playEnemyDeath, playEnemyStep, playEnemyWake } from "../audio/voices";
 import { floorScale, GROUPS, PLAYER } from "../core/config";
 import { flashLight } from "../fx/DynamicLights";
 import { hitSparksFx, soulDissolveFx } from "../fx/effects";
@@ -157,6 +159,8 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
   const flash = useRef(0);
   const aggro = useRef(false);
   const knockTimer = useRef(0);
+  // Its voice: woken once, a footfall every stride it walks.
+  const voice = useRef({ woke: false, cried: -Infinity, x: NaN, z: NaN, walked: 0 });
 
   const kill = useCallback((silent = false) => {
     if (deadRef.current) return;
@@ -179,6 +183,7 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
         dropGold(at, o.floor, GOLD_DROPS.enemyChance, "enemy");
       }
       o.onDeathFx?.(t);
+      if (isEnemyVoice(o.kind)) playEnemyDeath(o.kind, [t.x, t.y, t.z]);
     }
     o.onKilled?.();
     setDead(true);
@@ -235,6 +240,7 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
       if (!b || deadRef.current || !combatActive()) return null;
       flash.current = Math.max(0, flash.current - dt * flashDecay);
       knockTimer.current -= dt;
+      hearEnemy(opts.current.kind, b, aggro.current, voice.current);
       return b;
     },
     sense(input, b, pos, time, dt, vel) {
@@ -261,6 +267,42 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
       if (s.apply) b.setLinvel(s.vel, true);
     },
   };
+}
+
+/** How far off an enemy's steps and waking still carry (m). */
+const HEARD_WITHIN = 30;
+
+/** Voice an enemy this frame: a cry on waking, steps as it walks — on every
+ * client (replicas walk too), and only within earshot. */
+function hearEnemy(
+  kind: EnemyId,
+  b: RapierRigidBody,
+  awake: boolean,
+  v: { woke: boolean; cried: number; x: number; z: number; walked: number },
+): void {
+  if (!isEnemyVoice(kind)) return;
+  const t = b.translation();
+  const l = listenerAt();
+  const near = Math.hypot(t.x - l.x, t.z - l.z) < HEARD_WITHIN;
+  // A brain that dozes off and wakes again cries again — but not on repeat.
+  const now = performance.now();
+  if (awake && !v.woke && near && now - v.cried > 8000) {
+    v.cried = now;
+    playEnemyWake(kind, [t.x, t.y, t.z]);
+  }
+  v.woke = awake;
+  const stride = ENEMY_STRIDE[kind];
+  if (stride > 0 && !Number.isNaN(v.x)) {
+    const d = Math.hypot(t.x - v.x, t.z - v.z);
+    // A teleport (warp, replica snap) isn't a walk.
+    v.walked += d < 1 ? d : 0;
+    if (v.walked >= stride) {
+      v.walked %= stride;
+      if (near) playEnemyStep(kind, [t.x, t.y - 0.4, t.z]);
+    }
+  }
+  v.x = t.x;
+  v.z = t.z;
 }
 
 export interface ContactDamage {
@@ -419,7 +461,8 @@ export function useEnemyNet(opts: {
       hit: (damage, impulse) => {
         if (deadRef.current) return;
         flash.current = 1;
-        playHit();
+        const at = body.current?.translation();
+        playHit(at ? [at.x, at.y, at.z] : undefined);
         hitFeedback?.();
         // Shooter-favored: our shots apply where we saw them land — locally
         // on the authority, via a command to it otherwise (with the physical

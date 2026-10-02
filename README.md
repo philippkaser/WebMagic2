@@ -111,6 +111,13 @@ corner — check it against the latest commit when testing.
 - **Procedural everything**: painted pixel-art textures, normal maps, models
   and every sound are generated at runtime — no binary assets beyond the
   four pixel fonts.
+- **Raytraced sound**: rays measure the room around you a few times a second
+  and its reverb is generated to match — a stone hall rings, a corridor
+  answers close, the village green is dry under the sky. Every sound is
+  placed in 3D (HRTF): a monster round a corner is heard muffled from the
+  doorway it's coming through, and torches, rifts, footsteps — yours, your
+  floor-mates', the monsters' — and the dungeon's own drips, groans and
+  chimes all sound where they are.
 - **The UI lives in the world**: menus are tablets built from worn stones,
   messages burn into small slabs of slate as runes that settle into
   letters, the map (M) is a miniature of the village or the explored floor
@@ -150,7 +157,9 @@ src/
   player/      input, first-person controller, staff viewmodel
   fx/          shader particles + named effects, ambient air, torch flames,
                the dynamic light pool
-  audio/       procedural WebAudio synth (sfx, biome drones)
+  audio/       procedural WebAudio synth; raytraced acoustics (room reverb,
+               early reflections, sound paths round corners), placed
+               HRTF emitters, the world's own voices
   render/      textures/ (procedural painters), models/, post-processing
   scenes/      village, dungeon floor, floor atmosphere, canvas composition
   transition/  portal journeys (pulled through the rift, the starry warp, arrival)

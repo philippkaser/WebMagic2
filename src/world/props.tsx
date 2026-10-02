@@ -176,7 +176,8 @@ export function Breakable({
       getPosition: () => body.current?.translation() ?? { x: 0, y: -999, z: 0 },
       hit: (damage, impulse) => {
         if (deadRef.current) return;
-        playHit();
+        const at = body.current?.translation();
+        playHit(at ? [at.x, at.y, at.z] : undefined);
         if (isHost()) {
           applyDamageRef.current(damage, impulse);
         } else {
@@ -492,7 +493,7 @@ export function Portal({
           prompt,
           d2,
           () => {
-            playPortal();
+            playPortal(position);
             onUse();
           },
           at,

@@ -151,7 +151,7 @@ function announceFall(g: LiveGrave): void {
           ? `${g.ownerName} was slain by ${g.killerName}. A grave rises where they fell.`
           : `${g.ownerName} has fallen. A grave rises where they fell.`;
   gameEvents.emit("message", text);
-  playGraveRise();
+  playGraveRise(g.pos);
   flashLight([g.pos[0], g.pos[1] + 1, g.pos[2]], g.color, 24);
   soulRiseFx([g.pos[0], g.pos[1] + 0.5, g.pos[2]], g.color, 26);
 }

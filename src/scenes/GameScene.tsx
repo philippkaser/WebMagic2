@@ -2,6 +2,7 @@ import { Environment, PointerLockControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { Suspense, useMemo } from "react";
+import { AudioWorld } from "../audio/AudioWorld";
 import { BlackHoles } from "../weapons/singularity";
 import { CastingSystem } from "../weapons/CastingSystem";
 import { Projectiles } from "../weapons/projectiles";
@@ -83,6 +84,9 @@ export function GameScene() {
           <PeerBodies />
         </Physics>
         <RemoteWizards />
+        {/* The ears: raytraced room acoustics, placed sounds, the world's
+            own voices (audio/). */}
+        <AudioWorld layout={inDungeon ? layout : null} />
         <Graves />
         <FloorMaps />
         <PactSystem />

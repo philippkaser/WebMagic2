@@ -67,7 +67,7 @@ export function explode(opts: ExplosionOptions): void {
   if (opts.vfx === "shockwave") shockwaveFx(center, radius, color, particles / 36);
   else explosionFx(center, radius, color, particles / 36);
   flashLight([center.x, center.y, center.z], color, light);
-  playExplosion(radius);
+  playExplosion(radius, [center.x, center.y, center.z]);
 
   if (!opts.remote) {
     forEachHittable((h) => {

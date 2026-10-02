@@ -90,7 +90,7 @@ function LoreRune({ rune }: { rune: LoreSpawn }) {
         () => {
           if (cooldown.current > 0) return;
           cooldown.current = 1;
-          playWhisper();
+          playWhisper(out);
           // The words lift off the stone as light.
           soulRiseFx(out, RUNE_COLOR, 18);
           gameEvents.emit("loreRead", { fragmentId: fragment.id });

@@ -1,27 +1,47 @@
+import { audioCtx, ensureContext, masterBus, noiseBuf } from "./context";
+import { oneShotAt, selfOut, type At } from "./spatial";
+
 /** Procedural WebAudio — every sound is synthesized, keeping the zero-asset
  * pipeline. The context is created lazily on the first user gesture (autoplay
- * policy); every play call is a safe no-op before that. */
+ * policy, audio/context.ts); every play call is a safe no-op before that.
+ *
+ * World sounds are placed and traced (audio/spatial.ts): `atPoint` plays a
+ * sound's voices from a point in the world — around corners, through the
+ * room's reverb — and `self` from where you stand (your steps, your spells:
+ * dry, plus the room answering). Sounds in your head (the omen, the
+ * heartbeat, the journey through a rift) go straight to the master bus. */
 
-let ctx: AudioContext | null = null;
-let master: GainNode | null = null;
-let noiseBuffer: AudioBuffer | null = null;
 let ambientStop: (() => void) | null = null;
 let pendingAmbient: "village" | "dungeon" | null = null;
 let pendingMood: AmbientMood | undefined;
 
-function ensureContext(): void {
-  if (!ctx) {
-    ctx = new AudioContext();
-    master = ctx.createGain();
-    master.gain.value = 0.45;
-    master.connect(ctx.destination);
-    const len = ctx.sampleRate * 2;
-    noiseBuffer = ctx.createBuffer(1, len, ctx.sampleRate);
-    const data = noiseBuffer.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+/** Where the voices being built go (null: the master bus). */
+let dest: AudioNode | null = null;
+
+function routed(out: AudioNode | null, fn: () => void): void {
+  const prev = dest;
+  dest = out;
+  try {
+    fn();
+  } finally {
+    dest = prev;
   }
-  if (ctx.state === "suspended") void ctx.resume();
 }
+
+/** Play `fn`'s voices at `pos` in the world (for `life` seconds), or from
+ * where you stand if no position is given. */
+export function atPoint(pos: At | undefined | null, life: number, fn: () => void, gain = 1): void {
+  if (!audioCtx()) return;
+  routed(pos ? (oneShotAt(pos, life, gain) ?? selfOut()) : selfOut(), fn);
+}
+
+/** Play `fn`'s voices from where you stand: dry, and the room answering. */
+export function self(fn: () => void): void {
+  if (!audioCtx()) return;
+  routed(selfOut(), fn);
+}
+
+const out = (): AudioNode | null => dest ?? masterBus();
 
 /** Call once at app start: arms a one-time gesture listener. */
 export function initAudio(): void {
@@ -52,7 +72,9 @@ interface ToneOptions {
 }
 
 function tone({ type = "sine", freq, freqEnd, dur, vol = 0.2, delay = 0, attack = 0.008 }: ToneOptions): void {
-  if (!ctx || !master) return;
+  const ctx = audioCtx();
+  const dst = out();
+  if (!ctx || !dst) return;
   const t0 = ctx.currentTime + delay;
   const osc = ctx.createOscillator();
   osc.type = type;
@@ -62,7 +84,7 @@ function tone({ type = "sine", freq, freqEnd, dur, vol = 0.2, delay = 0, attack 
   g.gain.setValueAtTime(0.0001, t0);
   g.gain.exponentialRampToValueAtTime(vol, t0 + Math.min(attack, dur * 0.95));
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  osc.connect(g).connect(master);
+  osc.connect(g).connect(dst);
   osc.start(t0);
   osc.stop(t0 + dur + 0.05);
 }
@@ -89,7 +111,10 @@ function noise({
   type = "lowpass",
   attack = 0.012,
 }: NoiseOptions): void {
-  if (!ctx || !master || !noiseBuffer) return;
+  const ctx = audioCtx();
+  const noiseBuffer = noiseBuf();
+  const dst = out();
+  if (!ctx || !dst || !noiseBuffer) return;
   const t0 = ctx.currentTime + delay;
   const src = ctx.createBufferSource();
   src.buffer = noiseBuffer;
@@ -104,7 +129,7 @@ function noise({
   g.gain.setValueAtTime(0.0001, t0);
   g.gain.exponentialRampToValueAtTime(vol, t0 + Math.min(attack, dur * 0.95));
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  src.connect(filter).connect(g).connect(master);
+  src.connect(filter).connect(g).connect(dst);
   src.start(t0);
   src.stop(t0 + dur + 0.05);
 }
@@ -116,24 +141,32 @@ export type { NoiseOptions, ToneOptions };
 
 // ── Game sounds ──────────────────────────────────────────────────────────────
 
-export function playCast(): void {
-  tone({ type: "square", freq: 640 + Math.random() * 120, freqEnd: 170, dur: 0.13, vol: 0.1 });
-  noise({ dur: 0.09, vol: 0.05, filterFreq: 2600, filterEnd: 500, type: "bandpass", q: 2 });
+/** A spell leaves a staff — yours (from where you stand), or a floor-mate's
+ * (`at` their staff). */
+export function playCast(at?: At): void {
+  atPoint(at, 0.3, () => {
+    tone({ type: "square", freq: 640 + Math.random() * 120, freqEnd: 170, dur: 0.13, vol: 0.1 });
+    noise({ dur: 0.09, vol: 0.05, filterFreq: 2600, filterEnd: 500, type: "bandpass", q: 2 });
+  });
 }
 
-export function playExplosion(radius: number): void {
+export function playExplosion(radius: number, at?: At): void {
   const size = Math.min(radius / 4, 1.6);
-  noise({ dur: 0.32 + size * 0.2, vol: 0.22 + size * 0.1, filterFreq: 1100, filterEnd: 90 });
-  tone({ type: "sine", freq: 110, freqEnd: 34, dur: 0.34 + size * 0.15, vol: 0.28 });
+  atPoint(at, 0.7 + size * 0.2, () => {
+    noise({ dur: 0.32 + size * 0.2, vol: 0.22 + size * 0.1, filterFreq: 1100, filterEnd: 90 });
+    tone({ type: "sine", freq: 110, freqEnd: 34, dur: 0.34 + size * 0.15, vol: 0.28 });
+  }, 1.5);
 }
 
-export function playHit(): void {
-  tone({ type: "triangle", freq: 320 + Math.random() * 80, freqEnd: 110, dur: 0.08, vol: 0.12 });
+export function playHit(at?: At): void {
+  atPoint(at, 0.15, () => tone({ type: "triangle", freq: 320 + Math.random() * 80, freqEnd: 110, dur: 0.08, vol: 0.12 }));
 }
 
 export function playHurt(): void {
-  tone({ type: "sawtooth", freq: 170, freqEnd: 65, dur: 0.22, vol: 0.16 });
-  noise({ dur: 0.16, vol: 0.08, filterFreq: 700, filterEnd: 150 });
+  self(() => {
+    tone({ type: "sawtooth", freq: 170, freqEnd: 65, dur: 0.22, vol: 0.16 });
+    noise({ dur: 0.16, vol: 0.08, filterFreq: 700, filterEnd: 150 });
+  });
 }
 
 export function playPickup(): void {
@@ -143,24 +176,28 @@ export function playPickup(): void {
 }
 
 export function playJump(): void {
-  tone({ type: "sine", freq: 170, freqEnd: 300, dur: 0.09, vol: 0.06 });
+  self(() => tone({ type: "sine", freq: 170, freqEnd: 300, dur: 0.09, vol: 0.06 }));
 }
 
 export function playDash(): void {
-  noise({ dur: 0.22, vol: 0.12, filterFreq: 400, filterEnd: 3200, type: "bandpass", q: 1.4 });
+  self(() => noise({ dur: 0.22, vol: 0.12, filterFreq: 400, filterEnd: 3200, type: "bandpass", q: 1.4 }));
 }
 
-export function playPortal(): void {
-  for (let i = 0; i < 3; i++) {
-    tone({ type: "sine", freq: 380 + i * 140, freqEnd: 760 + i * 180, dur: 0.7, vol: 0.07, delay: i * 0.07 });
-  }
-  noise({ dur: 0.8, vol: 0.05, filterFreq: 900, filterEnd: 2600, type: "bandpass", q: 3 });
+export function playPortal(at?: At): void {
+  atPoint(at, 0.95, () => {
+    for (let i = 0; i < 3; i++) {
+      tone({ type: "sine", freq: 380 + i * 140, freqEnd: 760 + i * 180, dur: 0.7, vol: 0.07, delay: i * 0.07 });
+    }
+    noise({ dur: 0.8, vol: 0.05, filterFreq: 900, filterEnd: 2600, type: "bandpass", q: 3 });
+  });
 }
 
-export function playBossRoar(): void {
-  tone({ type: "sawtooth", freq: 90, freqEnd: 42, dur: 0.9, vol: 0.22 });
-  tone({ type: "square", freq: 61, freqEnd: 30, dur: 1.1, vol: 0.14, delay: 0.05 });
-  noise({ dur: 0.9, vol: 0.12, filterFreq: 500, filterEnd: 80 });
+export function playBossRoar(at?: At): void {
+  atPoint(at, 1.25, () => {
+    tone({ type: "sawtooth", freq: 90, freqEnd: 42, dur: 0.9, vol: 0.22 });
+    tone({ type: "square", freq: 61, freqEnd: 30, dur: 1.1, vol: 0.14, delay: 0.05 });
+    noise({ dur: 0.9, vol: 0.12, filterFreq: 500, filterEnd: 80 });
+  }, 1.8);
 }
 
 // ── Encounters, lore & omens ─────────────────────────────────────────────────
@@ -196,17 +233,21 @@ export function playPactBroken(): void {
 }
 
 /** A grave rises where a wizard fell. */
-export function playGraveRise(): void {
-  tone({ type: "sine", freq: 196, freqEnd: 98, dur: 1.6, vol: 0.12 });
-  tone({ type: "triangle", freq: 392, freqEnd: 370, dur: 1.4, vol: 0.04, delay: 0.2 });
-  noise({ dur: 1.2, vol: 0.06, filterFreq: 300, filterEnd: 90 });
+export function playGraveRise(at?: At): void {
+  atPoint(at, 1.7, () => {
+    tone({ type: "sine", freq: 196, freqEnd: 98, dur: 1.6, vol: 0.12 });
+    tone({ type: "triangle", freq: 392, freqEnd: 370, dur: 1.4, vol: 0.04, delay: 0.2 });
+    noise({ dur: 1.2, vol: 0.06, filterFreq: 300, filterEnd: 90 });
+  }, 1.4);
 }
 
 /** A lore rune is read — breathy whisper over a faint chord. */
-export function playWhisper(): void {
-  noise({ dur: 1.4, vol: 0.07, filterFreq: 1400, filterEnd: 2600, type: "bandpass", q: 6 });
-  tone({ type: "sine", freq: 523, dur: 1.2, vol: 0.03, delay: 0.1 });
-  tone({ type: "sine", freq: 659, dur: 1.2, vol: 0.025, delay: 0.25 });
+export function playWhisper(at?: At): void {
+  atPoint(at, 1.55, () => {
+    noise({ dur: 1.4, vol: 0.07, filterFreq: 1400, filterEnd: 2600, type: "bandpass", q: 6 });
+    tone({ type: "sine", freq: 523, dur: 1.2, vol: 0.03, delay: 0.1 });
+    tone({ type: "sine", freq: 659, dur: 1.2, vol: 0.025, delay: 0.25 });
+  }, 1.3);
 }
 
 /** The floor's omen announces itself on arrival. */
@@ -249,6 +290,9 @@ export function playPortalEnter(bright = 0.5): void {
  * with a little vibrato. Loops until the returned stop() (which fades out).
  * `pitch` is the drone's root in Hz; `air` scales the rush (0 = drone only). */
 export function startTunnelRush(pitch = 55, air = 1): () => void {
+  const ctx = audioCtx();
+  const master = masterBus();
+  const noiseBuffer = noiseBuf();
   if (!ctx || !master || !noiseBuffer) return () => {};
   const c = ctx;
   const now = c.currentTime;
@@ -392,6 +436,9 @@ const VILLAGE_MOOD: AmbientMood = { drone: 55, wind: 480, weight: 1 };
 
 export function startAmbient(kind: "village" | "dungeon", mood?: AmbientMood): void {
   stopAmbient();
+  const ctx = audioCtx();
+  const master = masterBus();
+  const noiseBuffer = noiseBuf();
   if (!ctx || !master || !noiseBuffer) {
     // Context not unlocked yet — start this bed on the first gesture.
     pendingAmbient = kind;
@@ -442,7 +489,7 @@ export function startAmbient(kind: "village" | "dungeon", mood?: AmbientMood): v
   nodes.push(windFilter, windGain, lfoGain);
 
   ambientStop = () => {
-    const now = ctx!.currentTime;
+    const now = ctx.currentTime;
     bed.gain.cancelScheduledValues(now);
     bed.gain.setValueAtTime(bed.gain.value, now);
     bed.gain.linearRampToValueAtTime(0, now + 0.6);
