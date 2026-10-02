@@ -6,7 +6,7 @@ import { Quaternion, Vector3 } from "three";
 import { gridFromLayout } from "../../src/audio/acoustics";
 import { adoptOfflineContext, masterBus, noiseBuf } from "../../src/audio/context";
 import { playCast, playExplosion, startAmbient } from "../../src/audio/sound";
-import { emitterAt, oneShotAt, selfOut, setAcousticGrid, updateListener, type Emitter } from "../../src/audio/spatial";
+import { emitterAt, oneShotAt, selfOut, setAcousticGrid, setHeadphones, updateListener, type Emitter } from "../../src/audio/spatial";
 import { chooseLoops, playEnemyStep, playFootstep, playRoomVoice, startTorch, type Loop } from "../../src/audio/voices";
 import { generateFloor } from "../../src/world/gen";
 import { buildScene, wav } from "./scene";
@@ -26,6 +26,10 @@ function impulse(ctx: BaseAudioContext, dst: AudioNode, at: number): void {
 }
 
 async function render(name: string): Promise<string> {
+  // "scene:speakers" renders it for speakers rather than headphones.
+  const [base, mode] = name.split(":");
+  name = base!;
+  setHeadphones(mode !== "speakers");
   const layout = generateFloor(1234, 3);
   const scene = buildScene(layout, name);
   const ctx = new OfflineAudioContext(2, Math.ceil(scene.duration * SR), SR);
@@ -45,6 +49,7 @@ async function render(name: string): Promise<string> {
   const torches = layout.torches.map((at, i) => ({ key: String(i), at, reach: 24, level: 1 }));
   let nextLoopTick = 0;
   let steady: Emitter | null = null;
+  const movers: Emitter[] = [];
   let nextLog = 0;
   const fired = new Set<number>();
   const step = (t: number) => {
@@ -64,6 +69,32 @@ async function render(name: string): Promise<string> {
           src.start();
         }
       } else if (tick) steady.place();
+    }
+    if (scene.moving) {
+      scene.moving.forEach((m, i) => {
+        let e = movers[i];
+        if (!e) {
+          const made = emitterAt(m.at(t), m.level ?? 1, m.size);
+          if (!made) return;
+          e = movers[i] = made;
+          const g = ctx.createGain();
+          if (m.kind === "noise") {
+            const src = ctx.createBufferSource();
+            src.buffer = noiseBuf();
+            src.loop = true;
+            src.connect(g);
+            src.start(ctx.currentTime, i * 0.37);
+            g.gain.value = 0.1;
+          } else {
+            const o = ctx.createOscillator();
+            o.frequency.value = 440;
+            o.connect(g);
+            o.start();
+            g.gain.value = 0.15;
+          }
+          g.connect(e.input);
+        } else e.place(m.at(t));
+      });
     }
     if (scene.log && t >= nextLog) {
       nextLog = t + 0.25;
@@ -107,7 +138,8 @@ async function render(name: string): Promise<string> {
       fired.add(i);
       switch (e.kind) {
         case "step":
-          playFootstep("stone", e.loud ?? 1);
+          // Left foot, right foot, as the player's.
+          playFootstep("stone", e.loud ?? 1, undefined, i & 1 ? 1 : -1);
           break;
         case "cast":
           playCast();

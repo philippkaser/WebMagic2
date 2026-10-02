@@ -10,8 +10,18 @@ export interface Ev {
   at?: P3;
   loud?: number;
 }
+/** A sound that follows a path: steady noise, or a steady tone (pitch). */
+export interface Moving {
+  kind: "noise" | "tone";
+  at(t: number): P3;
+  level?: number;
+  /** Its radius (m). */
+  size?: number;
+}
 export interface Scene {
   duration: number;
+  /** Sounds moving (or standing) about while the scene plays. */
+  moving?: Moving[];
   /** Log what the ears hear every quarter second. */
   log?: boolean;
   /** A steady noise source to follow (x, y, z). */
@@ -111,6 +121,75 @@ export function buildScene(layout: FloorLayout, name: string): Scene {
       return { duration: walkEnd + 2, pose: walkPose, events, torches: true, ambient: false, log: true };
     case "leave-steady":
       return { duration: walkEnd + 2, pose: walkPose, events, torches: false, ambient: false, log: true, steady: roomAt(2, 3, 1.2) };
+    // ── The spatial suite: what the ears get besides loudness ──
+    case "orbit": {
+      // Noise circling the head at 3 m, once in 8 s, starting dead ahead and
+      // going round to the right; the listener faces −z, in the hall.
+      const [hx, hz] = [17, 11];
+      const orbit = (t: number): P3 => {
+        const a = (t / 8) * Math.PI * 2;
+        return [hx + 3 * Math.sin(a), 1.6, hz - 3 * Math.cos(a)];
+      };
+      return { duration: 8.5, pose: () => ({ x: hx, z: hz, yaw: 0 }), events, torches: false, ambient: false, moving: [{ kind: "noise", at: orbit }] };
+    }
+    case "distance": {
+      // Clicks straight ahead at 1, 2, 4, 8 and 16 m down the hall.
+      const [hx, hz] = [16, 2];
+      [1, 2, 4, 8, 16].forEach((d, i) => events.push({ t: 0.5 + i * 2, kind: "impulse-at", at: [hx, 1.6, hz + d] }));
+      return { duration: 10.5, pose: () => ({ x: hx, z: hz, yaw: Math.PI }), events, torches: false, ambient: false };
+    }
+    case "flyby":
+      // A 440 Hz tone passing 2 m to the right at 8 m/s, front to back.
+      return {
+        duration: 3.2,
+        pose: () => ({ x: 12, z: 11, yaw: 0 }),
+        events,
+        torches: false,
+        ambient: false,
+        moving: [{ kind: "tone", at: (t) => [14, 1.6, Math.min(19.5, 1 + Math.max(0, t - 0.4) * 8)] }],
+      };
+    case "size": {
+      // A rift-sized noise (1.2 m) ahead at 8, 4, 2 and 1 m, two seconds
+      // each: a point far off, all round you up close.
+      const [hx, hz] = [16, 2];
+      const d = (t: number) => [8, 4, 2, 1][Math.min(3, Math.floor(t / 2))]!;
+      return {
+        duration: 8,
+        pose: () => ({ x: hx, z: hz, yaw: Math.PI }),
+        events,
+        torches: false,
+        ambient: false,
+        moving: [{ kind: "noise", at: (t) => [hx, 1.6, hz + d(t)], size: 1.2 }],
+      };
+    }
+    case "spin": {
+      // A tone 3 m ahead while you whip round: a full turn in a second,
+      // twice (a mouse flick) — the ears' cues swing across.
+      const [hx, hz] = [17, 11];
+      return {
+        duration: 4,
+        pose: (t) => ({ x: hx, z: hz, yaw: t < 1 ? 0 : t < 2 ? (t - 1) * Math.PI * 2 : t < 3 ? 0 : -(t - 3) * Math.PI * 2 }),
+        events,
+        torches: false,
+        ambient: false,
+        moving: [{ kind: "tone", at: () => [hx, 1.6, hz - 3] }],
+      };
+    }
+    case "leave-tone":
+      // A steady tone in the hall while you walk out: its way to you bends
+      // round the doorway — its pitch must not warble.
+      return { duration: walkEnd + 2, pose: walkPose, events, torches: false, ambient: false, moving: [{ kind: "tone", at: () => roomAt(2, 3, 1.2) }] };
+    case "stress": {
+      // Every voice busy (steady noise all over the hall), the listener
+      // walking out: how hard the audio thread works.
+      const moving: Moving[] = [];
+      for (let i = 0; i < 20; i++) {
+        const a = i * 2.39996;
+        const r = 2 + (i % 5) * 1.6;
+        moving.push({ kind: i % 3 ? "noise" : "tone", at: () => [17 + r * Math.cos(a), 1 + (i % 3), 11 + r * Math.sin(a)], level: 0.5 });
+      }
+      return { duration: 10, pose: walkPose, events, torches: true, ambient: true, moving };
+    }
     case "torch-walk":
       return { duration: walkEnd + 1, pose: walkPose, events, torches: true, ambient: false };
     case "steps-room":

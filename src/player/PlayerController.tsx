@@ -214,7 +214,8 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
     const step = Math.floor((bobPhase.current - Math.PI * 0.75) / Math.PI);
     if (step !== lastStep.current) {
       lastStep.current = step;
-      if (grounded && bobAmp.current > 0.2) playFootstep(groundAt(t.x, t.z), 0.45 + 0.55 * Math.min(1, bobAmp.current));
+      // Left foot, right foot.
+      if (grounded && bobAmp.current > 0.2) playFootstep(groundAt(t.x, t.z), 0.45 + 0.55 * Math.min(1, bobAmp.current), undefined, step & 1 ? 1 : -1);
     }
     playerGait.phase = bobPhase.current;
     playerGait.amp = bobAmp.current;

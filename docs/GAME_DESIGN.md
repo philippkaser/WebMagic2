@@ -149,7 +149,12 @@ art is a new procedural painter function, not an asset pipeline.
   straight, or round corners from the doorway it came through, duller the
   further it bent, a thud through rock. Each room rings on its own: walk
   out of a hall and you still hear it ringing behind you through the
-  doorway, fading as the corridor takes you away. The world has its own voices:
+  doorway, fading as the corridor takes you away. And sound is a place,
+  not a volume knob: each ear hears a sound at its own moment and through
+  the head's shadow (on headphones it's out there, behind you, to your
+  left), a far blast lands after its flash, a wisp streaking past bends in
+  pitch, the air dulls the far end of a hall, and a rift you stand beside
+  — or a blast you stand in — is all round you. The world has its own voices:
   footsteps on each ground (stone, wet stone, crystal, iron, ash, cobbles,
   grass), torches crackling, rifts humming, monsters waking, walking and
   dying, and the small sounds each place makes by itself.

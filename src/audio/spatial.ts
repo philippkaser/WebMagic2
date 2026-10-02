@@ -1,5 +1,6 @@
 import type { Quaternion, Vector3 } from "three";
 import { analyzeRoom, hearing, impulseResponse, zoneAt, zoneHearing, type AcousticGrid, type RoomAcoustics } from "./acoustics";
+import { airDb, decorrelator, ears, spread, SPEED_OF_SOUND } from "./binaural";
 import { audioCtx, masterBus } from "./context";
 
 /** Raytraced sound, in WebAudio.
@@ -22,16 +23,23 @@ import { audioCtx, masterBus } from "./context";
  * you — and it fades as you walk away. Sounds in the corridors, and your
  * own, ring in the space you're in.
  *
- * A sound in the world plays on a voice from a fixed pool: its input runs
- * through a lowpass (how clearly it gets through — acoustics.hearing — and
- * the air it crossed), a gain for distance, a head-shadow filter (behind you
- * is duller) and an equal-power pan, and sends to the room's tail. It is
- * placed where it SEEMS to be: straight at it in plain sight, else toward
- * the opening it came through, as far away as it travelled. Every frame the
- * voices glide toward where they should be — the apparent position swings
- * round you on an arc rather than jumping, the muffling eases in and out in
- * octaves — so nothing zips or pops as you walk. A lasting sound (a torch,
- * a rift) is re-traced as you move (`Emitter.place`).
+ * A sound in the world plays on a voice from a fixed pool, and reaches
+ * you the way sound does (binaural.ts): late by its distance at the speed
+ * of sound (so moving sounds bend in pitch — Doppler, never faster than
+ * things really move), muffled by how clearly it gets through
+ * (acoustics.hearing), its treble thinned by the air it crossed, quieter
+ * with distance, duller from behind — and then at each ear as a head hears
+ * it: the far ear a fraction of a millisecond later, its treble in the
+ * head's shadow. A sound has a size: a rift or a blast close by comes from
+ * all round you (through a decorrelator), a point once it's far. It sends
+ * to the rooms' tails. It is placed where it SEEMS to be: straight at it in
+ * plain sight, else toward the opening it came through, as far away as it
+ * travelled. Every frame the voices glide toward where they should be —
+ * the apparent position swings round you on an arc rather than jumping, the
+ * muffling eases in and out in octaves — so nothing zips or pops as you
+ * walk. A lasting sound (a torch, a rift) is re-traced as you move
+ * (`Emitter.place`). On speakers (`setHeadphones(false)`) the ears' cues
+ * fall back to an equal-power pan.
  *
  * The mix is set in one place (LEVELS below): the room's answer for a sound
  * is about as loud wherever in the room the sound is (a diffuse field),
@@ -62,8 +70,15 @@ const SELF_SEND = 0.4;
  * between, it moves in octaves. */
 const MUFFLED_HZ = 320;
 const CLEAR_HZ = 20000;
-/** How far the pan swings at a sound dead to one side (1 = only that ear). */
-const PAN_WIDTH = 0.8;
+/** The longest a sound may take to arrive (s): 86 m at the speed of sound. */
+const MAX_TRAVEL = 0.25;
+/** The fastest its travel time may change (s per s): sounds bend in pitch
+ * by at most 4% — as fast as anything in the dungeon really moves past you
+ * (a running wizard, 8 m/s, is 2.4%). A sound whose way round changes jumps
+ * no faster, so it never warbles. */
+const MAX_DOPPLER = 0.04;
+/** How far apart your feet sound (an equal-power pan, each side). */
+const FEET = 0.2;
 /** Voices at once: torches and rifts, footsteps, spells, the room's voices. */
 const VOICES = 24;
 /** Reverb tails at once: the one where you stand, and rooms ringing. */
@@ -92,6 +107,13 @@ const L = {
   at: -1,
   t: -1,
 };
+
+/** Headphones: the ears' full cues; speakers: a pan (binaural.ts). */
+let headphones = true;
+
+export function setHeadphones(on: boolean): void {
+  headphones = on;
+}
 
 /** The room (zone) you're in, or -1; and each room's own acoustics. */
 let hereZone = -1;
@@ -128,11 +150,25 @@ export function listenerAt(): { x: number; y: number; z: number } {
 
 // ── Buses ────────────────────────────────────────────────────────────────────
 
+/** One ear's path: its delay round the head, its shadow, its level. */
+interface Ear {
+  delay: DelayNode;
+  shelf: BiquadFilterNode;
+  gain: GainNode;
+}
+
 interface Voice {
+  /** The time the sound takes to get here. */
+  travel: DelayNode;
   occ: BiquadFilterNode;
+  air: BiquadFilterNode;
   dry: GainNode;
-  shadow: BiquadFilterNode;
-  pan: StereoPannerNode;
+  /** Duller from behind. */
+  back: BiquadFilterNode;
+  earL: Ear;
+  earR: Ear;
+  /** Into the decorrelator: how much of it comes from all round. */
+  wide: GainNode;
   /** Into each tail. */
   sends: GainNode[];
   /** The room the source is in (-1: a corridor, or no rooms). */
@@ -157,6 +193,13 @@ interface Voice {
   clarity: number;
   cClarity: number;
   blocked: boolean;
+  /** How big the sound is (radius, m). */
+  size: number;
+  /** The travel time it's at now (s). */
+  late: number;
+  /** The last value written to each parameter (unchanged ones are skipped:
+   * an AudioParam left alone stops being automated, and costs nothing). */
+  last: Float64Array;
 }
 
 /** Whose ringing a tail is: the space where you stand, or free. (Rooms
@@ -200,9 +243,13 @@ interface Buses {
   ctx: AudioContext;
   /** [0] the local tail (where you stand); the rest, rooms. */
   tails: Tail[];
-  /** Sounds from where you stand: dry, and into the tail you're in. */
+  /** Sounds from where you stand: dry, and into the tail you're in — and
+   * your feet, a little to each side. */
   selfIn: GainNode;
+  selfFeet: [GainNode, GainNode];
   selfSends: GainNode[];
+  /** Into the decorrelator (sounds you're inside of). */
+  wideIn: GainNode;
   /** The ambient air bed (wind, cavern hiss): level and lean by the space. */
   air: GainNode;
   airPan: StereoPannerNode;
@@ -269,41 +316,93 @@ function buses(): Buses | null {
   const tails: Tail[] = [];
   for (let i = 0; i < TAILS; i++) tails.push(makeTail(ctx, master, i === 0));
   const selfIn = ctx.createGain();
+  const selfHub = ctx.createGain();
   selfIn.connect(master);
+  selfIn.connect(selfHub);
+  const selfFeet = ([-FEET, FEET] as const).map((side) => {
+    const g = ctx.createGain();
+    const p = ctx.createStereoPanner();
+    p.pan.value = side;
+    g.connect(p).connect(master);
+    g.connect(selfHub);
+    return g;
+  }) as [GainNode, GainNode];
   const selfSends = tails.map((tail, i) => {
     const g = ctx.createGain();
     g.gain.value = i === 0 ? SELF_SEND : 0;
-    selfIn.connect(g).connect(tail.input);
+    selfHub.connect(g).connect(tail.input);
     return g;
   });
+  const wideIn = ctx.createGain();
+  const deco = ctx.createConvolver();
+  deco.normalize = false;
+  const [dl, dr] = decorrelator(ctx.sampleRate);
+  const decoBuf = ctx.createBuffer(2, dl.length, ctx.sampleRate);
+  decoBuf.copyToChannel(dl, 0);
+  decoBuf.copyToChannel(dr, 1);
+  deco.buffer = decoBuf;
+  wideIn.connect(deco).connect(master);
   const air = ctx.createGain();
   const airPan = ctx.createStereoPanner();
   air.connect(airPan).connect(master);
+  // Filters' settings change at most once a 128-sample block (computing
+  // biquad coefficients every sample is what costs).
+  const blockRate = (p: AudioParam) => {
+    try {
+      p.automationRate = "k-rate";
+    } catch {
+      // (Older browsers: every sample, as before.)
+    }
+  };
+  const biquad = (type: BiquadFilterType, freq: number) => {
+    const f = ctx.createBiquadFilter();
+    f.type = type;
+    f.frequency.value = freq;
+    f.Q.value = -3;
+    blockRate(f.frequency);
+    blockRate(f.gain);
+    return f;
+  };
   const voices: Voice[] = [];
   for (let i = 0; i < VOICES; i++) {
-    const occ = ctx.createBiquadFilter();
-    occ.type = "lowpass";
-    occ.Q.value = -3;
-    occ.frequency.value = CLEAR_HZ;
+    const travel = ctx.createDelay(MAX_TRAVEL + 0.01);
+    const occ = biquad("lowpass", CLEAR_HZ);
+    const air = biquad("highshelf", 4000);
     const dry = ctx.createGain();
     dry.gain.value = 0;
-    const shadow = ctx.createBiquadFilter();
-    shadow.type = "lowpass";
-    shadow.Q.value = -3;
-    shadow.frequency.value = CLEAR_HZ;
-    const pan = ctx.createStereoPanner();
-    occ.connect(dry).connect(shadow).connect(pan).connect(master);
+    const back = biquad("highshelf", 4500);
+    const merge = ctx.createChannelMerger(2);
+    const ear = (ch: number): Ear => {
+      // (Its delay moves every sample: stepping it a block at a time
+      // roughens a moving sound's tone.)
+      const delay = ctx.createDelay(0.002);
+      const shelf = biquad("highshelf", 1250);
+      const gain = ctx.createGain();
+      back.connect(delay).connect(shelf).connect(gain).connect(merge, 0, ch);
+      return { delay, shelf, gain };
+    };
+    travel.connect(occ).connect(air).connect(dry).connect(back);
+    const earL = ear(0);
+    const earR = ear(1);
+    merge.connect(master);
+    const wide = ctx.createGain();
+    wide.gain.value = 0;
+    back.connect(wide).connect(wideIn);
     const sends = tails.map((tail) => {
       const g = ctx.createGain();
       g.gain.value = 0;
-      occ.connect(g).connect(tail.input);
+      air.connect(g).connect(tail.input);
       return g;
     });
     voices.push({
+      travel,
       occ,
+      air,
       dry,
-      shadow,
-      pan,
+      back,
+      earL,
+      earR,
+      wide,
       sends,
       zone: -1,
       tap: null,
@@ -321,15 +420,21 @@ function buses(): Buses | null {
       clarity: 1,
       cClarity: 1,
       blocked: false,
+      size: 0,
+      late: 0,
+      last: new Float64Array(PARAMS).fill(NaN),
     });
   }
-  B = { ctx, tails, selfIn, selfSends, air, airPan, voices, spent: [] };
+  B = { ctx, tails, selfIn, selfFeet, selfSends, wideIn, air, airPan, voices, spent: [] };
   return B;
 }
 
-/** Sounds from where you stand (your steps, your spells). */
-export function selfOut(): AudioNode | null {
-  return buses()?.selfIn ?? masterBus();
+/** Sounds from where you stand (your steps, your spells); `foot` −1/1 puts
+ * a step under your left or right foot. */
+export function selfOut(foot = 0): AudioNode | null {
+  const b = buses();
+  if (!b) return masterBus();
+  return foot < 0 ? b.selfFeet[0] : foot > 0 ? b.selfFeet[1] : b.selfIn;
 }
 
 /** The ambient air bed's way out (startAmbient's wind): fuller in big
@@ -520,41 +625,84 @@ function trace(b: Buses, v: Voice): void {
 function mix(v: Voice) {
   const dx = v.cx - L.x;
   const dz = v.cz - L.z;
+  const dy = v.sy - L.y;
   const flat = Math.hypot(dx, dz);
-  const dist = Math.hypot(flat, v.sy - L.y);
+  const dist = Math.hypot(flat, dy);
   const c = v.cClarity;
   // Distance, and what bending round corners costs; through rock, a thud.
-  // (√2: an equal-power pan puts a centred sound at −3 dB a side; a sound
-  // in front of you is as loud as one of your own.)
-  let gain = (v.level * REF_DISTANCE * Math.SQRT2) / Math.max(REF_DISTANCE, dist);
+  let gain = (v.level * REF_DISTANCE) / Math.max(REF_DISTANCE, dist);
   gain *= lerp(0.45, 1, c) * (v.blocked ? 0.6 : 1);
   // The room's answer: much the same anywhere in this room; a sound halls
   // away rings in ITS hall, and less of that gets here.
   const send = v.level * lerp(0.4, 1, c) * (v.blocked ? 0.5 : 1) / (1 + Math.max(0, dist - 12) / 18);
-  // Muffle in octaves; the air takes a little top off far sounds.
-  const cutoff = Math.min(MUFFLED_HZ * Math.pow(CLEAR_HZ / MUFFLED_HZ, c), CLEAR_HZ * Math.exp(-dist / 40));
-  // Direction from your head: pan by the side it's on (less when it's on
-  // top of you), duller from behind.
-  const near = Math.min(1, flat / 1.2);
-  const ux = flat > 1e-4 ? dx / flat : 0;
-  const uz = flat > 1e-4 ? dz / flat : 0;
-  const side = (ux * L.rightX + uz * L.rightZ) * near;
-  const behind = Math.max(0, -(ux * L.fx + uz * L.fz)) * near;
-  return { gain, send, cutoff, pan: side * PAN_WIDTH, shadow: CLEAR_HZ * (1 - 0.68 * behind) };
+  // Muffle in octaves.
+  const cutoff = MUFFLED_HZ * Math.pow(CLEAR_HZ / MUFFLED_HZ, c);
+  // At the ears: the head's cues for where it is (fading to the middle as
+  // it comes on top of you), and how much of it is all round you.
+  const e = ears(dx * L.rightX + dz * L.rightZ, dy, dx * L.fx + dz * L.fz, headphones, Math.min(1, flat / 1.2));
+  const w = spread(v.size, dist);
+  return {
+    dist,
+    gain,
+    send,
+    cutoff,
+    air: airDb(dist),
+    ears: e,
+    point: Math.cos((w * Math.PI) / 2),
+    wide: Math.sin((w * Math.PI) / 2),
+    travel: Math.min(MAX_TRAVEL, dist / SPEED_OF_SOUND),
+  };
 }
+
+/** Parameters a voice writes, by slot in `Voice.last`. */
+const enum P {
+  Occ,
+  Air,
+  Dry,
+  Back,
+  DelayL,
+  DelayR,
+  ShelfL,
+  ShelfR,
+  CornerL,
+  CornerR,
+  GainL,
+  GainR,
+  Wide,
+  Travel,
+  Send0,
+}
+const PARAMS = P.Send0 + TAILS;
 
 function write(b: Buses, v: Voice, t: number, tc: number): void {
   const m = mix(v);
-  const set = (p: AudioParam, x: number) => {
+  // `eps`: a change smaller than this isn't worth an automation event.
+  const set = (slot: number, p: AudioParam, x: number, eps: number) => {
     if (tc <= 0) {
       p.cancelScheduledValues(t);
       p.setValueAtTime(x, t);
-    } else p.setTargetAtTime(x, t, tc);
+    } else if (!(Math.abs(x - v.last[slot]!) <= eps)) p.setTargetAtTime(x, t, tc);
+    else return;
+    v.last[slot] = x;
   };
-  set(v.occ.frequency, m.cutoff);
-  set(v.dry.gain, m.gain);
-  set(v.shadow.frequency, m.shadow);
-  set(v.pan.pan, m.pan);
+  const e = m.ears;
+  set(P.Occ, v.occ.frequency, m.cutoff, m.cutoff * 0.01);
+  set(P.Air, v.air.gain, m.air, 0.05);
+  set(P.Dry, v.dry.gain, m.gain, m.gain * 0.005 + 1e-5);
+  set(P.Back, v.back.gain, e.behind, 0.05);
+  set(P.DelayL, v.earL.delay.delayTime, e.delayL, 2e-6);
+  set(P.DelayR, v.earR.delay.delayTime, e.delayR, 2e-6);
+  set(P.ShelfL, v.earL.shelf.gain, e.shelfL, 0.05);
+  set(P.ShelfR, v.earR.shelf.gain, e.shelfR, 0.05);
+  set(P.CornerL, v.earL.shelf.frequency, e.cornerL, e.cornerL * 0.01);
+  set(P.CornerR, v.earR.shelf.frequency, e.cornerR, e.cornerR * 0.01);
+  set(P.GainL, v.earL.gain.gain, e.gainL * m.point, 0.002);
+  set(P.GainR, v.earR.gain.gain, e.gainR * m.point, 0.002);
+  set(P.Wide, v.wide.gain, m.wide, 0.002);
+  // The travel time: straight to it on a new sound, else as far as `glide`
+  // let it move this frame (a slope the delay line turns into Doppler).
+  if (tc <= 0) v.late = m.travel;
+  set(P.Travel, v.travel.delayTime, v.late, 1e-6);
   // Into the room it's in, in full (its tail carries the way to you), and a
   // little into the space you're in; or, in your space, into yours.
   const own = v.zone !== hereZone ? tailOf(b, v.zone) : null;
@@ -562,7 +710,7 @@ function write(b: Buses, v: Voice, t: number, tc: number): void {
   for (let i = 0; i < b.tails.length; i++) {
     const tail = b.tails[i]!;
     const x = tail === own ? v.level : tail === you ? m.send * (own ? LEAK : 1) : 0;
-    set(v.sends[i]!.gain, x * SEND);
+    set(P.Send0 + i, v.sends[i]!.gain, x * SEND, x * SEND * 0.005 + 1e-5);
     if (x > 0 && tail.room) tail.quietAt = t + tail.room.rt60 + 0.3;
   }
 }
@@ -583,6 +731,10 @@ function glide(v: Voice, dt: number): void {
   v.cx = L.x + Math.cos(a) * d;
   v.cz = L.z + Math.sin(a) * d;
   v.cClarity += (v.clarity - v.cClarity) * (1 - Math.exp(-dt * 6));
+  // The travel time follows the distance, no faster than MAX_DOPPLER.
+  const want = Math.min(MAX_TRAVEL, Math.hypot(d, v.sy - L.y) / SPEED_OF_SOUND);
+  const step = MAX_DOPPLER * dt;
+  v.late += Math.max(-step, Math.min(step, want - v.late));
 }
 
 /** Let go of the sound on `v` (fading over `fade` s) and free the voice. */
@@ -626,15 +778,17 @@ function claim(b: Buses, loud: number, lasting: boolean): Voice | null {
   return null;
 }
 
-function start(b: Buses, pos: At, level: number, lasting: boolean, life = 0): Voice | null {
+function start(b: Buses, pos: At, level: number, size: number, lasting: boolean, life = 0): Voice | null {
   const d = Math.hypot(pos[0] - L.x, pos[1] - L.y, pos[2] - L.z);
   const loud = (level * REF_DISTANCE) / Math.max(REF_DISTANCE, d);
   const v = claim(b, loud, lasting);
   if (!v) return null;
   const t = b.ctx.currentTime;
   v.mode = lasting ? 2 : 1;
-  v.until = t + life + 0.05;
+  // (A one-shot plays on until it has arrived and finished.)
+  v.until = t + life + 0.05 + Math.min(MAX_TRAVEL, d / SPEED_OF_SOUND);
   v.level = level;
+  v.size = size;
   v.loud = loud;
   v.sx = pos[0];
   v.sy = pos[1];
@@ -645,7 +799,7 @@ function start(b: Buses, pos: At, level: number, lasting: boolean, life = 0): Vo
   v.cClarity = v.clarity;
   write(b, v, t, 0);
   const tap = b.ctx.createGain();
-  tap.connect(v.occ);
+  tap.connect(v.travel);
   v.tap = tap;
   return v;
 }
@@ -755,20 +909,21 @@ export class Emitter {
 }
 
 /** A sound at `pos` that plays for `life` seconds and then lets go: connect
- * its voices to the returned node. Null when there's no audio yet, or every
+ * its voices to the returned node. `size`: its radius (m) — a blast or a
+ * rift is big, a footstep small. Null when there's no audio yet, or every
  * voice is busy with something louder. */
-export function oneShotAt(pos: At, life: number, level = 1): AudioNode | null {
+export function oneShotAt(pos: At, life: number, level = 1, size = 0.3): AudioNode | null {
   const b = buses();
   if (!b) return null;
-  return start(b, pos, level, false, life)?.tap ?? null;
+  return start(b, pos, level, size, false, life)?.tap ?? null;
 }
 
 /** A lasting sound at `pos` (a torch, a rift): re-trace it with `place()`,
  * end it with `release()`. Null when there's no audio yet. */
-export function emitterAt(pos: At, level = 1): Emitter | null {
+export function emitterAt(pos: At, level = 1, size = 0.3): Emitter | null {
   const b = buses();
   if (!b) return null;
-  const v = start(b, pos, level, true);
+  const v = start(b, pos, level, size, true);
   return v && v.tap ? new Emitter(b, v, v.tap) : null;
 }
 

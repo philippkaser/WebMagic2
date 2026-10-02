@@ -29,18 +29,21 @@ function routed(out: AudioNode | null, fn: () => void): void {
 }
 
 /** Play `fn`'s voices at `pos` in the world (for `life` seconds), or from
- * where you stand if no position is given. (When every voice is busy with
- * something louder, a placed sound is dropped — never moved into your head.) */
-export function atPoint(pos: At | undefined | null, life: number, fn: () => void, gain = 1): void {
+ * where you stand if no position is given. `size`: how big the sound is
+ * (radius, m) — up close a big one comes from all round you. (When every
+ * voice is busy with something louder, a placed sound is dropped — never
+ * moved into your head.) */
+export function atPoint(pos: At | undefined | null, life: number, fn: () => void, gain = 1, size = 0.3): void {
   if (!audioCtx()) return;
-  const out = pos ? oneShotAt(pos, life, gain) : selfOut();
+  const out = pos ? oneShotAt(pos, life, gain, size) : selfOut();
   if (out) routed(out, fn);
 }
 
-/** Play `fn`'s voices from where you stand: dry, and the room answering. */
-export function self(fn: () => void): void {
+/** Play `fn`'s voices from where you stand: dry, and the room answering —
+ * under your left (`foot` −1) or right (1) foot for a step. */
+export function self(fn: () => void, foot = 0): void {
   if (!audioCtx()) return;
-  routed(selfOut(), fn);
+  routed(selfOut(foot), fn);
 }
 
 const out = (): AudioNode | null => dest ?? masterBus();
@@ -158,11 +161,12 @@ export function playExplosion(radius: number, at?: At): void {
   atPoint(at, 0.7 + size * 0.2, () => {
     noise({ dur: 0.32 + size * 0.2, vol: 0.22 + size * 0.1, filterFreq: 1100, filterEnd: 90 });
     tone({ type: "sine", freq: 110, freqEnd: 34, dur: 0.34 + size * 0.15, vol: 0.28 });
-  }, 1.5);
+    // As big as the blast: inside it, it's all round you.
+  }, 1.5, radius * 0.6);
 }
 
 export function playHit(at?: At): void {
-  atPoint(at, 0.15, () => tone({ type: "triangle", freq: 320 + Math.random() * 80, freqEnd: 110, dur: 0.08, vol: 0.12 }));
+  atPoint(at, 0.15, () => tone({ type: "triangle", freq: 320 + Math.random() * 80, freqEnd: 110, dur: 0.08, vol: 0.12 }), 1, 0.25);
 }
 
 export function playHurt(): void {
@@ -192,7 +196,7 @@ export function playPortal(at?: At): void {
       tone({ type: "sine", freq: 380 + i * 140, freqEnd: 760 + i * 180, dur: 0.7, vol: 0.07, delay: i * 0.07 });
     }
     noise({ dur: 0.8, vol: 0.05, filterFreq: 900, filterEnd: 2600, type: "bandpass", q: 3 });
-  });
+  }, 1, 1.2);
 }
 
 export function playBossRoar(at?: At): void {
@@ -200,7 +204,7 @@ export function playBossRoar(at?: At): void {
     tone({ type: "sawtooth", freq: 90, freqEnd: 42, dur: 0.9, vol: 0.22 });
     tone({ type: "square", freq: 61, freqEnd: 30, dur: 1.1, vol: 0.14, delay: 0.05 });
     noise({ dur: 0.9, vol: 0.12, filterFreq: 500, filterEnd: 80 });
-  }, 1.8);
+  }, 1.8, 1.6);
 }
 
 // ── Encounters, lore & omens ─────────────────────────────────────────────────
@@ -241,7 +245,7 @@ export function playGraveRise(at?: At): void {
     tone({ type: "sine", freq: 196, freqEnd: 98, dur: 1.6, vol: 0.12 });
     tone({ type: "triangle", freq: 392, freqEnd: 370, dur: 1.4, vol: 0.04, delay: 0.2 });
     noise({ dur: 1.2, vol: 0.06, filterFreq: 300, filterEnd: 90 });
-  }, 1.4);
+  }, 1.4, 1);
 }
 
 /** A lore rune is read — breathy whisper over a faint chord. */
@@ -250,7 +254,7 @@ export function playWhisper(at?: At): void {
     noise({ dur: 1.4, vol: 0.07, filterFreq: 1400, filterEnd: 2600, type: "bandpass", q: 6 });
     tone({ type: "sine", freq: 523, dur: 1.2, vol: 0.03, delay: 0.1 });
     tone({ type: "sine", freq: 659, dur: 1.2, vol: 0.025, delay: 0.25 });
-  }, 1.3);
+  }, 1.3, 0.5);
 }
 
 /** The floor's omen announces itself on arrival. */

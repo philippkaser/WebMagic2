@@ -147,13 +147,15 @@ function Tenets() {
   );
 }
 
-/** Your name, the way in, and the two settings. */
+/** Your name, the way in, and the settings. */
 function TheWayIn() {
   const startGame = useGame((s) => s.startGame);
   const shadows = useGame((s) => s.shadows);
   const toggleShadows = useGame((s) => s.toggleShadows);
   const reflections = useGame((s) => s.reflections);
   const toggleReflections = useGame((s) => s.toggleReflections);
+  const headphones = useGame((s) => s.headphones);
+  const toggleHeadphones = useGame((s) => s.toggleHeadphones);
   const deepest = useGame((s) => s.deepest);
   const [editing, setEditing] = useState(false);
   const toggle = (label: string, on: boolean) => [
@@ -180,7 +182,7 @@ function TheWayIn() {
           px={tp(STEP.text)}
           width={0.15 * U}
           color={ink.parchmentDim}
-          position={[-0.085 * U, -0.25 * U, 0]}
+          position={[-0.165 * U, -0.25 * U, 0]}
           delay={0.1}
         />
         <RuneButton
@@ -190,8 +192,19 @@ function TheWayIn() {
           px={tp(STEP.text)}
           width={0.15 * U}
           color={ink.parchmentDim}
-          position={[0.085 * U, -0.25 * U, 0]}
+          position={[0, -0.25 * U, 0]}
           delay={0.15}
+        />
+        {/* Sound for headphones (the ears' own cues) or speakers (a pan). */}
+        <RuneButton
+          label={toggle("Headphones", headphones)}
+          variant="ghost"
+          onPress={toggleHeadphones}
+          px={tp(STEP.text)}
+          width={0.15 * U}
+          color={ink.parchmentDim}
+          position={[0.165 * U, -0.25 * U, 0]}
+          delay={0.2}
         />
       </Delayed>
       {deepest > 0 && (

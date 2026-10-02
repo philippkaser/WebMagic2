@@ -16,7 +16,15 @@
 //   imp-room      impulses: yours, one 5 m off, one at a torch 11 m off
 //   imp-corridor  impulses: yours in the corridor, one back in the hall
 //   imp-dry       a bare impulse on the master bus (the reference)
-// With none named, renders them all.
+//   orbit         noise circling your head at 3 m (direction cues)
+//   distance      clicks ahead at 1, 2, 4, 8, 16 m (distance cues)
+//   flyby         a 440 Hz tone passing at 8 m/s (Doppler)
+//   size          a rift-sized noise at 8, 4, 2, 1 m (a point far, all round close)
+//   leave-tone    a tone in the hall as you walk out (no warble round the door)
+//   spin          a tone ahead while you whip round (no clicks as the ears swing)
+//   stress        every voice busy (how hard the audio thread works)
+// With none named, renders them all. Add ":speakers" to a scene's name to
+// render it for speakers rather than headphones (e.g. orbit:speakers).
 //
 // Env: AUDIO_LAB_URL (default http://localhost:3000/scripts/audio-lab/index.html),
 // AUDIO_LAB_OUT (default ./audio-lab-output), CHROMIUM_PATH (optional).
@@ -25,7 +33,7 @@ import { chromium } from "playwright-core";
 
 const URL = process.env.AUDIO_LAB_URL ?? "http://localhost:3000/scripts/audio-lab/index.html";
 const OUT = process.env.AUDIO_LAB_OUT ?? "audio-lab-output";
-const ALL = ["walk", "torch-walk", "leave-steady", "leave-torches", "steps-room", "imp-room", "imp-corridor", "imp-dry"];
+const ALL = ["walk", "torch-walk", "leave-steady", "leave-torches", "steps-room", "imp-room", "imp-corridor", "imp-dry", "orbit", "distance", "flyby", "size", "leave-tone", "spin", "stress"];
 const scenes = process.argv.slice(2).length ? process.argv.slice(2) : ALL;
 mkdirSync(OUT, { recursive: true });
 
@@ -39,8 +47,13 @@ for (const s of scenes) {
   await page.waitForFunction(() => !!window.__lab, null, { timeout: 60000 });
   const t0 = Date.now();
   const b64 = await page.evaluate((s) => window.__lab.render(s), s);
-  writeFileSync(`${OUT}/${s}.wav`, Buffer.from(b64, "base64"));
-  console.log(`${OUT}/${s}.wav (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+  const wavBytes = Buffer.from(b64, "base64");
+  writeFileSync(`${OUT}/${s.replace(":", "-")}.wav`, wavBytes);
+  // Rendering offline as fast as it can: the share of real time it took is
+  // roughly how busy the audio thread would be playing it live.
+  const secs = (wavBytes.length - 44) / 8 / 48000;
+  const took = (Date.now() - t0) / 1000;
+  console.log(`${OUT}/${s.replace(":", "-")}.wav (${took.toFixed(1)}s for ${secs.toFixed(1)}s of audio: ${((took / secs) * 100).toFixed(0)}% of real time)`);
   await page.close();
 }
 await browser.close();

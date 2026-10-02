@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { playHurt, playPickup, playWeighing } from "../audio/sound";
+import { setHeadphones } from "../audio/spatial";
 import { DUNGEON, PLAYER, PVP } from "../core/config";
 import { gameEvents } from "../core/events";
 import { Rng } from "../core/rng";
@@ -99,6 +100,10 @@ export interface GameState {
    * low-res scene render per frame). Off by default — the painted floors
    * carry their own wet glints — and persisted. */
   reflections: boolean;
+  /** Sound for headphones (each ear its own cues: the timing round the
+   * head, its shadow — sounds outside your head, all round you) or for
+   * speakers (a pan). Headphones by default; persisted. */
+  headphones: boolean;
   /** Display name shown to floor-mates. */
   playerName: string;
 
@@ -149,11 +154,13 @@ export interface GameState {
   setPrompt(prompt: string | null, at?: [number, number, number] | null): void;
   toggleShadows(): void;
   toggleReflections(): void;
+  toggleHeadphones(): void;
   setPlayerName(name: string): void;
 }
 
 const SHADOWS_KEY = "webmagic.shadows.v1";
 const REFLECTIONS_KEY = "webmagic.reflections.v1";
+const HEADPHONES_KEY = "webmagic.headphones.v1";
 const NAME_KEY = "webmagic.name.v1";
 
 function loadShadowSetting(): boolean {
@@ -161,6 +168,14 @@ function loadShadowSetting(): boolean {
     return localStorage.getItem(SHADOWS_KEY) === "1";
   } catch {
     return false;
+  }
+}
+
+function loadHeadphoneSetting(): boolean {
+  try {
+    return localStorage.getItem(HEADPHONES_KEY) !== "0";
+  } catch {
+    return true;
   }
 }
 
@@ -221,6 +236,7 @@ export const useGame = create<GameState>((set, get) => ({
   lastDeath: null,
   shadows: loadShadowSetting(),
   reflections: loadReflectionSetting(),
+  headphones: loadHeadphoneSetting(),
   playerName: loadPlayerName(),
 
   startGame: () => set({ phase: "village" }),
@@ -594,6 +610,18 @@ export const useGame = create<GameState>((set, get) => ({
     gameEvents.emit("message", `Shadows ${shadows ? "on" : "off"}`);
   },
 
+  toggleHeadphones: () => {
+    const headphones = !get().headphones;
+    set({ headphones });
+    setHeadphones(headphones);
+    try {
+      localStorage.setItem(HEADPHONES_KEY, headphones ? "1" : "0");
+    } catch {
+      // Setting is session-only without storage.
+    }
+    gameEvents.emit("message", `Sound for ${headphones ? "headphones" : "speakers"}`);
+  },
+
   toggleReflections: () => {
     const reflections = !get().reflections;
     set({ reflections });
@@ -763,6 +791,9 @@ netBus.on("assigned", (a) => {
   if (state.floorSeed === a.seed && state.instanceId === a.instanceId) return;
   useGame.setState({ floor: a.floor, floorSeed: a.seed, instanceId: a.instanceId });
 });
+
+// The ears start as the player left them.
+setHeadphones(useGame.getState().headphones);
 
 // Dev-only hook for debugging and end-to-end scripts.
 if (typeof window !== "undefined" && import.meta.env?.DEV) {

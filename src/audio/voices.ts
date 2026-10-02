@@ -25,10 +25,11 @@ export function setGround(fn: (x: number, z: number) => Ground): void {
   groundFn = fn;
 }
 
-/** One footfall on `ground` — yours (from where you stand) or someone's
- * `at` their feet. `loud` 0…1+ (a landing is louder). */
-export function playFootstep(ground: Ground, loud = 1, at?: At): void {
-  atPoint(at, 0.3, () => {
+/** One footfall on `ground` — yours (from where you stand, under your
+ * left `foot` −1 or right 1) or someone's `at` their feet. `loud` 0…1+ (a
+ * landing is louder). */
+export function playFootstep(ground: Ground, loud = 1, at?: At, foot = 0): void {
+  const step = () => {
     const v = 0.9 + Math.random() * 0.2;
     if (ground === "grass") {
       noise({ dur: 0.09, vol: 0.03 * loud * v, filterFreq: jitter(1300), filterEnd: 500 });
@@ -51,7 +52,9 @@ export function playFootstep(ground: Ground, loud = 1, at?: At): void {
     if (ground === "wet") noise({ dur: 0.15, vol: 0.035 * loud * v, filterFreq: jitter(2800), filterEnd: 1200, type: "bandpass", q: 0.9, delay: 0.01 });
     if (ground === "crystal") tone({ type: "sine", freq: [2093, 2637, 3136][Math.floor(Math.random() * 3)]!, dur: 0.2, vol: 0.012 * loud });
     if (ground === "iron") tone({ type: "triangle", freq: jitter(520, 0.05), freqEnd: 500, dur: 0.14, vol: 0.012 * loud });
-  });
+  };
+  if (at) atPoint(at, 0.3, step, 1, 0.15);
+  else self(step, foot);
 }
 
 // ── The creatures ───────────────────────────────────────────────────────────
@@ -64,6 +67,9 @@ export const isEnemyVoice = (k: string): k is EnemyVoice => VOICES.has(k);
 
 /** Metres an enemy walks between footfalls (0: it doesn't walk). */
 export const ENEMY_STRIDE: Record<EnemyVoice, number> = { slime: 1.1, wisp: 0, shadow: 0.9, sentry: 0, boss: 2.2 };
+
+/** How big each kind sounds (radius, m). */
+const ENEMY_SIZE: Record<EnemyVoice, number> = { slime: 0.5, wisp: 0.25, shadow: 0.7, sentry: 0.4, boss: 1.6 };
 
 /** It has noticed you. */
 export function playEnemyWake(kind: EnemyVoice, at: At): void {
@@ -88,7 +94,7 @@ export function playEnemyWake(kind: EnemyVoice, at: At): void {
       case "boss":
         break; // it roars (playBossRoar)
     }
-  }, 1.3);
+  }, 1.3, ENEMY_SIZE[kind]);
 }
 
 /** A footfall (or a slither). */
@@ -103,7 +109,7 @@ export function playEnemyStep(kind: EnemyVoice, at: At): void {
       tone({ type: "sine", freq: jitter(58), freqEnd: 32, dur: 0.28, vol: 0.22 });
       noise({ dur: 0.2, vol: 0.09, filterFreq: 320, filterEnd: 90 });
     }
-  }, kind === "boss" ? 1.6 : 1);
+  }, kind === "boss" ? 1.6 : 1, ENEMY_SIZE[kind]);
 }
 
 /** It falls. */
@@ -128,7 +134,7 @@ export function playEnemyDeath(kind: EnemyVoice, at: At): void {
       case "boss":
         break; // it roars as it falls (playBossRoar)
     }
-  }, 1.3);
+  }, 1.3, ENEMY_SIZE[kind]);
 }
 
 // ── Lasting sounds: torches, rifts ─────────────────────────────────────────
@@ -206,7 +212,7 @@ function crackleBuffer(ctx: AudioContext): AudioBuffer {
 export function startTorch(at: At, level = 1): Loop | null {
   const ctx = audioCtx();
   if (!ctx) return null;
-  const e = emitterAt(at, level);
+  const e = emitterAt(at, level, 0.25);
   if (!e) return null;
   const src = ctx.createBufferSource();
   src.buffer = crackleBuffer(ctx);
@@ -233,7 +239,8 @@ export function startRiftHum(at: At, pitch = 98, level = 1): Loop | null {
   const ctx = audioCtx();
   const nb = noiseBuf();
   if (!ctx || !nb) return null;
-  const e = emitterAt(at, level);
+  // A rift is big: across a hall it's a point, beside it it's all round you.
+  const e = emitterAt(at, level, 1.2);
   if (!e) return null;
   const t = ctx.currentTime;
   const out = ctx.createGain();
@@ -289,6 +296,10 @@ export function startRiftHum(at: At, pitch = 98, level = 1): Loop | null {
 
 export type RoomVoice = "drip" | "chime" | "ember" | "groan" | "settle" | "skitter" | "cricket" | "owl";
 
+/** How big each sounds (radius, m): a drip is a point, the dungeon's groan
+ * is the stone itself. */
+const ROOM_VOICE_SIZE: Record<RoomVoice, number> = { drip: 0.05, chime: 0.15, ember: 0.1, groan: 6, settle: 2, skitter: 0.4, cricket: 0.05, owl: 0.3 };
+
 /** A small sound the place makes at `at`. */
 export function playRoomVoice(v: RoomVoice, at: At): void {
   atPoint(at, v === "groan" || v === "chime" ? 2.4 : v === "owl" ? 1.4 : 0.6, () => {
@@ -328,7 +339,7 @@ export function playRoomVoice(v: RoomVoice, at: At): void {
         tone({ type: "sine", freq: 300, freqEnd: 270, dur: 0.55, vol: 0.035, delay: 0.5, attack: 0.08 });
         break;
     }
-  });
+  }, 1, ROOM_VOICE_SIZE[v]);
 }
 
 /** Your own landing: a thump scaled by how hard. */

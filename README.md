@@ -69,7 +69,8 @@ bun run audio-lab            # or name scenes: bun run audio-lab walk imp-room
 | O (or F4) | Toggle shadows (quality option, off by default) |
 
 Reflections (floor mirrors, on by default) and shadows can also be toggled on
-the title screen's left tablet.
+the title screen's left tablet, as can Headphones (on: binaural 3D sound; off:
+a plain pan for speakers).
 
 The current build id (`b<n> · <sha>`) is always shown in the bottom-right
 corner — check it against the latest commit when testing.
@@ -125,11 +126,16 @@ corner — check it against the latest commit when testing.
   second, a corridor answers short, the village green is nearly dry under
   the sky — and each room rings on its own, so a hall you walk out of
   keeps ringing behind you through the doorway. Every sound is placed
-  where it is: a monster round a corner is
-  heard muffled from the doorway it's coming through, more clearly through
-  a wide arch than a crack, and torches, rifts, footsteps — yours, your
-  floor-mates', the monsters' — and the dungeon's own drips, groans and
-  chimes all sound where they are.
+  where it is, and reaches you as sound does: each ear hears it at its own
+  moment and through the head's shadow (binaural — best on headphones; a
+  title-screen toggle switches to speakers), a far blast lands after its
+  flash, things moving past bend in pitch, the air dulls what's far, and a
+  rift or a blast you're inside of is all round you rather than a point.
+  A monster round a corner is heard muffled from the doorway it's coming
+  through, more clearly through a wide arch than a crack, and torches,
+  rifts, footsteps — yours, under each foot, your floor-mates', the
+  monsters' — and the dungeon's own drips, groans and chimes all sound
+  where they are.
 - **The UI lives in the world**: menus are tablets built from worn stones,
   messages burn into small slabs of slate as runes that settle into
   letters, the map (M) is a miniature of the village or the explored floor

@@ -496,12 +496,31 @@ UI blip, heard through a small raytraced acoustics model:
   down a corridor). So stepping out of a hall changes nothing at first —
   inside, your room's tail is that same tail, unpanned — and the hall
   fades behind you as you walk away.
-- **Voices** (`spatial.ts`): a fixed pool of 24, each input → lowpass
-  (the clarity, in octaves from 320 Hz to 20 kHz, and air absorption) →
-  gain (inverse distance from 2 m, less for clarity) → head-shadow lowpass
-  (duller from behind) → equal-power pan; and sends to the tails (above):
-  the room's answer is much the same level wherever the sound is in it (a
-  diffuse field). Every frame each sounding voice
+- **Voices** (`spatial.ts`): a fixed pool of 24, each one sound reaching
+  you the way sound does: input → **travel delay** (its distance at
+  343 m/s — a far blast lands after its flash; the delay's slope as things
+  move is real **Doppler**, its rate capped at 4% so a sound whose way
+  round changes can't warble) → lowpass (the clarity, in octaves from
+  320 Hz to 20 kHz) → **air** (a treble shelf, −0.3 dB a metre beyond 2 m)
+  → gain (inverse distance from 2 m, less for clarity) → **behind** shelf
+  (−10 dB of treble straight behind: torso and pinna) → then **each ear**
+  (`binaural.ts`, a spherical head after Brown & Duda): its own delay
+  round the head (Woodworth's ITD, up to 0.66 ms — measured 0.75 ms at
+  low frequencies, as a real head's), its own head-shadow treble shelf
+  (+6 dB facing the sound down to −20 dB in the shadow) and a little
+  broadband level (±1.5 dB) → a channel merger. A sound has a **size**
+  (radius: a footstep 0.15 m, a torch 0.25, a rift 1.2, a blast 0.6 of
+  its radius, the dungeon's groan 6): by its angular size a share of it
+  goes through a shared stereo **decorrelator** (velvet noise, 20 ms,
+  different in each ear) instead — a point far off, all round you up
+  close or inside it. On speakers (the title tablet's Headphones toggle,
+  persisted) the ears' cues become an equal-power pan; the behind shelf
+  stays. Your own steps fall under your left and right foot (±0.2 pan).
+  Biquad parameters run at block rate and unchanged values aren't
+  rewritten (an AudioParam left alone stops being automated), so the
+  whole graph costs about what the plain pan did. Sends go to the tails
+  (above): the room's answer is much the same level wherever the sound
+  is in it (a diffuse field). Every frame each sounding voice
   glides toward its target — the apparent position swings round the
   listener on an arc (bearing and distance, never through your head), the
   clarity eases — and the audio clock, not timers, frees one-shots. When
@@ -538,7 +557,19 @@ server) renders scripted scenes on a generated floor through the real
 audio code into an `OfflineAudioContext` (`context.adoptOfflineContext`),
 stepping the scene every 1/60 s with `suspend()`, and writes WAVs — to
 listen to, or to measure: the impulse scenes give direct-to-reverb
-balance, decay times and comb ripple.
+balance, decay times and comb ripple; the spatial suite gives what the
+ears get besides loudness — `orbit` (ITD and ILD by frequency round the
+head, front/back tilt), `distance` (arrival time, level, D/R, air, width
+at 1–16 m), `flyby` (Doppler against theory), `size`, `spin` (a mouse
+flick: no clicks), `leave-tone` (no warble round a doorway) and `stress`
+(every voice busy: the share of real time it takes to render).
+
+Measured (headphones, the hall): ITD 0 → 0.75 ms at the side; ILD
+4.5 dB in the lows, 16 dB in the treble; behind 4.5 dB duller than in
+front; arrival 4.5 → 48 ms from 1 to 16 m, treble tilt +4.7 → +0.4 dB,
+D/R +12 → −3 dB, early IACC 0.88 → 0.69; a rift's IACC 0.75 at 4 m, 0.29
+at 1 m; Doppler ±39 cents for 8 m/s (theory ±41); distortion under a
+moving tone −65 dB; the stress scene at 26% of real time.
 
 ## Portal journeys (`transition/`)
 
