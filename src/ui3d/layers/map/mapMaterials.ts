@@ -7,11 +7,8 @@ import { AdditiveBlending, Color, ShaderMaterial } from "three";
  * Tiles and walls are instanced; each instance carries `aBorn`, the uiNow
  * second it appears (the reveal ripples out from where the caster stood),
  * and tiles `aBright` (paths glow brighter). Each grows in (tiles unfold,
- * walls rise) over a quarter second with a white-hot flash. Folding runs
- * the other way: from `uFoldAt`, the light drains back toward the caster —
- * the farthest pieces first (`aDist`, metres from there, of
- * `uDistMax`) — tiles flaring once as they go out, walls sinking into the
- * floor. */
+ * walls rise) over a quarter second with a white-hot flash. Folding is the
+ * map's whole transform (FloorMap): `uAlpha` carries its light. */
 
 const LIGHT = {
   transparent: true,
@@ -27,29 +24,13 @@ const DECAL = { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits
 
 const COMMON = /* glsl */ `
 uniform float uTime;
-uniform float uFoldAt;
-uniform float uDistMax;
 attribute float aBorn;
-attribute float aDist;
 varying float vAge;
-varying float vFold;
-// 0 standing … 1 gone: the edge goes first, the middle last.
-float foldOf() {
-  return clamp((uTime - uFoldAt - (uDistMax - aDist) * FOLD_PER_M) / 0.3, 0.0, 1.0);
-}
 `;
-
-/** Seconds per metre (of the miniature's world) the fold takes to travel
- * in from the edge. */
-export const FOLD_PER_M = 0.02;
-const DEFINES = { FOLD_PER_M: FOLD_PER_M.toFixed(4) };
-
-const foldUniforms = () => ({ uFoldAt: { value: 1e9 }, uDistMax: { value: 0 } });
 
 export function makeTileMaterial(color: string): ShaderMaterial {
   return new ShaderMaterial({
-    uniforms: { uColor: { value: new Color(color) }, uTime: { value: 0 }, uAlpha: { value: 1 }, ...foldUniforms() },
-    defines: DEFINES,
+    uniforms: { uColor: { value: new Color(color) }, uTime: { value: 0 }, uAlpha: { value: 1 } },
     vertexShader: /* glsl */ `
 ${COMMON}
 attribute float aBright;
@@ -60,7 +41,6 @@ void main() {
   vUv = uv;
   vBright = aBright;
   vAge = uTime - aBorn;
-  vFold = foldOf();
   vec3 p = position * clamp(vAge / 0.25, 0.0, 1.0);
   vec4 w = modelMatrix * instanceMatrix * vec4(p, 1.0);
   vWorld = w.xyz;
@@ -72,12 +52,11 @@ uniform vec3 uColor;
 uniform float uTime;
 uniform float uAlpha;
 varying float vAge;
-varying float vFold;
 varying vec2 vUv;
 varying vec3 vWorld;
 varying float vBright;
 void main() {
-  if (vAge < 0.0 || vFold >= 1.0) discard;
+  if (vAge < 0.0) discard;
   vec2 e = min(vUv, 1.0 - vUv);
   float edge = min(e.x, e.y);
   float b = (0.06 + (edge < 0.12 ? 0.08 : 0.0)) * vBright;
@@ -85,8 +64,6 @@ void main() {
   float sweep = abs(fract(vWorld.x * 0.5 + vWorld.z * 0.25 - uTime * 0.3) - 0.5);
   b += sweep < 0.025 ? 0.05 : 0.0;
   b += vAge < 0.3 ? (0.3 - vAge) * 1.2 : 0.0;
-  // Going out: one flare, then dark.
-  b = vFold > 0.0 ? (b + 0.12 * (1.0 - vFold)) * (1.0 - vFold) : b;
   gl_FragColor = vec4(uColor * b * uAlpha, 1.0);
 }
 `,
@@ -98,8 +75,7 @@ void main() {
 
 export function makeWallMaterial(color: string): ShaderMaterial {
   return new ShaderMaterial({
-    uniforms: { uColor: { value: new Color(color) }, uTime: { value: 0 }, uAlpha: { value: 1 }, ...foldUniforms() },
-    defines: DEFINES,
+    uniforms: { uColor: { value: new Color(color) }, uTime: { value: 0 }, uAlpha: { value: 1 } },
     vertexShader: /* glsl */ `
 ${COMMON}
 varying vec3 vLocal;
@@ -107,10 +83,8 @@ varying vec3 vNormal2;
 varying vec3 vWorld;
 void main() {
   vAge = uTime - aBorn;
-  vFold = foldOf();
-  // Rise from the floor of the miniature (the box spans y 0..1) — and sink
-  // back into it on the fold.
-  float grow = clamp(vAge / 0.3, 0.0, 1.0) * (1.0 - vFold);
+  // Rise from the floor of the miniature (the box spans y 0..1).
+  float grow = clamp(vAge / 0.3, 0.0, 1.0);
   vec3 p = vec3(position.x, position.y * grow, position.z);
   vLocal = position;
   vNormal2 = normal;
@@ -124,12 +98,11 @@ uniform vec3 uColor;
 uniform float uTime;
 uniform float uAlpha;
 varying float vAge;
-varying float vFold;
 varying vec3 vLocal;
 varying vec3 vNormal2;
 varying vec3 vWorld;
 void main() {
-  if (vAge < 0.0 || vFold >= 1.0) discard;
+  if (vAge < 0.0) discard;
   // Lit like a hologram: tops bright, sides dim, edges traced.
   float top = vNormal2.y > 0.5 ? 1.0 : 0.0;
   float b = top > 0.5 ? 0.14 : 0.05;
@@ -141,7 +114,6 @@ void main() {
   // Scanlines climbing the walls.
   b += fract(vWorld.y * 40.0 - uTime * 1.5) < 0.3 ? 0.03 : 0.0;
   b += vAge < 0.35 ? (0.35 - vAge) * 1.2 : 0.0;
-  b *= 1.0 - vFold * 0.6;
   gl_FragColor = vec4(uColor * b * uAlpha, 1.0);
 }
 `,
@@ -245,7 +217,7 @@ uniform float uAlpha;
 varying vec2 vUv;
 void main() {
   float r = length(vUv - 0.5) * 2.0;
-  float a = (1.0 - smoothstep(0.55, 1.0, r)) * 0.6 * uAlpha;
+  float a = (1.0 - smoothstep(0.55, 1.0, r)) * 0.3 * uAlpha;
   if (a <= 0.003) discard;
   gl_FragColor = vec4(0.0, 0.0, 0.01, a);
 }

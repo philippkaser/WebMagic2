@@ -573,9 +573,12 @@ and the way onward, gold for home, blood for danger.
   of light (instanced, each born on its own beat), and markers kindle —
   every wizard on the floor (`net/players` poses), the way onward, the way
   home, the treasure and the Warden once seen. It carries no words (the
-  floor's name and mood are the HUD's, top right). Folding runs the reveal
-  backwards: the light drains in from the edge toward the caster, walls
-  sinking into the floor, and the rune circle un-draws. What it draws
+  floor's name and mood are the HUD's, top right). It lights the room
+  round it (a pooled dynamic light, fx/DynamicLights). Folding gathers the
+  whole map into its middle in one motion — shrinking with a slow swirl,
+  brightening as it condenses — and it goes out in a spark and a flash of
+  its light. Casts on stage (`useStagedCasts`) notice a fold in the same
+  render, so a folding map is never remounted mid-fold. What it draws
   is pure data (`mapModel.ts`: `dungeonModel`, `villageModel`, `castSpot`,
   tested). Casts are per wizard (`mapStore.ts`): yours is sent to your
   floor-mates as a `peerMessage` carrying your explored tiles

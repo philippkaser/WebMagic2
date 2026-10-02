@@ -100,7 +100,8 @@ The emotional loop we are chasing:
   of the floor you've explored, laid in light on the ground a step ahead of
   you inside a rune circle — walk around it, or over it; anyone on the floor
   sees it, every wizard marked on it, and casting it shares what you've
-  explored; folded, its light drains back in and its circle un-draws; your
+  explored; it lights the room round it, and folded, it gathers into its
+  middle and goes out in a spark; your
   health and mana are two glass orbs whose facets catch the torch one pixel
   at a time, their liquid sloshing as you run and turn; the HUD is sparse
   (the tithe stones top left, the floor top right, the orbs, the belt) and
@@ -353,7 +354,7 @@ hundred-floor dungeon that bores down into the earth.** The village is the
 safe hub — quiet, night-time, a few huts with warm windows, a central portal
 ringed with torches, under a big pixel sky: the Milky Way with dark lanes of
 dust through it, thousands of single-pixel stars twinkling in hard steps, a
-big cratered moon — a real sphere, its craters and seas picked out by a
+small, simple moon — a real sphere in a few tones, its seas and big craters picked out by a
 sun over your shoulder, its dark side faint with earthshine — long banks
 of cloud silvered on top, and now and then a shooting star. Through the portal is the descent.
 

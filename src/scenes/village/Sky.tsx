@@ -39,8 +39,8 @@ export const HORIZON = "#1a2244";
 /** The galaxy's plane (its band is the great circle around this axis). */
 const MILKY_N = new Vector3(0.62, 0.35, 0.7).normalize();
 
-/** The moon's radius at its 100 m distance (about 12° across). */
-const MOON_R = 10.5;
+/** The moon's radius at its 100 m distance (about 8° across). */
+const MOON_R = 7;
 /** Where its sun shines from: over your shoulder and to the upper right as
  * seen from the village — a gibbous moon, the terminator on its lower left. */
 const MOON_SUN = (() => {
@@ -246,15 +246,11 @@ function starField(count: number): { geometry: BufferGeometry; material: ShaderM
 }
 
 /** The moon: a real sphere, drawn at the world's own pixels — a clean round
- * edge, and a calm surface. Its relief is a field of big craters and a few
- * small ones (bowls with raised rims; the dark seas smooth them out) whose
- * normals the sun picks out (no finer than a pixel — finer only speckles),
- * so the craters along the terminator throw
- * long shadows and their far rims catch the light; the lit face is flat
- * and bright the way the real moon is (Lommel–Seeliger, not Lambert); the
- * surface is broken into tiny facets, each tilted at random, so single
- * pixels glint; one young crater sprays bright rays; the dark side keeps a
- * faint blue earthshine. Tones step in a few dithered levels. */
+ * edge and a simple face in a few tones, like the rest of the world: broad
+ * dark seas, a handful of big craters (bowls with raised rims, their relief
+ * picked out by a sun over your shoulder so the ones along the terminator
+ * read), a flat bright lit face (Lommel–Seeliger, not Lambert) and a faint
+ * earthshine on the dark side. */
 function moonMaterial(sun: Vector3): ShaderMaterial {
   return new ShaderMaterial({
     uniforms: { uSun: { value: sun } },
@@ -292,7 +288,7 @@ function moonMaterial(sun: Vector3): ShaderMaterial {
             for (int x = -1; x <= 1; x++) {
               vec3 cell = c + vec3(x, y, z);
               vec3 r = hash33(cell);
-              if (r.z < 0.35) continue; // not every cell has one
+              if (r.z < 0.6) continue; // most cells have none
               vec3 center = cell + 0.2 + r * 0.6;
               float rad = 0.22 + 0.25 * r.y;
               float d = length(q - center) / rad;
@@ -301,10 +297,9 @@ function moonMaterial(sun: Vector3): ShaderMaterial {
             }
         return h;
       }
-      float maria(vec3 p) { return smoothstep(0.5, 0.62, fbm(p * 1.6 + 3.1)); }
+      float maria(vec3 p) { return smoothstep(0.48, 0.58, fbm(p * 1.2 + 3.1)); }
       float height(vec3 p) {
-        float soft = 1.0 - 0.75 * maria(p);
-        return craters(p, 2.6, 0.06) + craters(p, 5.0, 0.02) * soft;
+        return craters(p, 2.4, 0.05) * (1.0 - 0.6 * maria(p));
       }
       void main() {
         vec3 n = normalize(vObj);
@@ -316,11 +311,7 @@ function moonMaterial(sun: Vector3): ShaderMaterial {
         float h0 = height(n);
         float h1 = height(normalize(n + t1 * e));
         float h2 = height(normalize(n + t2 * e));
-        vec3 nb = normalize(n - t1 * (h1 - h0) / e * 0.8 - t2 * (h2 - h0) / e * 0.8);
-        // Tiny facets, each tilted at random: single pixels catch the sun.
-        vec3 cell = floor(n * 40.0);
-        vec3 jit = hash33(cell) - 0.5;
-        vec3 nf = normalize(nb + jit * 0.04);
+        vec3 nf = normalize(n - t1 * (h1 - h0) / e * 0.7 - t2 * (h2 - h0) / e * 0.7);
         vec3 V = normalize(vView);
         vec3 S = normalize(vSun);
         float ci = max(dot(nf, S), 0.0);
@@ -331,23 +322,13 @@ function moonMaterial(sun: Vector3): ShaderMaterial {
         // Only the sunward half is lit: the relief shades within it, never
         // speckles the night side.
         lit *= smoothstep(-0.03, 0.1, dot(n, S));
-        // Albedo: bright highlands, dark seas, bright crater rims.
-        float m = maria(n);
-        float alb = mix(0.82, 0.5, m) + clamp(h0 * 2.0, -0.08, 0.08);
-        // One young crater with bright rays.
-        vec3 ty = normalize(vec3(-0.25, -0.55, 0.8));
-        float dt = acos(clamp(dot(n, ty), -1.0, 1.0));
-        float ang = atan(dot(n - ty, cross(ty, vec3(0.0, 1.0, 0.0))), dot(n - ty, vec3(0.0, 1.0, 0.0)));
-        float rays = step(0.86, noise3(vec3(ang * 7.0, 0.0, 1.0))) * smoothstep(0.9, 0.08, dt);
-        alb += rays * 0.1 + (dt < 0.05 ? 0.12 : 0.0);
+        // Albedo: bright highlands, dark seas, darker crater floors.
+        float alb = mix(0.84, 0.52, maria(n)) + clamp(h0 * 1.5, -0.08, 0.05);
         float k = alb * lit;
-        // A facet turned just so: a glint.
-        vec3 hv = normalize(S + V);
-        k += pow(max(dot(nf, hv), 0.0), 400.0) * 0.3 * step(0.25, dot(n, S));
         // A few dithered tones of brightness, like the rest of the world —
         // stepped as one value, so shadows stay grey rather than speckling
         // into colour — over a faint earthshine on the dark side.
-        float lv = 6.0;
+        float lv = 4.0;
         float kq = floor(clamp(k, 0.0, 1.2) * lv + bayer4(gl_FragCoord.xy) * 0.5) / lv;
         vec3 col = vec3(0.035, 0.04, 0.055) + vec3(1.0, 0.97, 0.9) * kq;
         gl_FragColor = vec4(col * 0.78, 1.0);

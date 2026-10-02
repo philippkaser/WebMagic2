@@ -15,13 +15,14 @@ import {
 } from "three";
 import { playHoloCast, playHoloCollapse } from "../../../audio/uiSounds";
 import { playerPosition } from "../../../game/player-state";
+import { addLightSource, removeLightSource, type DynamicLightSource } from "../../../fx/DynamicLights";
 import { estimatePeer, peerIds } from "../../../net/players";
 import { useGame } from "../../../state/gameStore";
 import { exploredVersion, getCurrentLayout, isExplored, markExplored, useCurrentLayout } from "../../../world/currentFloor";
 import type { FloorLayout } from "../../../world/types";
 import { uiNow } from "../../clock";
 import { ink } from "../../theme";
-import { FOLD_PER_M, makeMarkerMaterial, makeShadeMaterial, makeSigilMaterial, makeTileMaterial, makeWallMaterial } from "./mapMaterials";
+import { makeMarkerMaterial, makeShadeMaterial, makeSigilMaterial, makeTileMaterial, makeWallMaterial } from "./mapMaterials";
 import { dungeonModel, villageModel, type MapMarker, type MapModel } from "./mapModel";
 import { SELF, useMapCast, type MapCast } from "./mapStore";
 import { useStagedCasts } from "./useStagedCasts";
@@ -36,13 +37,24 @@ import { useStagedCasts } from "./useStagedCasts";
  * floor (you in cream, the others in green), the way onward, the way home,
  * the treasure and the Warden once seen. It is true to the world (north is
  * north), so walk around it to read it from any side; walk over it if you
- * like. Walk far off and it lets go; M again folds it — the light drains
- * back in from the edge toward the caster, the walls sinking into the
- * floor, and the rune circle un-draws itself. No words hang over it: the
- * floor's name and mood are the HUD's (top right). */
+ * like. It casts its own light on the floor and walls round it. Walk far
+ * off and it lets go; M again folds it — the whole map gathers into its
+ * middle with a slow swirl, brightening as it condenses, and goes out in a
+ * spark. No words hang over it: the floor's name and mood are the HUD's
+ * (top right). */
 
 /** Walk this far from a map and it lets go, m. */
 const LEAVE_DIST = 14;
+/** Seconds the fold takes to gather into the middle, and its spark after. */
+const FOLD = 0.6;
+const SPARK = 0.25;
+/** The map's light (fx/DynamicLights intensity). */
+const LIGHT = 12;
+
+const smooth = (a: number, b: number, x: number) => {
+  const k = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return k * k * (3 - 2 * k);
+};
 const COLOR = ink.arcane;
 /** Floor-mates on the map (more never share a floor). */
 const PEER_SLOTS = 3;
@@ -94,7 +106,6 @@ const UP = new Vector3(0, 1, 0);
 function instanced(geometry: BoxGeometry | PlaneGeometry, material: ShaderMaterial, capacity: number, bright: boolean): InstancedMesh {
   const m = new InstancedMesh(geometry.clone(), material, Math.max(1, capacity));
   m.geometry.setAttribute("aBorn", new InstancedBufferAttribute(new Float32Array(Math.max(1, capacity)).fill(1e9), 1));
-  m.geometry.setAttribute("aDist", new InstancedBufferAttribute(new Float32Array(Math.max(1, capacity)), 1));
   if (bright) m.geometry.setAttribute("aBright", new InstancedBufferAttribute(new Float32Array(Math.max(1, capacity)).fill(1), 1));
   m.count = 0;
   m.frustumCulled = false;
@@ -115,6 +126,7 @@ function FloorMap({ cast, layout, shown, onGone }: { cast: MapCast; layout: Floo
       shade: makeShadeMaterial(),
       you: makeMarkerMaterial("#fff4dc"),
       peer: makeMarkerMaterial(ink.ally),
+      spark: makeMarkerMaterial("#e8fff8"),
     }),
     [],
   );
@@ -136,6 +148,18 @@ function FloorMap({ cast, layout, shown, onGone }: { cast: MapCast; layout: Floo
   const setMarkers = (m: MapMarker[]) =>
     setMarkersState((prev) => (prev.length === m.length && prev.every((x, i) => x.key === m[i]!.key) ? prev : m));
   const inner = useRef<Group>(null);
+  const foldGroup = useRef<Group>(null);
+  const sparkRef = useRef<Mesh>(null);
+  // The map's light on the world round it (fx/DynamicLights).
+  const lightRef = useRef<DynamicLightSource | null>(null);
+  useEffect(() => {
+    const src = addLightSource({ position: [cast.at[0], cast.at[1] + 1, cast.at[2]], color: COLOR, intensity: 0, distance: 9, priority: 2 });
+    lightRef.current = src;
+    return () => {
+      removeLightSource(src);
+      lightRef.current = null;
+    };
+  }, [cast.at]);
   const you = useRef<Mesh>(null);
   const peerRefs = useRef<(Mesh | null)[]>([]);
   const markerRefs = useRef<(Mesh | null)[]>([]);
@@ -146,8 +170,6 @@ function FloorMap({ cast, layout, shown, onGone }: { cast: MapCast; layout: Floo
     built: -10,
     castAt: uiNow(),
     goneAt: -1,
-    /** Farthest piece from where the reveal began, m (the fold starts there). */
-    distMax: 0,
     frame: { s: 0, cx: 0, cz: 0 },
     shown: { s: 0, cx: 0, cz: 0 },
   });
@@ -194,31 +216,54 @@ function FloorMap({ cast, layout, shown, onGone }: { cast: MapCast; layout: Floo
       ig.position.set(-sf.cx * scale, 0.012, -sf.cz * scale);
     }
 
-    // Folding: the light drains in from the edge (the shaders, per piece),
-    // the markers go out first, and once the middle is dark the rune circle
-    // un-draws itself the way it was drawn.
-    const foldTime = st.distMax * FOLD_PER_M + 0.3;
+    // Folding: the whole map gathers into its middle in one smooth motion —
+    // shrinking with a slow swirl, its light brightening as it condenses —
+    // and goes out in a spark.
     const folding = st.goneAt > 0;
-    const fold = folding ? Math.min(1, (now - st.goneAt) / foldTime) : 0;
-    const unwind = folding ? Math.min(1, Math.max(0, (now - st.goneAt - foldTime * 0.6) / 0.5)) : 0;
-    if (folding && unwind >= 1) {
+    const fp = folding ? Math.min(1, (now - st.goneAt) / FOLD) : 0;
+    if (folding && now - st.goneAt > FOLD + SPARK) {
       onGone();
       return;
     }
-    const alpha = folding ? Math.max(0, 1 - (now - st.goneAt) / 0.15) : 1;
+    const gather = fp * fp * (3 - 2 * fp); // smoothstep
+    const fg = foldGroup.current;
+    if (fg) {
+      fg.scale.setScalar(Math.max(1e-3, 1 - 0.97 * gather));
+      fg.rotation.y = gather * gather * 1.4;
+    }
+    // Brighter as it condenses, then out.
+    const glow = (1 + 0.8 * gather) * (1 - smooth(0.7, 1, fp));
+    const alpha = folding ? glow : 1;
     for (const m of [mats.tile, mats.wall]) {
       m.uniforms.uTime!.value = now;
-      m.uniforms.uFoldAt!.value = folding ? st.goneAt : 1e9;
-      m.uniforms.uDistMax!.value = st.distMax;
+      m.uniforms.uAlpha!.value = alpha;
     }
-    mats.sigil.uniforms.uIgnite!.value = Math.min(1, t / 0.45) * (1 - unwind);
-    mats.sigil.uniforms.uAlpha!.value = 1;
+    mats.sigil.uniforms.uIgnite!.value = Math.min(1, t / 0.45);
+    mats.sigil.uniforms.uAlpha!.value = alpha;
     mats.sigil.uniforms.uTime!.value = now;
-    mats.shade.uniforms.uAlpha!.value = Math.min(1, t / 0.4) * (1 - fold);
+    mats.shade.uniforms.uAlpha!.value = Math.min(1, t / 0.4) * (1 - gather);
+    // The spark it goes out in.
+    const since = folding ? now - st.goneAt : -1;
+    const spark = since < FOLD * 0.75 ? 0 : Math.sin(Math.min(1, (since - FOLD * 0.75) / (FOLD * 0.25 + SPARK)) * Math.PI);
+    const sp = sparkRef.current;
+    if (sp) {
+      sp.visible = spark > 0.01;
+      sp.scale.set(0.09 * spark, 0.14 * spark, 0.09 * spark);
+      sp.position.y = 0.1 + 0.25 * gather;
+      sp.rotation.y = now * 6;
+    }
+    mats.spark.uniforms.uAlpha!.value = spark;
+    mats.spark.uniforms.uTime!.value = now;
+    // The map lights the floor and walls round it.
+    const light = lightRef.current;
+    if (light) {
+      const breathe = 1 + 0.08 * Math.sin(now * 2.3) + 0.04 * Math.sin(now * 5.1);
+      light.intensity = LIGHT * Math.min(1, t / 0.6) * breathe * (folding ? 1 - gather : 1) + spark * LIGHT * 1.6;
+    }
 
     // Markers keep their size in metres whatever the map's scale.
     const inv = 1 / scale;
-    const appear = (delay: number) => Math.min(1, Math.max(0, (t - delay) / 0.2)) * alpha;
+    const appear = (delay: number) => Math.min(1, Math.max(0, (t - delay) / 0.2)) * (folding ? 1 - fp : 1);
     const wizard = (m: Mesh | null, x: number, z: number, phase: number) => {
       if (!m) return;
       m.position.set(x, (0.16 + Math.sin(now * 3 + phase) * 0.012) * inv, z);
@@ -260,31 +305,34 @@ function FloorMap({ cast, layout, shown, onGone }: { cast: MapCast; layout: Floo
   return (
     <group position={cast.at}>
       <mesh geometry={flatQuad} material={mats.shade} scale={[W * 1.35, 1, W * 1.35]} position={[0, 0.006, 0]} renderOrder={1} />
-      <mesh geometry={flatQuad} material={mats.sigil} scale={[W * 1.4, 1, W * 1.4]} position={[0, 0.009, 0]} renderOrder={2} />
-      <group ref={inner} scale={0.001}>
-        <primitive object={tiles} />
-        <primitive object={walls} />
-        {markers.map((mk, i) => (
-          <MarkerMesh
-            key={mk.key}
-            color={mk.color}
-            meshRef={(m) => {
-              markerRefs.current[i] = m;
-            }}
-          />
-        ))}
-        <mesh ref={you} geometry={diamond} material={mats.you} />
-        {Array.from({ length: PEER_SLOTS }, (_, i) => (
-          <mesh
-            key={i}
-            ref={(m) => {
-              peerRefs.current[i] = m;
-            }}
-            geometry={diamond}
-            material={mats.peer}
-            visible={false}
-          />
-        ))}
+      <mesh ref={sparkRef} geometry={diamond} material={mats.spark} visible={false} />
+      <group ref={foldGroup}>
+        <mesh geometry={flatQuad} material={mats.sigil} scale={[W * 1.4, 1, W * 1.4]} position={[0, 0.009, 0]} renderOrder={2} />
+        <group ref={inner} scale={0.001}>
+          <primitive object={tiles} />
+          <primitive object={walls} />
+          {markers.map((mk, i) => (
+            <MarkerMesh
+              key={mk.key}
+              color={mk.color}
+              meshRef={(m) => {
+                markerRefs.current[i] = m;
+              }}
+            />
+          ))}
+          <mesh ref={you} geometry={diamond} material={mats.you} />
+          {Array.from({ length: PEER_SLOTS }, (_, i) => (
+            <mesh
+              key={i}
+              ref={(m) => {
+                peerRefs.current[i] = m;
+              }}
+              geometry={diamond}
+              material={mats.peer}
+              visible={false}
+            />
+          ))}
+        </group>
       </group>
     </group>
   );
@@ -300,7 +348,7 @@ function MarkerMesh({ color, meshRef }: { color: string; meshRef: (m: Mesh | nul
  * on a ripple out from where the map was cast. */
 function fill(
   model: MapModel,
-  st: { born: Map<number, number>; distMax: number; frame: { s: number; cx: number; cz: number } },
+  st: { born: Map<number, number>; frame: { s: number; cx: number; cz: number } },
   tiles: InstancedMesh,
   walls: InstancedMesh,
   from: number,
@@ -309,14 +357,11 @@ function fill(
 ) {
   const b0 = model.bounds;
   const [ox, oz] = origin ?? (b0 ? [(b0.minX + b0.maxX) / 2, (b0.minZ + b0.maxZ) / 2] : [0, 0]);
-  const dist = (x: number, z: number) => Math.hypot(x - ox, z - oz);
-  const ripple = (x: number, z: number) => from + dist(x, z) * 0.012;
+  const ripple = (x: number, z: number) => from + Math.hypot(x - ox, z - oz) * 0.012;
   const tileBorn = tiles.geometry.getAttribute("aBorn") as InstancedBufferAttribute;
   const tileBright = tiles.geometry.getAttribute("aBright") as InstancedBufferAttribute;
-  const tileDist = tiles.geometry.getAttribute("aDist") as InstancedBufferAttribute;
   const wallBorn = walls.geometry.getAttribute("aBorn") as InstancedBufferAttribute;
-  const wallDist = walls.geometry.getAttribute("aDist") as InstancedBufferAttribute;
-  let far = 0;
+
   let i = 0;
   for (const p of model.floor) {
     if (i >= tiles.instanceMatrix.count) break;
@@ -326,9 +371,6 @@ function fill(
     tiles.setMatrixAt(i, tmpM);
     tileBorn.setX(i, born);
     tileBright.setX(i, p.bright);
-    const d = dist(p.x, p.z);
-    tileDist.setX(i, d);
-    far = Math.max(far, d);
     i++;
   }
   tiles.count = i;
@@ -340,9 +382,6 @@ function fill(
     tmpM.compose(tmpP.set(p.x, 0, p.z), tmpQ.setFromAxisAngle(UP, p.rot), tmpS.set(p.sx, p.h, p.sz));
     walls.setMatrixAt(w, tmpM);
     wallBorn.setX(w, born);
-    const d = dist(p.x, p.z);
-    wallDist.setX(w, d);
-    far = Math.max(far, d);
     w++;
   }
   walls.count = w;
@@ -350,10 +389,8 @@ function fill(
   walls.instanceMatrix.needsUpdate = true;
   tileBorn.needsUpdate = true;
   tileBright.needsUpdate = true;
-  tileDist.needsUpdate = true;
   wallBorn.needsUpdate = true;
-  wallDist.needsUpdate = true;
-  st.distMax = far;
+
   if (model.bounds) {
     const b = model.bounds;
     st.frame.s = width / Math.max(b.maxX - b.minX, b.maxZ - b.minZ);
