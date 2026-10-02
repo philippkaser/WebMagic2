@@ -5,7 +5,19 @@ import { GATE_TORCHES, LANE, LANTERNS, PLAZA_R } from "../scenes/village/layout"
 import type { BiomeId, FloorLayout } from "../world/types";
 import { gridFromLayout, openAt, villageGrid, type AcousticGrid } from "./acoustics";
 import { listenerAt, setAcousticGrid, updateListener, type At } from "./spatial";
-import { groundAt, playFootstep, playRoomVoice, setGround, startRiftHum, startTorch, type Ground, type Loop, type RoomVoice } from "./voices";
+import {
+  chooseLoops,
+  groundAt,
+  playFootstep,
+  playRoomVoice,
+  setGround,
+  startRiftHum,
+  startTorch,
+  type Ground,
+  type Loop,
+  type LoopSource,
+  type RoomVoice,
+} from "./voices";
 
 /** The scene's ears. Mounted once in the world canvas, it hands the level to
  * the acoustics (spatial.ts) and moves the listener with the camera every
@@ -49,38 +61,34 @@ const VOICE_Y: Record<RoomVoice, number> = {
   owl: 7,
 };
 
-interface Source {
-  key: string;
-  at: At;
-  /** How far off it's still worth sounding (m). */
-  reach: number;
+interface Source extends LoopSource {
   start(): Loop | null;
 }
 
 function sourcesFor(layout: FloorLayout | null): Source[] {
   const out: Source[] = [];
   if (layout) {
-    layout.torches.forEach((p, i) => out.push({ key: `t${i}`, at: p, reach: 20, start: () => startTorch(p) }));
+    layout.torches.forEach((p, i) => out.push({ key: `t${i}`, at: p, reach: 24, level: 1, start: () => startTorch(p) }));
     const exit: At = [layout.exit[0], layout.exit[1] + 1.4, layout.exit[2]];
     const leave: At = [layout.leave[0], layout.leave[1] + 1.4, layout.leave[2]];
-    out.push({ key: "exit", at: exit, reach: 36, start: () => startRiftHum(exit, 73.4) });
-    out.push({ key: "leave", at: leave, reach: 36, start: () => startRiftHum(leave, 98, 0.7) });
+    out.push({ key: "exit", at: exit, reach: 36, level: 1, start: () => startRiftHum(exit, 73.4) });
+    out.push({ key: "leave", at: leave, reach: 36, level: 0.7, start: () => startRiftHum(leave, 98, 0.7) });
   } else {
     GATE_TORCHES.forEach(([x, , z], i) => {
       const at: At = [x, 1.9, z];
-      out.push({ key: `g${i}`, at, reach: 20, start: () => startTorch(at) });
+      out.push({ key: `g${i}`, at, reach: 20, level: 1, start: () => startTorch(at) });
     });
     LANTERNS.forEach(([x, , z], i) => {
       const at: At = [x, 2.2, z];
-      out.push({ key: `l${i}`, at, reach: 12, start: () => startTorch(at, 0.35) });
+      out.push({ key: `l${i}`, at, reach: 12, level: 0.35, start: () => startTorch(at, 0.35) });
     });
     const gate: At = [0, 1.4, 0];
-    out.push({ key: "gate", at: gate, reach: 36, start: () => startRiftHum(gate, 73.4) });
+    out.push({ key: "gate", at: gate, reach: 36, level: 1, start: () => startRiftHum(gate, 73.4) });
   }
   return out;
 }
 
-/** Torches and rifts sounding at once, at most (the nearest win). */
+/** Torches and rifts sounding at once, at most (the loudest win). */
 const MAX_LOOPS = 5;
 /** Seconds between re-tracing the loops as you move (they glide between). */
 const LOOP_TICK = 0.2;
@@ -111,22 +119,19 @@ export function AudioWorld({ layout }: { layout: FloorLayout | null }) {
     updateListener(camera.position, camera.quaternion);
     const L = listenerAt();
 
-    // Torches and rifts: keep the nearest sounding, re-trace them as we move.
+    // Torches and rifts: keep the ones that reach you loudest sounding,
+    // re-trace them as we move.
     clock.current.loops -= dt;
     if (clock.current.loops <= 0) {
       clock.current.loops = LOOP_TICK;
-      const near = sources
-        .map((s) => ({ s, d: Math.hypot(s.at[0] - L.x, s.at[2] - L.z) }))
-        .filter(({ s, d }) => d < s.reach)
-        .sort((a, b) => a.d - b.d)
-        .slice(0, MAX_LOOPS);
-      const wanted = new Set(near.map(({ s }) => s.key));
+      const near = chooseLoops(sources, (key) => loops.current.has(key), MAX_LOOPS);
+      const wanted = new Set(near.map((s) => s.key));
       for (const [key, loop] of loops.current) {
         if (wanted.has(key)) continue;
         loop.stop();
         loops.current.delete(key);
       }
-      for (const { s } of near) {
+      for (const s of near) {
         const loop = loops.current.get(s.key);
         if (loop) loop.emitter.place(s.at);
         else {

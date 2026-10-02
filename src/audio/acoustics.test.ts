@@ -12,6 +12,8 @@ import {
   soundPath,
   traceRay,
   villageGrid,
+  zoneAt,
+  zoneHearing,
   type AcousticGrid,
 } from "./acoustics";
 
@@ -185,6 +187,59 @@ describe("acoustics", () => {
     const yard = grid(Array.from({ length: 20 }, () => ".".repeat(15) + "#####"), "open");
     const r = analyzeRoom(yard, 13.5, 10);
     expect(r.escape[0]).toBeLessThan(-0.1);
+  });
+
+  test("the dungeon's rooms are zones; its corridors are not", () => {
+    const layout = generateFloor(31, 4);
+    const g = gridFromLayout(layout);
+    const n = layout.size;
+    expect(g.zones!.cells.length).toBe(layout.rooms.length);
+    layout.rooms.forEach((r, z) => {
+      // The middle of every room is in it; its middle is where it's measured.
+      const [cx, cz] = g.zones!.centers[z]!;
+      expect(zoneAt(g, cx, cz)).toBe(z);
+      expect(g.zones!.cells[z]!.length).toBe(r.w * r.h);
+    });
+    // Some open tile is in no room: a corridor.
+    let corridor = false;
+    for (let k = 0; k < n * n && !corridor; k++) corridor = layout.tiles[k] === 1 && g.zones!.of[k] === -1;
+    expect(corridor).toBe(true);
+    expect(villageGrid().zones).toBeUndefined();
+    expect(zoneAt(villageGrid(), 0, 0)).toBe(-1);
+  });
+
+  test("a room's ringing reaches you through its doorway", () => {
+    // A hall (zone 0) with a corridor out of its east side that turns south.
+    const rows = [
+      "################",
+      "#......#########",
+      "#......#########",
+      "#..............#",
+      "#......#######.#",
+      "#......#######.#",
+      "########.......#",
+      "################",
+      ...Array(8).fill("################"),
+    ];
+    const g = grid(rows);
+    const of = new Int16Array(16 * 16).fill(-1);
+    const cells: number[] = [];
+    for (let z = 1; z <= 5; z++) for (let x = 1; x <= 6; x++) (of[z * 16 + x] = 0), cells.push(z * 16 + x);
+    g.zones = { of, cells: [Int32Array.from(cells)], centers: [[4, 3.5]] };
+    // Inside: all round you.
+    expect(zoneHearing(g, null, 3.5, 2.5, 0)).toEqual({ length: 0, apparent: [3.5, 2.5], clarity: 1, blocked: false });
+    // Down the straight corridor: from the doorway, in plain sight.
+    const near = zoneHearing(g, null, 11.5, 3.5, 0);
+    expect(near.blocked).toBe(false);
+    expect(near.clarity).toBe(1);
+    expect(near.length).toBeGreaterThan(4);
+    expect(near.length).toBeLessThan(6);
+    expect(near.apparent[0]).toBeLessThan(11.5);
+    // Round the bend: further, and less clearly.
+    const round = zoneHearing(g, null, 10.5, 6.5, 0);
+    expect(round.blocked).toBe(false);
+    expect(round.clarity).toBeLessThan(1);
+    expect(round.length).toBeGreaterThan(near.length);
   });
 
   test("the dungeon's grid is its tiles", () => {

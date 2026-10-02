@@ -123,7 +123,9 @@ corner — check it against the latest commit when testing.
 - **Raytraced sound**: rays bounce round the room around you a few times a
   second and its reverb is generated to match — a hall rings for about a
   second, a corridor answers short, the village green is nearly dry under
-  the sky. Every sound is placed where it is: a monster round a corner is
+  the sky — and each room rings on its own, so a hall you walk out of
+  keeps ringing behind you through the doorway. Every sound is placed
+  where it is: a monster round a corner is
   heard muffled from the doorway it's coming through, more clearly through
   a wide arch than a crack, and torches, rifts, footsteps — yours, your
   floor-mates', the monsters' — and the dungeon's own drips, groans and

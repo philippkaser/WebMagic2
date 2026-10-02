@@ -4,18 +4,17 @@
 // and hands back WAVs (see render.mjs). Served by vite as a page of its own.
 import { Quaternion, Vector3 } from "three";
 import { gridFromLayout } from "../../src/audio/acoustics";
-import { adoptOfflineContext, masterBus } from "../../src/audio/context";
+import { adoptOfflineContext, masterBus, noiseBuf } from "../../src/audio/context";
 import { playCast, playExplosion, startAmbient } from "../../src/audio/sound";
-import { oneShotAt, selfOut, setAcousticGrid, updateListener } from "../../src/audio/spatial";
-import { playEnemyStep, playFootstep, playRoomVoice, startTorch, type Loop } from "../../src/audio/voices";
+import { emitterAt, oneShotAt, selfOut, setAcousticGrid, updateListener, type Emitter } from "../../src/audio/spatial";
+import { chooseLoops, playEnemyStep, playFootstep, playRoomVoice, startTorch, type Loop } from "../../src/audio/voices";
 import { generateFloor } from "../../src/world/gen";
 import { buildScene, wav } from "./scene";
 
 const SR = 48000;
-/** As AudioWorld: the nearest torches sounding, re-traced a few times a second. */
+/** As AudioWorld: the torches that reach you loudest, re-traced a few times a second. */
 const MAX_LOOPS = 5;
 const LOOP_TICK = 0.2;
-const LOOP_REACH = 20;
 
 function impulse(ctx: BaseAudioContext, dst: AudioNode, at: number): void {
   const b = ctx.createBuffer(1, 2, SR);
@@ -43,18 +42,51 @@ async function render(name: string): Promise<string> {
   };
   if (scene.ambient) startAmbient("dungeon", { drone: 41, wind: 220, weight: 1 });
   const loops = new Map<number, Loop>();
+  const torches = layout.torches.map((at, i) => ({ key: String(i), at, reach: 24, level: 1 }));
   let nextLoopTick = 0;
+  let steady: Emitter | null = null;
+  let nextLog = 0;
   const fired = new Set<number>();
   const step = (t: number) => {
     pose(t);
-    if (scene.torches && t >= nextLoopTick) {
-      nextLoopTick = t + LOOP_TICK;
+    const tick = t >= nextLoopTick;
+    if (tick) nextLoopTick = t + LOOP_TICK;
+    if (scene.steady) {
+      if (!steady) {
+        steady = emitterAt(scene.steady);
+        if (steady) {
+          const src = ctx.createBufferSource();
+          src.buffer = noiseBuf();
+          src.loop = true;
+          const g = ctx.createGain();
+          g.gain.value = 0.1;
+          src.connect(g).connect(steady.input);
+          src.start();
+        }
+      } else if (tick) steady.place();
+    }
+    if (scene.log && t >= nextLog) {
+      nextLog = t + 0.25;
+      type Heard = {
+        room: { rt60: number; wet: number } | null;
+        here: number;
+        tails: { zone: number; level: number }[];
+        sounding: { at: number[]; zone: number; clarity: number; gain: number; lasting: boolean }[];
+      };
+      const a = (window as unknown as { __audio: () => Heard }).__audio();
       const p = scene.pose(t);
-      const near = layout.torches
-        .map((at, i) => ({ at, i, d: Math.hypot(at[0] - p.x, at[2] - p.z) }))
-        .filter((s) => s.d < LOOP_REACH)
-        .sort((a, b) => a.d - b.d)
-        .slice(0, MAX_LOOPS);
+      console.log(
+        `[lab] t=${t.toFixed(2)} at=(${p.x.toFixed(1)},${p.z.toFixed(1)}) rt=${a.room?.rt60.toFixed(2)} wet=${a.room?.wet.toFixed(2)} | ` +
+          a.sounding
+            .filter((v) => v.lasting)
+            .map((v) => `(${v.at[0]!.toFixed(0)},${v.at[1]!.toFixed(0)})z${v.zone} c=${v.clarity.toFixed(2)} g=${v.gain.toFixed(3)}`)
+            .join("  ") +
+          ` | here z${a.here} tails ` +
+          a.tails.map((x) => `z${x.zone}:${x.level.toFixed(3)}`).join(" "),
+      );
+    }
+    if (scene.torches && tick) {
+      const near = chooseLoops(torches, (key) => loops.has(Number(key)), MAX_LOOPS).map((s) => ({ i: Number(s.key), at: s.at }));
       const want = new Set(near.map((n) => n.i));
       for (const [i, l] of loops)
         if (!want.has(i)) {

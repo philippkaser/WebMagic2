@@ -1,16 +1,26 @@
 import type { Quaternion, Vector3 } from "three";
-import { analyzeRoom, hearing, impulseResponse, type AcousticGrid, type RoomAcoustics } from "./acoustics";
+import { analyzeRoom, hearing, impulseResponse, zoneAt, zoneHearing, type AcousticGrid, type RoomAcoustics } from "./acoustics";
 import { audioCtx, masterBus } from "./context";
 
 /** Raytraced sound, in WebAudio.
  *
  * The listener rides the camera. A few times a second, when it has moved,
- * the room around it is measured (acoustics.analyzeRoom — rays bouncing
- * through the level) and the room's reverb tail is generated to match and
+ * the space around it is measured (acoustics.analyzeRoom — rays bouncing
+ * through the level) and the local reverb tail is generated to match and
  * crossfaded in on one of two convolvers; how much of the room comes back
  * sets the tail's level. The ambient air bed follows the space too: fuller
  * in a big hall, thinner in a cell, leaning toward the open side under the
  * sky (the reference's "ambient bus").
+ *
+ * The dungeon's rooms ring on their own (as Wwise's rooms and portals do):
+ * a room with something sounding in it — or you in it — gets a tail of its
+ * own, measured at its middle. A sound rings in the room it's in, wherever
+ * you are; from outside, that room's ringing reaches you through the
+ * nearest way in (acoustics.zoneHearing): from the doorway's side, duller
+ * the further round the corners, fainter the further off. So stepping out
+ * of a hall changes nothing at first — the hall is still ringing behind
+ * you — and it fades as you walk away. Sounds in the corridors, and your
+ * own, ring in the space you're in.
  *
  * A sound in the world plays on a voice from a fixed pool: its input runs
  * through a lowpass (how clearly it gets through — acoustics.hearing — and
@@ -56,6 +66,11 @@ const CLEAR_HZ = 20000;
 const PAN_WIDTH = 0.8;
 /** Voices at once: torches and rifts, footsteps, spells, the room's voices. */
 const VOICES = 24;
+/** Reverb tails at once: the one where you stand, and rooms ringing. */
+const TAILS = 4;
+/** How much of a sound in another room rings in the space you're in too
+ * (what comes through the doorway sets your corridor answering). */
+const LEAK = 0.35;
 
 // ── State ───────────────────────────────────────────────────────────────────
 
@@ -78,9 +93,28 @@ const L = {
   t: -1,
 };
 
+/** The room (zone) you're in, or -1; and each room's own acoustics. */
+let hereZone = -1;
+const zoneRooms = new Map<number, RoomAcoustics>();
+
 export function setAcousticGrid(g: AcousticGrid | null): void {
   grid = g;
   roomDirty = true;
+  hereZone = -1;
+  zoneRooms.clear();
+  // The rooms of the last place no longer exist.
+  if (B) for (const tail of B.tails) if (tail.zone >= 0) tail.zone = FREE;
+}
+
+function zoneRoom(zone: number): RoomAcoustics | null {
+  const c = grid?.zones?.centers[zone];
+  if (!grid || !c) return null;
+  let r = zoneRooms.get(zone);
+  if (!r) {
+    r = analyzeRoom(grid, c[0], c[1]);
+    zoneRooms.set(zone, r);
+  }
+  return r;
 }
 
 export function currentRoom(): RoomAcoustics | null {
@@ -99,7 +133,10 @@ interface Voice {
   dry: GainNode;
   shadow: BiquadFilterNode;
   pan: StereoPannerNode;
-  send: GainNode;
+  /** Into each tail. */
+  sends: GainNode[];
+  /** The room the source is in (-1: a corridor, or no rooms). */
+  zone: number;
   /** The input of the sound playing now. */
   tap: GainNode | null;
   /** 0 idle, 1 a one-shot (until `until`), 2 a lasting sound. */
@@ -122,23 +159,50 @@ interface Voice {
   blocked: boolean;
 }
 
-interface Buses {
-  ctx: AudioContext;
-  /** Into the room: everything's send. */
-  verbIn: GainNode;
-  conv: [ConvolverNode, ConvolverNode];
-  convGain: [GainNode, GainNode];
-  active: 0 | 1;
+/** Whose ringing a tail is: the space where you stand, or free. (Rooms
+ * are their zone numbers, 0 and up.) */
+const LOCAL = -1;
+const FREE = -2;
+
+/** A reverb: one space's ringing, and the way it reaches you. */
+interface Tail {
+  /** Sends in here (through a highpass: no boom). */
+  input: GainNode;
+  /** The local tail crossfades between two as you walk; a room's has one. */
+  conv: ConvolverNode[];
+  convGain: GainNode[];
+  active: number;
   irKey: string;
   /** No new tail before this (audio time): the last crossfade is done. */
   swapReady: number;
   /** A new tail is waiting for that. */
   swapPending: boolean;
+  /** Its level: the space's wetness × how much of it reaches you. */
   ret: GainNode;
-  verbTone: BiquadFilterNode;
-  /** Sounds from where you stand: dry, and into the room. */
+  /** Its brightness, and the muffle of the way through to you. */
+  tone: BiquadFilterNode;
+  /** Toward the doorway it comes through. */
+  pan: StereoPannerNode;
+  zone: number;
+  room: RoomAcoustics | null;
+  /** How it reaches you (a room you're not in): the share that gets here,
+   * the muffle, and where it seems to come from (and how far). */
+  reach: number;
+  cutoff: number;
+  ax: number;
+  az: number;
+  dist: number;
+  /** It has rung out by then (audio time): free to be another room. */
+  quietAt: number;
+}
+
+interface Buses {
+  ctx: AudioContext;
+  /** [0] the local tail (where you stand); the rest, rooms. */
+  tails: Tail[];
+  /** Sounds from where you stand: dry, and into the tail you're in. */
   selfIn: GainNode;
-  selfSend: GainNode;
+  selfSends: GainNode[];
   /** The ambient air bed (wind, cavern hiss): level and lean by the space. */
   air: GainNode;
   airPan: StereoPannerNode;
@@ -149,39 +213,69 @@ interface Buses {
 
 let B: Buses | null = null;
 
+function makeTail(ctx: AudioContext, master: AudioNode, local: boolean): Tail {
+  const input = ctx.createGain();
+  const hp = ctx.createBiquadFilter();
+  hp.type = "highpass";
+  hp.frequency.value = 160;
+  hp.Q.value = -3;
+  input.connect(hp);
+  const ret = ctx.createGain();
+  ret.gain.value = 0;
+  const tone = ctx.createBiquadFilter();
+  tone.type = "lowpass";
+  tone.frequency.value = 7000;
+  tone.Q.value = -3;
+  const pan = ctx.createStereoPanner();
+  ret.connect(tone).connect(pan).connect(master);
+  const conv: ConvolverNode[] = [];
+  const convGain: GainNode[] = [];
+  for (let i = 0; i < (local ? 2 : 1); i++) {
+    const c = ctx.createConvolver();
+    c.normalize = false;
+    const g = ctx.createGain();
+    g.gain.value = local ? 0 : 1;
+    hp.connect(c).connect(g).connect(ret);
+    conv.push(c);
+    convGain.push(g);
+  }
+  return {
+    input,
+    conv,
+    convGain,
+    active: 0,
+    irKey: "",
+    swapReady: 0,
+    swapPending: false,
+    ret,
+    tone,
+    pan,
+    zone: local ? LOCAL : FREE,
+    room: null,
+    reach: 0,
+    cutoff: CLEAR_HZ,
+    ax: 0,
+    az: 0,
+    dist: 0,
+    quietAt: 0,
+  };
+}
+
 function buses(): Buses | null {
   if (B) return B;
   const ctx = audioCtx();
   const master = masterBus();
   if (!ctx || !master) return null;
-  // The room: a highpass keeps the tail out of the low end (no boom), two
-  // convolvers crossfade between rooms' tails, a lowpass darkens it by the
-  // room's brightness.
-  const verbIn = ctx.createGain();
-  const verbHp = ctx.createBiquadFilter();
-  verbHp.type = "highpass";
-  verbHp.frequency.value = 160;
-  verbHp.Q.value = -3;
-  verbIn.connect(verbHp);
-  const ret = ctx.createGain();
-  ret.gain.value = 0;
-  const verbTone = ctx.createBiquadFilter();
-  verbTone.type = "lowpass";
-  verbTone.frequency.value = 7000;
-  verbTone.Q.value = -3;
-  ret.connect(verbTone).connect(master);
-  const conv: [ConvolverNode, ConvolverNode] = [ctx.createConvolver(), ctx.createConvolver()];
-  const convGain: [GainNode, GainNode] = [ctx.createGain(), ctx.createGain()];
-  for (let i = 0; i < 2; i++) {
-    conv[i]!.normalize = false;
-    convGain[i]!.gain.value = 0;
-    verbHp.connect(conv[i]!).connect(convGain[i]!).connect(ret);
-  }
+  const tails: Tail[] = [];
+  for (let i = 0; i < TAILS; i++) tails.push(makeTail(ctx, master, i === 0));
   const selfIn = ctx.createGain();
-  const selfSend = ctx.createGain();
-  selfSend.gain.value = SELF_SEND;
   selfIn.connect(master);
-  selfIn.connect(selfSend).connect(verbIn);
+  const selfSends = tails.map((tail, i) => {
+    const g = ctx.createGain();
+    g.gain.value = i === 0 ? SELF_SEND : 0;
+    selfIn.connect(g).connect(tail.input);
+    return g;
+  });
   const air = ctx.createGain();
   const airPan = ctx.createStereoPanner();
   air.connect(airPan).connect(master);
@@ -198,16 +292,20 @@ function buses(): Buses | null {
     shadow.Q.value = -3;
     shadow.frequency.value = CLEAR_HZ;
     const pan = ctx.createStereoPanner();
-    const send = ctx.createGain();
-    send.gain.value = 0;
     occ.connect(dry).connect(shadow).connect(pan).connect(master);
-    occ.connect(send).connect(verbIn);
+    const sends = tails.map((tail) => {
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      occ.connect(g).connect(tail.input);
+      return g;
+    });
     voices.push({
       occ,
       dry,
       shadow,
       pan,
-      send,
+      sends,
+      zone: -1,
       tap: null,
       mode: 0,
       until: 0,
@@ -225,7 +323,7 @@ function buses(): Buses | null {
       blocked: false,
     });
   }
-  B = { ctx, verbIn, conv, convGain, active: 0, irKey: "", swapReady: 0, swapPending: false, ret, verbTone, selfIn, selfSend, air, airPan, voices, spent: [] };
+  B = { ctx, tails, selfIn, selfSends, air, airPan, voices, spent: [] };
   return B;
 }
 
@@ -263,7 +361,7 @@ function irFor(b: Buses, r: RoomAcoustics): { key: string; buffer: () => AudioBu
         buf = b.ctx.createBuffer(2, l.length, b.ctx.sampleRate);
         buf.copyToChannel(l, 0);
         buf.copyToChannel(rr, 1);
-        if (irCache.size >= 16) irCache.delete(irCache.keys().next().value!);
+        if (irCache.size >= 24) irCache.delete(irCache.keys().next().value!);
         irCache.set(key, buf);
       }
       return buf;
@@ -271,31 +369,126 @@ function irFor(b: Buses, r: RoomAcoustics): { key: string; buffer: () => AudioBu
   };
 }
 
+/** The space where you stand changed: retune the local tail, and the air. */
 function applyRoom(b: Buses, r: RoomAcoustics, t: number): void {
-  // The tail: a new one crossfades in on the idle convolver — only once the
-  // last crossfade has finished, so the one being replaced is silent.
+  // A new tail crossfades in on the idle convolver — only once the last
+  // crossfade has finished, so the one being replaced is silent.
+  const tail = b.tails[0]!;
   const ir = irFor(b, r);
-  b.swapPending = ir.key !== b.irKey && t < b.swapReady;
-  if (ir.key !== b.irKey && t >= b.swapReady) {
-    const next = (1 - b.active) as 0 | 1;
-    b.conv[next].buffer = ir.buffer();
-    for (const [i, to] of [[next, 1], [b.active, 0]] as const) {
-      const g = b.convGain[i].gain;
+  tail.room = r;
+  tail.swapPending = ir.key !== tail.irKey && t < tail.swapReady;
+  if (ir.key !== tail.irKey && t >= tail.swapReady) {
+    const next = 1 - tail.active;
+    tail.conv[next]!.buffer = ir.buffer();
+    for (const [i, to] of [[next, 1], [tail.active, 0]] as const) {
+      const g = tail.convGain[i]!.gain;
       g.cancelScheduledValues(t);
       g.setValueAtTime(g.value, t);
       g.linearRampToValueAtTime(to, t + TAIL_FADE);
     }
-    b.active = next;
-    b.irKey = ir.key;
-    b.swapReady = t + TAIL_FADE + 0.05;
+    tail.active = next;
+    tail.irKey = ir.key;
+    tail.swapReady = t + TAIL_FADE + 0.05;
   }
-  b.ret.gain.setTargetAtTime(r.wet * RETURN, t, 0.3);
-  b.verbTone.frequency.setTargetAtTime(2500 + 9000 * r.brightness, t, 0.3);
+  tail.ret.gain.setTargetAtTime(r.wet * RETURN, t, 0.3);
+  tail.tone.frequency.setTargetAtTime(2500 + 9000 * r.brightness, t, 0.3);
   // The air: fuller in a big space or under the sky, leaning to the open.
   const big = Math.min(1, Math.max(0, (r.size - 3) / 4.5));
   b.air.gain.setTargetAtTime(0.6 + 0.4 * Math.max(r.openness, big), t, 0.8);
   const lean = r.escape[0] * L.rightX + r.escape[1] * L.rightZ;
   b.airPan.pan.setTargetAtTime(Math.max(-0.6, Math.min(0.6, lean * 1.5)), t, 0.8);
+}
+
+// ── Rooms ringing ───────────────────────────────────────────────────────────
+
+function tailOf(b: Buses, zone: number): Tail | null {
+  if (zone < 0) return null;
+  for (const tail of b.tails) if (tail.zone === zone) return tail;
+  return null;
+}
+
+/** The tail of the space you're in: your room's, or the local one. */
+function yours(b: Buses): Tail {
+  return tailOf(b, hereZone) ?? b.tails[0]!;
+}
+
+/** Room `zone`'s tail — given one if a tail is free (never used, or rung out
+ * in a room nobody's in). Null when all are busy: the sound then rings in
+ * the space you're in, as a corridor's would. */
+function claimTail(b: Buses, zone: number, t: number): Tail | null {
+  if (zone < 0) return null;
+  const have = tailOf(b, zone);
+  if (have) return have;
+  const r = zoneRoom(zone);
+  if (!r) return null;
+  let pick: Tail | null = null;
+  for (const tail of b.tails) {
+    if (tail.zone === LOCAL || tail.zone === hereZone) continue;
+    // (Never one still ringing — even freed by a new floor: retuning a
+    // convolver cuts its tail off.)
+    if (t >= tail.quietAt) {
+      pick = tail;
+      break;
+    }
+  }
+  if (!pick) return null;
+  // It has rung out: the new room's tail goes straight in.
+  const ir = irFor(b, r);
+  if (ir.key !== pick.irKey) {
+    pick.conv[0]!.buffer = ir.buffer();
+    pick.irKey = ir.key;
+  }
+  pick.zone = zone;
+  pick.room = r;
+  pick.quietAt = t + r.rt60 + 0.3;
+  traceTail(pick);
+  const set = (p: AudioParam, x: number) => {
+    p.cancelScheduledValues(t);
+    p.setValueAtTime(x, t);
+  };
+  set(pick.ret.gain, tailLevel(pick));
+  set(pick.tone.frequency, tailTone(pick));
+  set(pick.pan.pan, tailPan(pick));
+  return pick;
+}
+
+/** How room `tail.zone`'s ringing reaches you, from where you stand. */
+function traceTail(tail: Tail): void {
+  if (!grid || tail.zone < 0) return;
+  if (tail.zone === hereZone) {
+    tail.reach = 1;
+    tail.cutoff = CLEAR_HZ;
+    tail.ax = L.x;
+    tail.az = L.z;
+    tail.dist = 0;
+    return;
+  }
+  const h = zoneHearing(grid, room, L.x, L.z, tail.zone);
+  const dist = Number.isFinite(h.length) ? h.length : 60;
+  // As a sound in the doorway would be heard — but a room's ringing comes
+  // out of the whole doorway at once and the stone passages carry it on, so
+  // it bends round corners more easily and fades far more gently than a
+  // single sound would (−5 dB 10 m down a corridor, −8 dB at 20 m).
+  tail.reach = (lerp(0.5, 1, h.clarity) * (h.blocked ? 0.6 : 1)) / (1 + Math.max(0, dist - 1) / 12);
+  tail.cutoff = MUFFLED_HZ * Math.pow(CLEAR_HZ / MUFFLED_HZ, h.clarity);
+  tail.ax = h.apparent[0];
+  tail.az = h.apparent[1];
+  tail.dist = dist;
+}
+
+const tailLevel = (tail: Tail) => (tail.room ? tail.room.wet * RETURN * (tail.zone === LOCAL ? 1 : tail.reach) : 0);
+const tailTone = (tail: Tail) => Math.min(2500 + 9000 * (tail.room?.brightness ?? 0.5), tail.zone === LOCAL ? CLEAR_HZ : tail.cutoff);
+
+/** A room's ringing leans toward the doorway it comes through — a little
+ * at the threshold (it's all round you), more as you walk away. */
+function tailPan(tail: Tail): number {
+  if (tail.zone < 0 || tail.zone === hereZone) return 0;
+  const dx = tail.ax - L.x;
+  const dz = tail.az - L.z;
+  const d = Math.hypot(dx, dz);
+  if (d < 1e-4) return 0;
+  const side = (dx * L.rightX + dz * L.rightZ) / d;
+  return side * 0.7 * Math.min(1, tail.dist / 4);
 }
 
 // ── Voices ──────────────────────────────────────────────────────────────────
@@ -304,18 +497,22 @@ const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
 
 /** Trace `v`'s source to the listener: set where it seems to be and how
  * clearly it gets through (the targets the voice glides to). */
-function trace(v: Voice): void {
+function trace(b: Buses, v: Voice): void {
   if (grid) {
     const h = hearing(grid, room, L.x, L.z, v.sx, v.sz);
     v.ax = h.apparent[0];
     v.az = h.apparent[1];
     v.clarity = h.clarity;
     v.blocked = h.blocked;
+    // The room it rings in (if not yours, it needs a tail of its own).
+    v.zone = zoneAt(grid, v.sx, v.sz);
+    if (v.zone !== hereZone) claimTail(b, v.zone, b.ctx.currentTime);
   } else {
     v.ax = v.sx;
     v.az = v.sz;
     v.clarity = 1;
     v.blocked = false;
+    v.zone = -1;
   }
 }
 
@@ -346,7 +543,7 @@ function mix(v: Voice) {
   return { gain, send, cutoff, pan: side * PAN_WIDTH, shadow: CLEAR_HZ * (1 - 0.68 * behind) };
 }
 
-function write(v: Voice, t: number, tc: number): void {
+function write(b: Buses, v: Voice, t: number, tc: number): void {
   const m = mix(v);
   const set = (p: AudioParam, x: number) => {
     if (tc <= 0) {
@@ -356,9 +553,18 @@ function write(v: Voice, t: number, tc: number): void {
   };
   set(v.occ.frequency, m.cutoff);
   set(v.dry.gain, m.gain);
-  set(v.send.gain, m.send * SEND);
   set(v.shadow.frequency, m.shadow);
   set(v.pan.pan, m.pan);
+  // Into the room it's in, in full (its tail carries the way to you), and a
+  // little into the space you're in; or, in your space, into yours.
+  const own = v.zone !== hereZone ? tailOf(b, v.zone) : null;
+  const you = yours(b);
+  for (let i = 0; i < b.tails.length; i++) {
+    const tail = b.tails[i]!;
+    const x = tail === own ? v.level : tail === you ? m.send * (own ? LEAK : 1) : 0;
+    set(v.sends[i]!.gain, x * SEND);
+    if (x > 0 && tail.room) tail.quietAt = t + tail.room.rt60 + 0.3;
+  }
 }
 
 /** Glide `v` toward its target over `dt` seconds: the apparent position
@@ -433,11 +639,11 @@ function start(b: Buses, pos: At, level: number, lasting: boolean, life = 0): Vo
   v.sx = pos[0];
   v.sy = pos[1];
   v.sz = pos[2];
-  trace(v);
+  trace(b, v);
   v.cx = v.ax;
   v.cz = v.az;
   v.cClarity = v.clarity;
-  write(v, t, 0);
+  write(b, v, t, 0);
   const tap = b.ctx.createGain();
   tap.connect(v.occ);
   v.tap = tap;
@@ -466,11 +672,12 @@ export function updateListener(pos: Vector3, quat: Quaternion): void {
   L.x = pos.x;
   L.y = pos.y;
   L.z = pos.z;
-  // Re-measure the room several times a second, when moved or changed.
+  // Re-measure the room several times a second, when moved or changed —
+  // and how each ringing room reaches you from here.
   if (!grid) {
     if (room) {
       room = null;
-      b.ret.gain.setTargetAtTime(0, t, 0.3);
+      for (const tail of b.tails) tail.ret.gain.setTargetAtTime(0, t, 0.3);
     }
   } else {
     const moved = Math.hypot(pos.x - L.analyzedX, pos.z - L.analyzedZ);
@@ -481,16 +688,30 @@ export function updateListener(pos: Vector3, quat: Quaternion): void {
       L.analyzedZ = pos.z;
       room = analyzeRoom(grid, pos.x, pos.z);
       applyRoom(b, room, t);
-    } else if (room && b.swapPending && t >= b.swapReady) {
+      hereZone = zoneAt(grid, pos.x, pos.z);
+      claimTail(b, hereZone, t);
+      for (const tail of b.tails) traceTail(tail);
+    } else if (room && b.tails[0]!.swapPending && t >= b.tails[0]!.swapReady) {
       // A tail that had to wait for the last crossfade.
       applyRoom(b, room, t);
     }
   }
+  // Rooms' tails: their level and muffle ease, their lean follows your head.
+  for (const tail of b.tails) {
+    if (tail.zone < 0) continue;
+    tail.ret.gain.setTargetAtTime(tailLevel(tail), t, 0.25);
+    tail.tone.frequency.setTargetAtTime(tailTone(tail), t, 0.25);
+    tail.pan.pan.setTargetAtTime(tailPan(tail), t, 0.05);
+  }
+  // Your own sounds ring in the space you're in.
+  const you = yours(b);
+  for (let i = 0; i < b.tails.length; i++) b.selfSends[i]!.gain.setTargetAtTime(b.tails[i] === you ? SELF_SEND : 0, t, 0.08);
+  if (you.room) you.quietAt = t + you.room.rt60 + 0.3;
   sweep(b, t);
   for (const v of b.voices) {
     if (v.mode === 0) continue;
     glide(v, dt);
-    write(v, t, 0.02);
+    write(b, v, t, 0.02);
   }
 }
 
@@ -516,7 +737,7 @@ export class Emitter {
       this.v.sy = pos[1];
       this.v.sz = pos[2];
     }
-    trace(this.v);
+    trace(this.b, this.v);
   }
 
   /** Fade out over `fade` seconds and let go. */
@@ -551,12 +772,28 @@ export function emitterAt(pos: At, level = 1): Emitter | null {
   return v && v.tap ? new Emitter(b, v, v.tap) : null;
 }
 
+/** About how loud a sound at `pos` reaches you (1: a full-level sound right
+ * beside you) — the way round, the muffling and all. For choosing which
+ * lasting sounds are worth a voice: the torch round the corner you just
+ * came from, not the one behind the rock. */
+export function audibility(pos: At, level = 1): number {
+  const dy = pos[1] - L.y;
+  if (!grid) return (level * REF_DISTANCE) / Math.max(REF_DISTANCE, Math.hypot(pos[0] - L.x, dy, pos[2] - L.z));
+  const h = hearing(grid, room, L.x, L.z, pos[0], pos[2]);
+  const d = Math.hypot(h.length, dy);
+  return ((level * REF_DISTANCE) / Math.max(REF_DISTANCE, d)) * lerp(0.45, 1, h.clarity) * (h.blocked ? 0.6 : 1);
+}
+
 // Dev-only: what the ears hear (end-to-end scripts, debugging).
 if (typeof window !== "undefined" && import.meta.env?.DEV) {
   (window as unknown as Record<string, unknown>).__audio = () => ({
     room,
     voices: B?.voices.filter((v) => v.mode !== 0).length ?? 0,
-    tail: B?.irKey ?? "",
+    sounding: B?.voices
+      .filter((v) => v.mode !== 0)
+      .map((v) => ({ at: [v.sx, v.sz], zone: v.zone, lasting: v.mode === 2, clarity: v.cClarity, blocked: v.blocked, ...mix(v) })),
+    tails: B?.tails.map((tail) => ({ zone: tail.zone, key: tail.irKey, level: tailLevel(tail), reach: tail.reach })),
+    here: hereZone,
     listener: { x: L.x, y: L.y, z: L.z },
   });
 }

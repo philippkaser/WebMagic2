@@ -9,6 +9,9 @@
 //   walk          stand in a torch-lit hall, cast, walk out down a corridor
 //                 while a fireball goes off and a slime walks behind you
 //   torch-walk    the same walk with only the torches
+//   leave-steady  a steady noise in the hall while you walk out (logs what
+//                 the ears hear: voices, the room you're in, rooms' tails)
+//   leave-torches the same with the torches
 //   steps-room    your own footsteps in the hall
 //   imp-room      impulses: yours, one 5 m off, one at a torch 11 m off
 //   imp-corridor  impulses: yours in the corridor, one back in the hall
@@ -22,7 +25,7 @@ import { chromium } from "playwright-core";
 
 const URL = process.env.AUDIO_LAB_URL ?? "http://localhost:3000/scripts/audio-lab/index.html";
 const OUT = process.env.AUDIO_LAB_OUT ?? "audio-lab-output";
-const ALL = ["walk", "torch-walk", "steps-room", "imp-room", "imp-corridor", "imp-dry"];
+const ALL = ["walk", "torch-walk", "leave-steady", "leave-torches", "steps-room", "imp-room", "imp-corridor", "imp-dry"];
 const scenes = process.argv.slice(2).length ? process.argv.slice(2) : ALL;
 mkdirSync(OUT, { recursive: true });
 
@@ -31,6 +34,7 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PAT
 for (const s of scenes) {
   const page = await browser.newPage();
   page.on("pageerror", (e) => console.log("[pageerror]", String(e)));
+  page.on("console", (m) => m.text().startsWith("[lab]") && console.log(m.text()));
   await page.goto(URL);
   await page.waitForFunction(() => !!window.__lab, null, { timeout: 60000 });
   const t0 = Date.now();

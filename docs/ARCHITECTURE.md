@@ -479,12 +479,29 @@ UI blip, heard through a small raytraced acoustics model:
   way round within 60 m: a thud through the rock. Points inside a wall
   (the camera brushing one, a torch on its bracket, the grace round a
   cottage) are first moved just out of it (`openPoint`).
+- **Rooms ring on their own** (rooms & portals, as in Wwise): the
+  dungeon's generated rooms are **zones** (`AcousticGrid.zones`; corridors
+  and the village green have none). A room with something sounding in it,
+  or you in it, gets a reverb tail of its own, measured at its middle —
+  four tails in all: the local one (measured where you stand, crossfading
+  as you walk, for corridors) and three for rooms, handed out as needed and
+  retuned only once one has rung out in a room nobody's in. A sound sends
+  to the room it's in, wherever you are (and a little to the space you're
+  in); your own sounds and corridor sounds ring where you are. From
+  outside, a room's tail reaches you through its nearest way in
+  (`zoneHearing`: the nearest cell of the room by the listener's flood,
+  heard as a sound standing there would be): leaning toward that doorway,
+  muffled by the bend, and fading gently with distance (a doorway radiates
+  the room's ringing as a whole, and the passages carry it: −5 dB 10 m
+  down a corridor). So stepping out of a hall changes nothing at first —
+  inside, your room's tail is that same tail, unpanned — and the hall
+  fades behind you as you walk away.
 - **Voices** (`spatial.ts`): a fixed pool of 24, each input → lowpass
   (the clarity, in octaves from 320 Hz to 20 kHz, and air absorption) →
   gain (inverse distance from 2 m, less for clarity) → head-shadow lowpass
-  (duller from behind) → equal-power pan; and a send to the room at much
-  the same level wherever the sound is in the room (a diffuse field),
-  falling off for sounds halls away. Every frame each sounding voice
+  (duller from behind) → equal-power pan; and sends to the tails (above):
+  the room's answer is much the same level wherever the sound is in it (a
+  diffuse field). Every frame each sounding voice
   glides toward its target — the apparent position swings round the
   listener on an arc (bearing and distance, never through your head), the
   clarity eases — and the audio clock, not timers, frees one-shots. When
@@ -504,13 +521,17 @@ UI blip, heard through a small raytraced acoustics model:
 - **The world's voices** (`voices.ts`, driven by `AudioWorld` and the
   systems that own the events): footsteps per ground (the player's on
   each low of the view bob, landings by impact, floor-mates' every 1.7 m
-  of their replicated poses), the nearest five torches and rifts as
-  loops, enemies waking, walking and dying (`useEnemy` — on every client,
+  of their replicated poses), the five torches and rifts that reach you
+  loudest as loops (`chooseLoops`: by the way sound travels, not as the
+  crow flies — the torch behind the rock doesn't take the place of the one
+  round the corner you just came from; one sounding keeps its place unless
+  another is clearly louder), enemies waking, walking and dying (`useEnemy` — on every client,
   replicas walk too), and each place's own small sounds a few metres off
   where the grid is open.
 
 Costs, measured: a room analysis ~0.03 ms; a hearing query ~0.01–0.15 ms;
-a flood ~1 ms, only when the listener changes cell.
+a flood ~1 ms, only when the listener changes cell; a room's own
+measurement once per floor.
 
 **The audio lab** (`scripts/audio-lab/`, `bun run audio-lab` against a dev
 server) renders scripted scenes on a generated floor through the real

@@ -25,6 +25,10 @@ import type { BiomeId, FloorLayout } from "../world/types";
  *    through: 1 in plain sight, less the further round the corner it bent,
  *    a little more again where the listener's bounced rays can see it (a
  *    wide arch carries more than a crack), and almost nothing through rock;
+ *  - the dungeon's rooms are **zones**: each rings with its own reverb,
+ *    measured at its middle, and `zoneHearing` says how a room's ringing
+ *    reaches a listener outside it — through the nearest way in, as clearly
+ *    as a sound standing in that doorway would;
  *  - `impulseResponse` writes the room's reverb tail as a stereo impulse —
  *    noise whose lows hang on and whose highs die early, as stone rooms do. */
 
@@ -50,6 +54,18 @@ export interface AcousticGrid {
   /** What lies past the grid's edge. */
   outside: "solid" | "open";
   surfaces: Surfaces;
+  /** Rooms that ring on their own (the dungeon's; none on the open green). */
+  zones?: Zones;
+}
+
+/** The rooms of a grid, each with its own reverb. */
+export interface Zones {
+  /** The zone of each cell (-1: none — a corridor). */
+  of: Int16Array;
+  /** Each zone's open cells (cell indices). */
+  cells: Int32Array[];
+  /** Each zone's middle (x, z): where its reverb is measured. */
+  centers: [number, number][];
 }
 
 /** How each depth band's stone sounds. The absorption is what a player
@@ -77,15 +93,36 @@ export function gridFromLayout(layout: FloorLayout): AcousticGrid {
   const n = layout.size;
   const solid = new Uint8Array(n * n);
   for (let i = 0; i < n * n; i++) solid[i] = layout.tiles[i] ? 0 : 1;
+  const x0 = (-n / 2) * TILE;
+  const z0 = (-n / 2) * TILE;
+  // Every room the generator carved is a zone; the corridors between are not.
+  const of = new Int16Array(n * n).fill(-1);
+  const cells: Int32Array[] = [];
+  const centers: [number, number][] = [];
+  for (const r of layout.rooms) {
+    const z = cells.length;
+    const mine: number[] = [];
+    for (let ty = r.y; ty < r.y + r.h; ty++)
+      for (let tx = r.x; tx < r.x + r.w; tx++) {
+        const k = ty * n + tx;
+        if (tx < 0 || ty < 0 || tx >= n || ty >= n || solid[k] || of[k] !== -1) continue;
+        of[k] = z;
+        mine.push(k);
+      }
+    if (!mine.length) continue;
+    cells.push(Int32Array.from(mine));
+    centers.push([x0 + (r.x + r.w / 2) * TILE, z0 + (r.y + r.h / 2) * TILE]);
+  }
   return {
     cell: TILE,
     size: n,
-    x0: (-n / 2) * TILE,
-    z0: (-n / 2) * TILE,
+    x0,
+    z0,
     solid,
     ceiling: WALL_HEIGHT,
     outside: "solid",
     surfaces: BIOME_SURFACES[layout.biome],
+    zones: { of, cells, centers },
   };
 }
 
@@ -144,6 +181,15 @@ function solidAt(g: AcousticGrid, cx: number, cz: number): boolean {
 /** Whether the world point (x, z) is open air rather than rock or a wall. */
 export function openAt(g: AcousticGrid, x: number, z: number): boolean {
   return !solidAt(g, Math.floor((x - g.x0) / g.cell), Math.floor((z - g.z0) / g.cell));
+}
+
+/** The zone (room) the world point (x, z) is in, or -1. */
+export function zoneAt(g: AcousticGrid, x: number, z: number): number {
+  if (!g.zones) return -1;
+  const cx = Math.floor((x - g.x0) / g.cell);
+  const cz = Math.floor((z - g.z0) / g.cell);
+  if (!inGrid(g, cx, cz)) return -1;
+  return g.zones.of[cz * g.size + cx]!;
 }
 
 /** (x, z) itself if it's open air, else the nearest point just inside an
@@ -532,6 +578,33 @@ export function hearing(g: AcousticGrid, room: RoomAcoustics | null, lx: number,
   // both: the clearer of the two, and some more for the other.
   const clarity = 1 - (1 - around) * (1 - 0.5 * Math.sqrt(seen));
   return { length: p.length, apparent: p.apparent, clarity, blocked: p.blocked };
+}
+
+/** How room `zone`'s ringing reaches a listener at (lx, lz): from inside it,
+ * all round you; from outside, as a sound standing in the nearest way in
+ * would — from that doorway, as clearly as the way to it allows, from as far
+ * away as it is. */
+export function zoneHearing(g: AcousticGrid, room: RoomAcoustics | null, lx: number, lz: number, zone: number, maxLength = 60): Hearing {
+  const zs = g.zones;
+  const cells = zs?.cells[zone];
+  const none: Hearing = { length: Infinity, apparent: [lx, lz], clarity: 0, blocked: true };
+  if (!zs || !cells) return none;
+  if (zoneAt(g, lx, lz) === zone) return { length: 0, apparent: [lx, lz], clarity: 1, blocked: false };
+  const l = openPoint(g, lx, lz);
+  if (!l) return none;
+  const f = floodFrom(g, cellOf(g, l[0], l[1]), maxLength);
+  let best = -1;
+  let bc = Infinity;
+  for (const k of cells) {
+    if (f.cost[k]! < bc) {
+      bc = f.cost[k]!;
+      best = k;
+    }
+  }
+  if (best < 0) return none;
+  const cx = best % g.size;
+  const cz = (best - cx) / g.size;
+  return hearing(g, room, lx, lz, g.x0 + (cx + 0.5) * g.cell, g.z0 + (cz + 0.5) * g.cell, maxLength);
 }
 
 // ── The reverb tail ─────────────────────────────────────────────────────────

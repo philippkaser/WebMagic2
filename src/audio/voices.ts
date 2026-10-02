@@ -1,6 +1,6 @@
 import { audioCtx, noiseBuf } from "./context";
 import { atPoint, self, synthNoise as noise, synthTone as tone } from "./sound";
-import { emitterAt, type At, type Emitter } from "./spatial";
+import { audibility, emitterAt, listenerAt, type At, type Emitter } from "./spatial";
 
 /** The world's own voices, all synthesized and all placed (spatial.ts):
  * footsteps on each kind of ground, the creatures waking, walking and
@@ -136,6 +136,34 @@ export function playEnemyDeath(kind: EnemyVoice, at: At): void {
 export interface Loop {
   emitter: Emitter;
   stop(): void;
+}
+
+/** A lasting sound that may be voiced (a torch, a rift). */
+export interface LoopSource {
+  key: string;
+  at: At;
+  /** Metres (as the crow flies) beyond which it isn't even considered. */
+  reach: number;
+  level: number;
+}
+
+/** Quieter than this at the listener: not worth a voice. */
+const MIN_AUDIBLE = 0.04;
+
+/** Which lasting sounds get a voice: the `max` that reach you loudest, the
+ * way sound travels — not the nearest as the crow flies, or the torch
+ * behind the rock takes the place of the one round the corner you just
+ * came from. One already sounding keeps its place unless another is
+ * clearly louder (no churn as you walk). */
+export function chooseLoops<T extends LoopSource>(sources: readonly T[], sounding: (key: string) => boolean, max: number): T[] {
+  const l = listenerAt();
+  return sources
+    .filter((s) => Math.hypot(s.at[0] - l.x, s.at[2] - l.z) < s.reach)
+    .map((s) => ({ s, a: audibility(s.at, s.level) * (sounding(s.key) ? 1.5 : 1) }))
+    .filter(({ a }) => a > MIN_AUDIBLE)
+    .sort((x, y) => y.a - x.a)
+    .slice(0, max)
+    .map(({ s }) => s);
 }
 
 let crackle: AudioBuffer | null = null;

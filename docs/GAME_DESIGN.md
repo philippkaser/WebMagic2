@@ -147,7 +147,9 @@ art is a new procedural painter function, not an asset pipeline.
   play, a hall rings about a second, never a cathedral's wash), and every
   sound in the world is placed and reaches you the way sound would —
   straight, or round corners from the doorway it came through, duller the
-  further it bent, a thud through rock. The world has its own voices:
+  further it bent, a thud through rock. Each room rings on its own: walk
+  out of a hall and you still hear it ringing behind you through the
+  doorway, fading as the corridor takes you away. The world has its own voices:
   footsteps on each ground (stone, wet stone, crystal, iron, ash, cobbles,
   grass), torches crackling, rifts humming, monsters waking, walking and
   dying, and the small sounds each place makes by itself.
@@ -478,9 +480,9 @@ own boss, enemy mix, and environmental gimmick.
 ### Audio
 
 Raytraced acoustics, placed sounds and the world's voices are in (see §2).
-Next: per-staff cast timbres, musical stingers on boss phases, height in
-the acoustics (pits, ledges, the vault's shape), and coupled-room reverb —
-hearing the hall next door ring through the doorway as well as your own.
+Rooms ring on their own and are heard through their doorways. Next:
+per-staff cast timbres, musical stingers on boss phases, and height in the
+acoustics (pits, ledges, the vault's shape).
 
 ---
 

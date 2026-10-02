@@ -12,6 +12,10 @@ export interface Ev {
 }
 export interface Scene {
   duration: number;
+  /** Log what the ears hear every quarter second. */
+  log?: boolean;
+  /** A steady noise source to follow (x, y, z). */
+  steady?: P3;
   pose(t: number): { x: number; z: number; yaw: number };
   events: Ev[];
   torches: boolean;
@@ -68,7 +72,7 @@ export function buildScene(layout: FloorLayout, name: string): Scene {
   const center = path[0]!;
   const facingTorch = Math.atan2(-(torch[0] - center[0]), -(torch[2] - center[1]));
   const SPEED = 5;
-  const walkFrom = name === "torch-walk" ? 1 : 2.5;
+  const walkFrom = name === "torch-walk" ? 1 : name.startsWith("leave") ? 2 : 2.5;
   const at = (s: number) => {
     s = Math.max(0, Math.min(total, s));
     let i = 1;
@@ -103,6 +107,10 @@ export function buildScene(layout: FloorLayout, name: string): Scene {
       events.push({ t: 10, kind: "cast" });
       events.push({ t: 11, kind: "explosion", at: roomAt(0, 0, 1) });
       return { duration: 14, pose: walkPose, events, torches: true, ambient: true };
+    case "leave-torches":
+      return { duration: walkEnd + 2, pose: walkPose, events, torches: true, ambient: false, log: true };
+    case "leave-steady":
+      return { duration: walkEnd + 2, pose: walkPose, events, torches: false, ambient: false, log: true, steady: roomAt(2, 3, 1.2) };
     case "torch-walk":
       return { duration: walkEnd + 1, pose: walkPose, events, torches: true, ambient: false };
     case "steps-room":
