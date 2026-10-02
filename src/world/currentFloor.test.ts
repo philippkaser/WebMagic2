@@ -1,41 +1,28 @@
 import { describe, expect, test } from "bun:test";
 import { TILE } from "../core/config";
-import { exploredVersion, isExplored, markExplored } from "./currentFloor";
+import { exploredBits, isExplored, markExplored, mergeExplored } from "./currentFloor";
 import { generateFloor } from "./gen";
 
-describe("exploration", () => {
-  const layout = generateFloor(4254, 12);
-  const n = layout.size;
-  const [sx, , sz] = layout.spawn;
-  const tx = Math.floor(sx / TILE + n / 2);
-  const tz = Math.floor(sz / TILE + n / 2);
-
-  test("a fresh floor is unseen", () => {
-    expect(isExplored(layout, tx, tz)).toBe(false);
+describe("sharing what a wizard has seen", () => {
+  test("bits round-trip into another wizard's view of the same floor", () => {
+    const mine = generateFloor(77, 3);
+    const theirs = generateFloor(77, 3); // the same floor, another machine
+    const [x, , z] = mine.spawn;
+    markExplored(mine, x, z, 4);
+    expect(mergeExplored(theirs, exploredBits(mine))).toBe(true);
+    const n = mine.size;
+    for (let tz = 0; tz < n; tz++)
+      for (let tx = 0; tx < n; tx++) expect(isExplored(theirs, tx, tz)).toBe(isExplored(mine, tx, tz));
+    const stx = Math.floor(x / TILE + n / 2);
+    const stz = Math.floor(z / TILE + n / 2);
+    expect(isExplored(theirs, stx, stz)).toBe(true);
+    // Nothing new the second time.
+    expect(mergeExplored(theirs, exploredBits(mine))).toBe(false);
   });
 
-  test("standing somewhere reveals the floor around you, not the walls", () => {
-    const before = exploredVersion();
-    expect(markExplored(layout, sx, sz, 4)).toBe(true);
-    expect(exploredVersion()).toBeGreaterThan(before);
-    expect(isExplored(layout, tx, tz)).toBe(true);
-    for (let z = 0; z < n; z++)
-      for (let x = 0; x < n; x++) if (isExplored(layout, x, z)) expect(layout.tiles[z * n + x]).toBe(1);
-    // Far away stays dark.
-    const far = layout.exit;
-    const fx = Math.floor(far[0] / TILE + n / 2);
-    const fz = Math.floor(far[2] / TILE + n / 2);
-    if (Math.hypot(fx - tx, fz - tz) > 6) expect(isExplored(layout, fx, fz)).toBe(false);
-  });
-
-  test("seeing the same place again changes nothing", () => {
-    const v = exploredVersion();
-    expect(markExplored(layout, sx, sz, 4)).toBe(false);
-    expect(exploredVersion()).toBe(v);
-  });
-
-  test("off the grid is never explored", () => {
-    expect(isExplored(layout, -1, 0)).toBe(false);
-    expect(isExplored(layout, n, n)).toBe(false);
+  test("garbage and wrong sizes are ignored", () => {
+    const f = generateFloor(5, 2);
+    expect(mergeExplored(f, "%%%not base64")).toBe(false);
+    expect(mergeExplored(f, btoa("abc"))).toBe(false);
   });
 });

@@ -3,13 +3,14 @@ import { useEffect } from "react";
 import { Color, Fog } from "three";
 import { playOmen, startAmbient, stopAmbient, type AmbientMood } from "../audio/sound";
 import { resetGrade, setGrade } from "../render/Effects";
+import { floorTint, NO_TINT, setFloorTint, turnHue } from "../render/floorTint";
 import { getBiomeDef } from "../world/biomes";
 import { omenGenMods } from "../world/omens";
 import type { BiomeId, FloorLayout } from "../world/types";
 
 /** How a floor FEELS, applied while it's mounted: the biome's fog, backdrop,
- * environment-map strength, colour grade (eased in by render/Effects) and
- * ambient drone, and the omen's arrival whisper. The layout decides WHAT is on the floor; this decides the mood
+ * environment-map strength, colour grade (eased in by render/Effects), the
+ * floor's tint and ambient drone, and the omen's arrival whisper. The layout decides WHAT is on the floor; this decides the mood
  * it's seen and heard in. (The omen's rule bends are installed by GameScene
  * alongside the layout, before any enemy renders.) Everything here is
  * undone on unmount. */
@@ -27,13 +28,18 @@ const BIOME_MOODS: Record<BiomeId, AmbientMood> = {
  * settles and the floor has had a moment to look ordinary. */
 const OMEN_DELAY_MS = 1600;
 
-/** Fog/background/ambient of a biome, with the omen's fog squeeze applied. */
+/** Fog/background/ambient of a biome, with the omen's fog squeeze applied
+ * and the floor's tint (render/floorTint.ts) — the air takes half of the
+ * turn the stone takes. */
 export function atmosphereOf(layout: FloorLayout) {
   const biome = getBiomeDef(layout.biome);
   const fogMult = omenGenMods(layout.omen).fogMult;
+  const tint = floorTint(layout.seed);
   return {
     biome,
-    fog: { color: biome.fog.color, near: biome.fog.near * fogMult, far: biome.fog.far * fogMult },
+    tint,
+    fog: { color: turnHue(biome.fog.color, tint.hue * 0.5), near: biome.fog.near * fogMult, far: biome.fog.far * fogMult },
+    background: turnHue(biome.background, tint.hue * 0.5),
   };
 }
 
@@ -41,9 +47,10 @@ export function useFloorAtmosphere(layout: FloorLayout): void {
   const scene = useThree((s) => s.scene);
 
   useEffect(() => {
-    const { biome, fog } = atmosphereOf(layout);
+    const { biome, fog, background, tint } = atmosphereOf(layout);
     scene.fog = new Fog(fog.color, fog.near, fog.far);
-    scene.background = new Color(biome.background);
+    scene.background = new Color(background);
+    setFloorTint(tint);
     const envBefore = scene.environmentIntensity;
     scene.environmentIntensity = biome.envIntensity;
     setGrade(biome.grade);
@@ -58,6 +65,7 @@ export function useFloorAtmosphere(layout: FloorLayout): void {
     return () => {
       if (omenTimer !== null) clearTimeout(omenTimer);
       scene.fog = null;
+      setFloorTint(NO_TINT);
       scene.environmentIntensity = envBefore;
       resetGrade();
       stopAmbient();

@@ -11,6 +11,7 @@ import { hashSeed } from "../core/rng";
 import { resetNetEntities, setExpectedEntities } from "../net/entities";
 import { useNet } from "../net/netStore";
 import { PlayerController } from "../player/PlayerController";
+import { floorTint, turnHue } from "../render/floorTint";
 import { DungeonGround } from "../render/models/DungeonGround";
 import { DungeonStone } from "../render/models/DungeonStone";
 import { LightShafts } from "../render/models/LightShaftModel";
@@ -47,6 +48,15 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
 
   useFloorAtmosphere(layout);
   const biome = getBiomeDef(layout.biome);
+  // The floor's tint (render/floorTint.ts): the ambient light turns with
+  // the stone; torches take half the turn, each a little warmer or cooler.
+  const { ambientColor, torchColors } = useMemo(() => {
+    const turn = floorTint(layout.seed).hue;
+    return {
+      ambientColor: turnHue(biome.ambient.color, turn),
+      torchColors: layout.torches.map((p) => turnHue(biome.torchColor, turn * 0.5 + (((hashSeed(p.join(",")) % 1000) / 1000) * 2 - 1) * 0.12)),
+    };
+  }, [layout, biome]);
 
   useEffect(() => {
     // Tell replication which entity ids this floor spawns, so the host can
@@ -85,14 +95,14 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
 
   return (
     <group>
-      <ambientLight intensity={biome.ambient.intensity} color={biome.ambient.color} />
+      <ambientLight intensity={biome.ambient.intensity} color={ambientColor} />
 
       <WallsAndFloor layout={layout} />
       {/* The air itself: dust, spores, embers, glitter or ash per biome. */}
       <AmbientParticles biome={layout.biome} omen={layout.omen} ceiling={WALL_HEIGHT} />
 
       {layout.torches.map((pos, i) => (
-        <Torch key={i} position={pos} color={biome.torchColor} intensity={biome.torchIntensityMult} />
+        <Torch key={i} position={pos} color={torchColors[i]} intensity={biome.torchIntensityMult} />
       ))}
       {layout.props.map((prop, i) => (
         <Breakable

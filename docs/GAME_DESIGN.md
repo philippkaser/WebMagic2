@@ -74,7 +74,10 @@ The emotional loop we are chasing:
   ramp — mortar lines, chipped edges, moss and grime — with a few emissive
   specks that bloom. Each biome brings its own ramp, its own glow colour and
   its own split-tone colour grade that eases in as you arrive, so a new
-  floor reads as the air changing. Rooms are plain on purpose (tall 6 m
+  floor reads as the air changing. And no floor is one colour end to end:
+  each turns its band's palette a little around the colour wheel (seeded),
+  and across the floor hue, richness and brightness drift from room to
+  room — the stone, its glowing seams, the torches and the fog with it. Rooms are plain on purpose (tall 6 m
   walls, fog, shafts of dusty light, torches): the feel comes from texture,
   light and fog, not from clutter.
 - **Particles everywhere, and alive — in pixels.** Every particle is a
@@ -93,13 +96,15 @@ The emotional loop we are chasing:
   boxes: menus are tablets that build themselves out of worn, round-edged
   stones in front of you; prompts and messages are small slabs of slate
   (never in your way); words burn into them as runes that settle into
-  letters and later burn away; the map (M) is a hologram miniature of the
-  village or of the floor you've explored, cast a stride ahead of you on a
-  small table of light — walk around it — with the place's name and, on an
-  omen floor, what the omen changes above it; your
+  letters and later burn away; the map (M) is a miniature of the village or
+  of the floor you've explored, laid in light on the ground a step ahead of
+  you inside a rune circle — walk around it, or over it; anyone on the floor
+  sees it, every wizard marked on it, and casting it shares what you've
+  explored — with the place's name hanging over it; your
   health and mana are two glass orbs whose facets catch the torch one pixel
   at a time, their liquid sloshing as you run and turn; the HUD is sparse
-  (the tithe stones, the orbs, the belt) and carried — it follows your
+  (the tithe stones top left, the floor top right, the orbs, the belt) and
+  carried — it follows your
   turns closely and swings with your stride; items are small objects you
   pick up and set down. The type is pixel type — Jacquard 12 blackletter for the
   big moments ("Floor 12", "You Died"), Jersey 15 for smaller titles,
@@ -301,10 +306,10 @@ silly), **the Lightless Vigil** (few torches, close fog), **the Crimson
 Omen** (angrier monsters, richer loot), **the Mana Tide**, **the Tinderbox**
 (barrels everywhere, bigger blasts), **the Teeming** (more, frailer
 monsters). Surprise is part of the charm: you never quite know what the
-next floor will be. Once it's there, it's never a mystery what it does: a
-violet stone joins the tithe stones in the top-left with the omen's name,
-and the map (M) lists its effects line by line (▼ what hurts, ▲ what
-helps) with its whisper beneath.
+next floor will be. Once it's there, it's never a mystery what it does: the
+top-right corner of the HUD names it under the floor and its biome, and
+lists its effects line by line (▼ what hurts, ▲ what helps) when you arrive
+and again whenever a map is cast.
 
 ### The signature multiplayer mechanic: rare encounters
 
@@ -348,8 +353,9 @@ hundred-floor dungeon that bores down into the earth.** The village is the
 safe hub — quiet, night-time, a few huts with warm windows, a central portal
 ringed with torches, under a big pixel sky: the Milky Way with dark lanes of
 dust through it, thousands of single-pixel stars twinkling in hard steps, a
-cratered moon, long banks of cloud silvered on top, and now and then a
-shooting star. Through the portal is the descent.
+big cratered moon — a real sphere, its craters and seas picked out by a
+sun over your shoulder, its dark side faint with earthshine — long banks
+of cloud silvered on top, and now and then a shooting star. Through the portal is the descent.
 
 Wizards go down for the classic reasons — **glory, fame, and riches** — but
 the deepest myth, the thing that drives the boldest, is that **god waits at
@@ -674,7 +680,7 @@ table, and the extension guide.
 | Q | Use belt slot 1 |
 | I (or Tab) | Inventory screen |
 | C | The codex (lore carvings read) |
-| M | Cast the map (explored floor, as a hologram) |
+| M | Cast the map (on the ground, shared with the floor) |
 | P (or F3) | FPS / frame-time overlay |
 | O (or F4) | Toggle shadows (quality option, off by default) |
 

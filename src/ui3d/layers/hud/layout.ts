@@ -62,7 +62,7 @@ export function slotStrip(n: number): { cssW: number; cssH: number; outerW: numb
 
 /** The top-left marker's height (Location.tsx: the tithe stones and the
  * line that sometimes shows under them). */
-export const LOCATION_H = 66;
+export const LOCATION_H = 52;
 
 /** The purse panel's padding-box height. */
 export const PURSE_H = 22;
@@ -73,6 +73,7 @@ export const HUD_LAYOUT = {
   purse: { h: -1, v: -1, inset: [EDGE, EDGE + apFrac(VITALS.outerH) + GAP], distance: 1 },
   equipment: { h: 1, v: -1, inset: [EDGE, EDGE], distance: 1 },
   plaque: { h: -1, v: 1, inset: [EDGE, EDGE], distance: 1 },
+  floor: { h: 1, v: 1, inset: [EDGE, EDGE], distance: 1 },
   feed: { h: -1, v: 1, inset: [EDGE, EDGE + apFrac(LOCATION_H) + GAP * 2], distance: 1 },
   presence: { h: 0, v: 1, inset: [0, apFrac(10)], distance: 1.2 },
   boss: { h: 0, v: 1, inset: [0, apFrac(74)], distance: 1.2 },

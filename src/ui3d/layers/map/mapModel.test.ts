@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { TILE } from "../../../core/config";
 import { generateFloor } from "../../../world/gen";
-import { castDistance, dungeonModel, MIN_SPAN, padBounds, villageModel } from "./mapModel";
+import { castSpot, dungeonModel, MAP_GAP, MAP_WIDTH, MIN_SPAN, padBounds, villageModel } from "./mapModel";
 
 describe("the cast map's model", () => {
   const layout = generateFloor(4254, 12);
@@ -46,15 +46,24 @@ describe("the cast map's model", () => {
     expect(b).toEqual({ minX: -2, maxX: 4, minZ: 7.5, maxZ: 13.5 });
   });
 
-  test("the map is never cast into a wall", () => {
+  test("the map lies a short step ahead, as wide as the hall ahead allows", () => {
     for (const [fx, fz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-      const d = castDistance(layout, sx, sz, fx, fz);
-      expect(d).toBeGreaterThanOrEqual(0.95);
-      expect(d).toBeLessThanOrEqual(2.2);
-      // Its centre stands on floor unless the hall is very tight.
-      const tx = Math.floor((sx + fx * d) / TILE + n / 2);
-      const tz = Math.floor((sz + fz * d) / TILE + n / 2);
-      if (d > 0.95) expect(layout.tiles[tz * n + tx]).toBe(1);
+      const { dist, width } = castSpot(layout, sx, sz, fx, fz);
+      expect(width).toBeGreaterThanOrEqual(MAP_WIDTH.min);
+      expect(width).toBeLessThanOrEqual(MAP_WIDTH.dungeon);
+      // Its near edge is the gap ahead of the caster's feet.
+      expect(dist - width / 2).toBeCloseTo(MAP_GAP, 6);
+      // A shrunk map ends before the wall ahead.
+      if (width < MAP_WIDTH.dungeon && width > MAP_WIDTH.min) {
+        const far = dist + width / 2;
+        const tx = Math.floor((sx + fx * (far - 0.05)) / TILE + n / 2);
+        const tz = Math.floor((sz + fz * (far - 0.05)) / TILE + n / 2);
+        expect(layout.tiles[tz * n + tx]).toBe(1);
+      }
     }
+  });
+
+  test("in the village it is always full size", () => {
+    expect(castSpot(null, 0, 5, 0, -1)).toEqual({ dist: MAP_GAP + MAP_WIDTH.village / 2, width: MAP_WIDTH.village });
   });
 });

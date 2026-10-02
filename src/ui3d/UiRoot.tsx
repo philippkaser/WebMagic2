@@ -6,7 +6,7 @@ import { Hud } from "./layers/hud/Hud";
 import { HudRig } from "./layers/hud/HudAnchor";
 import { Menus } from "./layers/menus/Menus";
 import { InventoryLayer } from "./layers/inventory/InventoryLayer";
-import { MapHologram } from "./layers/map/MapHologram";
+import { MapLabels } from "./layers/map/MapLabels";
 import { WorldMessages } from "./layers/WorldMessages";
 import { WorldPrompts } from "./layers/WorldPrompts";
 import { UiPresence } from "./presence";
@@ -28,7 +28,7 @@ export function UiRoot() {
       <HudRig />
       <WorldMessages />
       <WorldPrompts />
-      <MapHologram />
+      <MapLabels />
       <Hud />
       <Menus />
       <InventoryLayer />

@@ -22,6 +22,7 @@ import { Effects } from "../render/Effects";
 import { TransitionSystem } from "../transition/TransitionSystem";
 import { useGame } from "../state/gameStore";
 import { WorldCameraBridge } from "../ui3d/bridge";
+import { FloorMaps } from "../ui3d/layers/map/FloorMap";
 import { generateFloor } from "../world/gen";
 import { omenRules } from "../world/omens";
 import { setFloorRules } from "../game/floorRules";
@@ -83,6 +84,7 @@ export function GameScene() {
         </Physics>
         <RemoteWizards />
         <Graves />
+        <FloorMaps />
         <PactSystem />
         <PresenceSystem />
         <NetSystems />

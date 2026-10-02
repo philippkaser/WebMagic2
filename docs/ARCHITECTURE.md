@@ -546,39 +546,49 @@ and the way onward, gold for home, blood for danger.
   never in the room, where you could walk into them), prompts, the HUD
   (`hud/`, deliberately sparse: five round-edged tithe stones and a
   connection gem at the top left, the tithe line showing only when it
-  changes; health and mana as two glass orbs (`orbMaterials.ts`: real
+  changes; the floor at the top right (`FloorInfo`: number, biome, omen —
+  the omen's effects written out on arrival and while a map is cast); health and mana as two glass orbs (`orbMaterials.ts`: real
   spheres lit by the UI torch — the liquid a smaller sphere cut by a
   sloshing surface, its colour posterized and dithered per object-space
   cell; the glass broken into tiny facets, each tilted at random, so single
   pixels catch the torch as the orb slowly turns); the coin heap and the
   belt's potions floating bare; the staff's spells shown for a few seconds
   on arrival or a new staff; the arrival banner, which keeps its distance
-  as you move and burns away early once you walk off), the cast map
-  (`map/`: M on a floor — see below), the menus
+  as you move and burns away early once you walk off), the cast map's
+  words (`map/` — see below), the menus
   (`menus/`: title, the Weighing, death, and the codex — a leather-bound
   tome) and the inventory family (`inventory/`: item slots are soft wells
   worn into the stone, their grade glowing up from the floor). The DOM
   keeps only what isn't part of the fiction: the perf overlay, the build
   stamp and the dev room.
 - **The cast map** (`layers/map/`): M casts a miniature of where you are —
-  the village whole, or the floor as far as you have explored it — a
-  stride ahead of you: a sigil burns onto the floor, a column of light
-  rises, and on a small table tilted toward you the tiles ripple out from
-  where you stand and walls, cottages and standing stones rise as ribs of
-  light (instanced, each instance born on its own beat); markers kindle for
-  you (walking as you walk), the way onward, the way home, the treasure and
-  the Warden once seen. What it draws is pure data (`mapModel.ts`:
-  `dungeonModel`, `villageModel`, tested); `castDistance` keeps the table
-  out of the walls in a narrow hall, and its width follows its distance.
-  Above it stand the place's name and, on an omen floor, a slab listing
-  what the omen changes (`world/omens.ts` `omenEffects`). It is
-  world-aligned and stays where it was cast — walk around it; walk away
-  (8 m) or into it and it lets go; M again folds it back into its sigil. The floor being played and what
-  has been seen of it live in `world/currentFloor.ts` (the UI canvas can't
-  see the world's React tree); `ExploreTracker` marks tiles a few times a
-  second. It is the one hologram in the UI: pure added light
-  (`light.ts`'s `LIGHT_BLENDING`, so it glows over the world without
-  hiding it), in world space so it has real depth.
+  the village whole, or the floor as far as you have explored it — laid on
+  the ground a step ahead (`castSpot`: 3 m across, smaller if a wall comes
+  first). Its light lives in the WORLD canvas (`FloorMap.tsx`, mounted by
+  GameScene) so walls and wizards stand in front of it and it blooms with
+  the world: a rune circle burns onto the floor, the floor under it dims,
+  the tiles ripple out and walls, cottages and standing stones rise as ribs
+  of light (instanced, each born on its own beat), and markers kindle —
+  every wizard on the floor (`net/players` poses), the way onward, the way
+  home, the treasure and the Warden once seen. Its words (the place's name,
+  the biome and omen, whose map it is) hang above it on the UI canvas
+  (`MapLabels.tsx`) and step aside while you stand over it. What it draws
+  is pure data (`mapModel.ts`: `dungeonModel`, `villageModel`, `castSpot`,
+  tested). Casts are per wizard (`mapStore.ts`): yours is sent to your
+  floor-mates as a `peerMessage` carrying your explored tiles
+  (`currentFloor.exploredBits` → their `mergeExplored`), so a map cast is
+  also knowledge shared; a floor-mate's map stands on your floor until they
+  fold it or leave. Walk 14 m away and a map lets go; M folds yours. The
+  floor being played and what has been seen of it live in
+  `world/currentFloor.ts`; `ExploreTracker` marks tiles a few times a
+  second.
+- **Floor tint** (`render/floorTint.ts`): the dungeon's surface materials
+  (`wallMaterial.ts`, the reflective ground) get a shader stage after the
+  painted map is read: the floor's seeded turn of the hue, plus a slow
+  regional drift of hue, saturation and brightness in world space, and the
+  same drift on the painted glow — uniforms only, set per floor by
+  `floorAtmosphere.ts`, which also turns the fog, the ambient light and
+  (with a per-torch jitter) the torches.
 
 ## Extending
 

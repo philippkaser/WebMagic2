@@ -6,14 +6,13 @@ import { selectIsHost, useNet } from "../../../net/netStore";
 import { canLeave } from "../../../run/rules";
 import { useGame } from "../../../state/gameStore";
 import { useTravel } from "../../../transition/store";
-import { useCurrentLayout } from "../../../world/currentFloor";
-import { getOmenDef } from "../../../world/omens";
 import { uiNow } from "../../clock";
 import { UiPresence } from "../../presence";
 import { RuneText } from "../../text/RuneText";
 import { ink } from "../../theme";
 import { apx, fontPx } from "./ap";
 import { ArrivalBanner } from "./ArrivalBanner";
+import { FloorInfo } from "./FloorInfo";
 import { arrivalTitle, netStatus, titheLine, titheRunes } from "./copy";
 import { HudAnchor } from "./HudAnchor";
 import { HUD_LAYOUT } from "./layout";
@@ -30,11 +29,9 @@ import { usePresenceList } from "./usePresenceList";
  * top left is only what you need at a glance: the Tithe of Five as five
  * small rune stones that kindle as floors are played (gold once the way
  * home is open), and a little gem for your connection to the other
- * wizards. A floor under an omen adds a violet omen stone between them.
- * When the tithe changes (or you arrive), a line says how many more floors
- * the deep wants — and names the omen, if one hangs over the floor — then
- * fades; the floor's name and what its omen does are the map's (M) to
- * tell. */
+ * wizards; when the tithe changes (or you arrive), a line says how many
+ * more floors the deep wants, then fades. At the top right stands the
+ * floor itself — its number, its biome and its omen (FloorInfo). */
 
 const TITLE_HOLD = 4.2;
 const TITLE_HOLD_OMEN = 8.5;
@@ -77,6 +74,7 @@ export function Location() {
       ))}
       <UiPresence show={doneKey === key && !traveling} exit={0.8}>
         <TitheMarker key={key} inDungeon={inDungeon} />
+        <FloorInfo key={`info:${key}`} inDungeon={inDungeon} />
       </UiPresence>
     </>
   );
@@ -117,8 +115,6 @@ const LINE_HOLD = 5;
 
 function TitheMarker({ inDungeon }: { inDungeon: boolean }) {
   const floorsPlayed = useGame((s) => s.run?.floorsPlayed ?? 0);
-  const layout = useCurrentLayout();
-  const omen = inDungeon && layout?.omen ? getOmenDef(layout.omen) : null;
   const amHost = useNet(selectIsHost);
   const mode = useNet((s) => s.mode);
   const net = netStatus(mode, amHost, inDungeon);
@@ -134,7 +130,7 @@ function TitheMarker({ inDungeon }: { inDungeon: boolean }) {
   }, [line, home]);
 
   const S = STONE * A;
-  const stonesW = inDungeon ? runes.length * (STONE + STONE_GAP) + (omen ? STONE + STONE_GAP : 0) : 0;
+  const stonesW = inDungeon ? runes.length * (STONE + STONE_GAP) : 0;
   return (
     <HudAnchor h={L.h} v={L.v} inset={L.inset} distance={L.distance}>
       {inDungeon &&
@@ -149,16 +145,6 @@ function TitheMarker({ inDungeon }: { inDungeon: boolean }) {
             position={[(i * (STONE + STONE_GAP) + STONE / 2) * A, -(STONE / 2 + 9) * A, 0]}
           />
         ))}
-      {omen && (
-        <TitheStone
-          index={7}
-          lit
-          pulse
-          color={ink.violet}
-          size={S}
-          position={[(runes.length * (STONE + STONE_GAP) + 3 + STONE / 2) * A, -(STONE / 2 + 9) * A, 0]}
-        />
-      )}
       <NetGem color={net.color} online={mode === "online"} connecting={mode === "connecting"} position={[(stonesW + 8) * A, -(STONE / 2 + 9) * A, 0.004]} />
       {line && (
         <RuneText
@@ -173,21 +159,6 @@ function TitheMarker({ inDungeon }: { inDungeon: boolean }) {
           glow={home ? 1.2 : 0.35}
           outline={0.6}
           delay={0.5}
-        />
-      )}
-      {omen && (
-        <RuneText
-          text={`${omen.name} · M to recall`}
-          show={lineUp}
-          font="body"
-          px={LINE}
-          color="#d9b8ff"
-          anchor={[0, 0.5]}
-          align="left"
-          position={[0, -(STONE + 34) * A, 0]}
-          glow={0.6}
-          outline={0.6}
-          delay={0.8}
         />
       )}
     </HudAnchor>

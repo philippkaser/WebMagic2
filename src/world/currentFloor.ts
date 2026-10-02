@@ -81,3 +81,38 @@ export function isExplored(layout: FloorLayout, tx: number, tz: number): boolean
   if (tx < 0 || tz < 0 || tx >= layout.size || tz >= layout.size) return false;
   return grid(layout)[tz * layout.size + tx] === 1;
 }
+
+/** What this wizard has seen of `layout`, packed one bit per tile and
+ * base64'd — what a cast map carries to the other wizards on the floor. */
+export function exploredBits(layout: FloorLayout): string {
+  const g = grid(layout);
+  const bytes = new Uint8Array(Math.ceil(g.length / 8));
+  for (let i = 0; i < g.length; i++) if (g[i]) bytes[i >> 3]! |= 1 << (i & 7);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+/** Learn what another wizard has seen (exploredBits): their seen floor
+ * tiles join ours. Malformed input is ignored. Returns true if anything
+ * new was learnt. */
+export function mergeExplored(layout: FloorLayout, bits: string): boolean {
+  let bin: string;
+  try {
+    bin = atob(bits);
+  } catch {
+    return false;
+  }
+  const g = grid(layout);
+  if (bin.length !== Math.ceil(g.length / 8)) return false;
+  let changed = false;
+  for (let i = 0; i < g.length; i++) {
+    if (g[i] || !layout.tiles[i]) continue;
+    if (bin.charCodeAt(i >> 3) & (1 << (i & 7))) {
+      g[i] = 1;
+      changed = true;
+    }
+  }
+  if (changed) version++;
+  return changed;
+}

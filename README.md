@@ -55,7 +55,7 @@ DATA_FILE=/tmp/wm-e2e.json bun run e2e   # CHROMIUM_PATH=… to pick a browser
 | Q | Use belt slot 1 |
 | I (or Tab) | Inventory screen (drag & drop gear/bag/belt — chest & merchant in the village) |
 | C | The codex — every lore carving you've read |
-| M | Cast the map — a hologram of the village or the explored floor, a stride ahead; it lists the floor's omen |
+| M | Cast the map — a miniature of the village or the explored floor, laid on the ground a step ahead; floor-mates see it too |
 | P (or F3) | FPS / frame-time overlay |
 | O (or F4) | Toggle shadows (quality option, off by default) |
 
@@ -87,12 +87,13 @@ corner — check it against the latest commit when testing.
   together; pacts can be broken, and the floor remembers oathbreakers.
 - **Depth biomes**: the Catacombs, the Drowned Halls, the Ember Forge, the
   Crystal Deep and the Hollow — each with its own look, light, drone and
-  monster mix.
+  monster mix; every floor turns its band's colours a little, and the hue
+  drifts from room to room.
 - **Omens**: some floors are in a mood — the Weightless Hour (low gravity),
   the Lightless Vigil, the Crimson Omen, the Mana Tide, the Tinderbox, the
   Teeming. They're rolled from the floor seed, so everyone there shares them;
-  a violet stone in the top-left marks one, and the map (M) spells out what it
-  changes.
+  the top-right corner names the floor, its biome and its omen, and spells
+  out what the omen changes when you arrive (and whenever a map is cast).
 - **Lore** is carved into the walls: walk up to a faint violet carving, press
   E, and it joins your codex. Deeper carvings know deeper things.
 - **Loot** defines your kit: the staff sets both click abilities, amulets add
@@ -112,8 +113,9 @@ corner — check it against the latest commit when testing.
   four pixel fonts.
 - **The UI lives in the world**: menus are tablets built from worn stones,
   messages burn into small slabs of slate as runes that settle into
-  letters, the map (M) is a hologram miniature of the village or the
-  explored floor cast ahead of you, health and mana are glass orbs that slosh as you move,
+  letters, the map (M) is a miniature of the village or the explored floor
+  laid in light on the ground ahead of you (walk around it — your
+  floor-mates can too), health and mana are glass orbs that slosh as you move,
   items are small 3D objects. Portals are rifts torn in the air, and stepping through one is
   a journey — sucked in, through a void of blocky stars, spat out onto the
   new floor.

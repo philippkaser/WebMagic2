@@ -132,18 +132,39 @@ export function padBounds(b: MapBounds, min: number): MapBounds {
   return { minX: cx - half, maxX: cx + half, minZ: cz - half, maxZ: cz + half };
 }
 
-/** How far ahead of (x, z), looking along (fx, fz), the map can be cast on
- * this floor without standing in a wall, clamped to [min, max]. The table
- * is about 0.56 × its distance wide (mapWidth), so its far edge needs that
- * half-width plus a little air before the first solid tile:
- * d + 0.28·d + 0.4 ≤ wall. */
-export function castDistance(layout: FloorLayout, x: number, z: number, fx: number, fz: number, max = 2.2, min = 0.95): number {
+/** The map's width on the floor, m: big enough to walk around and read
+ * from where you stand; a narrow dead end gets a smaller one. */
+export const MAP_WIDTH = { dungeon: 3, village: 3.6, min: 1.6 } as const;
+/** The gap between the caster's feet and the map's near edge, m. */
+export const MAP_GAP = 0.35;
+
+/** Free floor ahead of (x, z) along (fx, fz) before the first solid tile,
+ * m, looking no further than `max`. */
+export function freeAhead(layout: FloorLayout, x: number, z: number, fx: number, fz: number, max: number): number {
   const n = layout.size;
-  for (let w = 0.1; w <= max * 1.28 + 0.4; w += 0.1) {
+  for (let w = 0.1; w <= max; w += 0.1) {
     const tx = Math.floor((x + fx * w) / TILE + n / 2);
     const tz = Math.floor((z + fz * w) / TILE + n / 2);
-    const solid = tx < 0 || tz < 0 || tx >= n || tz >= n || !layout.tiles[tz * n + tx];
-    if (solid) return Math.min(max, Math.max(min, (w - 0.4) / 1.28));
+    if (tx < 0 || tz < 0 || tx >= n || tz >= n || !layout.tiles[tz * n + tx]) return w - 0.1;
   }
   return max;
+}
+
+/** Where a map cast from (x, z) facing (fx, fz) lies: its centre `dist`
+ * ahead and its `width`. It lies on the floor a short step ahead, as wide
+ * as MAP_WIDTH unless a wall comes first — then it shrinks to fit (never
+ * below MAP_WIDTH.min). Off to the sides it may run under the walls; they
+ * hide that part. */
+export function castSpot(
+  layout: FloorLayout | null,
+  x: number,
+  z: number,
+  fx: number,
+  fz: number,
+): { dist: number; width: number } {
+  const want = layout ? MAP_WIDTH.dungeon : MAP_WIDTH.village;
+  if (!layout) return { dist: MAP_GAP + want / 2, width: want };
+  const free = freeAhead(layout, x, z, fx, fz, MAP_GAP + want + 0.2);
+  const width = Math.max(MAP_WIDTH.min, Math.min(want, free - MAP_GAP - 0.1));
+  return { dist: MAP_GAP + width / 2, width };
 }

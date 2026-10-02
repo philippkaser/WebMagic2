@@ -1,5 +1,6 @@
 import { useFrame } from "@react-three/fiber";
 import { MeshStandardMaterial } from "three";
+import { withFloorTint } from "../floorTint";
 import { getSurface, type ArchSurface } from "../textures";
 
 /** The dungeon's surface materials: one MeshStandardMaterial per
@@ -7,14 +8,15 @@ import { getSurface, type ArchSurface } from "../textures";
  * from the map, a touch of metal so wet texels pick up the environment,
  * emissive white under the painted glow) — built once and kept for the
  * session, so revisiting a band never recompiles or repaints anything.
- * The texture carries all the weathering; the material adds nothing. */
+ * The texture carries all the weathering; the material adds only the
+ * floor's tint (render/floorTint.ts). */
 
 const cache = new Map<ArchSurface, MeshStandardMaterial>();
 
 export function dungeonMaterial(kind: ArchSurface): MeshStandardMaterial {
   let m = cache.get(kind);
   if (!m) {
-    m = new MeshStandardMaterial({ ...getSurface(kind).material });
+    m = withFloorTint(new MeshStandardMaterial({ ...getSurface(kind).material }));
     cache.set(kind, m);
   }
   return m;

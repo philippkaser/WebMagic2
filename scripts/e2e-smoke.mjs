@@ -118,6 +118,12 @@ async function waitPhase(w, phase, timeout = 30000) {
   await sleep(3000);
   const idA = await state(a, () => window.__session.playerId);
   const idB = await state(b, () => window.__session.playerId);
+  // A casts the map: it lies on A's floor for B too.
+  await a.page.evaluate(async () => (await import("/src/ui3d/layers/map/mapStore.ts")).useMapCast.getState().toggle());
+  await sleep(1500);
+  const seenByB = await b.page.evaluate(async () => (await import("/src/ui3d/layers/map/mapStore.ts")).useMapCast.getState().casts.map((c) => c.owner));
+  check("a cast map is shared with the floor", seenByB.includes(idA), JSON.stringify(seenByB));
+  await a.page.evaluate(async () => (await import("/src/ui3d/layers/map/mapStore.ts")).useMapCast.getState().toggle());
   // PvP: A stands a few metres from B and shoots. A single fixed offset can
   // put a wall or a prop in the line of fire: try the four sides until a
   // volley lands (the check is about damage, not geometry).

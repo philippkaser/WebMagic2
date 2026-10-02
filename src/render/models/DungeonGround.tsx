@@ -24,6 +24,7 @@ import { FLOOR_SPAN, getSurface, type FloorSurface } from "../textures";
 import { MeshBuilder } from "./architectureMesh";
 import { toGeometry } from "./meshGeometry";
 import { type SurfaceGlow, dungeonMaterial, useBreathingGlow } from "./wallMaterial";
+import { withFloorTint } from "../floorTint";
 
 /** The dungeon floor: one world-mapped plane (the band's painted floor,
  * FLOOR_SPAN metres per repeat, texels square) whose wet texels glint
@@ -153,6 +154,7 @@ function createMirror(gl: WebGLRenderer, kind: FloorSurface, reflection: GroundR
     }
   };
   material.customProgramCacheKey = () => "webmagic-reflector";
+  withFloorTint(material);
   return { material, fbo, blurred, blur, textureMatrix };
 }
 

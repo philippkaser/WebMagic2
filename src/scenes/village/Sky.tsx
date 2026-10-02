@@ -30,8 +30,8 @@ import { hash2 } from "../../render/textures/pixelKit";
  *    are little crosses;
  *  - long banks of cloud low over the hills, dark against the sky, their
  *    tops lined with moonlight on the moon's side, drifting slowly;
- *  - a pixel moon — a disc of grey tones with craters, its dark side to the
- *    lower left — in a stepped halo;
+ *  - the moon — a real sphere at the world's pixels, its craters lit by a
+ *    sun over your shoulder (moonMaterial) — in a stepped halo;
  *  - now and then a shooting star;
  *  - two ridges of mountain silhouette, the far one faintly moonlit.
  *
@@ -43,6 +43,16 @@ export const MOON_DIR = new Vector3(0.45, 0.42, -0.79).normalize();
 export const HORIZON = "#1a2244";
 /** The galaxy's plane (its band is the great circle around this axis). */
 const MILKY_N = new Vector3(0.62, 0.35, 0.7).normalize();
+
+/** The moon's radius at its 100 m distance (about 13° across). */
+const MOON_R = 11.5;
+/** Where its sun shines from: over your shoulder and to the upper right as
+ * seen from the village — a gibbous moon, the terminator on its lower left. */
+const MOON_SUN = (() => {
+  const right = new Vector3().crossVectors(MOON_DIR, new Vector3(0, 1, 0)).normalize();
+  const up = new Vector3().crossVectors(right, MOON_DIR).normalize();
+  return new Vector3().addScaledVector(MOON_DIR, -0.45).addScaledVector(right, 0.8).addScaledVector(up, 0.35).normalize();
+})();
 
 const NOISE = /* glsl */ `
 float hash3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
@@ -239,36 +249,112 @@ function starField(count: number): { geometry: BufferGeometry; material: ShaderM
   return { geometry, material };
 }
 
-/** The moon: a pixel disc of grey tones with craters, lit from the upper
- * right so a sliver of shadow lies on its lower left. */
-function moonMaterial(): ShaderMaterial {
+/** The moon: a real sphere, drawn at the world's own pixels — a clean round
+ * edge, and a surface worth looking at. Its relief is a crater field in
+ * two sizes (bowls with raised rims; the dark seas smooth them out) whose
+ * normals the sun picks out (no finer than a pixel — finer only speckles),
+ * so the craters along the terminator throw
+ * long shadows and their far rims catch the light; the lit face is flat
+ * and bright the way the real moon is (Lommel–Seeliger, not Lambert); the
+ * surface is broken into tiny facets, each tilted at random, so single
+ * pixels glint; one young crater sprays bright rays; the dark side keeps a
+ * faint blue earthshine. Tones step in a few dithered levels. */
+function moonMaterial(sun: Vector3): ShaderMaterial {
   return new ShaderMaterial({
-    uniforms: {},
+    uniforms: { uSun: { value: sun } },
     vertexShader: /* glsl */ `
-      varying vec2 vUv;
+      uniform vec3 uSun;
+      varying vec3 vObj;
+      varying vec3 vView;
+      varying vec3 vSun;
       void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vObj = normalize(position);
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        // Light and eye into the sphere's own space (its transform is a
+        // rotation: v * M is the inverse rotation).
+        mat3 r = mat3(modelMatrix);
+        vView = normalize((cameraPosition - w.xyz) * r);
+        vSun = normalize(uSun * r);
+        gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: /* glsl */ `
-      varying vec2 vUv;
+      varying vec3 vObj;
+      varying vec3 vView;
+      varying vec3 vSun;
       ${NOISE}
+      vec3 hash33(vec3 p) {
+        return fract(sin(vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)))) * 43758.5453);
+      }
+      // One octave of craters: a feature point per cell, a bowl inside its
+      // radius, a rim just outside it.
+      float craters(vec3 p, float scale, float depth) {
+        vec3 q = p * scale;
+        vec3 c = floor(q);
+        float h = 0.0;
+        for (int z = -1; z <= 1; z++)
+          for (int y = -1; y <= 1; y++)
+            for (int x = -1; x <= 1; x++) {
+              vec3 cell = c + vec3(x, y, z);
+              vec3 r = hash33(cell);
+              if (r.z < 0.35) continue; // not every cell has one
+              vec3 center = cell + 0.2 + r * 0.6;
+              float rad = 0.22 + 0.25 * r.y;
+              float d = length(q - center) / rad;
+              if (d < 1.0) h -= (1.0 - d * d) * depth;
+              h += exp(-pow((d - 1.0) / 0.22, 2.0)) * depth * 0.45;
+            }
+        return h;
+      }
+      float maria(vec3 p) { return smoothstep(0.5, 0.62, fbm(p * 1.6 + 3.1)); }
+      float height(vec3 p) {
+        float soft = 1.0 - 0.75 * maria(p);
+        return craters(p, 3.0, 0.07) + craters(p, 6.5, 0.035) * soft + fbm(p * 9.0) * 0.01;
+      }
       void main() {
-        // A 15-cell disc: about as fine as the world's own pixels.
-        vec2 cell = floor(vUv * 15.0);
-        vec2 p = (cell + 0.5) / 15.0 * 2.0 - 1.0;
-        float r = length(p);
-        if (r > 1.0) discard;
-        vec3 n = vec3(p, sqrt(1.0 - r * r));
-        float light = dot(n, normalize(vec3(0.55, 0.45, 0.7)));
-        float maria = smoothstep(0.48, 0.6, fbm(vec3(p * 1.8, 3.1)));
-        float crater = step(0.84, noise3(vec3(p * 4.0, 9.0)));
-        float k = light * (1.0 - maria * 0.4 - crater * 0.3);
-        float b = bayer4(cell);
-        float tone = floor(clamp(k, 0.0, 1.0) * 4.0 + b * 0.8) / 4.0;
-        vec3 col = mix(vec3(0.22, 0.25, 0.38), vec3(1.0, 1.0, 1.04), tone);
-        if (r > 0.9 && light > 0.2) col *= 1.08; // the lit rim
-        gl_FragColor = vec4(col * 1.12, 1.0);
+        vec3 n = normalize(vObj);
+        // Bumped normal from the height field (object space).
+        vec3 t1 = normalize(cross(n, abs(n.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+        vec3 t2 = cross(n, t1);
+        // About a pixel across: finer relief would only alias into speckle.
+        float e = 0.03;
+        float h0 = height(n);
+        float h1 = height(normalize(n + t1 * e));
+        float h2 = height(normalize(n + t2 * e));
+        vec3 nb = normalize(n - t1 * (h1 - h0) / e * 1.2 - t2 * (h2 - h0) / e * 1.2);
+        // Tiny facets, each tilted at random: single pixels catch the sun.
+        vec3 cell = floor(n * 40.0);
+        vec3 jit = hash33(cell) - 0.5;
+        vec3 nf = normalize(nb + jit * 0.1);
+        vec3 V = normalize(vView);
+        vec3 S = normalize(vSun);
+        float ci = max(dot(nf, S), 0.0);
+        float ce = max(dot(n, V), 0.05);
+        // Flat and bright across the lit face, falling away at the terminator.
+        float ls = ci / (ci + ce);
+        float lit = mix(ci, ls * 2.0, 0.4);
+        // Only the sunward half is lit: the relief shades within it, never
+        // speckles the night side.
+        lit *= smoothstep(-0.03, 0.1, dot(n, S));
+        // Albedo: bright highlands, dark seas, bright crater rims.
+        float m = maria(n);
+        float alb = mix(0.84, 0.42, m) + clamp(h0 * 3.0, -0.14, 0.12);
+        // One young crater with bright rays.
+        vec3 ty = normalize(vec3(-0.25, -0.55, 0.8));
+        float dt = acos(clamp(dot(n, ty), -1.0, 1.0));
+        float ang = atan(dot(n - ty, cross(ty, vec3(0.0, 1.0, 0.0))), dot(n - ty, vec3(0.0, 1.0, 0.0)));
+        float rays = step(0.86, noise3(vec3(ang * 7.0, 0.0, 1.0))) * smoothstep(0.9, 0.08, dt);
+        alb += rays * 0.18 + (dt < 0.05 ? 0.2 : 0.0);
+        float k = alb * lit;
+        // A facet turned just so: a glint.
+        vec3 hv = normalize(S + V);
+        k += pow(max(dot(nf, hv), 0.0), 220.0) * 0.5 * step(0.25, dot(n, S));
+        // A few dithered tones of brightness, like the rest of the world —
+        // stepped as one value, so shadows stay grey rather than speckling
+        // into colour — over a faint earthshine on the dark side.
+        float lv = 8.0;
+        float kq = floor(clamp(k, 0.0, 1.2) * lv + bayer4(gl_FragCoord.xy) * 0.7) / lv;
+        vec3 col = vec3(0.035, 0.04, 0.055) + vec3(1.0, 0.97, 0.9) * kq;
+        gl_FragColor = vec4(col * 0.78, 1.0);
         #include <colorspace_fragment>
       }`,
     fog: false,
@@ -365,9 +451,9 @@ export function Sky() {
       farMat: ridgeMaterial("#0b0f22", 1.4),
       near: ridge(72, 1, 9, 4.2),
       nearMat: ridgeMaterial("#05070f", 0.5),
-      moon: new PlaneGeometry(11, 11),
-      moonMat: moonMaterial(),
-      halo: new PlaneGeometry(34, 34),
+      moon: new SphereGeometry(MOON_R, 64, 48),
+      moonMat: moonMaterial(MOON_SUN),
+      halo: new PlaneGeometry(MOON_R * 4.4, MOON_R * 4.4),
       haloMat: new MeshBasicMaterial({
         map: haloTexture(),
         transparent: true,
@@ -426,7 +512,7 @@ export function Sky() {
       <mesh geometry={res.far} material={res.farMat} renderOrder={-1} />
       <mesh geometry={res.near} material={res.nearMat} renderOrder={-1} />
       <group position={moonPos} onUpdate={(g) => g.lookAt(0, 0, 0)}>
-        <mesh geometry={res.halo} material={res.haloMat} position={[0, 0, -0.5]} />
+        <mesh geometry={res.halo} material={res.haloMat} position={[0, 0, -MOON_R - 0.5]} />
         <mesh geometry={res.moon} material={res.moonMat} />
       </group>
     </group>
