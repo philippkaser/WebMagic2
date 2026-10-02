@@ -511,7 +511,10 @@ and the way onward, gold for home, blood for danger.
   so `pxFor(distance, fraction)` sizes them all alike. Pixel type only reads
   when a font pixel covers a whole number of screen pixels (at 1.4 a V turns
   into a W), so every frame RuneText projects one font pixel onto the screen
-  and scales its block to the nearest whole number (`text/snap.ts`; at one
+  and, once the text is still, eases its block onto the nearest whole number
+  — holding its scale while it moves (a HUD stepping back, a tablet tilting
+  in, a prompt you walk toward), with hysteresis near a boundary, so text
+  never pops between sizes (`text/snap.ts` `stepSnapper`; at one
   screen pixel the dark outline drops to a trace — it would fill every gap).
   So that nothing lands a step away from its neighbours, sizes come from the
   **type scale** (`text/type.ts`: `typePx(distance, step, face)`, steps
@@ -554,8 +557,7 @@ and the way onward, gold for home, blood for danger.
   pixels catch the torch as the orb slowly turns); the coin heap and the
   belt's potions floating bare; the staff's spells shown for a few seconds
   on arrival or a new staff; the arrival banner, which keeps its distance
-  as you move and burns away early once you walk off), the cast map's
-  words (`map/` — see below), the menus
+  as you move and burns away early once you walk off), the menus
   (`menus/`: title, the Weighing, death, and the codex — a leather-bound
   tome) and the inventory family (`inventory/`: item slots are soft wells
   worn into the stone, their grade glowing up from the floor). The DOM
@@ -570,9 +572,10 @@ and the way onward, gold for home, blood for danger.
   the tiles ripple out and walls, cottages and standing stones rise as ribs
   of light (instanced, each born on its own beat), and markers kindle —
   every wizard on the floor (`net/players` poses), the way onward, the way
-  home, the treasure and the Warden once seen. Its words (the place's name,
-  the biome and omen, whose map it is) hang above it on the UI canvas
-  (`MapLabels.tsx`) and step aside while you stand over it. What it draws
+  home, the treasure and the Warden once seen. It carries no words (the
+  floor's name and mood are the HUD's, top right). Folding runs the reveal
+  backwards: the light drains in from the edge toward the caster, walls
+  sinking into the floor, and the rune circle un-draws. What it draws
   is pure data (`mapModel.ts`: `dungeonModel`, `villageModel`, `castSpot`,
   tested). Casts are per wizard (`mapStore.ts`): yours is sent to your
   floor-mates as a `peerMessage` carrying your explored tiles
@@ -580,8 +583,8 @@ and the way onward, gold for home, blood for danger.
   also knowledge shared; a floor-mate's map stands on your floor until they
   fold it or leave. Walk 14 m away and a map lets go; M folds yours. The
   floor being played and what has been seen of it live in
-  `world/currentFloor.ts`; `ExploreTracker` marks tiles a few times a
-  second.
+  `world/currentFloor.ts` (shared with the UI canvas); `ExploreTracker`
+  (in FloorMap.tsx) marks tiles a few times a second.
 - **Floor tint** (`render/floorTint.ts`): the dungeon's surface materials
   (`wallMaterial.ts`, the reflective ground) get a shader stage after the
   painted map is read: the floor's seeded turn of the hue, plus a slow

@@ -6,6 +6,7 @@ import {
   InstancedBufferAttribute,
   InstancedBufferGeometry,
   Mesh,
+  type Object3D,
   PlaneGeometry,
   Vector3,
 } from "three";
@@ -14,7 +15,7 @@ import { getFace, type Face, type FontId } from "../font/faces";
 import { layoutText, type Align, type TextInput, type TextLayout } from "../font/layout";
 import { useUiShow } from "../presence";
 import { useUiTextStyle } from "../style";
-import { outlineAt, snapScale } from "./snap";
+import { newSnapper, outlineAt, stepSnapper } from "./snap";
 import { emitUiSparks } from "../UiSparks";
 import { applyFace, createRuneTextMaterial, NEVER, type RuneTextMaterial } from "./runeTextMaterial";
 
@@ -43,9 +44,11 @@ import { applyFace, createRuneTextMaterial, NEVER, type RuneTextMaterial } from 
  * Pixel-exact: these are pixel fonts, and a font pixel drawn 1.4 screen
  * pixels wide comes out uneven — some strokes one pixel, some two, a V that
  * reads as a W. So every frame each block measures how many screen pixels
- * one of its font pixels covers and nudges its own scale (about its anchor)
- * to the nearest whole number (`snapScale`). Sizes are designed to land
- * near whole numbers at an 800 px tall window, so the nudge is small. */
+ * one of its font pixels covers and, once it is still, eases its own scale
+ * (about its anchor) onto a whole number — while it moves it holds its
+ * scale, so it never jumps a size mid-motion (snap.ts `stepSnapper`).
+ * Sizes are designed to land near whole numbers at an 800 px tall window,
+ * so the nudge is small. */
 
 export interface RuneTextProps {
   text: TextInput;
@@ -193,14 +196,21 @@ function buildGeometry(
   return geometry;
 }
 
+/** Whether `o` and every parent are visible (a hidden parent waiting to
+ * rise in shouldn't settle the snapping of its words). */
+function seen(o: Object3D | null): boolean {
+  for (; o; o = o.parent) if (!o.visible) return false;
+  return true;
+}
+
 const snapA = new Vector3();
 const snapB = new Vector3();
 
-/** Snap the mesh's scale; returns the screen pixels per font pixel it now
- * draws at (null when it can't tell). Measured by projecting one font pixel
- * up the text's own axis onto the screen — true whatever the parents do
- * (tilt, a corner piece's undistort squash, distance). */
-function snapMesh(mesh: Mesh, fontPx: number, camera: Camera, bufferW: number, bufferH: number): number | null {
+/** Screen pixels per font pixel the mesh would draw at scale 1 (null when
+ * it can't tell). Measured by projecting one font pixel up the text's own
+ * axis onto the screen — true whatever the parents do (tilt, a corner
+ * piece's undistort squash, distance). */
+function measureMesh(mesh: Mesh, fontPx: number, camera: Camera, bufferW: number, bufferH: number): number | null {
   const parent = mesh.parent;
   if (!parent) return null;
   // The parent's world transform as of last frame: steady enough.
@@ -211,10 +221,7 @@ function snapMesh(mesh: Mesh, fontPx: number, camera: Camera, bufferW: number, b
   snapB.applyMatrix4(camera.matrixWorldInverse);
   snapA.applyMatrix4(camera.projectionMatrix);
   snapB.applyMatrix4(camera.projectionMatrix);
-  const screenPx = Math.hypot(((snapB.x - snapA.x) * bufferW) / 2, ((snapB.y - snapA.y) * bufferH) / 2);
-  const k = snapScale(screenPx);
-  mesh.scale.setScalar(k);
-  return screenPx * k;
+  return Math.hypot(((snapB.x - snapA.x) * bufferW) / 2, ((snapB.y - snapA.y) * bufferH) / 2);
 }
 
 export function RuneText({
@@ -267,6 +274,8 @@ export function RuneText({
   const onHiddenRef = useRef(onHidden);
   onHiddenRef.current = onHidden;
   const sparkClock = useRef(0);
+  const snapper = useRef(newSnapper());
+  const snapFrames = useRef(0);
 
   // Stagger defaults to the length of the text: long lines write longer, but
   // never so long that a sentence keeps the player waiting.
@@ -324,12 +333,19 @@ export function RuneText({
   mesh.renderOrder = renderOrder;
 
   useFrame((state, dt) => {
+    const now = uiNow();
     if (snap) {
       const dpr = state.viewport.dpr;
-      const drawn = snapMesh(mesh, px, state.camera, state.size.width * dpr, state.size.height * dpr);
-      u.uOutline.value = outline * (drawn === null ? 1 : outlineAt(drawn));
+      const raw = measureMesh(mesh, px, state.camera, state.size.width * dpr, state.size.height * dpr);
+      // The first frame's transforms aren't in place yet: measure from the
+      // second on. While it (or a parent) is hidden, or it is burning away,
+      // it keeps the scale it had (its parent may be stepping back): it
+      // comes back as it left.
+      if (raw !== null && snapFrames.current++ > 0 && vanishAt.current === NEVER && seen(mesh)) {
+        mesh.scale.setScalar(stepSnapper(snapper.current, raw, now, dt));
+        u.uOutline.value = outline * outlineAt(snapper.current.step || raw);
+      }
     }
-    const now = uiNow();
     u.uTime.value = now;
     u.uVanishAt.value = vanishAt.current;
     if (vanishAt.current === NEVER) return;

@@ -147,7 +147,7 @@ export function ItemCard({
   );
 
   const lv = level !== null ? String(level) : null;
-  const lvSize = lv ? measureText(lv, px * 0.9, undefined, "label") : null;
+  const lvSize = lv ? measureText(lv, px, undefined, "label") : null;
   const tabW = lvSize ? lvSize.width + px * 4 : 0;
   const tabH = lvSize ? lvSize.height + px * 2.5 : 0;
   const artL = -width / 2;
@@ -167,14 +167,14 @@ export function ItemCard({
           <group position={[artR - tabW / 2 + L.texel * 0.5, artB + tabH / 2, 0.003]}>
             <mesh geometry={unitQuad()} material={tabEdge} scale={[tabW + L.texel * 0.8, tabH + L.texel * 0.8, 1]} position={[-L.texel * 0.4, L.texel * 0.4, -0.0005]} renderOrder={6} />
             <mesh geometry={unitQuad()} material={tab} scale={[tabW, tabH, 1]} renderOrder={7} />
-            <RuneText text={lv} font="label" px={px * 0.9} color={ink.parchment} glow={0} delay={delay + 0.35} depth={-0.2} position={[0, 0, 0.001]} />
+            <RuneText text={lv} font="label" px={px} color={ink.parchment} glow={0} delay={delay + 0.35} depth={-0.2} position={[0, 0, 0.001]} />
           </group>
         )}
         {qty > 1 && (
           <RuneText
             text={`×${qty}`}
             font="label"
-            px={px * 0.9}
+            px={px}
             color={dead ? ink.faded : ink.parchment}
             glow={0.3}
             anchor={[1, 0]}

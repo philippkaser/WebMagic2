@@ -1,16 +1,11 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import {
-  AdditiveBlending,
   BackSide,
   BufferAttribute,
   BufferGeometry,
-  CanvasTexture,
   Color,
   DoubleSide,
-  MeshBasicMaterial,
-  NearestFilter,
-  PlaneGeometry,
   Points,
   ShaderMaterial,
   SphereGeometry,
@@ -31,7 +26,7 @@ import { hash2 } from "../../render/textures/pixelKit";
  *  - long banks of cloud low over the hills, dark against the sky, their
  *    tops lined with moonlight on the moon's side, drifting slowly;
  *  - the moon — a real sphere at the world's pixels, its craters lit by a
- *    sun over your shoulder (moonMaterial) — in a stepped halo;
+ *    sun over your shoulder (moonMaterial) — in a soft glow;
  *  - now and then a shooting star;
  *  - two ridges of mountain silhouette, the far one faintly moonlit.
  *
@@ -44,8 +39,8 @@ export const HORIZON = "#1a2244";
 /** The galaxy's plane (its band is the great circle around this axis). */
 const MILKY_N = new Vector3(0.62, 0.35, 0.7).normalize();
 
-/** The moon's radius at its 100 m distance (about 13° across). */
-const MOON_R = 11.5;
+/** The moon's radius at its 100 m distance (about 12° across). */
+const MOON_R = 10.5;
 /** Where its sun shines from: over your shoulder and to the upper right as
  * seen from the village — a gibbous moon, the terminator on its lower left. */
 const MOON_SUN = (() => {
@@ -122,9 +117,10 @@ function skyMaterial(): ShaderMaterial {
         float t = pow(h, 0.45);
         float q = floor(t * 7.0 + dith) / 7.0;
         vec3 c = mix(uHorizon, uZenith, clamp(q, 0.0, 1.0));
-        // The moon's glow in stepped rings.
+        // The moon's glow: soft, in fine dithered steps (hard rings around
+        // it read as an outline).
         float mg = pow(max(dot(d, uMoon), 0.0), 14.0);
-        c += uMoonGlow * floor(mg * 5.0 + dith) / 5.0 * 0.7;
+        c += uMoonGlow * floor(mg * 14.0 + dith) / 14.0 * 0.7;
 
         // The Milky Way: star-dust in a band, cut by dark lanes.
         float off = dot(d, uMilky);
@@ -250,8 +246,8 @@ function starField(count: number): { geometry: BufferGeometry; material: ShaderM
 }
 
 /** The moon: a real sphere, drawn at the world's own pixels — a clean round
- * edge, and a surface worth looking at. Its relief is a crater field in
- * two sizes (bowls with raised rims; the dark seas smooth them out) whose
+ * edge, and a calm surface. Its relief is a field of big craters and a few
+ * small ones (bowls with raised rims; the dark seas smooth them out) whose
  * normals the sun picks out (no finer than a pixel — finer only speckles),
  * so the craters along the terminator throw
  * long shadows and their far rims catch the light; the lit face is flat
@@ -308,7 +304,7 @@ function moonMaterial(sun: Vector3): ShaderMaterial {
       float maria(vec3 p) { return smoothstep(0.5, 0.62, fbm(p * 1.6 + 3.1)); }
       float height(vec3 p) {
         float soft = 1.0 - 0.75 * maria(p);
-        return craters(p, 3.0, 0.07) + craters(p, 6.5, 0.035) * soft + fbm(p * 9.0) * 0.01;
+        return craters(p, 2.6, 0.06) + craters(p, 5.0, 0.02) * soft;
       }
       void main() {
         vec3 n = normalize(vObj);
@@ -320,11 +316,11 @@ function moonMaterial(sun: Vector3): ShaderMaterial {
         float h0 = height(n);
         float h1 = height(normalize(n + t1 * e));
         float h2 = height(normalize(n + t2 * e));
-        vec3 nb = normalize(n - t1 * (h1 - h0) / e * 1.2 - t2 * (h2 - h0) / e * 1.2);
+        vec3 nb = normalize(n - t1 * (h1 - h0) / e * 0.8 - t2 * (h2 - h0) / e * 0.8);
         // Tiny facets, each tilted at random: single pixels catch the sun.
         vec3 cell = floor(n * 40.0);
         vec3 jit = hash33(cell) - 0.5;
-        vec3 nf = normalize(nb + jit * 0.1);
+        vec3 nf = normalize(nb + jit * 0.04);
         vec3 V = normalize(vView);
         vec3 S = normalize(vSun);
         float ci = max(dot(nf, S), 0.0);
@@ -337,22 +333,22 @@ function moonMaterial(sun: Vector3): ShaderMaterial {
         lit *= smoothstep(-0.03, 0.1, dot(n, S));
         // Albedo: bright highlands, dark seas, bright crater rims.
         float m = maria(n);
-        float alb = mix(0.84, 0.42, m) + clamp(h0 * 3.0, -0.14, 0.12);
+        float alb = mix(0.82, 0.5, m) + clamp(h0 * 2.0, -0.08, 0.08);
         // One young crater with bright rays.
         vec3 ty = normalize(vec3(-0.25, -0.55, 0.8));
         float dt = acos(clamp(dot(n, ty), -1.0, 1.0));
         float ang = atan(dot(n - ty, cross(ty, vec3(0.0, 1.0, 0.0))), dot(n - ty, vec3(0.0, 1.0, 0.0)));
         float rays = step(0.86, noise3(vec3(ang * 7.0, 0.0, 1.0))) * smoothstep(0.9, 0.08, dt);
-        alb += rays * 0.18 + (dt < 0.05 ? 0.2 : 0.0);
+        alb += rays * 0.1 + (dt < 0.05 ? 0.12 : 0.0);
         float k = alb * lit;
         // A facet turned just so: a glint.
         vec3 hv = normalize(S + V);
-        k += pow(max(dot(nf, hv), 0.0), 220.0) * 0.5 * step(0.25, dot(n, S));
+        k += pow(max(dot(nf, hv), 0.0), 400.0) * 0.3 * step(0.25, dot(n, S));
         // A few dithered tones of brightness, like the rest of the world —
         // stepped as one value, so shadows stay grey rather than speckling
         // into colour — over a faint earthshine on the dark side.
-        float lv = 8.0;
-        float kq = floor(clamp(k, 0.0, 1.2) * lv + bayer4(gl_FragCoord.xy) * 0.7) / lv;
+        float lv = 6.0;
+        float kq = floor(clamp(k, 0.0, 1.2) * lv + bayer4(gl_FragCoord.xy) * 0.5) / lv;
         vec3 col = vec3(0.035, 0.04, 0.055) + vec3(1.0, 0.97, 0.9) * kq;
         gl_FragColor = vec4(col * 0.78, 1.0);
         #include <colorspace_fragment>
@@ -412,30 +408,6 @@ function ridgeMaterial(color: string, moonlit: number): ShaderMaterial {
   });
 }
 
-/** The moon's halo: concentric bands of pale blue, painted as pixels. */
-function haloTexture(): CanvasTexture {
-  const S = 32;
-  const c = document.createElement("canvas");
-  c.width = c.height = S;
-  const ctx = c.getContext("2d")!;
-  const img = ctx.createImageData(S, S);
-  for (let y = 0; y < S; y++)
-    for (let x = 0; x < S; x++) {
-      const r = Math.hypot(x - S / 2 + 0.5, y - S / 2 + 0.5) / (S / 2);
-      const v = Math.floor(Math.max(0, 1 - r) ** 2.2 * 6) / 6;
-      const i = (y * S + x) * 4;
-      img.data[i] = 150 * v;
-      img.data[i + 1] = 170 * v;
-      img.data[i + 2] = 255 * v;
-      img.data[i + 3] = 255;
-    }
-  ctx.putImageData(img, 0, 0);
-  const t = new CanvasTexture(c);
-  t.magFilter = NearestFilter;
-  t.minFilter = NearestFilter;
-  return t;
-}
-
 const tmpA = new Vector3();
 const tmpB = new Vector3();
 
@@ -453,14 +425,6 @@ export function Sky() {
       nearMat: ridgeMaterial("#05070f", 0.5),
       moon: new SphereGeometry(MOON_R, 64, 48),
       moonMat: moonMaterial(MOON_SUN),
-      halo: new PlaneGeometry(MOON_R * 4.4, MOON_R * 4.4),
-      haloMat: new MeshBasicMaterial({
-        map: haloTexture(),
-        transparent: true,
-        blending: AdditiveBlending,
-        depthWrite: false,
-        fog: false,
-      }),
     };
   }, []);
   const points = useMemo(() => {
@@ -472,7 +436,6 @@ export function Sky() {
   useEffect(
     () => () => {
       for (const r of Object.values(res)) r.dispose();
-      res.haloMat.map?.dispose();
     },
     [res],
   );
@@ -512,7 +475,6 @@ export function Sky() {
       <mesh geometry={res.far} material={res.farMat} renderOrder={-1} />
       <mesh geometry={res.near} material={res.nearMat} renderOrder={-1} />
       <group position={moonPos} onUpdate={(g) => g.lookAt(0, 0, 0)}>
-        <mesh geometry={res.halo} material={res.haloMat} position={[0, 0, -MOON_R - 0.5]} />
         <mesh geometry={res.moon} material={res.moonMat} />
       </group>
     </group>

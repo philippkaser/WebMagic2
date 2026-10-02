@@ -196,7 +196,7 @@ function UsageHint({ mode, y }: { mode: InventoryMode; y: number }) {
     { text: "close" },
   ];
   const gap = HINT_PX * 3;
-  const widths = parts.map((p) => ("key" in p ? keyCapWidth(p.key, HINT_PX * 0.85) : measureText(p.text, HINT_PX).width));
+  const widths = parts.map((p) => ("key" in p ? keyCapWidth(p.key, HINT_PX) : measureText(p.text, HINT_PX).width));
   const total = widths.reduce((a, b) => a + b, 0) + gap * (parts.length - 1);
   let x = -total / 2;
   return (
@@ -205,7 +205,7 @@ function UsageHint({ mode, y }: { mode: InventoryMode; y: number }) {
         const cx = x + widths[i]! / 2;
         x += widths[i]! + gap;
         return "key" in p ? (
-          <KeyCap key={i} k={p.key} px={HINT_PX * 0.85} position={[cx, 0, 0]} />
+          <KeyCap key={i} k={p.key} px={HINT_PX} position={[cx, 0, 0]} />
         ) : (
           <RuneText key={i} text={p.text} px={HINT_PX} color={p.color ?? ink.faded} glow={0.4} position={[cx, 0, 0]} delay={0.7 + i * 0.03} />
         );

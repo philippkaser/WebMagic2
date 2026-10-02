@@ -246,7 +246,7 @@ export function Socket({ spec, children, wareItem = null, grade: gradeProp = nul
         </group>
       </group>
       {spec.label && spec.variant === "belt" ? (
-        <KeyCap k={spec.label} px={LABEL_PX * 0.8} position={[0, -half - CARD_TEXEL * 2 - LABEL_PX * 5, 0.004]} />
+        <KeyCap k={spec.label} px={LABEL_PX} position={[0, -half - CARD_TEXEL * 2 - LABEL_PX * 5, 0.004]} />
       ) : (
         spec.label && (
           <RuneText

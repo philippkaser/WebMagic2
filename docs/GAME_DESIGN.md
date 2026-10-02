@@ -100,7 +100,7 @@ The emotional loop we are chasing:
   of the floor you've explored, laid in light on the ground a step ahead of
   you inside a rune circle — walk around it, or over it; anyone on the floor
   sees it, every wizard marked on it, and casting it shares what you've
-  explored — with the place's name hanging over it; your
+  explored; folded, its light drains back in and its circle un-draws; your
   health and mana are two glass orbs whose facets catch the torch one pixel
   at a time, their liquid sloshing as you run and turn; the HUD is sparse
   (the tithe stones top left, the floor top right, the orbs, the belt) and

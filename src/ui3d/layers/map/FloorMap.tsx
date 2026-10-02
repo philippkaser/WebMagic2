@@ -17,11 +17,11 @@ import { playHoloCast, playHoloCollapse } from "../../../audio/uiSounds";
 import { playerPosition } from "../../../game/player-state";
 import { estimatePeer, peerIds } from "../../../net/players";
 import { useGame } from "../../../state/gameStore";
-import { exploredVersion, isExplored, useCurrentLayout } from "../../../world/currentFloor";
+import { exploredVersion, getCurrentLayout, isExplored, markExplored, useCurrentLayout } from "../../../world/currentFloor";
 import type { FloorLayout } from "../../../world/types";
 import { uiNow } from "../../clock";
 import { ink } from "../../theme";
-import { makeMarkerMaterial, makeShadeMaterial, makeSigilMaterial, makeTileMaterial, makeWallMaterial } from "./mapMaterials";
+import { FOLD_PER_M, makeMarkerMaterial, makeShadeMaterial, makeSigilMaterial, makeTileMaterial, makeWallMaterial } from "./mapMaterials";
 import { dungeonModel, villageModel, type MapMarker, type MapModel } from "./mapModel";
 import { SELF, useMapCast, type MapCast } from "./mapStore";
 import { useStagedCasts } from "./useStagedCasts";
@@ -36,10 +36,10 @@ import { useStagedCasts } from "./useStagedCasts";
  * floor (you in cream, the others in green), the way onward, the way home,
  * the treasure and the Warden once seen. It is true to the world (north is
  * north), so walk around it to read it from any side; walk over it if you
- * like. Walk far off and it lets go; M again folds it.
- *
- * Its words (the place's name) hang above it on the UI canvas
- * (MapLabels.tsx). */
+ * like. Walk far off and it lets go; M again folds it — the light drains
+ * back in from the edge toward the caster, the walls sinking into the
+ * floor, and the rune circle un-draws itself. No words hang over it: the
+ * floor's name and mood are the HUD's (top right). */
 
 /** Walk this far from a map and it lets go, m. */
 const LEAVE_DIST = 14;
@@ -57,6 +57,7 @@ export function FloorMaps() {
   const { entries, drop } = useStagedCasts();
   return (
     <>
+      <ExploreTracker />
       {entries.map((e) =>
         e.cast.kind === "village" || layout ? (
           <FloorMap key={e.cast.id} cast={e.cast} layout={e.cast.kind === "village" ? null : layout} shown={e.shown} onGone={() => drop(e.cast.id)} />
@@ -64,6 +65,20 @@ export function FloorMaps() {
       )}
     </>
   );
+}
+
+/** Marks the tiles around the wizard as seen, a few times a second — cast
+ * or not (world/currentFloor.ts). */
+function ExploreTracker() {
+  const last = useRef(0);
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    if (t - last.current < 0.2) return;
+    last.current = t;
+    const layout = getCurrentLayout();
+    if (layout && useGame.getState().phase === "dungeon") markExplored(layout, playerPosition.x, playerPosition.z, 4);
+  });
+  return null;
 }
 
 const unitBox = new BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
@@ -79,6 +94,7 @@ const UP = new Vector3(0, 1, 0);
 function instanced(geometry: BoxGeometry | PlaneGeometry, material: ShaderMaterial, capacity: number, bright: boolean): InstancedMesh {
   const m = new InstancedMesh(geometry.clone(), material, Math.max(1, capacity));
   m.geometry.setAttribute("aBorn", new InstancedBufferAttribute(new Float32Array(Math.max(1, capacity)).fill(1e9), 1));
+  m.geometry.setAttribute("aDist", new InstancedBufferAttribute(new Float32Array(Math.max(1, capacity)), 1));
   if (bright) m.geometry.setAttribute("aBright", new InstancedBufferAttribute(new Float32Array(Math.max(1, capacity)).fill(1), 1));
   m.count = 0;
   m.frustumCulled = false;
@@ -130,6 +146,8 @@ function FloorMap({ cast, layout, shown, onGone }: { cast: MapCast; layout: Floo
     built: -10,
     castAt: uiNow(),
     goneAt: -1,
+    /** Farthest piece from where the reveal began, m (the fold starts there). */
+    distMax: 0,
     frame: { s: 0, cx: 0, cz: 0 },
     shown: { s: 0, cx: 0, cz: 0 },
   });
@@ -176,22 +194,27 @@ function FloorMap({ cast, layout, shown, onGone }: { cast: MapCast; layout: Floo
       ig.position.set(-sf.cx * scale, 0.012, -sf.cz * scale);
     }
 
-    // Collapse.
-    const gone = st.goneAt > 0 ? Math.min(1, (now - st.goneAt) / 0.5) : 0;
-    if (st.goneAt > 0 && now - st.goneAt > 0.75) {
+    // Folding: the light drains in from the edge (the shaders, per piece),
+    // the markers go out first, and once the middle is dark the rune circle
+    // un-draws itself the way it was drawn.
+    const foldTime = st.distMax * FOLD_PER_M + 0.3;
+    const folding = st.goneAt > 0;
+    const fold = folding ? Math.min(1, (now - st.goneAt) / foldTime) : 0;
+    const unwind = folding ? Math.min(1, Math.max(0, (now - st.goneAt - foldTime * 0.6) / 0.5)) : 0;
+    if (folding && unwind >= 1) {
       onGone();
       return;
     }
-    const alpha = 1 - gone;
+    const alpha = folding ? Math.max(0, 1 - (now - st.goneAt) / 0.15) : 1;
     for (const m of [mats.tile, mats.wall]) {
       m.uniforms.uTime!.value = now;
-      m.uniforms.uGone!.value = gone;
-      m.uniforms.uAlpha!.value = alpha;
+      m.uniforms.uFoldAt!.value = folding ? st.goneAt : 1e9;
+      m.uniforms.uDistMax!.value = st.distMax;
     }
-    mats.sigil.uniforms.uIgnite!.value = Math.min(1, t / 0.45);
-    mats.sigil.uniforms.uAlpha!.value = alpha;
+    mats.sigil.uniforms.uIgnite!.value = Math.min(1, t / 0.45) * (1 - unwind);
+    mats.sigil.uniforms.uAlpha!.value = 1;
     mats.sigil.uniforms.uTime!.value = now;
-    mats.shade.uniforms.uAlpha!.value = Math.min(1, t / 0.4) * alpha;
+    mats.shade.uniforms.uAlpha!.value = Math.min(1, t / 0.4) * (1 - fold);
 
     // Markers keep their size in metres whatever the map's scale.
     const inv = 1 / scale;
@@ -277,7 +300,7 @@ function MarkerMesh({ color, meshRef }: { color: string; meshRef: (m: Mesh | nul
  * on a ripple out from where the map was cast. */
 function fill(
   model: MapModel,
-  st: { born: Map<number, number>; frame: { s: number; cx: number; cz: number } },
+  st: { born: Map<number, number>; distMax: number; frame: { s: number; cx: number; cz: number } },
   tiles: InstancedMesh,
   walls: InstancedMesh,
   from: number,
@@ -286,10 +309,14 @@ function fill(
 ) {
   const b0 = model.bounds;
   const [ox, oz] = origin ?? (b0 ? [(b0.minX + b0.maxX) / 2, (b0.minZ + b0.maxZ) / 2] : [0, 0]);
-  const ripple = (x: number, z: number) => from + Math.hypot(x - ox, z - oz) * 0.012;
+  const dist = (x: number, z: number) => Math.hypot(x - ox, z - oz);
+  const ripple = (x: number, z: number) => from + dist(x, z) * 0.012;
   const tileBorn = tiles.geometry.getAttribute("aBorn") as InstancedBufferAttribute;
   const tileBright = tiles.geometry.getAttribute("aBright") as InstancedBufferAttribute;
+  const tileDist = tiles.geometry.getAttribute("aDist") as InstancedBufferAttribute;
   const wallBorn = walls.geometry.getAttribute("aBorn") as InstancedBufferAttribute;
+  const wallDist = walls.geometry.getAttribute("aDist") as InstancedBufferAttribute;
+  let far = 0;
   let i = 0;
   for (const p of model.floor) {
     if (i >= tiles.instanceMatrix.count) break;
@@ -299,6 +326,9 @@ function fill(
     tiles.setMatrixAt(i, tmpM);
     tileBorn.setX(i, born);
     tileBright.setX(i, p.bright);
+    const d = dist(p.x, p.z);
+    tileDist.setX(i, d);
+    far = Math.max(far, d);
     i++;
   }
   tiles.count = i;
@@ -310,6 +340,9 @@ function fill(
     tmpM.compose(tmpP.set(p.x, 0, p.z), tmpQ.setFromAxisAngle(UP, p.rot), tmpS.set(p.sx, p.h, p.sz));
     walls.setMatrixAt(w, tmpM);
     wallBorn.setX(w, born);
+    const d = dist(p.x, p.z);
+    wallDist.setX(w, d);
+    far = Math.max(far, d);
     w++;
   }
   walls.count = w;
@@ -317,7 +350,10 @@ function fill(
   walls.instanceMatrix.needsUpdate = true;
   tileBorn.needsUpdate = true;
   tileBright.needsUpdate = true;
+  tileDist.needsUpdate = true;
   wallBorn.needsUpdate = true;
+  wallDist.needsUpdate = true;
+  st.distMax = far;
   if (model.bounds) {
     const b = model.bounds;
     st.frame.s = width / Math.max(b.maxX - b.minX, b.maxZ - b.minZ);
