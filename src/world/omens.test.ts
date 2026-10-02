@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { NEUTRAL_FLOOR_RULES } from "../game/floorRules";
-import { OMEN_DEFS, getOmenDef, omenGenMods, omenRules, rollOmen } from "./omens";
+import { OMEN_DEFS, getOmenDef, omenGenMods, omenRules, rollOmen, omenEffects } from "./omens";
 import type { OmenId } from "./types";
 
 const SEEDS = Array.from({ length: 400 }, (_, i) => (i * 2654435761 + 1013904223) >>> 0);
@@ -90,5 +90,31 @@ describe("omens", () => {
 
   test("unknown ids throw", () => {
     expect(() => getOmenDef("sunny" as OmenId)).toThrow();
+  });
+});
+
+describe("omen effects in plain words", () => {
+  test("a calm floor has none", () => {
+    expect(omenEffects(null)).toEqual([]);
+  });
+
+  test("every omen says what it does, at least once", () => {
+    for (const def of OMEN_DEFS) {
+      const lines = omenEffects(def.id);
+      expect(lines.length).toBeGreaterThan(0);
+      for (const l of lines) expect(l.text.length).toBeGreaterThan(5);
+    }
+  });
+
+  test("the numbers come from the rules", () => {
+    const crimson = omenEffects("crimson").map((l) => l.text);
+    expect(crimson).toContain("Monsters hit 25% harder");
+    expect(crimson).toContain("Monsters move 20% faster");
+    expect(crimson).toContain("Loot drops 70% more often");
+    expect(crimson).toContain("50% more gold");
+    expect(omenEffects("manatide")[0]).toEqual({ text: "Mana returns 2.2× as fast", good: true });
+    const teeming = omenEffects("teeming");
+    expect(teeming).toContainEqual({ text: "50% more monsters", good: false });
+    expect(teeming).toContainEqual({ text: "Monsters have 25% less health", good: true });
   });
 });

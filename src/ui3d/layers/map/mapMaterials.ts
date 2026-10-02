@@ -5,10 +5,10 @@ import { LIGHT_BLENDING } from "../../light";
  * computed in display values (light.ts).
  *
  * Tiles and walls are instanced; each instance carries `aBorn`, the uiNow
- * second it appears — the reveal ripples out from where the wizard stands
- * — and grows in (tiles unfold, walls rise) over a quarter second with a
- * white-hot flash. `uGone` collapses everything again when the map is
- * dismissed. */
+ * second it appears (the reveal ripples out from where the wizard stands),
+ * and tiles `aBright` (paths glow brighter). Each grows in (tiles unfold,
+ * walls rise) over a quarter second with a white-hot flash. `uGone`
+ * collapses everything again when the map is dismissed. */
 
 const COMMON = /* glsl */ `
 uniform float uTime;
@@ -22,10 +22,13 @@ export function makeTileMaterial(color: string): ShaderMaterial {
     uniforms: { uColor: { value: new Color(color) }, uTime: { value: 0 }, uGone: { value: 0 }, uAlpha: { value: 1 } },
     vertexShader: /* glsl */ `
 ${COMMON}
+attribute float aBright;
 varying vec2 vUv;
 varying vec3 vWorld;
+varying float vBright;
 void main() {
   vUv = uv;
+  vBright = aBright;
   vAge = uTime - aBorn;
   float grow = clamp(vAge / 0.25, 0.0, 1.0) * (1.0 - uGone);
   vec3 p = position * grow;
@@ -41,11 +44,12 @@ uniform float uAlpha;
 varying float vAge;
 varying vec2 vUv;
 varying vec3 vWorld;
+varying float vBright;
 void main() {
   if (vAge < 0.0) discard;
   vec2 e = min(vUv, 1.0 - vUv);
   float edge = min(e.x, e.y);
-  float b = 0.11 + (edge < 0.12 ? 0.16 : 0.0);
+  float b = (0.13 + (edge < 0.12 ? 0.14 : 0.0)) * vBright;
   // A slow sweep crossing the map.
   float sweep = abs(fract(vWorld.x * 1.6 + vWorld.z * 0.8 - uTime * 0.35) - 0.5);
   b += sweep < 0.03 ? 0.08 : 0.0;

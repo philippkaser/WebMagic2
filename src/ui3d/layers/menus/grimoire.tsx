@@ -12,8 +12,8 @@ import { spriteSize, spriteTexture, type SpriteName } from "./icons";
 import { wrapRows } from "./menuText";
 import { Delayed } from "./stage";
 
-/** The grimoire's small furniture for the menu screens, in 3D: letter-
- * spaced caps, blackletter titles with their cast shadows, the brass
+/** The grimoire's small furniture for the menu screens, in 3D: small
+ * caps, blackletter titles with their cast shadows, the brass
  * flourish under a title, pixel icons that burn in pixel by pixel, and the
  * key-cap legend. Everything is hard-edged and builds itself in when its
  * presence shows (useUiShow), like the rest of the in-world UI. */
@@ -21,15 +21,11 @@ import { Delayed } from "./stage";
 let quad: PlaneGeometry | null = null;
 const unitQuad = () => (quad ??= new PlaneGeometry(1, 1));
 
-/** Letter-spaced caps — the grimoire's tiny tracking labels (`.wm-label`,
- * `.wm-tagline`). Layout has no tracking, so a space goes between letters
- * and three between words. */
+/** Small caps — the grimoire's tiny labels (`.wm-label`, `.wm-tagline`). */
 export function spaced(text: string): string {
-  return text
-    .toUpperCase()
-    .split(" ")
-    .map((w) => Array.from(w).join(" "))
-    .join("   ");
+  // Small caps in Silkscreen are already wide: letter-spacing them as well
+  // (the grimoire's CSS did) breaks words apart at pixel sizes.
+  return text.toUpperCase();
 }
 
 /** Wrap width in "columns" (RuneText's maxCols, in the face's average

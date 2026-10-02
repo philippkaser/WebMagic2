@@ -4,7 +4,7 @@ import jerseyUrl from "@fontsource/jersey-15/files/jersey-15-latin-400-normal.wo
 import silkscreenUrl from "@fontsource/silkscreen/files/silkscreen-latin-400-normal.woff2?url";
 import tiny5Url from "@fontsource/tiny5/files/tiny5-latin-400-normal.woff2?url";
 import { ATLAS_COLS, ATLAS_PAD, CELL_H, CELL_W, atlasTexture, glyphAtlas, inkToAtlas } from "./atlas";
-import { GLYPH_H, GLYPH_W, RUNE_BASE, RUNE_COUNT, glyphBitmap, glyphSlot, type Bitmap } from "./glyphs";
+import { GLYPH_H, GLYPH_W, RUNE_BASE, RUNE_COUNT, glyphBitmap, glyphSlot, smallSymbolBitmap, type Bitmap } from "./glyphs";
 import { PIXEL_METRICS, type FontMetrics } from "./metrics";
 
 /** The UI's typefaces:
@@ -76,9 +76,12 @@ const CHARSET: string[] = (() => {
   return chars;
 })();
 
-/** Symbols always drawn from the hand-set font (pixel fonts rarely carry
- * them, and the fallback's versions match the pixel look). */
-const SYMBOLS = "←→↑↓▲▼◆◇○●◉♥✦□■°×·";
+/** Symbols drawn from the hand-set bitmaps (pixel fonts rarely carry them,
+ * and the hand-set ones match the pixel look) — five pixels tall in a face
+ * with five-pixel capitals, seven (scaled) otherwise. `·`, `×` and `°` come
+ * from the font itself when it has them, so they match its strokes. */
+const SYMBOLS = "←→↑↓▲▼◆◇○●◉♥✦□■";
+const SOFT_SYMBOLS = "°×·";
 
 let pixelFace: Face | null = null;
 
@@ -169,8 +172,9 @@ function rasterize(spec: WebFaceSpec): Face {
 
   // Which characters come from the font, which from the hand-set bitmaps.
   const fromFont = CHARSET.filter((ch) => !SYMBOLS.includes(ch) && has(ch));
-  const symbolChars = [...SYMBOLS].filter((ch) => !fromFont.includes(ch));
+  const symbolChars = [...SYMBOLS, ...SOFT_SYMBOLS].filter((ch) => !fromFont.includes(ch));
   const runeScale = Math.max(1, Math.round(capHeight / 7));
+  const small = capHeight <= 6;
 
   let left = 0;
   let boxW = 0;
@@ -187,17 +191,19 @@ function rasterize(spec: WebFaceSpec): Face {
   const baseline = PAD + ascent; // within a cell
 
   const slots = new Map<string, number>();
-  const bitmapSlots: Bitmap[] = [];
+  // Each hand-set bitmap with the rows it stands above the baseline.
+  const bitmapSlots: { bmp: Bitmap; rows: number; scale: number }[] = [];
   fromFont.forEach((ch, i) => slots.set(ch, i));
   const symbolBase = fromFont.length;
   symbolChars.forEach((ch, i) => {
     slots.set(ch, symbolBase + i);
-    bitmapSlots.push(glyphBitmap(glyphSlot(ch)));
-    advances.push((GLYPH_W - 0) * runeScale);
+    const tiny = small ? smallSymbolBitmap(ch) : null;
+    bitmapSlots.push(tiny ? { bmp: tiny, rows: 5, scale: 1 } : { bmp: glyphBitmap(glyphSlot(ch)), rows: 7, scale: runeScale });
+    advances.push(GLYPH_W * (tiny ? 1 : runeScale));
   });
   const runeBase = symbolBase + symbolChars.length;
   for (let r = 0; r < RUNE_COUNT; r++) {
-    bitmapSlots.push(glyphBitmap(RUNE_BASE + r));
+    bitmapSlots.push({ bmp: glyphBitmap(RUNE_BASE + r), rows: 7, scale: runeScale });
     advances.push(GLYPH_W * runeScale);
   }
   const count = runeBase + RUNE_COUNT;
@@ -224,18 +230,19 @@ function rasterize(spec: WebFaceSpec): Face {
   });
 
   // Hand-set bitmaps (symbols, runes): scaled by whole pixels, standing on
-  // the baseline (their 7-row body = cap height, row 8 = descender).
-  bitmapSlots.forEach((bmp, i) => {
+  // the baseline (their body = cap height; a 7-row glyph's 8th row is its
+  // descender).
+  bitmapSlots.forEach(({ bmp, rows, scale }, i) => {
     const slot = symbolBase + i;
     const ox = (slot % cols) * cellW + PAD + left;
-    const oy = Math.floor(slot / cols) * cellH + baseline - 7 * runeScale;
-    for (let y = 0; y < GLYPH_H; y++)
+    const oy = Math.floor(slot / cols) * cellH + baseline - rows * scale;
+    for (let y = 0; y < Math.min(GLYPH_H, bmp.length); y++)
       for (let x = 0; x < GLYPH_W; x++) {
         if (!bmp[y]![x]) continue;
-        for (let sy = 0; sy < runeScale; sy++)
-          for (let sx = 0; sx < runeScale; sx++) {
-            const tx = ox + x * runeScale + sx;
-            const ty = oy + y * runeScale + sy;
+        for (let sy = 0; sy < scale; sy++)
+          for (let sx = 0; sx < scale; sx++) {
+            const tx = ox + x * scale + sx;
+            const ty = oy + y * scale + sy;
             if (ty >= 0 && ty < height) ink[ty * width + tx] = 1;
           }
       }

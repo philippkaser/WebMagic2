@@ -70,7 +70,7 @@ export function HUD() {
         }
       } else if (e.code === "KeyM") {
         const state = useGame.getState();
-        if (state.phase !== "dungeon" || state.overlay !== "none") return;
+        if ((state.phase !== "dungeon" && state.phase !== "village") || state.overlay !== "none") return;
         e.preventDefault();
         useMapCast.getState().toggle();
       } else if (e.code === "KeyI" || e.code === "Tab") {

@@ -35,8 +35,8 @@ describe("menu text", () => {
     }
   });
 
-  test("labels are letter-spaced caps", () => {
-    expect(spaced("Your name")).toBe("Y O U R   N A M E");
+  test("labels are plain caps (no tracking: Silkscreen is wide already)", () => {
+    expect(spaced("Your name")).toBe("YOUR NAME");
   });
 
   test("name drafts are filtered like the committed name, without trimming", () => {

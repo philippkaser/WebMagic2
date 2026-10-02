@@ -144,3 +144,45 @@ export function omenGenMods(id: OmenId | null): Required<OmenGenMods> {
     enemyCountMult: gen.enemyCountMult ?? 1,
   };
 }
+
+/** One effect of an omen, in plain words, and whether it helps you. */
+export interface OmenEffect {
+  text: string;
+  good: boolean;
+}
+
+const pct = (m: number) => `${Math.round(Math.abs(m - 1) * 100)}%`;
+
+/** What an omen actually does, line by line, read straight from its rules
+ * and generation knobs (so the words can never drift from the numbers):
+ * "Monsters hit 25% harder", "Mana returns 2.2× as fast"… Empty for a calm
+ * floor. */
+export function omenEffects(id: OmenId | null): OmenEffect[] {
+  if (!id) return [];
+  const def = getOmenDef(id);
+  const r = def.rules;
+  const g = def.gen;
+  const out: OmenEffect[] = [];
+  if (r.gravityMult !== undefined && r.gravityMult !== 1)
+    out.push(r.gravityMult < 1 ? { text: `Gravity is ${pct(r.gravityMult)} weaker — you leap higher, fall slower`, good: true } : { text: `Gravity is ${pct(r.gravityMult)} stronger`, good: false });
+  if (r.manaRegenMult !== undefined && r.manaRegenMult !== 1)
+    out.push({ text: r.manaRegenMult > 1 ? `Mana returns ${r.manaRegenMult}× as fast` : `Mana returns ${pct(r.manaRegenMult)} slower`, good: r.manaRegenMult > 1 });
+  if (g.torchMult !== undefined && g.torchMult < 1) out.push({ text: "Few torches burn", good: false });
+  if (g.fogMult !== undefined && g.fogMult < 1) out.push({ text: "The dark closes in", good: false });
+  if (r.explosionRadiusMult !== undefined && r.explosionRadiusMult !== 1)
+    out.push({ text: `Explosions reach ${pct(r.explosionRadiusMult)} ${r.explosionRadiusMult > 1 ? "farther" : "less far"}`, good: r.explosionRadiusMult > 1 });
+  if (g.barrelBias !== undefined && g.barrelBias > 0) out.push({ text: "More powder barrels lie about", good: false });
+  if (g.enemyCountMult !== undefined && g.enemyCountMult !== 1)
+    out.push({ text: `${pct(g.enemyCountMult)} ${g.enemyCountMult > 1 ? "more" : "fewer"} monsters`, good: g.enemyCountMult < 1 });
+  if (r.enemyHealthMult !== undefined && r.enemyHealthMult !== 1)
+    out.push({ text: `Monsters have ${pct(r.enemyHealthMult)} ${r.enemyHealthMult < 1 ? "less" : "more"} health`, good: r.enemyHealthMult < 1 });
+  if (r.enemyDamageMult !== undefined && r.enemyDamageMult !== 1)
+    out.push({ text: `Monsters hit ${pct(r.enemyDamageMult)} ${r.enemyDamageMult > 1 ? "harder" : "softer"}`, good: r.enemyDamageMult < 1 });
+  if (r.enemySpeedMult !== undefined && r.enemySpeedMult !== 1)
+    out.push({ text: `Monsters move ${pct(r.enemySpeedMult)} ${r.enemySpeedMult > 1 ? "faster" : "slower"}`, good: r.enemySpeedMult < 1 });
+  if (r.lootChanceMult !== undefined && r.lootChanceMult !== 1)
+    out.push({ text: `Loot drops ${pct(r.lootChanceMult)} ${r.lootChanceMult > 1 ? "more" : "less"} often`, good: r.lootChanceMult > 1 });
+  if (r.goldMult !== undefined && r.goldMult !== 1)
+    out.push({ text: `${pct(r.goldMult)} ${r.goldMult > 1 ? "more" : "less"} gold`, good: r.goldMult > 1 });
+  return out;
+}

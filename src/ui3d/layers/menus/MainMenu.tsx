@@ -99,7 +99,8 @@ function Logo() {
 function Tenets() {
   const pad = 0.016 * U;
   const iconPx = 0.0026 * U;
-  const headCap = 0.0125;
+  // Jersey's capitals are 15 font pixels: drawn smaller they lose pixels.
+  const headCap = 0.019;
   const bodyCap = 0.0106;
   return (
     <>
@@ -115,6 +116,7 @@ function Tenets() {
                 <PixelIcon name={t.icon} tint={t.tint} pixel={iconPx} position={[left + iconW / 2, top - 0.01 * U, 0.002]} delay={0.05} />
                 <RuneText
                   text={t.title}
+                  font="heading"
                   px={px(headCap)}
                   color={ink.parchment}
                   glow={0.3}

@@ -5,7 +5,9 @@ import {
   InstancedBufferAttribute,
   InstancedBufferGeometry,
   Mesh,
+  PerspectiveCamera,
   PlaneGeometry,
+  Quaternion,
   Vector3,
 } from "three";
 import { uiNow } from "../clock";
@@ -13,6 +15,7 @@ import { getFace, type Face, type FontId } from "../font/faces";
 import { layoutText, type Align, type TextInput, type TextLayout } from "../font/layout";
 import { useUiShow } from "../presence";
 import { useUiTextStyle } from "../style";
+import { snapScale } from "./snap";
 import { emitUiSparks } from "../UiSparks";
 import { applyFace, createRuneTextMaterial, NEVER, type RuneTextMaterial } from "./runeTextMaterial";
 
@@ -35,7 +38,14 @@ import { applyFace, createRuneTextMaterial, NEVER, type RuneTextMaterial } from 
  * Size (`px`) is a seventh of the capital height in world units, whatever
  * the face — so `pxFor(distance, screenFraction)` sizes any face alike, and
  * switching a line to the title face keeps its cap height. `measureText`
- * measures a block before placing it. */
+ * measures a block before placing it.
+ *
+ * Pixel-exact: these are pixel fonts, and a font pixel drawn 1.4 screen
+ * pixels wide comes out uneven — some strokes one pixel, some two, a V that
+ * reads as a W. So every frame each block measures how many screen pixels
+ * one of its font pixels covers and nudges its own scale (about its anchor)
+ * to the nearest whole number (`snapScale`). Sizes are designed to land
+ * near whole numbers at an 800 px tall window, so the nudge is small. */
 
 export interface RuneTextProps {
   text: TextInput;
@@ -73,6 +83,8 @@ export interface RuneTextProps {
   brightness?: number;
   /** Shed embers while dissolving (default true). */
   sparks?: boolean;
+  /** Snap to whole screen pixels per font pixel (default true). */
+  snap?: boolean;
   renderOrder?: number;
   /** Called once when a dissolve has fully finished. */
   onHidden?: () => void;
@@ -181,6 +193,25 @@ function buildGeometry(
   return geometry;
 }
 
+const snapPos = new Vector3();
+const snapFwd = new Vector3();
+const snapScl = new Vector3();
+const tmpQuat = new Quaternion();
+
+function snapMesh(mesh: Mesh, fontPx: number, camera: PerspectiveCamera, bufferH: number): void {
+  const parent = mesh.parent;
+  if (!parent || !camera.isPerspectiveCamera) return;
+  // The parent's world transform as of last frame: steady enough.
+  parent.matrixWorld.decompose(snapPos, tmpQuat, snapScl);
+  mesh.getWorldPosition(snapPos);
+  camera.getWorldDirection(snapFwd);
+  const depth = snapPos.sub(camera.position).dot(snapFwd);
+  if (depth < 0.02) return;
+  const worldPerScreenPx = (2 * depth * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(1, bufferH);
+  const screenPx = (fontPx * snapScl.x) / worldPerScreenPx;
+  mesh.scale.setScalar(snapScale(screenPx));
+}
+
 export function RuneText({
   text,
   px: pxProp,
@@ -201,6 +232,7 @@ export function RuneText({
   opacity = 1,
   brightness = 1,
   sparks = true,
+  snap = true,
   renderOrder = 10,
   onHidden,
   children,
@@ -286,7 +318,8 @@ export function RuneText({
   u.uBright.value = brightness;
   mesh.renderOrder = renderOrder;
 
-  useFrame((_, dt) => {
+  useFrame((state, dt) => {
+    if (snap) snapMesh(mesh, px, state.camera as PerspectiveCamera, state.size.height * state.viewport.dpr);
     const now = uiNow();
     u.uTime.value = now;
     u.uVanishAt.value = vanishAt.current;

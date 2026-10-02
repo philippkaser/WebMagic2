@@ -138,6 +138,37 @@ const GLYPHS: Record<string, string> = {
   "°": ".##.. #..#. .##..",
 };
 
+/** The same symbols drawn five pixels tall, for faces whose capitals are
+ * five pixels (Tiny5, Silkscreen): a 7-pixel ▲ or ✦ beside 5-pixel letters
+ * towers over them. Rows run from cap height down to the baseline. */
+export const SMALL_SYMBOLS: Record<string, string> = {
+  "←": "..#.. .#... ##### .#... ..#..",
+  "→": "..#.. ...#. ##### ...#. ..#..",
+  "↑": "..#.. .###. #.#.# ..#.. ..#..",
+  "↓": "..#.. ..#.. #.#.# .###. ..#..",
+  "▲": "..... ..#.. .###. ##### .....",
+  "▼": "..... ##### .###. ..#.. .....",
+  "◆": "..#.. .###. ##### .###. ..#..",
+  "◇": "..#.. .#.#. #...# .#.#. ..#..",
+  "○": ".###. #...# #...# #...# .###.",
+  "●": ".###. ##### ##### ##### .###.",
+  "◉": ".###. #...# #.#.# #...# .###.",
+  "♥": ".#.#. ##### ##### .###. ..#..",
+  "✦": "..#.. ..#.. ##.## ..#.. ..#..",
+  "□": "##### #...# #...# #...# #####",
+  "■": "##### ##### ##### ##### #####",
+  "°": ".#... #.#.. .#... ..... .....",
+  "×": "#...# .#.#. ..#.. .#.#. #...#",
+  "·": "..... ..... ..#.. ..... .....",
+};
+
+/** A small symbol as rows of booleans (5 rows × GLYPH_W columns), or null. */
+export function smallSymbolBitmap(char: string): Bitmap | null {
+  const spec = SMALL_SYMBOLS[char];
+  if (!spec) return null;
+  return spec.split(" ").map((row) => Array.from({ length: GLYPH_W }, (_, x) => row[x] === "#"));
+}
+
 /** Stand-ins for characters the font doesn't carry. */
 const ALIASES: Record<string, string> = {
   "’": "'",

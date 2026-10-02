@@ -34,7 +34,7 @@ const L = HUD_LAYOUT.vitals;
 const A = apx(L.distance);
 const R = (VITALS.orb / 2) * A;
 const NUM = fontPx(21, "body", L.distance);
-const MAX = fontPx(10, "label", L.distance);
+const MAX = fontPx(13, "body", L.distance);
 
 type Kind = "health" | "mana";
 
@@ -204,7 +204,7 @@ function OrbBlock({
       />
       <RuneText
         text={`/ ${Math.round(max)}`}
-        font="label"
+        font="body"
         px={MAX}
         color={ink.faded}
         anchor={[0, 0.5]}
