@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { gameEvents } from "../../../core/events";
-import { pxFor } from "../../anchors";
 import { uiNow } from "../../clock";
 import { Plate } from "../../Plate";
 import { UiShow } from "../../presence";
 import { measureText, RuneText } from "../../text/RuneText";
+import { STEP, typePx } from "../../text/type";
 import { ink } from "../../theme";
 import { ALTAR, SCENE_DISTANCE } from "./layout";
 
@@ -16,7 +16,7 @@ import { ALTAR, SCENE_DISTANCE } from "./layout";
  * after a few seconds. */
 
 const MAX = 2;
-const PX = pxFor(SCENE_DISTANCE, 0.019);
+const PX = typePx(SCENE_DISTANCE, STEP.text);
 const MAX_COLS = 60;
 const LINE = PX * 15;
 

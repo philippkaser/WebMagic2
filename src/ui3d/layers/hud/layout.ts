@@ -62,7 +62,7 @@ export function slotStrip(n: number): { cssW: number; cssH: number; outerW: numb
 
 /** The top-left marker's height (Location.tsx: the tithe stones and the
  * line that sometimes shows under them). */
-export const LOCATION_H = 60;
+export const LOCATION_H = 66;
 
 /** The purse panel's padding-box height. */
 export const PURSE_H = 22;

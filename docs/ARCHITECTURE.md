@@ -508,7 +508,17 @@ and the way onward, gold for home, blood for danger.
   per instance, a vanish time per block): one draw call per text block and
   no per-frame CPU work. Changed glyphs rewrite themselves alone (a ticking
   counter flickers one digit). `px` is 1/7 of the cap height in every face,
-  so `pxFor(distance, fraction)` sizes them all alike.
+  so `pxFor(distance, fraction)` sizes them all alike. Pixel type only reads
+  when a font pixel covers a whole number of screen pixels (at 1.4 a V turns
+  into a W), so every frame RuneText projects one font pixel onto the screen
+  and scales its block to the nearest whole number (`text/snap.ts`; at one
+  screen pixel the dark outline drops to a trace — it would fill every gap).
+  So that nothing lands a step away from its neighbours, sizes come from the
+  **type scale** (`text/type.ts`: `typePx(distance, step, face)`, steps
+  exact on an 800-px-high view — `STEP.text` ×2 for anything read,
+  `STEP.lead` ×3 for numbers, the heading face at ×1/×2); the HUD's
+  `fontPx` rounds its artpass sizes to the same steps. The small faces carry
+  5-pixel symbols (▲▼◆…) of their own (`glyphs.ts` `SMALL_SYMBOLS`).
 - **Choreography** (`presence.tsx`): nothing pops. `<UiPresence show exit>`
   keeps a subtree mounted while it plays its exit, and every toolkit piece
   (RuneText, Tablet, Plate, RuneButton, ItemModel) ANDs the ambient "show"
@@ -550,15 +560,20 @@ and the way onward, gold for home, blood for danger.
   worn into the stone, their grade glowing up from the floor). The DOM
   keeps only what isn't part of the fiction: the perf overlay, the build
   stamp and the dev room.
-- **The cast map** (`layers/map/`): M on a floor casts a miniature of the
-  floor, as far as you have explored it, a stride ahead of you: a sigil
-  burns onto the floor, a column of light rises, and at table height the
-  explored tiles ripple out from where you stand and the walls rise behind
-  them as ribs of light (instanced, each instance born on its own beat);
-  markers kindle for you (walking as you walk), the way onward, the way
-  home, the treasure and the Warden once seen. It is world-aligned and
-  stays where it was cast — walk around it, or away (it lets go at 9 m);
-  M again folds it back into its sigil. The floor being played and what
+- **The cast map** (`layers/map/`): M casts a miniature of where you are —
+  the village whole, or the floor as far as you have explored it — a
+  stride ahead of you: a sigil burns onto the floor, a column of light
+  rises, and on a small table tilted toward you the tiles ripple out from
+  where you stand and walls, cottages and standing stones rise as ribs of
+  light (instanced, each instance born on its own beat); markers kindle for
+  you (walking as you walk), the way onward, the way home, the treasure and
+  the Warden once seen. What it draws is pure data (`mapModel.ts`:
+  `dungeonModel`, `villageModel`, tested); `castDistance` keeps the table
+  out of the walls in a narrow hall, and its width follows its distance.
+  Above it stand the place's name and, on an omen floor, a slab listing
+  what the omen changes (`world/omens.ts` `omenEffects`). It is
+  world-aligned and stays where it was cast — walk around it; walk away
+  (8 m) or into it and it lets go; M again folds it back into its sigil. The floor being played and what
   has been seen of it live in `world/currentFloor.ts` (the UI canvas can't
   see the world's React tree); `ExploreTracker` marks tiles a few times a
   second. It is the one hologram in the UI: pure added light

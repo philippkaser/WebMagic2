@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useGame } from "../../../state/gameStore";
-import { pxFor } from "../../anchors";
+import type { FontId } from "../../font/faces";
 import { UiPresence } from "../../presence";
 import { RuneButton } from "../../RuneButton";
 import { Tablet, TABLET_EXIT } from "../../Tablet";
 import { RuneText } from "../../text/RuneText";
+import { STEP, typePx } from "../../text/type";
 import { ink } from "../../theme";
 import { ArcaneCircle } from "./ArcaneCircle";
 import { SoftGlow } from "./fx";
@@ -30,11 +31,12 @@ import { Delayed, screenUnit, Stage, Veil } from "./stage";
 
 const D = 1.6;
 const U = screenUnit(D);
-const px = (cap: number) => pxFor(D, cap);
+/** RuneText px for step `n` of the type scale. */
+const tp = (n: number, face?: FontId) => typePx(D, n, face);
 
 const LOGO_Y = 0.305;
 const CARD_W = 0.27;
-const CARD_H = 0.122;
+const CARD_H = 0.136;
 const CARD_X = 0.288;
 const CARD_Y = 0.022;
 
@@ -55,7 +57,7 @@ export function MainMenu() {
         <Delayed by={2.0}>
           <KeyLegend
             entries={CONTROLS}
-            px={px(0.0088)}
+            px={tp(STEP.text)}
             maxWidth={0.86 * U}
             position={[0, -0.318 * U, 0]}
             step={0.05}
@@ -70,11 +72,11 @@ function Logo() {
   return (
     <>
       <SoftGlow color="#1fae96" width={0.95 * U} height={0.26 * U} position={[0, LOGO_Y * U, -0.04]} intensity={0.55} delay={0.6} fadeIn={1.4} breathe={0.25} />
-      <TitleText text="WebMagic" px={px(0.1)} color="#f1e4c2" position={[0, LOGO_Y * U, 0]} delay={0.15} inDuration={1.1} stagger={0.8} depth={2.5} flicker={0.06} />
+      <TitleText text="WebMagic" px={tp(7, "title")} color="#f1e4c2" position={[0, LOGO_Y * U, 0]} delay={0.15} inDuration={1.1} stagger={0.8} depth={2.5} flicker={0.06} />
       <RuneText
         text={spaced("Dungeon of the Hundred Floors")}
         font="label"
-        px={px(0.009)}
+        px={tp(STEP.text, "label")}
         color={ink.arcane}
         glow={0.5}
         position={[0, 0.212 * U, 0]}
@@ -83,8 +85,8 @@ function Logo() {
       />
       <RuneText
         text={PREMISE}
-        px={px(0.0118)}
-        maxCols={colsFor(0.6 * U, px(0.0118))}
+        px={tp(STEP.text)}
+        maxCols={colsFor(0.6 * U, tp(STEP.text))}
         color={ink.parchmentDim}
         glow={0.25}
         position={[0, 0.15 * U, 0]}
@@ -100,8 +102,8 @@ function Tenets() {
   const pad = 0.016 * U;
   const iconPx = 0.0026 * U;
   // Jersey's capitals are 15 font pixels: drawn smaller they lose pixels.
-  const headCap = 0.019;
-  const bodyCap = 0.0106;
+  const headPx = tp(1, "heading");
+  const bodyPx = tp(STEP.text);
   return (
     <>
       {TENETS.map((t, i) => {
@@ -117,7 +119,7 @@ function Tenets() {
                 <RuneText
                   text={t.title}
                   font="heading"
-                  px={px(headCap)}
+                  px={headPx}
                   color={ink.parchment}
                   glow={0.3}
                   anchor={[0, 0.5]}
@@ -126,8 +128,8 @@ function Tenets() {
                 />
                 <RuneText
                   text={t.text}
-                  px={px(bodyCap)}
-                  maxCols={colsFor(CARD_W * U - pad * 2, px(bodyCap))}
+                  px={bodyPx}
+                  maxCols={colsFor(CARD_W * U - pad * 2, bodyPx)}
                   align="left"
                   anchor={[0, 0]}
                   color={ink.parchmentDim}
@@ -163,19 +165,19 @@ function TheWayIn() {
       <RuneText
         text={spaced(editing ? "Enter to seal it" : "Your name, wizard")}
         font="label"
-        px={px(0.0085)}
+        px={tp(STEP.text, "label")}
         color={editing ? ink.arcaneDim : ink.faded}
         glow={0.2}
         position={[0, -0.078 * U, 0]}
       />
-      <NamePlaque px={px(0.0145)} width={0.3 * U} position={[0, -0.118 * U, 0]} onEditingChange={setEditing} />
-      <RuneButton label="Become the Wizard" onPress={startGame} px={px(0.0135)} position={[0, -0.188 * U, 0]} delay={0.25} />
+      <NamePlaque px={tp(STEP.text)} width={0.3 * U} position={[0, -0.118 * U, 0]} onEditingChange={setEditing} />
+      <RuneButton label="Become the Wizard" onPress={startGame} px={tp(STEP.text)} position={[0, -0.188 * U, 0]} delay={0.25} />
       <Delayed by={0.3}>
         <RuneButton
           label={toggle("Shadows", shadows)}
           variant="ghost"
           onPress={toggleShadows}
-          px={px(0.0102)}
+          px={tp(STEP.text)}
           width={0.15 * U}
           color={ink.parchmentDim}
           position={[-0.085 * U, -0.25 * U, 0]}
@@ -185,7 +187,7 @@ function TheWayIn() {
           label={toggle("Reflections", reflections)}
           variant="ghost"
           onPress={toggleReflections}
-          px={px(0.0102)}
+          px={tp(STEP.text)}
           width={0.15 * U}
           color={ink.parchmentDim}
           position={[0.085 * U, -0.25 * U, 0]}
@@ -199,7 +201,7 @@ function TheWayIn() {
             { text: `FLOOR ${deepest}`, color: ink.brassLight },
           ]}
           font="label"
-          px={px(0.0085)}
+          px={tp(STEP.text, "label")}
           position={[0, -0.415 * U, 0]}
           delay={1.2}
         />

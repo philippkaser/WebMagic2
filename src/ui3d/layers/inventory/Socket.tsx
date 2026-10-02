@@ -9,6 +9,7 @@ import { ItemModel } from "../../ItemModel";
 import { KeyCap } from "../../KeyCap";
 import { useUiShow } from "../../presence";
 import { RuneText, measureText } from "../../text/RuneText";
+import { STEP, typePx } from "../../text/type";
 import { FRAMES, ink, type FrameColors } from "../../theme";
 import { emitUiSparks } from "../../UiSparks";
 import { cardFrame, cardMaterial, cardQuad } from "./card";
@@ -33,7 +34,7 @@ import { PixelSprite, spriteSize, type SpriteName } from "./sprites";
 /** World size of a card's frame texel (≈2 screen px at 800 px tall). */
 export const CARD_TEXEL = 0.0055;
 const LABEL_PX = pxFor(SCENE_DISTANCE, TEXT.label);
-const PLATE_PX = pxFor(SCENE_DISTANCE, 0.0115);
+const PLATE_PX = typePx(SCENE_DISTANCE, STEP.text, "label");
 
 /** Seconds after the tablet shows before the first socket rises. */
 const RISE_DELAY = 0.02;

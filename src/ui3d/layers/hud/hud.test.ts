@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { RUN } from "../../../run/rules";
 import { OMEN_DEFS, rollOmen } from "../../../world/omens";
-import { apx, fontPx, plateSize } from "./ap";
+import { apx, fontPx, HUD_SCALE, plateSize } from "./ap";
 import {
   arrivalTitle,
   bossTitle,
@@ -320,9 +320,13 @@ describe("artpass pixels", () => {
     expect(apFrac(800 / 1.25)).toBeCloseTo(1, 8);
   });
 
-  test("font sizes: an 8 px label has a 5 px cap, Jacquard 21 px a 12 px cap", () => {
-    expect(fontPx(8, "label", 1) * 7).toBeCloseTo(5 * apx(1), 10);
-    expect(fontPx(21, "title", 1) * 7).toBeCloseTo(12 * apx(1), 10);
+  test("font sizes land on type-scale steps (whole screen pixels per font pixel at 800 tall)", () => {
+    // One screen pixel at 800 tall, in metres at distance 1.
+    const screenPx = apx(1) / HUD_SCALE;
+    expect((fontPx(8, "label", 1) * 7) / screenPx).toBeCloseTo(5, 10); // ×1: 5 px cap
+    expect((fontPx(13, "body", 1) * 7) / screenPx).toBeCloseTo(10, 10); // ×2
+    expect((fontPx(21, "title", 1) * 7) / screenPx).toBeCloseTo(12, 10); // ×1: 12 px cap
+    expect((fontPx(96, "title", 1) * 7) / screenPx).toBeCloseTo(72, 10); // ×6
   });
 
   test("panels: plate size wraps a CSS padding box in the 8 px frame", () => {

@@ -2,6 +2,7 @@ import { MERCHANT_STOCK } from "../../../items/economy";
 import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS, type SlotRef } from "../../../items/inventory";
 import type { GearSlot } from "../../../items/types";
 import type { Overlay } from "../../../state/gameStore";
+import { capFraction, STEP } from "../../text/type";
 
 /** Where everything sits on the inventory's stone tablets — pure numbers, no
  * three.js, so the arrangement and the pointer's hit-testing can be unit
@@ -25,19 +26,21 @@ export type SocketVariant = "gear" | "belt" | "bag" | "chest" | "ware";
 /** Metres from the eye to the scene's centre plane. */
 export const SCENE_DISTANCE = 1.35;
 
-/** Screen-height fractions for the scene's text (see anchors.pxFor). 0.016 is
- * the legibility floor at 600 px tall. */
+/** Screen-height fractions for the scene's text (see anchors.pxFor), each a
+ * step of the type scale (text/type.ts) so the inventory reads at the same
+ * sizes as every other screen. */
 export const TEXT = {
   /** Panel headlines ("The Wizard", heading face). */
-  title: 0.034,
+  title: capFraction(2, "heading"),
   /** Silkscreen small caps (section labels, captions). */
-  label: 0.0135,
+  label: capFraction(STEP.text, "label"),
   /** Tiny5 lore lines under a headline. */
-  lore: 0.0165,
-  gold: 0.022,
-  plaqueName: 0.021,
-  plaqueLine: 0.0165,
-  hint: 0.016,
+  lore: capFraction(STEP.text),
+  gold: capFraction(STEP.lead),
+  /** An item's name on its plaque (heading face). */
+  plaqueName: capFraction(1, "heading"),
+  plaqueLine: capFraction(STEP.text),
+  hint: capFraction(STEP.text),
 } as const;
 
 /** The Orb of Fortune's ware key (it isn't an item). */

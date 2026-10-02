@@ -7,15 +7,15 @@ import { useNet } from "../../../net/netStore";
 import { GraveModel } from "../../../render/models/GraveModel";
 import { useGame } from "../../../state/gameStore";
 import { biomeForFloor, getBiomeDef } from "../../../world/biomes";
-import { pxFor } from "../../anchors";
 import { uiNow } from "../../clock";
-import { getFace } from "../../font/faces";
+import { type FontId, getFace } from "../../font/faces";
 import { ItemModel } from "../../ItemModel";
 import { metalMaterial, stoneMaterial } from "../../materials";
 import { UiPresence, useUiShow } from "../../presence";
 import { RuneButton } from "../../RuneButton";
 import { TABLET_EXIT } from "../../Tablet";
 import { fontPixel, measureText, RuneText } from "../../text/RuneText";
+import { STEP, typePx } from "../../text/type";
 import { ink } from "../../theme";
 import { emitUiSparks, type UiSparkOptions } from "../../UiSparks";
 import { ArcaneCircle } from "./ArcaneCircle";
@@ -49,7 +49,8 @@ import { backOut, Delayed, screenUnit, smooth01, Stage, Veil } from "./stage";
 
 const D = 1.6;
 const U = screenUnit(D);
-const px = (cap: number) => pxFor(D, cap);
+/** RuneText px for step `n` of the type scale. */
+const tp = (n: number, face?: FontId) => typePx(D, n, face);
 
 const T = {
   toll: 0.15,
@@ -66,9 +67,7 @@ const T = {
 } as const;
 
 const TITLE_Y = 0.262;
-const TITLE_CAP = 0.108;
 const CARDS_Y = -0.118;
-const NAME_CAP = 0.0094;
 /** The grave marker's width on screen (H units) and where it stands. */
 const GRAVE_W = 0.13;
 const GRAVE_BASE_Y = -0.33;
@@ -109,10 +108,10 @@ function Death() {
   const verdict = lossVerdict(lastDeath);
   // Cards shrink to fit a long loss on one row.
   const n = things.length;
-  const cardW = Math.min(0.105, 0.86 / Math.max(1, n) - 0.035) * U;
+  const cardW = Math.min(0.12, 0.86 / Math.max(1, n) - 0.035) * U;
   const stepX = cardW + 0.036 * U;
   const headline = deathHeadline(lastDeath, biome);
-  const headPx = px(0.0118);
+  const headPx = tp(STEP.text);
   const headW = measureText(headline, headPx).width;
   const skullPx = 0.0024 * U;
   const buttonY = grave ? -0.44 : n > 0 ? -0.29 : -0.08;
@@ -122,7 +121,7 @@ function Death() {
       <SoftGlow color="#8a0014" width={1.0 * U} height={0.28 * U} position={[0, TITLE_Y * U, -0.06]} intensity={0.8} delay={T.title + 0.3} fadeIn={1.4} breathe={0.2} />
       <TitleText
         text="You Died"
-        px={px(TITLE_CAP)}
+        px={tp(7, "title")}
         color={ink.blood}
         shadow="#4a0c0c"
         position={[0, TITLE_Y * U, 0]}
@@ -152,9 +151,9 @@ function Death() {
       )}
       <Delayed by={T.verdict}>
         {verdict.label && (
-          <RuneText text={spaced(verdict.label)} font="label" px={px(0.0085)} color={MENU_INK.wound} glow={0.4} position={[0, 0.012 * U, 0]} />
+          <RuneText text={spaced(verdict.label)} font="label" px={tp(STEP.text, "label")} color={MENU_INK.wound} glow={0.4} position={[0, 0.012 * U, 0]} />
         )}
-        <RuneText text={verdict.lore} px={px(0.0112)} color={ink.parchmentDim} glow={0.2} position={[0, (verdict.label ? -0.018 : 0.0) * U, 0]} delay={0.2} stagger={0.7} />
+        <RuneText text={verdict.lore} px={tp(STEP.text)} color={ink.parchmentDim} glow={0.2} position={[0, (verdict.label ? -0.018 : 0.0) * U, 0]} delay={0.2} stagger={0.7} />
       </Delayed>
       {things.map((t, i) => (
         <Delayed key={`${t.name}:${i}`} by={T.cards + i * T.cardStep}>
@@ -170,7 +169,7 @@ function Death() {
       ))}
       {grave && <Grave robe={robe} />}
       <Delayed by={T.button}>
-        <RuneButton label="Return to the Village" variant="danger" onPress={respawn} px={px(0.0135)} position={[0, buttonY * U, 0.02]} delay={0.15} />
+        <RuneButton label="Return to the Village" variant="danger" onPress={respawn} px={tp(STEP.text)} position={[0, buttonY * U, 0.02]} delay={0.15} />
       </Delayed>
       <AshFlakes />
     </>
@@ -186,8 +185,8 @@ function Stats({ stats }: { stats: [number, string][] }) {
         const x = (i - (stats.length - 1) / 2) * step;
         return (
           <group key={label} position={[x, 0.083 * U, 0]}>
-            <RuneText text={String(n)} px={px(0.02)} color={MENU_INK.wound} glow={0.4} position={[0, 0.008 * U, 0]} delay={i * 0.08} />
-            <RuneText text={spaced(label)} font="label" px={px(0.0072)} color={ink.faded} glow={0.1} position={[0, -0.022 * U, 0]} delay={0.1 + i * 0.08} />
+            <RuneText text={String(n)} px={tp(STEP.lead)} color={MENU_INK.wound} glow={0.4} position={[0, 0.008 * U, 0]} delay={i * 0.08} />
+            <RuneText text={spaced(label)} font="label" px={tp(STEP.text, "label")} color={ink.faded} glow={0.1} position={[0, -0.022 * U, 0]} delay={0.1 + i * 0.08} />
           </group>
         );
       })}
@@ -221,8 +220,8 @@ function Smolder({ delay }: { delay: number }) {
   useEffect(() => {
     since.current = uiNow();
   }, [show]);
-  const size = useMemo(() => measureText("You Died", px(TITLE_CAP), undefined, "title"), []);
-  const fp = fontPixel(getFace("title"), px(TITLE_CAP));
+  const size = useMemo(() => measureText("You Died", tp(7, "title"), undefined, "title"), []);
+  const fp = fontPixel(getFace("title"), tp(7, "title"));
   useFrame((_, dt) => {
     const g = group.current;
     if (!g || !show || uiNow() - since.current < delay) return;
@@ -295,7 +294,7 @@ function LostCard({
   }, [show]);
   const look = thing.id ? itemLook(thing.id) : null;
   const color = thing.gold ? RARITY_COLOR.legendary : (look?.color ?? "#7d7288");
-  const L = cardLayout(width, px(NAME_CAP));
+  const L = cardLayout(width, tp(STEP.text));
   // The card cools once the thing is gone (one timer, not per-frame state).
   const [taken, setTaken] = useState(false);
   useEffect(() => {
@@ -381,7 +380,7 @@ function LostCard({
   return (
     <ItemCard
       width={width}
-      px={px(NAME_CAP)}
+      px={tp(STEP.text)}
       color={color}
       name={thing.name}
       level={look ? look.level : null}

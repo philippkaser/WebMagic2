@@ -7,10 +7,10 @@ import { KeyCap, keyCapWidth } from "../KeyCap";
 import { Plate } from "../Plate";
 import { UiShow } from "../presence";
 import { ink } from "../theme";
-import { pxFor } from "../anchors";
 import { CarriedAnchor } from "./hud/HudAnchor";
 import type { TextSpan } from "../font/layout";
 import { measureText, RuneText } from "../text/RuneText";
+import { STEP, typePx } from "../text/type";
 
 /** The interaction prompt, written where the thing is: "E — Plunder …"
  * hangs above the grave, "E — Descend" above the portal. Prompts without a
@@ -103,7 +103,7 @@ export function WorldPrompts() {
             <UiShow show={e.shown}>
               <PromptPanel
                 parts={e.text === HINT_TEXT ? HINT : promptParts(e.text)}
-                px={pxFor(1.6, 0.018)}
+                px={typePx(1.6, STEP.text)}
                 frame={e.text === HINT_TEXT ? "iron" : "arcane"}
                 onHidden={() => setEntries((prev) => prev.filter((x) => x.id !== e.id))}
               />
@@ -131,7 +131,7 @@ function AnchoredPrompt({ entry, onHidden }: { entry: Entry; onHidden: () => voi
   return (
     <group ref={group}>
       <UiShow show={entry.shown}>
-        <PromptPanel parts={promptParts(entry.text)} px={pxFor(1.8, 0.017)} frame="arcane" onHidden={onHidden} />
+        <PromptPanel parts={promptParts(entry.text)} px={typePx(1.8, STEP.text)} frame="arcane" onHidden={onHidden} />
       </UiShow>
     </group>
   );

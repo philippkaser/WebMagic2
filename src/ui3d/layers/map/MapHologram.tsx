@@ -23,11 +23,11 @@ import { getBiomeDef } from "../../../world/biomes";
 import { exploredVersion, getCurrentLayout, isExplored, markExplored, useCurrentLayout } from "../../../world/currentFloor";
 import { getOmenDef, omenEffects } from "../../../world/omens";
 import type { FloorLayout } from "../../../world/types";
-import { pxFor } from "../../anchors";
 import { uiNow } from "../../clock";
 import { Plate } from "../../Plate";
 import { UiShow } from "../../presence";
 import { measureText, RuneText } from "../../text/RuneText";
+import { STEP, typePx } from "../../text/type";
 import { ink } from "../../theme";
 import { usePresenceList } from "../hud/usePresenceList";
 import { makeMarkerMaterial, makeTileMaterial, makeWallMaterial } from "./mapMaterials";
@@ -66,6 +66,9 @@ export function mapWidth(dist: number): number {
 }
 /** Walk this far from it and it lets go. */
 const LEAVE_DIST = 8;
+/** Walk into it and it lets go too: standing inside the projection, its
+ * words would fill your eyes. */
+const ENTER_DIST = 0.45;
 const COLOR = ink.arcane;
 
 export function MapHologram() {
@@ -126,8 +129,8 @@ function Miniature({ cast, layout, shown, onGone }: { cast: MapCast; layout: Flo
   const village = cast.kind === "village" || !layout;
   const MAP_W = mapWidth(cast.dist);
   // Text sized as a share of the screen, seen from where it was cast.
-  const TITLE_PX = pxFor(cast.dist, 0.026);
-  const SMALL_PX = pxFor(cast.dist, 0.013);
+  const TITLE_PX = typePx(cast.dist, 2, "heading");
+  const SMALL_PX = typePx(cast.dist, STEP.text, "label");
   const fixed = useMemo(() => (village ? villageModel() : null), [village]);
   const capacity = village ? { floor: fixed!.floor.length, raised: fixed!.raised.length } : { floor: layout!.size ** 2, raised: layout!.size ** 2 };
 
@@ -269,13 +272,14 @@ function Miniature({ cast, layout, shown, onGone }: { cast: MapCast; layout: Flo
       lg.getWorldPosition(tmpP);
       lg.rotation.y = Math.atan2(camera.position.x - tmpP.x, camera.position.z - tmpP.z);
     }
-    // Wander off and the spell lets go.
-    if (shown && Math.hypot(cast.at[0] - playerPosition.x, cast.at[2] - playerPosition.z) > LEAVE_DIST) useMapCast.getState().dismiss();
+    // Wander off — or walk into it — and the spell lets go.
+    const away = Math.hypot(cast.at[0] - playerPosition.x, cast.at[2] - playerPosition.z);
+    if (shown && (away > LEAVE_DIST || away < ENTER_DIST)) useMapCast.getState().dismiss();
   });
 
   const biome = layout && !village ? getBiomeDef(layout.biome) : null;
   const omenId = layout && !village ? layout.omen : null;
-  const omen = useMemo(() => (omenId ? omenLayout(omenId, pxFor(cast.dist, 0.0125)) : null), [omenId, cast.dist]);
+  const omen = useMemo(() => (omenId ? omenLayout(omenId, typePx(cast.dist, STEP.text)) : null), [omenId, cast.dist]);
   // The column above the table, built bottom-up from just over its raised
   // far edge: the omen slab (if any), then the place's name.
   const base = MAP_Y + MAP_W * 0.3;

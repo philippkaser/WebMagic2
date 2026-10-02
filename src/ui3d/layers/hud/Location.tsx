@@ -107,7 +107,8 @@ function useWalkAway(active: boolean, minSeconds: number, onWalked: () => void) 
 
 const L = HUD_LAYOUT.plaque;
 const A = apx(L.distance);
-const LABEL = fontPx(9, "label", L.distance);
+/** The lines under the stones read like the message feed: Tiny5, ×2. */
+const LINE = fontPx(13, "body", L.distance);
 /** A tithe stone's height and the gap between stones, artpass pixels. */
 const STONE = 22;
 const STONE_GAP = 6;
@@ -161,14 +162,14 @@ function TitheMarker({ inDungeon }: { inDungeon: boolean }) {
       <NetGem color={net.color} online={mode === "online"} connecting={mode === "connecting"} position={[(stonesW + 8) * A, -(STONE / 2 + 9) * A, 0.004]} />
       {line && (
         <RuneText
-          text={line.toUpperCase()}
+          text={line}
           show={lineUp}
-          font="label"
-          px={LABEL}
+          font="body"
+          px={LINE}
           color={home ? ink.gold : ink.parchmentDim}
           anchor={[0, 0.5]}
           align="left"
-          position={[0, -(STONE + 19) * A, 0]}
+          position={[0, -(STONE + 20) * A, 0]}
           glow={home ? 1.2 : 0.35}
           outline={0.6}
           delay={0.5}
@@ -176,14 +177,14 @@ function TitheMarker({ inDungeon }: { inDungeon: boolean }) {
       )}
       {omen && (
         <RuneText
-          text={`OMEN · ${omen.name.toUpperCase()} · M TO RECALL`}
+          text={`${omen.name} · M to recall`}
           show={lineUp}
-          font="label"
-          px={LABEL}
+          font="body"
+          px={LINE}
           color="#d9b8ff"
           anchor={[0, 0.5]}
           align="left"
-          position={[0, -(STONE + 30) * A, 0]}
+          position={[0, -(STONE + 34) * A, 0]}
           glow={0.6}
           outline={0.6}
           delay={0.8}

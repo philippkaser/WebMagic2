@@ -12,6 +12,7 @@ import { useUiShow } from "../../presence";
 import { RuneButton } from "../../RuneButton";
 import { Tablet } from "../../Tablet";
 import { measureText, RuneText } from "../../text/RuneText";
+import { STEP, typePx } from "../../text/type";
 import { FRAMES, ink } from "../../theme";
 import { PANEL_TINT } from "./AltarTablet";
 import { cardFrame, cardMaterial, cardQuad } from "./card";
@@ -37,7 +38,7 @@ import { PixelSprite, spriteSize } from "./sprites";
 
 const NAME_PX = pxFor(SCENE_DISTANCE, TEXT.plaqueLine);
 const PRICE_PX = pxFor(SCENE_DISTANCE, TEXT.label);
-const BUTTON_PX = pxFor(SCENE_DISTANCE, 0.015);
+const BUTTON_PX = typePx(SCENE_DISTANCE, STEP.text, "label");
 const COIN_PX = (PRICE_PX * 8) / spriteSize("coin").h;
 const ORB = GRADES.enchanted;
 

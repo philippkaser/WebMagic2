@@ -94,14 +94,19 @@ The emotional loop we are chasing:
   stones in front of you; prompts and messages are small slabs of slate
   (never in your way); words burn into them as runes that settle into
   letters and later burn away; the map (M) is a hologram miniature of the
-  floor you've explored, cast a stride ahead of you — walk around it; your
+  village or of the floor you've explored, cast a stride ahead of you on a
+  small table of light — walk around it — with the place's name and, on an
+  omen floor, what the omen changes above it; your
   health and mana are two glass orbs whose facets catch the torch one pixel
   at a time, their liquid sloshing as you run and turn; the HUD is sparse
   (the tithe stones, the orbs, the belt) and carried — it follows your
   turns closely and swings with your stride; items are small objects you
   pick up and set down. The type is pixel type — Jacquard 12 blackletter for the
   big moments ("Floor 12", "You Died"), Jersey 15 for smaller titles,
-  Tiny5 for text, Silkscreen for tiny labels — in parchment on soot, arcane cyan for magic and the way onward,
+  Tiny5 for text, Silkscreen for labels — every font pixel on a whole number
+  of screen pixels, and every size a step of one type scale (text ×2, a big
+  number ×3, a heading's own size), so a label on the HUD, in a menu and in
+  the inventory comes out the same — in parchment on soot, arcane cyan for magic and the way onward,
   gold for home, blood for danger. New UI must follow this — if it could be
   a DOM panel, it's wrong.
 - **Post-processing chain:** bloom (feeds the emissive specks and magic) →
@@ -296,7 +301,10 @@ silly), **the Lightless Vigil** (few torches, close fog), **the Crimson
 Omen** (angrier monsters, richer loot), **the Mana Tide**, **the Tinderbox**
 (barrels everywhere, bigger blasts), **the Teeming** (more, frailer
 monsters). Surprise is part of the charm: you never quite know what the
-next floor will be.
+next floor will be. Once it's there, it's never a mystery what it does: a
+violet stone joins the tithe stones in the top-left with the omen's name,
+and the map (M) lists its effects line by line (▼ what hurts, ▲ what
+helps) with its whisper beneath.
 
 ### The signature multiplayer mechanic: rare encounters
 
@@ -338,7 +346,10 @@ next floor will be.
 The world is one vertical place: a **village of wizards perched above a
 hundred-floor dungeon that bores down into the earth.** The village is the
 safe hub — quiet, night-time, a few huts with warm windows, a central portal
-ringed with torches. Through the portal is the descent.
+ringed with torches, under a big pixel sky: the Milky Way with dark lanes of
+dust through it, thousands of single-pixel stars twinkling in hard steps, a
+cratered moon, long banks of cloud silvered on top, and now and then a
+shooting star. Through the portal is the descent.
 
 Wizards go down for the classic reasons — **glory, fame, and riches** — but
 the deepest myth, the thing that drives the boldest, is that **god waits at

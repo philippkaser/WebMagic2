@@ -1,13 +1,12 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import {
+  type Camera,
   Color,
   InstancedBufferAttribute,
   InstancedBufferGeometry,
   Mesh,
-  PerspectiveCamera,
   PlaneGeometry,
-  Quaternion,
   Vector3,
 } from "three";
 import { uiNow } from "../clock";
@@ -15,7 +14,7 @@ import { getFace, type Face, type FontId } from "../font/faces";
 import { layoutText, type Align, type TextInput, type TextLayout } from "../font/layout";
 import { useUiShow } from "../presence";
 import { useUiTextStyle } from "../style";
-import { snapScale } from "./snap";
+import { outlineAt, snapScale } from "./snap";
 import { emitUiSparks } from "../UiSparks";
 import { applyFace, createRuneTextMaterial, NEVER, type RuneTextMaterial } from "./runeTextMaterial";
 
@@ -37,8 +36,9 @@ import { applyFace, createRuneTextMaterial, NEVER, type RuneTextMaterial } from 
  *
  * Size (`px`) is a seventh of the capital height in world units, whatever
  * the face — so `pxFor(distance, screenFraction)` sizes any face alike, and
- * switching a line to the title face keeps its cap height. `measureText`
- * measures a block before placing it.
+ * switching a line to the title face keeps its cap height. Pick sizes from
+ * the type scale (text/type.ts: typePx) rather than free fractions.
+ * `measureText` measures a block before placing it.
  *
  * Pixel-exact: these are pixel fonts, and a font pixel drawn 1.4 screen
  * pixels wide comes out uneven — some strokes one pixel, some two, a V that
@@ -193,23 +193,28 @@ function buildGeometry(
   return geometry;
 }
 
-const snapPos = new Vector3();
-const snapFwd = new Vector3();
-const snapScl = new Vector3();
-const tmpQuat = new Quaternion();
+const snapA = new Vector3();
+const snapB = new Vector3();
 
-function snapMesh(mesh: Mesh, fontPx: number, camera: PerspectiveCamera, bufferH: number): void {
+/** Snap the mesh's scale; returns the screen pixels per font pixel it now
+ * draws at (null when it can't tell). Measured by projecting one font pixel
+ * up the text's own axis onto the screen — true whatever the parents do
+ * (tilt, a corner piece's undistort squash, distance). */
+function snapMesh(mesh: Mesh, fontPx: number, camera: Camera, bufferW: number, bufferH: number): number | null {
   const parent = mesh.parent;
-  if (!parent || !camera.isPerspectiveCamera) return;
+  if (!parent) return null;
   // The parent's world transform as of last frame: steady enough.
-  parent.matrixWorld.decompose(snapPos, tmpQuat, snapScl);
-  mesh.getWorldPosition(snapPos);
-  camera.getWorldDirection(snapFwd);
-  const depth = snapPos.sub(camera.position).dot(snapFwd);
-  if (depth < 0.02) return;
-  const worldPerScreenPx = (2 * depth * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(1, bufferH);
-  const screenPx = (fontPx * snapScl.x) / worldPerScreenPx;
-  mesh.scale.setScalar(snapScale(screenPx));
+  snapA.copy(mesh.position).applyMatrix4(parent.matrixWorld);
+  snapB.copy(mesh.position).setY(mesh.position.y + fontPx).applyMatrix4(parent.matrixWorld);
+  // Behind (or nearly at) the eye: nothing to snap.
+  if (snapA.applyMatrix4(camera.matrixWorldInverse).z > -0.02) return null;
+  snapB.applyMatrix4(camera.matrixWorldInverse);
+  snapA.applyMatrix4(camera.projectionMatrix);
+  snapB.applyMatrix4(camera.projectionMatrix);
+  const screenPx = Math.hypot(((snapB.x - snapA.x) * bufferW) / 2, ((snapB.y - snapA.y) * bufferH) / 2);
+  const k = snapScale(screenPx);
+  mesh.scale.setScalar(k);
+  return screenPx * k;
 }
 
 export function RuneText({
@@ -319,7 +324,11 @@ export function RuneText({
   mesh.renderOrder = renderOrder;
 
   useFrame((state, dt) => {
-    if (snap) snapMesh(mesh, px, state.camera as PerspectiveCamera, state.size.height * state.viewport.dpr);
+    if (snap) {
+      const dpr = state.viewport.dpr;
+      const drawn = snapMesh(mesh, px, state.camera, state.size.width * dpr, state.size.height * dpr);
+      u.uOutline.value = outline * (drawn === null ? 1 : outlineAt(drawn));
+    }
     const now = uiNow();
     u.uTime.value = now;
     u.uVanishAt.value = vanishAt.current;

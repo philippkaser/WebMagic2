@@ -5,14 +5,14 @@ import { useCodex } from "../../../state/codex";
 import { useGame } from "../../../state/gameStore";
 import { BIOME_DEFS, biomeForFloor } from "../../../world/biomes";
 import { allLoreFragments, getLoreFragment } from "../../../world/lore";
-import { pxFor } from "../../anchors";
 import { uiNow } from "../../clock";
-import { getFace } from "../../font/faces";
+import { type FontId, getFace } from "../../font/faces";
 import { glowMaterial, metalMaterial } from "../../materials";
 import { UiPresence, UiShow, useUiShow } from "../../presence";
 import { RuneButton } from "../../RuneButton";
 import { TABLET_EXIT } from "../../Tablet";
 import { RuneText } from "../../text/RuneText";
+import { STEP, typePx } from "../../text/type";
 import { ink } from "../../theme";
 import { emitUiSparks } from "../../UiSparks";
 import { codexSpreads, CODEX_INK, type CodexPage, type CodexSpread } from "./codexPages";
@@ -39,9 +39,9 @@ import { tomeMaterials } from "./tomeMaterials";
 
 const D = 1.4;
 const U = screenUnit(D);
-const px = (cap: number) => pxFor(D, cap);
+/** RuneText px for step `n` of the type scale. */
+const tp = (n: number, face?: FontId) => typePx(D, n, face);
 
-const BODY_CAP = 0.0148;
 const PAGE_W = 0.54 * U;
 const PAGE_H = 0.62 * U;
 /** The text block's width on a page (the brass rule sits outside it). */
@@ -106,7 +106,7 @@ function Tome() {
         allLoreFragments().length,
         BIOME_DEFS,
         biomeForFloor,
-        { cols: colsFor(TEXT_W, px(BODY_CAP)), lines: PAGE_LINES },
+        { cols: colsFor(TEXT_W, tp(STEP.text)), lines: PAGE_LINES },
         getFace("body"),
       ),
     [read],
@@ -289,15 +289,15 @@ function Tome() {
         </group>
       </group>
       <group position={[0, -0.41 * U, 0.05]}>
-        <RuneButton label="← Prev" variant="ghost" onPress={() => turn(-1)} disabled={spread <= 0} px={px(0.0135)} position={[-0.3 * U, 0, 0]} delay={0.9} />
-        <RuneButton label="Close" variant="ghost" onPress={() => setOverlay("none")} px={px(0.0135)} color={ink.parchmentDim} position={[0, 0, 0]} delay={1} />
-        <RuneButton label="Next →" onPress={() => turn(1)} disabled={spread >= last} px={px(0.0135)} position={[0.3 * U, 0, 0]} delay={0.9} />
+        <RuneButton label="← Prev" variant="ghost" onPress={() => turn(-1)} disabled={spread <= 0} px={tp(STEP.text)} position={[-0.3 * U, 0, 0]} delay={0.9} />
+        <RuneButton label="Close" variant="ghost" onPress={() => setOverlay("none")} px={tp(STEP.text)} color={ink.parchmentDim} position={[0, 0, 0]} delay={1} />
+        <RuneButton label="Next →" onPress={() => turn(1)} disabled={spread >= last} px={tp(STEP.text)} position={[0.3 * U, 0, 0]} delay={0.9} />
         <KeyLegend
           entries={[
             { keys: ["C", "Esc"], action: "close" },
             { keys: ["←", "→"], action: "turn the page" },
           ]}
-          px={px(0.0085)}
+          px={tp(STEP.text)}
           maxWidth={0.8 * U}
           position={[0, -0.058 * U, 0]}
           delay={1.2}
@@ -361,7 +361,7 @@ function CoverFace() {
   return (
     <group position={[x, 0, z]} rotation={[0, Math.PI, 0]}>
       <mesh geometry={gem} material={glowMaterial(ink.arcane, 2.2)} scale={[0.04 * U, 0.06 * U, 0.012 * U]} position={[0, 0.06 * U, 0]} />
-      <TitleText text="The Codex" px={px(0.04)} color={ink.brassLight} position={[0, -0.06 * U, 0.003]} depth={-0.3} />
+      <TitleText text="The Codex" px={tp(3, "title")} color={ink.brassLight} position={[0, -0.06 * U, 0.003]} depth={-0.3} />
     </group>
   );
 }
@@ -382,7 +382,7 @@ function PageText({
 }) {
   const cx = (side * PAGE_W) / 2;
   const top = PAGE_H / 2;
-  const bodyPx = px(BODY_CAP);
+  const bodyPx = tp(STEP.text);
   const out = { outDuration: 0.35 } as const;
   const headed = page.title || page.chapter !== null;
   const bodyTop = page.title ? 0.15 : headed ? 0.118 : 0.05;
@@ -390,7 +390,7 @@ function PageText({
     <group position={[0, 0, 0.0025]}>
       {page.title && (
         <>
-          <TitleText text="The Codex" px={px(0.044)} position={[cx, top - 0.068 * U, 0]} show={shown} delay={delay} depth={-0.3} inDuration={0.6} />
+          <TitleText text="The Codex" px={tp(3, "title")} position={[cx, top - 0.068 * U, 0]} show={shown} delay={delay} depth={-0.3} inDuration={0.6} />
           <UiShow show={shown}>
             <Flourish width={0.26 * U} texel={0.0015 * U} position={[cx, top - 0.115 * U, 0]} delay={delay + 0.2} />
           </UiShow>
@@ -401,7 +401,7 @@ function PageText({
           <TitleText
             text={page.chapter.name}
             font="heading"
-            px={px(0.024)}
+            px={tp(1, "heading")}
             color={ink.brassLight}
             shadow={null}
             diagonal
@@ -414,7 +414,7 @@ function PageText({
           <RuneText
             text={spaced(`Floors ${page.chapter.floors[0]}–${page.chapter.floors[1]}`)}
             font="label"
-            px={px(0.0082)}
+            px={tp(STEP.text, "label")}
             color={ink.faded}
             position={[cx, top - 0.08 * U, 0]}
             show={shown}
@@ -446,7 +446,7 @@ function PageText({
         <RuneText
           text={String(page.folio)}
           font="label"
-          px={px(0.009)}
+          px={tp(STEP.fine, "label")}
           position={[cx + side * (PAGE_W / 2 - 0.05 * U), -top + 0.035 * U, 0]}
           color={CODEX_INK.faint}
           show={shown}

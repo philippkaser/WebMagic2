@@ -26,9 +26,10 @@
  *
  * Conventions
  *   - Distances in metres from the eye; HUD pieces sit 0.8–1.6 m ahead,
- *     menus ~1.5 m. Size text with pxFor(distance, screenFraction) so it's
- *     the same share of the screen on any display (≥ 0.016 stays legible
- *     at 800 px tall).
+ *     menus ~1.5 m. Size text on the type scale — typePx(distance, step,
+ *     face), text/type.ts: STEP.fine for captions, STEP.text for anything
+ *     read, STEP.lead for numbers — so it's the same share of the screen on
+ *     any display and every text of a role comes out the same size.
  *   - Nothing pops. Wrap conditional UI in <UiPresence show exit> and let
  *     RuneText/Tablet/RuneButton/ItemModel read useUiShow().
  *   - No per-frame allocations and no per-frame React state: animate in
