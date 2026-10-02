@@ -58,7 +58,7 @@ export function AltarTablet({ tilt = false }: { tilt?: boolean }) {
   const m = ALTAR.marginX;
 
   return (
-    <Tablet width={spec.width} height={spec.height} tint={PANEL_TINT} frame="brass" seed={3} projector tile={0.17} tilt={tilt}>
+    <Tablet width={spec.width} height={spec.height} tint={PANEL_TINT} frame="brass" seed={3} tile={0.17} tilt={tilt}>
       <group ref={face}>
         <TitlePlate text="INVENTORY" y={ALTAR.height / 2 + 0.006} />
         <Headline text="The Wizard" x={-m} y={ALTAR.titleY} />

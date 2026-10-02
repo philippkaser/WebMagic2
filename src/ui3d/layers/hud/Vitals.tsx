@@ -10,23 +10,25 @@ import { RuneText } from "../../text/RuneText";
 import { ink } from "../../theme";
 import { apx, fontPx } from "./ap";
 import { HUD_COLORS } from "./copy";
-import { useStepFade } from "./fade";
 import { kickSlosh, makeGauge, makeSlosh, stepGauge, stepSlosh } from "./gauge";
-import { HudAnchor } from "./HudAnchor";
+import { glowQuad, makeGlowMaterial } from "./glow";
+import { HudAnchor, Undistort } from "./HudAnchor";
 import { HUD_LAYOUT, VITALS } from "./layout";
+import { Materialize } from "./Materialize";
 import { useCarrierMotion, type CarrierMotion } from "./motion";
-import { makeOrbMaterial, ORB_PALETTES, PixelOrb } from "./PixelOrb";
+import { levelToHeight, makeGlassMaterial, makeLiquidMaterial, orbGeometry } from "./orbMaterials";
 import { useEntryDelay, useSettled } from "./useSettled";
 
 /** Health and mana as two glass orbs carried at the lower left — real
- * spheres, shaded in gritty pixels (PixelOrb) — their liquid standing
- * exactly as high as the value and level with the world (look down and
- * you see its surface from above). Carry them and they slosh: the surface
- * leans as you turn and run, ripples when you land, bubbles and sparks
- * (mana churns while it refills), pours in as you heal. A blow jars the
- * health orb, blanches its liquid white-hot and leaves a pale ghost of
- * what it took, fizzing away a moment later; under 30 % the liquid throbs
- * like a pulse. The numbers stand beside each orb, the max dim beneath. */
+ * spheres lit by the UI's torch (orbMaterials.ts), their glowing liquid
+ * standing exactly as high as the value. Carry them and they slosh: the
+ * surface leans as you turn and run, ripples when you land, bubbles
+ * (mana churns while it refills), pours in as you heal. The glass turns
+ * slowly, and its little facets catch the torch one pixel at a time. A
+ * blow jars the health orb, blanches its liquid white-hot and leaves a pale
+ * ghost of what it took, fizzing away a moment later; under 30 % the liquid
+ * throbs like a pulse. The numbers stand beside each orb, the max dim
+ * beneath. */
 
 const L = HUD_LAYOUT.vitals;
 const A = apx(L.distance);
@@ -35,6 +37,11 @@ const NUM = fontPx(21, "body", L.distance);
 const MAX = fontPx(10, "label", L.distance);
 
 type Kind = "health" | "mana";
+
+const LOOK: Record<Kind, { color: string; deep: string; tint: string }> = {
+  health: { color: "#e0302c", deep: "#3a060c", tint: "#ffd0c8" },
+  mana: { color: "#3f86ff", deep: "#0a1442", tint: "#cfe2ff" },
+};
 
 export function Vitals() {
   const motion = useCarrierMotion();
@@ -48,8 +55,8 @@ export function Vitals() {
   );
   return (
     <HudAnchor h={L.h} v={L.v} inset={L.inset} distance={L.distance}>
-      <FlaskBlock kind="health" x={0} motion={motion} hit={hit} />
-      <FlaskBlock kind="mana" x={(VITALS.blockW + VITALS.between) * A} motion={motion} hit={hit} />
+      <OrbBlock kind="health" x={0} motion={motion} hit={hit} />
+      <OrbBlock kind="mana" x={(VITALS.blockW + VITALS.between) * A} motion={motion} hit={hit} />
     </HudAnchor>
   );
 }
@@ -60,7 +67,7 @@ function useMax(kind: Kind): number {
   return useMemo(() => (kind === "health" ? computeStats(equipment).maxHealth : PLAYER.maxMana), [kind, equipment]);
 }
 
-function FlaskBlock({
+function OrbBlock({
   kind,
   x,
   motion,
@@ -81,13 +88,29 @@ function FlaskBlock({
   const low = kind === "health" && value / max < 0.3;
   const d = useEntryDelay(0.35);
 
-  const material = useMemo(() => makeOrbMaterial(ORB_PALETTES[kind]), [kind]);
-  // Starts empty: the orb fills once its glass has popped in.
+  const look = LOOK[kind];
+  const g = orbGeometry();
+  const liquid = useMemo(() => makeLiquidMaterial(look.color, look.deep), [look]);
+  const glass = useMemo(() => makeGlassMaterial(look.tint, false), [look]);
+  const glassBack = useMemo(() => makeGlassMaterial(look.tint, true), [look]);
+  const halo = useMemo(() => makeGlowMaterial(look.color, 0.15), [look]);
+  useEffect(
+    () => () => {
+      liquid.dispose();
+      glass.dispose();
+      glassBack.dispose();
+      halo.dispose();
+    },
+    [liquid, glass, glassBack, halo],
+  );
+
+  // Starts empty: the orb fills as it materializes.
   const gauge = useRef(makeGauge(0));
   const slosh = useRef(makeSlosh());
   const last = useRef(-1);
   const shaker = useRef<Group>(null);
-  const reveal = useStepFade({ delay: 0.1 + (kind === "mana" ? 0.12 : 0), inTime: 0.45, outTime: 0.35, steps: 14 });
+  const spin = useRef<Group>(null);
+  const facing = useRef<Group>(null);
 
   useEffect(() => {
     if (kind !== "health") return;
@@ -98,7 +121,16 @@ function FlaskBlock({
     });
   }, [kind]);
 
-  useFrame((_, dt) => {
+  useFrame(({ camera }, dt) => {
+    // Held square to the eye: the orb (and its liquid's "up") faces the
+    // eye along the line of sight, so the level reads from the side rather
+    // than as a surface seen from above.
+    const f = facing.current;
+    if (f) {
+      f.quaternion.identity();
+      f.parent?.updateWorldMatrix(true, false);
+      f.lookAt(camera.position);
+    }
     const s = useGame.getState();
     const v = kind === "health" ? s.health : s.mana;
     const frac = v / Math.max(1, maxRef.current);
@@ -106,45 +138,57 @@ function FlaskBlock({
     if (last.current >= 0 && frac < last.current - 0.04) kickSlosh(slosh.current, (Math.random() - 0.5) * 3, 1.5, 0.3);
     last.current = frac;
     const m = motion.current;
-    stepGauge(gauge.current, reveal.current >= 1 ? frac : 0, dt);
+    stepGauge(gauge.current, frac, dt);
     stepSlosh(slosh.current, m.fx, m.fz, dt);
     if (m.jolt > 0) kickSlosh(slosh.current, 0, 0, m.jolt);
 
     const now = uiNow();
-    const u = material.uniforms;
+    const u = liquid.uniforms;
     u.uTime.value = now;
-    u.uReveal.value = reveal.current;
-    u.uLevel.value = gauge.current.level;
-    u.uGhost.value = gauge.current.ghost;
+    u.uLevel.value = levelToHeight(gauge.current.level);
+    u.uGhost.value = levelToHeight(gauge.current.ghost);
     u.uTilt.value.set(slosh.current.x, slosh.current.z);
     u.uWave.value = slosh.current.wave;
-    // Mana is a living thing: it fizzes while it refills.
-    u.uBubbles.value = kind === "mana" ? (frac < 0.999 ? 0.9 : 0.3) : 0.15 + (gauge.current.ghost - gauge.current.level) * 3;
-    const since = now - hit.current.at;
-    // A blow blanches the health orb, in three hard steps.
-    const flare = kind === "health" && since < 0.35 ? hit.current.amp * (1 - since / 0.35) : 0;
-    u.uFlash.value = Math.ceil(flare * 3) / 3;
-    // Low health: the liquid throbs like a pulse (stepped).
-    const beat = kind === "health" && frac < 0.3 ? Math.max(0, Math.sin(now * 7)) ** 4 : 0;
-    u.uBright.value = 1 + (Math.round(beat * 3) / 3) * 0.5;
+    // Mana is a living thing: it churns while it refills.
+    u.uBubbles.value = kind === "mana" ? (frac < 0.999 ? 0.9 : 0.35) : 0.2 + (gauge.current.ghost - gauge.current.level) * 2;
 
-    // The blow jars the orb.
-    const g = shaker.current;
-    if (g) {
-      const a = kind === "health" && since < 0.35 ? hit.current.amp * (1 - since / 0.35) : 0;
-      g.position.set(Math.sin(now * 83) * a * R * 0.09, Math.sin(now * 61) * a * R * 0.05, 0);
+    // Damage: a flare and a shudder, both decaying fast.
+    const since = now - hit.current.at;
+    const flare = kind === "health" && since < 0.6 ? Math.exp(-since * 7) * hit.current.amp : 0;
+    // Low health: the liquid's glow beats like a pulse.
+    const lowBeat = kind === "health" && frac < 0.3 ? Math.max(0, Math.sin(now * 7)) ** 6 * 0.35 * (1 - frac / 0.3) : 0;
+    u.uFlash.value = Math.max(flare, lowBeat);
+    glass.uniforms.uFlash.value = flare;
+    glass.uniforms.uTime.value = now;
+    halo.uniforms.uIntensity.value = 0.04 + gauge.current.level * 0.1 + flare * 0.7 + lowBeat;
+    const sh = shaker.current;
+    if (sh) {
+      const a = since < 0.5 ? Math.exp(-since * 9) * hit.current.amp : 0;
+      sh.position.set(Math.sin(now * 83) * a * R * 0.18, Math.sin(now * 61) * a * R * 0.08, 0);
+      sh.rotation.z = Math.sin(now * 57) * a * 0.14;
     }
+    // The glass turns slowly, so its facets catch the torch one by one.
+    if (spin.current) spin.current.rotation.y = now * 0.35 + (kind === "mana" ? 2 : 0);
   });
 
   const color = kind === "health" ? (low ? HUD_COLORS.lowText : "#f6d2c8") : "#cfe0ff";
   const numX = x + (VITALS.orb + VITALS.gap) * A;
   return (
     <>
-      <group position={[x + R, R, 0]}>
-        <group ref={shaker}>
-          <PixelOrb material={material} radius={R} />
-        </group>
-      </group>
+      <Undistort at={[x + R, R, 0]}>
+        <Materialize delay={0.1 + (kind === "mana" ? 0.12 : 0)} color={look.color} size={R * 1.6} from={[0, -R * 0.8, -R * 5]}>
+          <mesh geometry={glowQuad()} material={halo} position={[0, 0, -R * 1.3]} scale={R * 5} renderOrder={0} />
+          <group ref={facing}>
+            <group ref={shaker} scale={R}>
+              <mesh geometry={g.liquid} material={liquid} renderOrder={1} />
+              <group ref={spin}>
+                <mesh geometry={g.glass} material={glassBack} renderOrder={2} />
+                <mesh geometry={g.glass} material={glass} renderOrder={4} />
+              </group>
+            </group>
+          </group>
+        </Materialize>
+      </Undistort>
       <RuneText
         text={`${value}`}
         px={NUM}

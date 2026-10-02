@@ -1,8 +1,8 @@
 import { Color, ShaderMaterial } from "three";
-import { LIGHT_BLENDING } from "../../holo/holoMaterial";
+import { LIGHT_BLENDING } from "../../light";
 
 /** The cast map's light: everything is added light in the caster's colour,
- * computed in display values like the panes (holo/holoMaterial.ts).
+ * computed in display values (light.ts).
  *
  * Tiles and walls are instanced; each instance carries `aBorn`, the uiNow
  * second it appears — the reveal ripples out from where the wizard stands

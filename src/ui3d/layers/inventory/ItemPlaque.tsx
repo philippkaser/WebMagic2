@@ -1,6 +1,6 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Group, ShaderMaterial, Vector3 } from "three";
+import { Group, Vector3 } from "three";
 import { resolveItem, type ResolvedItem } from "../../../items/catalog";
 import { GAMBLE_PRICE, merchantPrice } from "../../../items/economy";
 import { readSlot } from "../../../items/inventory";
@@ -8,7 +8,7 @@ import { useGame } from "../../../state/gameStore";
 import { pxFor } from "../../anchors";
 import type { FontId } from "../../font/faces";
 import type { TextInput } from "../../font/layout";
-import { PixelFrame } from "../../PixelFrame";
+import { slabGeometry, slabMaterial } from "../../slab";
 import { UiShow, useUiShow } from "../../presence";
 import { UiTextStyleProvider } from "../../style";
 import { measureText, RuneText } from "../../text/RuneText";
@@ -138,48 +138,6 @@ function layoutPlaque(t: PlaqueText): { rows: Row[]; w: number; h: number } {
   return { rows, w: w + PAD * 2, h: y + PAD * 2 };
 }
 
-// ── Parchment ────────────────────────────────────────────────────────────────
-
-let parchmentMat: ShaderMaterial | null = null;
-
-/** The tooltip's ground: a dark, slightly see-through haze of the caster's
- * light (it is a spell like every pane), with faint scanlines and a
- * shimmer, thinning out at its rim. World-space texels, so it never
- * stretches with the card. Premultiplied. */
-function parchment(): ShaderMaterial {
-  return (parchmentMat ??= new ShaderMaterial({
-    uniforms: { uTexel: { value: TEXEL } },
-    vertexShader: /* glsl */ `
-      varying vec2 vPos;
-      varying vec2 vUv;
-      void main() {
-        vUv = uv;
-        vPos = (modelMatrix * vec4(position, 1.0)).xy;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform float uTexel;
-      varying vec2 vPos;
-      varying vec2 vUv;
-      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-      void main() {
-        vec2 c = floor(vPos / uTexel);
-        float n = hash(c);
-        vec2 e = min(vUv, 1.0 - vUv);
-        float rim = clamp(min(e.x, e.y) * 14.0, 0.0, 1.0);
-        float a = 0.93 * rim;
-        vec3 light = vec3(0.07, 0.25, 0.21) * (0.12 + (mod(c.y, 3.0) < 1.0 ? 0.08 : 0.0) + n * 0.05);
-        gl_FragColor = vec4(vec3(0.01, 0.012, 0.016) * a + light * rim, a);
-      }
-    `,
-    transparent: true,
-    premultipliedAlpha: true,
-    // It hangs in front of the pages: it must hide what's behind it.
-    depthWrite: true,
-  }));
-}
-
 export function ItemPlaque() {
   const ix = useInventory();
   const shown = useUiShow();
@@ -272,16 +230,16 @@ export function ItemPlaque() {
   return (
     <group ref={group} visible={false}>
       <group ref={card}>
-        <mesh geometry={plane()} material={parchment()} scale={[size.w - TEXEL * 4, size.h - TEXEL * 4, 1]} renderOrder={4} />
-        <PixelFrame width={size.w} height={size.h} frame={text?.frame ?? "brass"} texel={TEXEL} position={[0, 0, 0.001]} renderOrder={5} />
+        {/* A worn slate slab, warmed a little by the item's grade. */}
+        <mesh geometry={slabGeometry(size.w, size.h, TEXEL * 4)} material={slabMaterial(text?.frame === "gold" ? ink.gold : null)} renderOrder={4} />
       </group>
       {lay && (
         <UiTextStyleProvider value={{ depth: -0.35 }}>
           {lay.rows.map((r, i) =>
             r.kind === "rule" ? (
               <group key={`r${i}`} visible={textOn} position={[0, top - r.y, 0.006]}>
-                <mesh geometry={plane()} material={flat(ink.brassDark)} scale={[size.w - PAD * 2, TEXEL, 1]} />
-                <mesh geometry={plane()} material={flat(ink.brass)} scale={[(size.w - PAD * 2) * 0.6, TEXEL, 1]} position={[0, 0, 0.0002]} />
+                <mesh geometry={plane()} material={flat(ink.ink, 0.5)} scale={[size.w - PAD * 2, TEXEL, 1]} />
+                <mesh geometry={plane()} material={flat(ink.stoneLight, 0.5)} scale={[size.w - PAD * 2, TEXEL, 1]} position={[0, -TEXEL, 0.0002]} />
               </group>
             ) : (
               <group key={`t${i}`}>

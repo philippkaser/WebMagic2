@@ -11,9 +11,9 @@ import { HUD_LAYOUT, SLOT, slotStrip } from "./layout";
 import { SlotCard } from "./SlotCard";
 
 /** The belt: the two consumables bound to Q and E, beside the vitals they
- * mend — two item cards carried side by side (no panel around them), each
- * with its key cap on the corner, the potion itself turning in the slot
- * and the stack count as its badge. Using one makes its slot flare and puff sparks; swapping
+ * mend — the potions themselves, turning slowly in the air beside the orbs,
+ * each with its key beneath it and its count beside it (an empty place is
+ * a faint silhouette). Using one makes its slot flare and puff sparks; swapping
  * one out makes the old one burn away as the new one arrives. */
 
 const L = HUD_LAYOUT.belt;
@@ -76,6 +76,7 @@ function BeltSlot({ hotkey, stack, index, position }: { hotkey: string; stack: I
         runLoot={!!stack?.runLoot}
         flashAt={flashAt}
         index={index + 1}
+        bare
         position={[0, 0, 0]}
       />
     </group>

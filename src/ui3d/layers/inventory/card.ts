@@ -2,21 +2,21 @@ import { Color, DataTexture, NearestFilter, RGBAFormat, ShaderMaterial, SRGBColo
 import { frameTexture } from "../../PixelFrame";
 import type { FrameColors } from "../../theme";
 
-/** The item slot a socket is drawn as — a little well cast into the pane,
- * in one quad:
+/** The item slot a socket is drawn as — a soft, round-cornered well cut
+ * into the stone of the page, in one quad:
  *
- *   - a dark haze that thins out toward its rim (no hard edge), the item's
- *     grade pooled behind the item in stepped rings of light;
- *   - a thread of the grade's light round it (its frame bitmap's lit tone),
- *     drawing itself round from the bottom when the socket rises, with a
- *     bright rune-dot at each corner;
- *   - an inner ring of light and a wash for hover and drag feedback;
- *   - the level plate in the bottom-right corner (a dark tile with a
- *     grade-coloured edge — the number itself is RuneText).
+ *   - the well: dark at its floor, its upper-left walls in shadow and its
+ *     lower-right walls catching the torch, its rim worn round — no border
+ *     line, the edge is just where the stone turns down;
+ *   - the item's grade glowing up from the floor of the well behind the
+ *     item, in stepped rings;
+ *   - a soft ring of light inside the rim and a wash for hover and drag
+ *     feedback;
+ *   - the level tab in the bottom-right corner (a small dark rounded tab —
+ *     the number itself is RuneText).
  *
- * One draw call per socket, and every look change is a uniform write (the
- * frame swaps textures from a cache), so sockets never re-render to light
- * up. */
+ * It opens from its centre when the socket rises (uProgress). One draw
+ * call per socket, and every look change is a uniform write. */
 
 const frames = new Map<string, DataTexture>();
 
@@ -93,63 +93,62 @@ float bayer4(vec2 c) {
 }
 vec3 disp(vec3 c) { return pow(max(c, vec3(0.0)), vec3(1.0 / 2.2)); }
 
-// Output is premultiplied: the haze darkens what's behind it, the light is
-// added on top (colour without alpha), all in display values.
+float roundRect(vec2 p, vec2 hs, float r) {
+  vec2 q = abs(p) - (hs - r);
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+// Premultiplied output: the well darkens the stone, light is added on top.
 void main() {
-  vec2 p = vUv * uCard;
   vec2 n = floor(uCard / uTexel);
-  vec2 t = min(floor(p / uTexel), n - 1.0);
-  float d = min(min(t.x, t.y), min(n.x - 1.0 - t.x, n.y - 1.0 - t.y));
+  vec2 t = min(floor(vUv * uCard / uTexel), n - 1.0);
+  vec2 c = t + 0.5 - n * 0.5;                // texels from the centre
+  float r = min(n.x, n.y) * 0.32;            // a generous corner
+  // Opens from its centre as the socket rises.
+  float grow = mix(0.25, 1.0, uProgress);
+  float sd = roundRect(c, n * 0.5 * grow, r * grow);
+  if (sd > 0.0) discard;
   vec3 edge = disp(texelFetch(uFrame, ivec2(6, 1), 0).rgb);
 
-  // The well: haze thinning to nothing at the rim.
-  float feather = clamp(d / 4.0, 0.0, 1.0);
-  float haze = uBody * 0.62 * step(bayer4(t), feather * 1.2);
+  // The well's walls: the rim's two outer texels slope down into it.
+  float wall = clamp(1.0 + sd / 3.0, 0.0, 1.0);          // 1 at the rim, 0 inside
+  vec2 dir = normalize(c + 0.0001);
+  float facing = dot(dir, normalize(vec2(1.0, -1.0)));   // lower-right walls face the torch
+  // The floor of the well is near-black; its rim is where the stone turns
+  // down: the lit lower-right lip is a thin bright crescent, the upper-left
+  // wall falls into shadow.
+  float a = uBody * 0.92;
   vec3 light = vec3(0.0);
-
-  // Its grade pooled behind the item, in stepped rings.
-  vec2 c = ((t + 0.5) / n - vec2(0.5, 0.47)) * 2.0;
-  float r = length(c);
-  light += disp(uGlow) * uGlowK * (r < 0.46 ? 0.16 : r < 0.7 ? 0.08 : r < 0.9 ? 0.03 : 0.0) * uBody;
-  light += disp(uFill) * 0.6 * uBody;
-
-  // The thread, forging round from the bottom centre.
-  vec2 g = (t + 0.5) * uTexel;
-  float dx = abs(g.x - uCard.x * 0.5);
-  float dB = g.y;
-  float dT = uCard.y - g.y;
-  float dS = uCard.x * 0.5 - dx;
-  float s;
-  if (dB <= min(dT, dS)) s = dx;
-  else if (dS <= dT) s = uCard.x * 0.5 + g.y;
-  else s = uCard.x * 0.5 + uCard.y + (uCard.x * 0.5 - dx);
-  s /= (uCard.x + uCard.y);
-  float front = uProgress * 1.02;
-  if (s <= front) {
-    float hot = step(front - 0.03, s) * step(uProgress, 0.999);
-    float th = abs(d - 1.0) < 0.5 ? 0.42 : d < 0.5 ? (mod(t.x + t.y, 2.0) < 1.0 ? 0.1 : 0.0) : 0.0;
-    vec2 cd = min(t, n - 1.0 - t);
-    if (cd.x < 2.5 && cd.y < 2.5 && abs(cd.x - cd.y) < 1.5) th = max(th, cd.x + cd.y < 3.5 ? 0.9 : 0.25);
-    light += mix(edge * th, disp(uHot), hot);
+  vec3 dark = vec3(0.004, 0.003, 0.007);
+  if (wall > 0.0) {
+    if (facing > 0.0) light += vec3(0.24, 0.22, 0.26) * wall * wall * facing * uBody;
+    else a = min(1.0, a + 0.08 * wall * -facing);
   }
 
-  // Feedback: an inner ring and a wash.
-  float ring = abs(d - 3.0) < 0.5 ? 1.0 : 0.0;
+  // The grade glowing up from the floor of the well, in stepped rings.
+  vec2 g = c / (n * 0.5);
+  float rr = length(g - vec2(0.0, -0.06));
+  light += disp(uGlow) * uGlowK * (rr < 0.46 ? 0.16 : rr < 0.7 ? 0.075 : rr < 0.9 ? 0.03 : 0.0) * uBody;
+  light += disp(uFill) * 0.4 * uBody;
+  // A hint of the grade on the lit lip.
+  if (wall > 0.5 && facing > 0.3) light += edge * 0.08 * uBody;
+
+  // Feedback: a soft ring inside the rim, and a wash.
+  float ring = abs(sd + 3.0) < 0.75 ? 1.0 : abs(sd + 3.0) < 1.75 ? 0.35 : 0.0;
   light += disp(uRing) * ring * uRingK * 0.8;
-  light += disp(uWash) * uWashK * 0.3 * step(2.5, d);
+  light += disp(uWash) * uWashK * 0.3 * step(2.5, -sd);
+  light += disp(uHot) * (1.0 - uProgress) * 0.25 * step(-1.5, sd) * step(uProgress, 0.999);
 
   light *= 1.0 - uDim * 0.7;
-  haze = min(1.0, haze + uDim * 0.25 * step(0.5, d));
-  vec4 col = vec4(vec3(0.004, 0.003, 0.008) * haze + light, haze);
+  a = min(1.0, a + uDim * 0.15);
+  vec4 col = vec4(dark * a + light, a);
 
   if (uPlate.x > 0.0 && uProgress >= 1.0) {
     vec2 k = vec2(n.x - 1.0 - t.x, t.y);
-    if (k.x < uPlate.x && k.y < uPlate.y) {
-      bool pe = k.x >= uPlate.x - 1.0 || k.y >= uPlate.y - 1.0;
-      col = pe ? vec4(disp(uPlateEdge) * 0.8, 0.85) : vec4(0.01, 0.008, 0.015, 0.85);
+    if (k.x < uPlate.x && k.y < uPlate.y && roundRect(k + 0.5 - uPlate * 0.5, uPlate * 0.5, 1.5) < 0.0) {
+      col = vec4(0.01, 0.008, 0.015, 0.88);
     }
   }
-  if (col.a < 0.002 && dot(col.rgb, col.rgb) < 0.000001) discard;
   gl_FragColor = col * uFade;
 }
 `;

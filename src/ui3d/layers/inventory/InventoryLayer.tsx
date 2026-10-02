@@ -5,7 +5,8 @@ import { useGame } from "../../../state/gameStore";
 import { useEscapeClosesOverlay } from "../../../ui/hooks";
 import { ViewAnchor, pxFor } from "../../anchors";
 import { KeyCap, keyCapWidth } from "../../KeyCap";
-import { PixelFrame } from "../../PixelFrame";
+import { metalMaterial } from "../../materials";
+import { slabGeometry, slabMaterial } from "../../slab";
 import { UiPresence, useUiShow } from "../../presence";
 import { TABLET_EXIT } from "../../Tablet";
 import { measureText, RuneText } from "../../text/RuneText";
@@ -28,7 +29,6 @@ import {
   type Placement,
   type TabletId,
 } from "./layout";
-import { flat, plane } from "./materials";
 import { MerchantStall } from "./MerchantStall";
 import { PointerController } from "./PointerController";
 
@@ -147,9 +147,9 @@ function Placed({ at, children }: { at: Placement; children: React.ReactNode }) 
 }
 
 /** The spine that joins a pair of tablets into one open book (artpass's
- * `.wm-inv__book`), closing the gap between them: a soot strip in a brass
- * pixel frame with brass bands. It rises out of the dark with the stones
- * and sinks again when they break — in hard steps. */
+ * `.wm-inv__book`), closing the gap between them: a rounded spine of dark
+ * leather with three bronze bands. It rises out of the dark with the
+ * stones and sinks again when they break — in hard steps. */
 function Hinge({ x, y }: { x: number; y: number }) {
   const show = useUiShow();
   const group = useRef<Group>(null);
@@ -162,16 +162,14 @@ function Hinge({ x, y }: { x: number; y: number }) {
     g.scale.set(1, Math.max(0.0001, step), 1);
     g.visible = step > 0;
   });
-  const h = ALTAR.height + 0.06;
-  const w = 0.1;
-  const texel = 0.0055;
+  const h = ALTAR.height * 0.94;
+  const w = 0.09;
   return (
-    <group ref={group} position={[x, y, -0.1]} visible={false}>
-      <mesh geometry={plane()} material={flat("#140f18")} scale={[w, h, 1]} />
+    <group ref={group} position={[x, y, -0.08]} visible={false}>
+      <mesh geometry={slabGeometry(w, h, 0.05, w * 0.48)} material={slabMaterial(null, "#1c1418")} />
       {[-0.36, 0, 0.36].map((b) => (
-        <mesh key={b} geometry={plane()} material={flat(ink.brassDark)} scale={[w, texel * 3, 1]} position={[0, b * h, 0.001]} />
+        <mesh key={b} geometry={slabGeometry(w * 1.04, 0.016, 0.056, 0.007)} material={metalMaterial("#7a6038")} position={[0, b * h, 0.003]} />
       ))}
-      <PixelFrame width={w + texel * 2} height={h + texel * 2} frame="brass" texel={texel} position={[0, 0, 0.002]} />
     </group>
   );
 }

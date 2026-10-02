@@ -67,9 +67,9 @@ export function shade(hex: string, t: number): string {
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
 }
 
-/** The colour of the light a pane is cast in (holo/): magic is arcane cyan,
- * so the grimoire's brass trims become the caster's own light; gold stays
- * gold (home, treasure), blood blood, violet violet, iron a cool steel. */
+/** An accent colour for a named look (slab tints, glows): magic is arcane
+ * cyan, gold home and treasure, blood danger, violet enchantment, iron a
+ * cool steel; brass reads as arcane. Any other string is a colour. */
 const HOLO: Record<string, string> = {
   brass: ink.arcane,
   arcane: ink.arcane,

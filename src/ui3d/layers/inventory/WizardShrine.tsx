@@ -80,7 +80,8 @@ void main() {
 
   vec3 col;
   bool left = c.x < r;
-  if (d < 1.0) col = uInk;
+  // No ink outline: the alcove's edge is just where the stone turns in.
+  if (d < 1.0) col = left ? uRim : uRimDark;
   else if (d < 3.0) col = (left && d < 2.0) || (c.y > spring && c.x < r * 1.2 && d < 2.0) ? uRimLit : left ? uRim : uRimDark;
   else if (t.y < uLedge) {
     // The ledge: stone, a lit lip, an ink line above it.

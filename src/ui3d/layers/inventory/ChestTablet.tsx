@@ -26,7 +26,7 @@ export function ChestTablet() {
   const m = CHEST.marginX;
 
   return (
-    <Tablet width={spec.width} height={spec.height} tint={PANEL_TINT} frame="brass" seed={7} projector tile={0.17}>
+    <Tablet width={spec.width} height={spec.height} tint={PANEL_TINT} frame="brass" seed={7} tile={0.17}>
       <group ref={face}>
         <TitlePlate text="STASH" y={CHEST.height / 2 + 0.006} />
         <Headline text="Your Chest" x={-m} y={CHEST.titleY} />

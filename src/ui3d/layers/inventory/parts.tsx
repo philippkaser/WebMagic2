@@ -90,9 +90,9 @@ export function Lore({ text, x, y, delay = 0.2 }: { text: string; x: number; y: 
   );
 }
 
-/** The brass rule (`.wm-rule`, the banner's `—— ◆ ——`): a hard 1-texel line,
- * dark brass at the ends and bright in the middle (three steps instead of a
- * gradient), with a brass diamond at its centre. */
+/** A rule cut into the stone (the banner's `—— ◆ ——`, quietened): a fine
+ * dark groove with the torch catching its lower lip, and a small brass
+ * diamond inlaid at its centre. */
 export function GoldRule({ x0, x1, y, diamond = true }: { x0: number; x1: number; y: number; diamond?: boolean }) {
   const shown = useUiShow();
   const w = x1 - x0;
@@ -100,9 +100,8 @@ export function GoldRule({ x0, x1, y, diamond = true }: { x0: number; x1: number
   const t = PANEL_TEXEL;
   return (
     <group position={[0, y, 0.0015]} visible={shown}>
-      <mesh geometry={plane()} material={flat(ink.brassDark)} scale={[w, t, 1]} position={[c, 0, 0]} />
-      <mesh geometry={plane()} material={flat(ink.brass)} scale={[w * 0.6, t, 1]} position={[c, 0, 0.0002]} />
-      <mesh geometry={plane()} material={flat(ink.ink)} scale={[w, t, 1]} position={[c + t, -t, -0.0002]} />
+      <mesh geometry={plane()} material={flat(ink.ink, 0.55)} scale={[w, t, 1]} position={[c, 0, 0]} />
+      <mesh geometry={plane()} material={flat(ink.stoneLight, 0.45)} scale={[w, t, 1]} position={[c, -t, 0.0002]} />
       {diamond && <PixelSprite name="diamond" tint={ink.brass} px={t * 1.2} position={[c, 0, 0.0006]} delay={0.15} />}
     </group>
   );

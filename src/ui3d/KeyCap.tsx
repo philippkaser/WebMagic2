@@ -1,11 +1,12 @@
-import { HoloPane } from "./holo/HoloPane";
+import { Pop } from "./Plate";
+import { slabGeometry, parchmentMaterial } from "./slab";
 import { measureText, RuneText } from "./text/RuneText";
 import { ink } from "./theme";
 
-/** A key cap — a small bright tile of parchment light with the key dark on
- * it (the grimoire's `.wm-key`, cast like every other pane), for prompts
- * and legends: [E] Plunder…, [TAB] satchel. `px` sizes the letters like
- * RuneText's. */
+/** A key cap — a little rounded cap of worn parchment with the key in ink
+ * on it, standing a touch proud of whatever it sits on (the grimoire's
+ * `.wm-key`), for prompts and legends: [E] Plunder…, [TAB] satchel. `px`
+ * sizes the letters like RuneText's. */
 export function KeyCap({
   k,
   px,
@@ -22,9 +23,10 @@ export function KeyCap({
   const h = size.height + px * 4;
   return (
     <group position={position as [number, number, number] | undefined}>
-      <HoloPane width={w + texel * 2} height={h + texel * 2} color={ink.parchment} cellPx={1.6} fill={7} smoke={0.9} border={false} float={false} speed={2.4} quiet>
-        <RuneText text={label} font="label" px={px} color={ink.ink} glow={0} outline={0} depth={-0.2} />
-      </HoloPane>
+      <Pop time={0.25}>
+        <mesh geometry={slabGeometry(w + texel * 2, h + texel * 2, texel * 3, (h + texel * 2) * 0.3)} material={parchmentMaterial()} position={[0, 0, texel * 2]} renderOrder={5} />
+      </Pop>
+      <RuneText text={label} font="label" px={px} color={ink.ink} glow={0} outline={0} depth={-0.2} position={[0, 0, texel * 2 + 0.0005]} />
     </group>
   );
 }

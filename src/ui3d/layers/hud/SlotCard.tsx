@@ -83,6 +83,7 @@ export function SlotCard({
   enchanted = false,
   flashAt,
   index = 0,
+  bare = false,
   position,
 }: {
   unit: number;
@@ -100,6 +101,9 @@ export function SlotCard({
   /** uiNow() of the last flash (a change, a use). */
   flashAt?: MutableRefObject<number>;
   index?: number;
+  /** No card: the item floats on its own, its key beneath it and its count
+   * as plain digits (the HUD's belt). */
+  bare?: boolean;
   position: readonly [number, number, number];
 }) {
   const W = SLOT.w + 4;
@@ -153,8 +157,8 @@ export function SlotCard({
   const label = fontPxAt(8, "label", unit);
   return (
     <group position={position as [number, number, number]}>
-      <mesh geometry={unitQuad()} material={material} scale={[W * unit, H * unit, 1]} renderOrder={6} />
-      {empty && <PixelSprite name={icon} tint="#8a8090" texel={2 * unit} opacity={0.22} position={[0, 2 * unit, 0.0005]} delay={delay + 0.1} />}
+      {!bare && <mesh geometry={unitQuad()} material={material} scale={[W * unit, H * unit, 1]} renderOrder={6} />}
+      {empty && <PixelSprite name={icon} tint="#8a8090" texel={2 * unit} opacity={bare ? 0.14 : 0.22} position={[0, 2 * unit, 0.0005]} delay={delay + 0.1} />}
       <Undistort at={[0, 2 * unit, 0.02]}>
         <group ref={turn}>
           {entries.map((e) => (
@@ -166,10 +170,13 @@ export function SlotCard({
           ))}
         </group>
       </Undistort>
-      {badge && !empty && <Badge text={badge} unit={unit} color={color} px={label} delay={delay + 0.3} />}
+      {badge && !empty && !bare && <Badge text={badge} unit={unit} color={color} px={label} delay={delay + 0.3} />}
+      {badge && !empty && bare && (
+        <RuneText text={`×${badge}`} font="label" px={label} color={ink.parchment} anchor={[1, 0]} align="right" position={[(W / 2 - 4) * unit, (-H / 2 + 6) * unit, 0.03]} glow={0.3} outline={0.6} delay={delay + 0.3} />
+      )}
       {enchanted && !empty && <PixelSprite name="gem" tint={ink.violet} texel={unit} position={[(-W / 2 + 6.5) * unit, (H / 2 - 6.5) * unit, 0.03]} delay={delay + 0.3} />}
       {runLoot && !empty && <RiskMark unit={unit} delay={delay + 0.35} position={[(W / 2 - 7.5) * unit, (H / 2 - 7.5) * unit, 0.03]} />}
-      {keyCap && <KeyCap k={keyCap} px={fontPxAt(9, "label", unit)} position={[(-W / 2 + 4) * unit, (H / 2 - 3) * unit, 0.035]} />}
+      {keyCap && <KeyCap k={keyCap} px={fontPxAt(9, "label", unit)} position={bare ? [0, (-H / 2 + 1) * unit, 0.035] : [(-W / 2 + 4) * unit, (H / 2 - 3) * unit, 0.035]} />}
     </group>
   );
 }

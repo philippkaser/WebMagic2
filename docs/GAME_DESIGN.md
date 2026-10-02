@@ -89,17 +89,17 @@ The emotional loop we are chasing:
   sucked in, hover in a dark void of blocky stars while the next floor
   loads, and are spat out through a tear onto the new place. Sealed rifts
   are frozen, cracked glass.
-- **The UI is magic you cast.** No flat screens and no framed boxes: menus
-  are projections of light rising from a sigil you burn onto the floor,
-  tuning in like a hologram, flickering and breathing like any spell you
-  have to hold, and collapsing back into their sigil when you let go;
-  prompts and messages are small panes of light (never in your way); words
-  burn into them as runes that settle into letters and later burn away;
-  the map (M) is a miniature of the floor you've explored, cast a stride
-  ahead of you — walk around it; your health and mana are two glass orbs
-  of liquid, real spheres shaded in gritty pixels, sloshing as you run and
-  turn; the whole HUD is carried — it trails your turns and swings with
-  your stride; items are small objects you pick up and set down. The type is pixel type — Jacquard 12 blackletter for the
+- **The UI is physical and in the world.** No flat screens and no framed
+  boxes: menus are tablets that build themselves out of worn, round-edged
+  stones in front of you; prompts and messages are small slabs of slate
+  (never in your way); words burn into them as runes that settle into
+  letters and later burn away; the map (M) is a hologram miniature of the
+  floor you've explored, cast a stride ahead of you — walk around it; your
+  health and mana are two glass orbs whose facets catch the torch one pixel
+  at a time, their liquid sloshing as you run and turn; the HUD is sparse
+  (the tithe stones, the orbs, the belt) and carried — it follows your
+  turns closely and swings with your stride; items are small objects you
+  pick up and set down. The type is pixel type — Jacquard 12 blackletter for the
   big moments ("Floor 12", "You Died"), Jersey 15 for smaller titles,
   Tiny5 for text, Silkscreen for tiny labels — in parchment on soot, arcane cyan for magic and the way onward,
   gold for home, blood for danger. New UI must follow this — if it could be

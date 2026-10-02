@@ -108,11 +108,11 @@ corner — check it against the latest commit when testing.
 - **Procedural everything**: painted pixel-art textures, normal maps, models
   and every sound are generated at runtime — no binary assets beyond the
   four pixel fonts.
-- **The UI is magic you cast**: menus rise as projections of light from a
-  sigil burned onto the floor, messages burn into small panes of light as
-  runes that settle into letters, the map (M) is a hologram miniature of
-  the explored floor cast ahead of you, health and mana are glass orbs that
-  slosh as you move, items are small 3D objects. Portals are rifts torn in the air, and stepping through one is
+- **The UI lives in the world**: menus are tablets built from worn stones,
+  messages burn into small slabs of slate as runes that settle into
+  letters, the map (M) is a hologram miniature of the explored floor cast
+  ahead of you, health and mana are glass orbs that slosh as you move,
+  items are small 3D objects. Portals are rifts torn in the air, and stepping through one is
   a journey — sucked in, through a void of blocky stars, spat out onto the
   new floor.
 

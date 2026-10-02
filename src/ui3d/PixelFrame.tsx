@@ -2,7 +2,6 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import { Color, DataTexture, Mesh, NearestFilter, PlaneGeometry, RGBAFormat, ShaderMaterial, SRGBColorSpace, UnsignedByteType } from "three";
 import { uiNow } from "./clock";
-import { LIGHT_BLENDING } from "./holo/holoMaterial";
 import { frameFor, ink, type FrameColors, type FrameKind } from "./theme";
 
 /** A pixel-art frame around a rectangle — the grimoire's brass trim, in 3D.
@@ -94,12 +93,10 @@ void main() {
 }
 `;
 
-/** The frame as cast light (the UI is magic, not carpentry): no ink
- * outline and no bevel — a thread of the frame's light two texels in,
- * pulsing as power flows round it, a faint dithered glow outside it, and a
- * bright rune-dot at each corner. It still draws itself round from the
- * bottom centre (uProgress) with a white-hot leading spark. Pure added
- * light in display values (no colour-space step). */
+/** The "frame" is no frame any more: a fine groove cut into whatever it
+ * surrounds — a dark line two texels in, with the torch catching the lip
+ * below it — quiet enough to read as carving, not as a border. It still
+ * cuts itself round from the bottom centre (uProgress). Premultiplied. */
 const FRAG = /* glsl */ `
 uniform sampler2D uFrame;
 uniform vec2 uSize;      // quad size, world units
@@ -115,12 +112,9 @@ void main() {
   vec2 n = floor(uSize / uTexel);
   vec2 t = min(floor(p / uTexel), n - 1.0);
   float d = min(min(t.x, t.y), min(n.x - 1.0 - t.x, n.y - 1.0 - t.y));
-  if (d > 3.5) discard;
-  // The frame's lit tone (its bitmap's top edge), decoded to display values.
-  vec3 light = pow(texelFetch(uFrame, ivec2(6, 1), 0).rgb, vec3(1.0 / 2.2));
+  if (d > 3.5 || d < 1.5) discard;
+  vec3 light = texelFetch(uFrame, ivec2(6, 1), 0).rgb;
 
-  // Perimeter position from the bottom centre (0) up both sides to the top
-  // centre (1), in whole texels, for the forge.
   vec2 q = (t + 0.5) * uTexel;
   float dx = abs(q.x - uSize.x * 0.5);
   float dB = q.y;
@@ -131,21 +125,20 @@ void main() {
   else if (dS <= dT) s = uSize.x * 0.5 + q.y;
   else s = uSize.x * 0.5 + uSize.y + (uSize.x * 0.5 - dx);
   s /= (uSize.x + uSize.y);
-  float front = uProgress * 1.02;
-  if (s > front) discard;
-  float hot = step(front - 0.012, s) * step(uProgress, 0.999);
+  if (s > uProgress * 1.02) discard;
 
-  float flow = 0.5 + 0.5 * sin(s * 40.0 - uTime * 2.5);
-  float b = 0.0;
-  if (abs(d - 1.0) < 0.5) b = 0.32 + 0.22 * flow;
-  else if (abs(d - 2.0) < 0.5) b = 0.06;
-  else if (d < 0.5) b = mod(t.x + t.y, 2.0) < 1.0 ? 0.08 : 0.0;
-  // Rune-dots at the corners.
-  vec2 cd = min(t, n - 1.0 - t);
-  if (cd.x < 2.5 && cd.y < 2.5 && abs(cd.x - cd.y) < 1.5) b = max(b, cd.x + cd.y < 3.5 ? 0.85 : 0.2);
-  if (b <= 0.0) discard;
-  vec3 col = mix(light * b, uHot, hot);
-  gl_FragColor = vec4(col * uFade, 0.0);
+  vec4 col;
+  if (abs(d - 2.0) < 0.5) {
+    col = vec4(vec3(0.0), 0.45);                 // the groove
+  } else {
+    // The lip under it: lit on the lower and right edges, where the torch
+    // (up and to the left) can see into the cut.
+    bool lit = t.y < n.y * 0.5 || t.x > n.x * 0.5;
+    col = lit ? vec4(light * 0.16, 0.16) : vec4(0.0);
+  }
+  if (col.a <= 0.0) discard;
+  gl_FragColor = col * uFade;
+  #include <colorspace_fragment>
 }
 `;
 
@@ -192,8 +185,8 @@ export function PixelFrame({
         vertexShader: VERT,
         fragmentShader: FRAG,
         transparent: true,
+        premultipliedAlpha: true,
         depthWrite: false,
-        ...LIGHT_BLENDING,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [colors.trim, colors.light, colors.dark],

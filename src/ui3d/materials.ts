@@ -69,7 +69,7 @@ function dataTexture(data: Uint8Array, srgb: boolean): DataTexture {
 
 let slab: { map: DataTexture; normalMap: DataTexture } | null = null;
 
-function slabTextures(): { map: DataTexture; normalMap: DataTexture } {
+export function slabTextures(): { map: DataTexture; normalMap: DataTexture } {
   if (slab) return slab;
   const height = slabHeight();
   const color = new Uint8Array(SIZE * SIZE * 4);

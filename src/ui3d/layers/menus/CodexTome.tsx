@@ -9,7 +9,6 @@ import { pxFor } from "../../anchors";
 import { uiNow } from "../../clock";
 import { getFace } from "../../font/faces";
 import { glowMaterial, metalMaterial } from "../../materials";
-import { PixelFrame } from "../../PixelFrame";
 import { UiPresence, UiShow, useUiShow } from "../../presence";
 import { RuneButton } from "../../RuneButton";
 import { TABLET_EXIT } from "../../Tablet";
@@ -342,15 +341,6 @@ function Half({
         }}
       />
       <mesh geometry={box} material={m.leather} scale={[boardW, boardH, COVER_T]} position={[(side * boardW) / 2, 0, -BLOCK_T - COVER_T / 2]} />
-      {/* The page's brass rule: a thin pixel frame inset from the edge. */}
-      <PixelFrame
-        width={PAGE_W - 0.03 * U}
-        height={PAGE_H - 0.03 * U}
-        frame="brass"
-        texel={0.0016 * U}
-        position={[(side * PAGE_W) / 2, 0, 0.0012]}
-        renderOrder={5}
-      />
       {[1, -1].map((vy) => (
         <mesh
           key={vy}

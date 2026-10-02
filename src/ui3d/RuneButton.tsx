@@ -3,15 +3,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { BoxGeometry, Group, MeshBasicMaterial } from "three";
 import { playUiHover, playUiPress } from "../audio/uiSounds";
 import type { TextInput } from "./font/layout";
-import { HoloPane } from "./holo/HoloPane";
+import { slabGeometry, slabMaterial } from "./slab";
 import { holoColor, ink, type FrameKind } from "./theme";
 import { useUiShow } from "./presence";
 import { measureText, RuneText } from "./text/RuneText";
 
-/** A button you press with the mouse — a small bright pane of light cast
- * onto a menu (holo/HoloPane), "✦ label ✦" written on it. The pointer
- * finding it lifts it toward you and makes its light swell and its
- * scanlines race; pressing pushes it back with a flash.
+/** A button you press with the mouse — a small rounded slab of stone set
+ * onto a menu, "✦ label ✦" written on it, its colour glowing faintly from
+ * within the stone (arcane for the way onward, gold, blood; plain slate for
+ * a secondary one). The pointer finding it lifts it toward you and the
+ * glow swells; pressing pushes it in with a flash.
  *
  * Sized from its label unless `width` is given. Invisible (and inert) while
  * the enclosing tablet/presence isn't showing. */
@@ -100,6 +101,13 @@ export function RuneButton({
   const h = size.height + px * 10;
   const frameTexel = px * 1.35;
   const flash = useRef(0);
+  const glowTint = look.frame === "iron" ? null : holoColor(look.frame);
+  const stone = useMemo(() => {
+    const m = slabMaterial(glowTint).clone();
+    if (!glowTint) m.emissive.set(ink.parchmentDim);
+    return m;
+  }, [glowTint]);
+  useEffect(() => () => stone.dispose(), [stone]);
 
   const active = show && !disabled;
   useEffect(() => {
@@ -131,6 +139,7 @@ export function RuneButton({
     const s = show ? (down ? 0.97 : 1) : Math.max(0.001, 1 + lift.current * 50);
     g.scale.setScalar(s);
     g.visible = s > 0.002;
+    stone.emissiveIntensity = (glowTint ? 0.035 : 0.0) + glow.current * (glowTint ? 0.14 : 0.08);
   });
 
   const over = (e: ThreeEvent<PointerEvent>) => {
@@ -143,7 +152,7 @@ export function RuneButton({
   return (
     <group position={position as [number, number, number] | undefined}>
       <group ref={group}>
-        <HoloPane width={w + frameTexel * 8} height={h + frameTexel * 8} color={holoColor(look.frame)} fill={2.4} smoke={0.85} float={false} speed={2} quiet hoverRef={glow} renderOrder={5} />
+        <mesh geometry={slabGeometry(w + frameTexel * 8, h + frameTexel * 8, frameTexel * 5)} material={stone} renderOrder={5} />
         <mesh
           geometry={box}
           material={hitMaterial()}

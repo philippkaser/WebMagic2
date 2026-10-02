@@ -60,9 +60,9 @@ export function slotStrip(n: number): { cssW: number; cssH: number; outerW: numb
   return { cssW, cssH, outerW: cssW + 16, outerH: cssH + 16 };
 }
 
-/** The location panel's border-box height on a floor (its tallest form;
- * Location.tsx: 105 content + 8 padding + 12 frame + 4 overhang). */
-export const LOCATION_H = 129;
+/** The top-left marker's height (Location.tsx: the tithe stones and the
+ * line that sometimes shows under them). */
+export const LOCATION_H = 46;
 
 /** The purse panel's padding-box height. */
 export const PURSE_H = 22;

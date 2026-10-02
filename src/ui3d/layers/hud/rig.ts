@@ -21,14 +21,15 @@ import { Euler, Quaternion, Vector3 } from "three";
 const DEG = Math.PI / 180;
 
 export const RIG = {
-  /** Seconds of turn the rig trails by (target lag = turn rate × this). */
-  lagTime: 0.055,
+  /** Seconds of turn the rig trails by (target lag = turn rate × this) —
+   * a hint of weight, not a delay. */
+  lagTime: 0.02,
   /** Soft cap on the turn lag, radians. */
-  maxLag: 3 * DEG,
-  /** Spring natural frequency, rad/s (~2.3 Hz), and damping ratio: under 1
-   * for one soft overshoot when a turn stops. */
-  omega: 14.5,
-  zeta: 0.58,
+  maxLag: 1.4 * DEG,
+  /** Spring natural frequency, rad/s (~4.3 Hz), and damping ratio: under 1
+   * for a small soft overshoot when a turn stops. */
+  omega: 27,
+  zeta: 0.72,
   /** Walk bob amplitudes at a full run, radians. */
   bobPitch: 0.42 * DEG,
   bobYaw: 0.32 * DEG,

@@ -1,27 +1,9 @@
-import { useFrame } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
-import { LIGHT_BLENDING } from "./holoMaterial";
-import {
-  BufferAttribute,
-  BufferGeometry,
-  Color,
-  Group,
-  Mesh,
-  PlaneGeometry,
-  ShaderMaterial,
-  Vector3,
-} from "three";
+import { Color, ShaderMaterial } from "three";
+import { LIGHT_BLENDING } from "../../light";
 
-/** Where a cast pane comes from: a sigil burning on the floor and a beam of
- * light rising from it into the pane's lower edge — the hologram's
- * projector, in world space whatever the pane does.
- *
- * `paneRef` is the pane's group (its local origin at the pane centre,
- * x along its width, y along its height); `width`/`height` its size. The
- * sigil lies flat on the floor under the pane's foot (the floor is taken
- * 1.6 m below the eye), nudged toward the caster; the beam is a ribbon from
- * the sigil to the pane's bottom edge. `progress` (0…1) ignites the sigil,
- * then raises the beam; `alpha` fades both. */
+/** The cast map's sigil and beam: a rune circle that draws itself round on
+ * the floor, and a column of light rising from it — pure added light
+ * (light.ts), computed in display values. */
 
 const SIGIL_VERT = /* glsl */ `
 varying vec2 vUv;
@@ -118,7 +100,6 @@ void main() {
 }
 `;
 
-let sigilQuad: PlaneGeometry | null = null;
 
 /** The floor sigil's light (a unit quad; lay it flat). Uniforms: uIgnite
  * (0…1, draws itself around), uAlpha, uTime. */
@@ -155,91 +136,3 @@ export function makeBeamMaterial(color: string, worldSpace: boolean): ShaderMate
   });
 }
 
-export function Projector({
-  paneRef,
-  width,
-  height,
-  color,
-  progress,
-  alpha,
-}: {
-  paneRef: MutableRefObject<Group | null>;
-  width: number;
-  height: number;
-  color: string;
-  progress: MutableRefObject<number>;
-  alpha: MutableRefObject<number>;
-}) {
-  const sigilMat = useMemo(() => makeSigilMaterial(color), [color]);
-  const beamMat = useMemo(() => makeBeamMaterial(color, true), [color]);
-  const beamGeo = useMemo(() => {
-    const g = new BufferGeometry();
-    g.setAttribute("position", new BufferAttribute(new Float32Array(12), 3));
-    g.setAttribute("uv", new BufferAttribute(new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), 2));
-    g.setIndex([0, 1, 2, 2, 1, 3]);
-    return g;
-  }, []);
-  useEffect(
-    () => () => {
-      sigilMat.dispose();
-      beamMat.dispose();
-      beamGeo.dispose();
-    },
-    [sigilMat, beamMat, beamGeo],
-  );
-  const sigil = useRef<Mesh>(null);
-  const beam = useRef<Mesh>(null);
-
-  useFrame(({ camera, clock }) => {
-    const pane = paneRef.current;
-    const s = sigil.current;
-    const b = beam.current;
-    if (!pane || !s || !b) return;
-    const p = progress.current;
-    const a = alpha.current;
-    const t = clock.elapsedTime;
-    pane.updateWorldMatrix(true, false);
-    // The pane's bottom edge, in the world.
-    bl.set(-width / 2, -height / 2, 0).applyMatrix4(pane.matrixWorld);
-    br.set(width / 2, -height / 2, 0).applyMatrix4(pane.matrixWorld);
-    mid.addVectors(bl, br).multiplyScalar(0.5);
-    // The sigil: on the floor under the pane's foot, a little toward you.
-    const floorY = camera.position.y - 1.6;
-    toward.set(camera.position.x - mid.x, 0, camera.position.z - mid.z);
-    const dist = toward.length();
-    if (dist > 1e-3) toward.multiplyScalar(Math.min(0.35, dist * 0.3) / dist);
-    origin.set(mid.x + toward.x, floorY + 0.01, mid.z + toward.z);
-    const radius = Math.max(0.28, Math.min(0.6, width * 0.32));
-    s.matrixWorld.makeRotationX(-Math.PI / 2).scale(scaleV.set(radius * 2, radius * 2, 1)).setPosition(origin);
-    sigilMat.uniforms.uIgnite.value = Math.min(1, p / 0.45);
-    sigilMat.uniforms.uAlpha.value = a;
-    sigilMat.uniforms.uTime.value = t;
-    // The beam: a ribbon from the sigil (narrow) to the pane's edge (wide).
-    side.subVectors(br, bl).normalize().multiplyScalar(radius * 0.35);
-    const pos = beamGeo.attributes.position as BufferAttribute;
-    pos.setXYZ(0, origin.x - side.x, origin.y, origin.z - side.z);
-    pos.setXYZ(1, origin.x + side.x, origin.y, origin.z + side.z);
-    pos.setXYZ(2, bl.x, bl.y, bl.z);
-    pos.setXYZ(3, br.x, br.y, br.z);
-    pos.needsUpdate = true;
-    beamGeo.computeBoundingSphere();
-    beamMat.uniforms.uGrow.value = Math.min(1, Math.max(0, (p - 0.2) / 0.45));
-    beamMat.uniforms.uAlpha.value = a;
-    beamMat.uniforms.uTime.value = t;
-  });
-
-  return (
-    <>
-      <mesh ref={sigil} geometry={(sigilQuad ??= new PlaneGeometry(1, 1))} material={sigilMat} matrixAutoUpdate={false} matrixWorldAutoUpdate={false} frustumCulled={false} renderOrder={1} />
-      <mesh ref={beam} geometry={beamGeo} material={beamMat} matrixAutoUpdate={false} matrixWorldAutoUpdate={false} frustumCulled={false} renderOrder={1} />
-    </>
-  );
-}
-
-const bl = new Vector3();
-const br = new Vector3();
-const mid = new Vector3();
-const toward = new Vector3();
-const origin = new Vector3();
-const side = new Vector3();
-const scaleV = new Vector3();

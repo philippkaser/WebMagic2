@@ -22,7 +22,7 @@ import { getBiomeDef } from "../../../world/biomes";
 import type { FloorLayout } from "../../../world/types";
 import { pxFor } from "../../anchors";
 import { uiNow } from "../../clock";
-import { makeBeamMaterial, makeSigilMaterial } from "../../holo/Projector";
+import { makeBeamMaterial, makeSigilMaterial } from "./sigil";
 import { UiShow } from "../../presence";
 import { RuneText } from "../../text/RuneText";
 import { ink } from "../../theme";

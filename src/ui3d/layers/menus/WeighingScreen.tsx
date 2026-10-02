@@ -307,7 +307,7 @@ function GatePanel() {
   const titleH = measureText("W", px(titleCap), undefined, "label").height + px(titleCap) * 7;
   return (
     <group position={[0, PANEL_Y * U, 0]}>
-      <Tablet width={PANEL_W * U} height={PANEL_H * U} tile={0.15} thickness={0.05} frame="brass" tilt seed={5} projector>
+      <Tablet width={PANEL_W * U} height={PANEL_H * U} tile={0.15} thickness={0.05} frame="brass" tilt seed={5}>
         {/* The panel's title plate, straddling the top trim (.wm-panel__title). */}
         <Plate width={titleW} height={titleH} frame="brass" texel={px(titleCap) * 0.9} fill={ink.ink} fillOpacity={1} position={[0, (PANEL_H / 2) * U, 0.006]}>
           <RuneText text={spaced("The Weighing Gate")} font="label" px={px(titleCap)} color={ink.brassLight} glow={0.3} depth={-0.3} />
