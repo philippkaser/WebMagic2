@@ -2,10 +2,14 @@ import { Environment, PointerLockControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { Suspense, useMemo } from "react";
-import { BlackHoles } from "../combat/blackhole";
-import { CombatSystem } from "../combat/CombatSystem";
-import { Projectiles } from "../combat/projectiles";
+import { AudioWorld } from "../audio/AudioWorld";
+import { BlackHoles } from "../weapons/singularity";
+import { CastingSystem } from "../weapons/CastingSystem";
+import { Projectiles } from "../weapons/projectiles";
 import { GRAVITY } from "../core/config";
+import { Graves } from "../encounters/Graves";
+import { PactSystem } from "../encounters/PactSystem";
+import { PresenceSystem } from "../encounters/PresenceSystem";
 import { DynamicLights } from "../fx/DynamicLights";
 import { FxSystems } from "../fx/Particles";
 import { ConsumableSystem } from "../game/ConsumableSystem";
@@ -16,8 +20,14 @@ import { PeerBodies } from "../net/PeerBodies";
 import { RemoteWizards } from "../net/RemoteWizards";
 import { StaffView } from "../player/StaffView";
 import { Effects } from "../render/Effects";
+import { TransitionSystem } from "../transition/TransitionSystem";
 import { useGame } from "../state/gameStore";
-import { generateFloor } from "../world/dungeonGen";
+import { WorldCameraBridge } from "../ui3d/bridge";
+import { FloorMaps } from "../ui3d/layers/map/FloorMap";
+import { generateFloor } from "../world/gen";
+import { omenRules } from "../world/omens";
+import { setFloorRules } from "../game/floorRules";
+import { setCurrentLayout } from "../world/currentFloor";
 import { DungeonFloor } from "./DungeonFloor";
 import { Village } from "./Village";
 
@@ -28,11 +38,23 @@ export function GameScene() {
   const instanceId = useGame((s) => s.instanceId);
 
   const inDungeon = phase === "dungeon" || (phase === "loading" && floor > 0);
-  const layout = useMemo(
-    () => (inDungeon && floorSeed ? generateFloor(floorSeed, floor) : null),
-    [inDungeon, floorSeed, floor],
-  );
-  const controlsEnabled = phase === "village" || phase === "dungeon";
+  const layout = useMemo(() => {
+    const next = inDungeon && floorSeed ? generateFloor(floorSeed, floor) : null;
+    // Floor rules (the omen's bends) must be live BEFORE the floor's enemies
+    // render — they read enemyHealthMult as they initialize — so they're
+    // installed here, with the layout, rather than in a mount effect (which
+    // runs after the children). Idempotent, so a re-render is harmless.
+    setFloorRules(next ? omenRules(next.omen) : {});
+    setCurrentLayout(next);
+    if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__layout = next;
+    return next;
+  }, [inDungeon, floorSeed, floor]);
+  // Mouse-look stays live through a portal journey (phase "loading"): the
+  // lock survives the tunnel, and a controls instance remounted mid-lock
+  // would never see a pointerlockchange and ignore the mouse.
+  const controlsEnabled = phase === "village" || phase === "dungeon" || phase === "loading";
+  // The Weightless Hour (and any future omen) bends the world's gravity.
+  const gravityMult = (layout && omenRules(layout.omen).gravityMult) ?? 1;
 
   // dpr 0.35: the game IS pixelated, so rendering at native resolution was
   // pure waste — this one number cut measured frame time ~5x. The browser
@@ -40,6 +62,7 @@ export function GameScene() {
   // the pixel-art look (no pixelation post-pass needed).
   return (
     <Canvas
+      id="wm-world"
       shadows
       dpr={0.35}
       gl={{ antialias: false, powerPreference: "high-performance" }}
@@ -49,7 +72,7 @@ export function GameScene() {
         {/* Fixed timestep: one 1/60 step per frame. NEVER use timeStep="vary"
             here — a long frame (floor load, shader compile) integrates gravity
             over the whole gap in one step and props tunnel through the floor. */}
-        <Physics gravity={[0, GRAVITY, 0]}>
+        <Physics gravity={[0, GRAVITY * gravityMult, 0]}>
           {inDungeon && layout ? (
             <DungeonFloor key={`${instanceId}:${floor}`} layout={layout} />
           ) : (
@@ -61,13 +84,24 @@ export function GameScene() {
           <PeerBodies />
         </Physics>
         <RemoteWizards />
+        {/* The ears: raytraced room acoustics, placed sounds, the world's
+            own voices (audio/). */}
+        <AudioWorld layout={inDungeon ? layout : null} />
+        <Graves />
+        <FloorMaps />
+        <PactSystem />
+        <PresenceSystem />
         <NetSystems />
         <FxSystems />
         <DynamicLights />
         <StaffView />
-        <CombatSystem />
+        <CastingSystem />
         <InteractionSystem />
         <ConsumableSystem />
+        <WorldCameraBridge />
+        {/* Portal journeys: camera pull/FOV/roll and the vortex tunnel that
+            covers every scene switch (transition/). */}
+        <TransitionSystem />
         {/* Tiny procedural environment map: gives the wet slabs and metal
             trims something interesting to reflect without external assets. */}
         <Environment resolution={64} frames={1}>
@@ -86,11 +120,12 @@ export function GameScene() {
         </Environment>
         <Effects />
       </Suspense>
-      {/* selector="canvas" is load-bearing: without it drei binds its
-          click-to-lock handler to the whole DOCUMENT, so clicking inventory/
-          merchant buttons would instantly re-lock the pointer. Scoped to the
-          canvas, overlay clicks (which cover the canvas) can never lock. */}
-      {controlsEnabled && <PointerLockControls makeDefault selector="canvas" />}
+      {/* The selector is load-bearing: without it drei binds its click-to-
+          lock handler to the whole DOCUMENT, so clicking a menu button would
+          instantly re-lock the pointer. Scoped to the WORLD canvas (not the
+          in-world UI canvas stacked above it, which only takes clicks while
+          a menu is up), menu clicks can never lock. */}
+      {controlsEnabled && <PointerLockControls makeDefault selector="#wm-world canvas" />}
     </Canvas>
   );
 }

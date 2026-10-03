@@ -7,6 +7,7 @@
  */
 import type { ServerWebSocket } from "bun";
 import { writeFileSync } from "node:fs";
+import { ENCOUNTERS } from "../src/core/config";
 import { FloorDirectory } from "../src/net/matchmaking";
 import type { ClientMsg } from "../src/net/protocol";
 import { AccountStore } from "./accounts";
@@ -68,7 +69,20 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 const accounts = new AccountStore(persistAccounts, initialAccounts);
 log(`accounts: ${accounts.size} loaded from ${DATA_FILE}`);
 
-const relay = new Relay(new FloorDirectory(MAX_PLAYERS_PER_FLOOR), accounts, () => Date.now(), log);
+// ENCOUNTER_CHANCE=1 makes every same-floor entry meet whoever is there — a
+// testing knob (two local clients would otherwise meet ~12% of the time).
+// Unset, the tension clock in core/config.ts ENCOUNTERS applies.
+const encounterOverride = Number(process.env.ENCOUNTER_CHANCE);
+const encounterTuning = Number.isFinite(encounterOverride)
+  ? { baseChance: encounterOverride, perSoloFloor: 0, maxChance: encounterOverride }
+  : ENCOUNTERS;
+const relay = new Relay(
+  new FloorDirectory(MAX_PLAYERS_PER_FLOOR, undefined, undefined, undefined, encounterTuning),
+  accounts,
+  () => Date.now(),
+  log,
+);
+if (encounterTuning !== ENCOUNTERS) log(`encounter chance forced to ${encounterOverride}`);
 const sockets = new Map<string, ServerWebSocket<SocketData>>();
 
 function peerFor(ws: ServerWebSocket<SocketData>): RelayPeer {

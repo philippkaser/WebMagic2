@@ -8,6 +8,12 @@ import type { PhysBody } from "./registry";
 export const playerPosition = new Vector3(0, 2, 0);
 export const playerVelocity = new Vector3();
 
+/** The stride the camera's view bob follows (PlayerController), so things
+ * carried in front of the eye can swing in step: `phase` advances with
+ * every step (radians, one stride per 2π), `amp` is 0 standing … ~1 at a
+ * run, `landDip` is the landing thump still being absorbed (metres). */
+export const playerGait = { phase: 0, amp: 0, landDip: 0 };
+
 let playerBody: PhysBody | null = null;
 
 export function setPlayerBody(body: PhysBody | null): void {
@@ -18,8 +24,13 @@ export function getPlayerBody(): PhysBody | null {
   return playerBody;
 }
 
-// Dev-only helper for debugging and end-to-end scripts.
+// Dev-only helpers for debugging and end-to-end scripts.
 if (typeof window !== "undefined" && import.meta.env?.DEV) {
+  (window as unknown as Record<string, unknown>).__playerPos = () => [
+    playerPosition.x,
+    playerPosition.y,
+    playerPosition.z,
+  ];
   (window as unknown as Record<string, unknown>).__teleport = (x: number, y: number, z: number) => {
     const body = playerBody as unknown as {
       setTranslation(v: { x: number; y: number; z: number }, wake: boolean): void;

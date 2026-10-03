@@ -59,8 +59,10 @@ export class GameSession {
   }
 
   /** Ask the server which instance of `floor` we belong to. Resolves with the
-   * instance seed used to generate the floor locally. */
-  requestFloor(floor: number): Promise<FloorAssignment> {
+   * instance seed used to generate the floor locally. `fresh` starts a new
+   * run from the village: the server decides the actual floor from our
+   * banked gear (the resolved assignment carries it). */
+  requestFloor(floor: number, fresh = false): Promise<FloorAssignment> {
     return new Promise((resolve, reject) => {
       if (!this.transport) {
         reject(new Error("not connected"));
@@ -68,7 +70,7 @@ export class GameSession {
       }
       this.currentFloor = floor;
       this.pendingAssignment = resolve;
-      this.transport.send({ t: "enterFloor", floor });
+      this.transport.send({ t: "enterFloor", floor, fresh });
     });
   }
 
@@ -125,13 +127,13 @@ export class GameSession {
 
   /** HOST only (the server ignores anyone else): attest that a player
    * legitimately picked up an item, making it bankable for them. */
-  attestGrant(playerId: string, itemId: string): void {
-    this.transport?.send({ t: "grant", playerId, itemId });
+  attestGrant(playerId: string, itemId: string, source?: "grave"): void {
+    this.transport?.send({ t: "grant", playerId, itemId, source });
   }
 
   /** HOST only: attest a gold pickup — gold's provenance path. */
-  attestGold(playerId: string, amount: number): void {
-    this.transport?.send({ t: "grantGold", playerId, amount });
+  attestGold(playerId: string, amount: number, source?: "grave"): void {
+    this.transport?.send({ t: "grantGold", playerId, amount, source });
   }
 
   // ── Connection plumbing ────────────────────────────────────────────────────
@@ -228,6 +230,7 @@ export class GameSession {
         const a = msg.assignment;
         const roster: Record<string, string> = {};
         for (const m of a.members) roster[m.id] = m.name;
+        this.currentFloor = a.floor; // the server may have decided otherwise
         useNet.setState({ hostId: a.hostId, epoch: a.epoch, roster });
         netBus.emit("assigned", a);
         this.pendingAssignment?.(a);
@@ -237,25 +240,24 @@ export class GameSession {
       case "peerJoined": {
         const roster = { ...useNet.getState().roster, [msg.member.id]: msg.member.name };
         useNet.setState({ roster });
+        // No name in the feed: who walked in is for the player to discover
+        // (encounters/PresenceSystem voices the arrival).
         netBus.emit("peerJoined", msg.member);
-        gameEvents.emit("message", `${msg.member.name} entered the floor`);
         break;
       }
       case "peerLeft": {
         const roster = { ...useNet.getState().roster };
-        const name = roster[msg.playerId];
+        const name = roster[msg.playerId] ?? "";
         delete roster[msg.playerId];
         useNet.setState({ roster });
-        netBus.emit("peerLeft", { playerId: msg.playerId });
-        if (name) gameEvents.emit("message", `${name} left the floor`);
+        netBus.emit("peerLeft", { playerId: msg.playerId, name });
         break;
       }
       case "hostChanged":
         useNet.setState({ hostId: msg.hostId, epoch: msg.epoch });
+        // Silent on purpose: announcing a migration would tell you someone
+        // just left — that's the presence layer's call, not the plumbing's.
         netBus.emit("hostChanged", { hostId: msg.hostId, epoch: msg.epoch });
-        if (msg.hostId === this.playerId) {
-          gameEvents.emit("message", "You are now the floor host");
-        }
         break;
       case "syncRequest":
         netBus.emit("syncRequest", { playerId: msg.playerId });

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { getEnemyDef, type EnemyId } from "../combat/enemyRegistry";
+import { getEnemyDef, type EnemyId } from "../enemies/registry";
 import type { TrapKind, Vec3 } from "../world/types";
 
 /** Dev-room spawn registry — the shared state between the DevRoom overlay

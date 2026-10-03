@@ -147,6 +147,8 @@ export class LocalTransport implements Transport {
         // Offline progress is persisted client-side.
         break;
       case "enterFloor": {
+        // Offline the client is its own authority: it already applied the
+        // run rules (run/rules.ts) before asking, so honor the floor as sent.
         const inst = this.directory.join(this.playerId, msg.floor);
         this.deliver({
           t: "floorAssigned",

@@ -1,50 +1,79 @@
 import { create } from "zustand";
-import { playHurt, playPickup, playPortal } from "../audio/sound";
-import { DUNGEON, PLAYER } from "../core/config";
+import { playHurt, playPickup, playWeighing } from "../audio/sound";
+import { setHeadphones } from "../audio/spatial";
+import { DUNGEON, PLAYER, PVP } from "../core/config";
 import { gameEvents } from "../core/events";
+import { Rng } from "../core/rng";
+import { KillCredit } from "../encounters/killCredit";
+import type { DamageSource } from "../game/damageSource";
+import { getFloorRules } from "../game/floorRules";
 import { computeStats, getItemDef, resolveItem } from "../items/catalog";
 import { GAMBLE_PRICE, merchantPrice, multisetOf, sellValue } from "../items/economy";
-import { rollGamble } from "../items/loot";
-import { Rng } from "../core/rng";
 import {
   addToGrid,
   clearSlot,
-  hasRoom,
-  markBanked,
   moveItem as moveItemPure,
   readSlot,
-  stripRunLoot,
+  routeAcquire,
   takeOneAt,
   type Carried,
   type Grid,
   type SlotRef,
 } from "../items/inventory";
+import { rollGamble } from "../items/loot";
 import type { DerivedStats, Equipment } from "../items/types";
 import { netBus } from "../net/bus";
 import { useNet } from "../net/netStore";
 import { session } from "../net/session";
+import { bankKit, settleDeath, type LostStack } from "../run/outcomes";
+import { canLeave, entryFloorFor, floorsUntilExit, gearLevel } from "../run/rules";
+import { isTraveling, travel } from "../transition/travel";
 import {
   defaultSave,
   fromWireInventory,
   loadSave,
   persistSave,
   toWireInventory,
+  type SaveData,
 } from "./persistence";
 
-export type Phase = "menu" | "village" | "select" | "loading" | "dungeon" | "dead";
+/** Game flow: menu → village → weighing (the portal reads your gear) →
+ * loading → dungeon → (walk home → village) | (dead → village). */
+export type Phase = "menu" | "village" | "weighing" | "loading" | "dungeon" | "dead";
 
-/** Fullscreen inventory-family overlays. The world keeps simulating (shared
- * floors can't pause), so these are DOM layers, not phases. "devroom" is a
- * dev-only testing panel (see ui/DevRoom) reached from the village dev slab. */
-export type Overlay = "none" | "inventory" | "chest" | "merchant" | "devroom";
+/** Fullscreen in-game screens (inventory family, the lore codex). The world
+ * keeps simulating (shared floors can't pause), so these are DOM layers, not
+ * phases. "devroom" is a dev-only testing panel (see ui/DevRoom) reached from
+ * the village dev slab. */
+export type Overlay = "none" | "inventory" | "chest" | "merchant" | "codex" | "devroom";
+
+/** The current run, while in the dungeon. */
+export interface RunProgress {
+  /** Floor the Weighing cast us to. */
+  startFloor: number;
+  /** Floors entered this run, counting the current one (the Tithe of Five). */
+  floorsPlayed: number;
+}
+
+export interface DeathRecord {
+  floor: number;
+  lostItems: string[];
+  lostGold: number;
+  /** Name of the wizard credited with the kill, or null (the dungeon). */
+  killer: string | null;
+  /** True when the loss stayed behind in a grave (a shared floor). */
+  grave: boolean;
+}
 
 export interface GameState {
   phase: Phase;
   floor: number;
   floorSeed: number;
   instanceId: string;
-  /** Highest unlocked entry floor (1 or a checkpoint multiple). */
-  checkpoint: number;
+  /** Deepest floor ever walked home from (0 = never) — a trophy, and the
+   * Orb of Fortune's reference depth. */
+  deepest: number;
+  run: RunProgress | null;
   health: number;
   mana: number;
   equipment: Equipment;
@@ -59,25 +88,41 @@ export interface GameState {
   /** Gold gathered this run — lost on death, banked with the rest. */
   runGold: number;
   overlay: Overlay;
-  /** Contextual interaction prompt shown by the HUD ("E — Descend…"). */
+  /** Contextual interaction prompt ("E — Descend…") and where in the world
+   * it belongs (null = in front of the player). */
   prompt: string | null;
-  lastDeath: { floor: number; lostItems: string[]; lostGold: number } | null;
+  promptAt: [number, number, number] | null;
+  lastDeath: DeathRecord | null;
   /** Quality toggle: the staff/moon shadow costs several extra scene renders
    * per frame, so it's opt-in. */
   shadows: boolean;
+  /** Quality toggle: planar reflections on the dungeon floors (one extra
+   * low-res scene render per frame). Off by default — the painted floors
+   * carry their own wet glints — and persisted. */
+  reflections: boolean;
+  /** Sound for headphones (each ear its own cues: the timing round the
+   * head, its shadow — sounds outside your head, all round you) or for
+   * speakers (a pan). Headphones by default; persisted. */
+  headphones: boolean;
   /** Display name shown to floor-mates. */
   playerName: string;
 
   startGame(): void;
-  openPortalSelect(): void;
-  closePortalSelect(): void;
-  enterDungeon(entryFloor: number): Promise<void>;
+  /** Step up to the village portal: the Weighing reads your gear. */
+  openWeighing(): void;
+  closeWeighing(): void;
+  /** Step through: a fresh run, cast to the floor your gear resonates at.
+   * Like every scene switch, it plays as a journey (transition/travel.ts):
+   * the phase goes "loading" at once, the switch itself runs under the
+   * tunnel, and the promise settles once you've arrived. */
+  enterDungeon(): Promise<void>;
   descend(): Promise<void>;
-  bankAndLeave(): void;
+  /** Through an open way-home portal: bank everything carried. */
+  walkHome(): Promise<void>;
   /** Can this pickup go ANYWHERE right now? Gates loot-orb prompts. */
   canAcquire(defId: string): boolean;
-  /** Route a granted pickup: empty gear slot → equip; consumable → belt,
-   * then bag; gear with its slot taken → bag. Returns false if truly full. */
+  /** Route a granted pickup (items/inventory.ts routeAcquire). Returns false
+   * if truly full. */
   acquireItem(defId: string): boolean;
   addGold(amount: number): void;
   /** Move/swap/merge between any two cells (equipment/bag/belt/chest) —
@@ -98,22 +143,48 @@ export interface GameState {
   useBelt(index: number): void;
   buyItem(defId: string): void;
   setOverlay(overlay: Overlay): void;
-  takeDamage(amount: number): void;
+  /** Hurt the local wizard. `source` attributes the hit (kill credit, grave
+   * chests); omitted = the dungeon itself. */
+  takeDamage(amount: number, source?: DamageSource): void;
   heal(amount: number): void;
   spendMana(cost: number): boolean;
   regenMana(dt: number): void;
-  respawn(): void;
-  setPrompt(prompt: string | null): void;
+  /** From the death screen back to the village (a journey, like the rest). */
+  respawn(): Promise<void>;
+  setPrompt(prompt: string | null, at?: [number, number, number] | null): void;
   toggleShadows(): void;
+  toggleReflections(): void;
+  toggleHeadphones(): void;
   setPlayerName(name: string): void;
 }
 
 const SHADOWS_KEY = "webmagic.shadows.v1";
+const REFLECTIONS_KEY = "webmagic.reflections.v1";
+const HEADPHONES_KEY = "webmagic.headphones.v1";
 const NAME_KEY = "webmagic.name.v1";
 
 function loadShadowSetting(): boolean {
   try {
     return localStorage.getItem(SHADOWS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function loadHeadphoneSetting(): boolean {
+  try {
+    return localStorage.getItem(HEADPHONES_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function loadReflectionSetting(): boolean {
+  try {
+    // Default OFF: a mirror floor reads smooth and modern next to the
+    // painted pixel stone, whose wet texels glint on their own. Only an
+    // explicit "1" turns the planar reflection on.
+    return localStorage.getItem(REFLECTIONS_KEY) === "1";
   } catch {
     return false;
   }
@@ -129,6 +200,8 @@ function loadPlayerName(): string {
 
 const saved = loadSave();
 let manaAccumulator = 0;
+/** Who's been hurting us — names the killer if we fall (encounters). */
+const killCredit = new KillCredit(PVP.killCreditSeconds * 1000);
 /** Dev-room god mode. Module-level (not reactive state) so a production build
  * carries only a dead boolean — the DEV guard in takeDamage strips the read. */
 let devInvuln = false;
@@ -147,7 +220,8 @@ export const useGame = create<GameState>((set, get) => ({
   floor: 0,
   floorSeed: 0,
   instanceId: "",
-  checkpoint: saved.checkpoint,
+  deepest: saved.deepest,
+  run: null,
   health: computeStats(saved.equipment).maxHealth,
   mana: PLAYER.maxMana,
   equipment: saved.equipment,
@@ -158,122 +232,122 @@ export const useGame = create<GameState>((set, get) => ({
   runGold: 0,
   overlay: "none",
   prompt: null,
+  promptAt: null,
   lastDeath: null,
   shadows: loadShadowSetting(),
+  reflections: loadReflectionSetting(),
+  headphones: loadHeadphoneSetting(),
   playerName: loadPlayerName(),
 
   startGame: () => set({ phase: "village" }),
 
-  openPortalSelect: () => set({ phase: "select", prompt: null }),
-  closePortalSelect: () => set({ phase: "village" }),
+  openWeighing: () => {
+    playWeighing();
+    set({ phase: "weighing", prompt: null, overlay: "none" });
+  },
+  closeWeighing: () => set({ phase: "village" }),
 
-  enterDungeon: async (entryFloor) => {
+  enterDungeon: async () => {
+    if (isTraveling()) return;
+    const entry = resonanceOf(get().equipment).entryFloor;
     set({ phase: "loading", prompt: null, overlay: "none" });
-    await session.ensureConnected(get().playerName);
-    const assignment = await session.requestFloor(entryFloor);
-    const stats = getStats();
-    set({
-      phase: "dungeon",
-      floor: assignment.floor,
-      floorSeed: assignment.seed,
-      instanceId: assignment.instanceId,
-      health: stats.maxHealth,
-      mana: PLAYER.maxMana,
-      lastDeath: null,
+    await travel("gate", async () => {
+      await session.ensureConnected(get().playerName);
+      // Online the server re-derives the floor from our BANKED gear and its
+      // answer wins (the assignment carries it).
+      const assignment = await session.requestFloor(entry, true);
+      const stats = getStats();
+      killCredit.reset();
+      set({
+        phase: "dungeon",
+        floor: assignment.floor,
+        floorSeed: assignment.seed,
+        instanceId: assignment.instanceId,
+        // The server's count is the one the way home is judged by.
+        run: { startFloor: assignment.floor, floorsPlayed: assignment.runFloors ?? 1 },
+        health: stats.maxHealth,
+        mana: PLAYER.maxMana,
+        lastDeath: null,
+      });
+      gameEvents.emit("message", `The Weighing casts you down to floor ${assignment.floor}.`);
     });
-    gameEvents.emit("message", `Floor ${assignment.floor} — ${assignment.members.length} wizard(s) here`);
   },
 
   descend: async () => {
+    const run = get().run;
     const next = get().floor + 1;
-    if (next > DUNGEON.maxFloor) return;
+    if (!run || next > DUNGEON.maxFloor || isTraveling()) return;
     set({ phase: "loading", prompt: null, overlay: "none" });
-    const assignment = await session.requestFloor(next);
-    set({
-      phase: "dungeon",
-      floor: assignment.floor,
-      floorSeed: assignment.seed,
-      instanceId: assignment.instanceId,
+    await travel("descend", async () => {
+      const assignment = await session.requestFloor(next);
+      const floorsPlayed = assignment.runFloors ?? run.floorsPlayed + 1;
+      set({
+        phase: "dungeon",
+        floor: assignment.floor,
+        floorSeed: assignment.seed,
+        instanceId: assignment.instanceId,
+        run: { ...run, floorsPlayed },
+      });
+      const owed = floorsUntilExit(floorsPlayed);
+      gameEvents.emit(
+        "message",
+        owed === 0
+          ? `Floor ${assignment.floor} — the way home is open.`
+          : `Floor ${assignment.floor} — ${owed} more floor${owed === 1 ? "" : "s"} before the deep lets go.`,
+      );
     });
-    gameEvents.emit("message", `Floor ${assignment.floor}`);
   },
 
-  bankAndLeave: () => {
-    const banked = bankCarried(get());
-    const newCheckpoint = Math.max(get().checkpoint, get().floor);
-    persistCurrent({ ...get(), ...banked, checkpoint: newCheckpoint });
-    // Server-side bank: provenance-validated; the "saved" ack corrects us if
-    // anything didn't check out. Offline this is a no-op (local save rules).
-    session.sendBank(toWireInventory({ ...banked, chest: get().chest }));
-    session.leaveDungeon();
-    set({
-      phase: "village",
-      ...banked,
-      checkpoint: newCheckpoint,
-      floor: 0,
-      health: computeStats(banked.equipment).maxHealth,
-      mana: PLAYER.maxMana,
-      prompt: null,
-      overlay: "none",
+  walkHome: async () => {
+    const start = get();
+    if (!start.run || !canLeave(start.run.floorsPlayed) || isTraveling()) return;
+    // "loading" at once: input, casting and damage stop while the portal
+    // takes you (the floor stays mounted underneath — floor > 0).
+    set({ phase: "loading", prompt: null, overlay: "none" });
+    await travel("home", () => {
+      // Read the state at switch time: a host-granted pickup may still have
+      // landed during the ENTER.
+      const state = get();
+      const banked = bankedState(state);
+      const deepest = Math.max(state.deepest, state.floor);
+      persistCurrent({ ...state, ...banked, deepest });
+      // Server-side bank: provenance-validated; the "saved" ack corrects us if
+      // anything didn't check out. Offline this is a no-op (local save rules).
+      session.sendBank(toWireInventory({ ...banked, chest: state.chest }));
+      session.leaveDungeon();
+      set({
+        phase: "village",
+        ...banked,
+        deepest,
+        run: null,
+        floor: 0,
+        health: computeStats(banked.equipment).maxHealth,
+        mana: PLAYER.maxMana,
+        prompt: null,
+        overlay: "none",
+      });
+      gameEvents.emit("message", `Home from floor ${state.floor}. Your loot is safe.`);
     });
-    gameEvents.emit("message", `Loot banked. Checkpoint: floor ${newCheckpoint}`);
   },
 
-  canAcquire: (defId) => {
-    const def = getItemDef(defId);
-    const state = get();
-    if (def.slot === "consumable") {
-      const runLoot = state.phase === "dungeon";
-      return hasRoom(state.belt, defId, runLoot) || hasRoom(state.bag, defId, runLoot);
-    }
-    return state.equipment[def.slot] === null || state.bag.includes(null);
-  },
+  canAcquire: (defId) => routeAcquire(carriedOf(get()), defId, get().phase === "dungeon") !== null,
 
   acquireItem: (defId) => {
-    const item = resolveItem(defId);
-    const def = item.def;
     const state = get();
-    const runLoot = state.phase === "dungeon";
-
-    if (def.slot === "consumable") {
-      const toBelt = addToGrid(state.belt, defId, runLoot);
-      if (toBelt) {
-        set({ belt: toBelt });
-        afterPickup(item.name, "belt");
-        syncVillage(get());
-        return true;
-      }
-      const toBag = addToGrid(state.bag, defId, runLoot);
-      if (toBag) {
-        set({ bag: toBag });
-        afterPickup(item.name, "bag");
-        syncVillage(get());
-        return true;
-      }
+    const item = resolveItem(defId);
+    const routed = routeAcquire(carriedOf(state), defId, state.phase === "dungeon");
+    if (!routed) {
       // Pickups are gated on canAcquire before the grant, so this only
       // happens on a rare co-op race (bag filled while the request flew).
       gameEvents.emit("message", `${item.name} slips away — inventory full`);
       return false;
     }
-
-    // Gear: fill an empty slot outright, otherwise stow in the bag.
-    if (state.equipment[def.slot] === null) {
-      set({
-        equipment: { ...state.equipment, [def.slot]: { defId, runLoot } },
-        health: clampedHealth(get()),
-      });
-      playPickup();
-      gameEvents.emit("message", `${item.name} equipped`);
-      syncVillage(get());
-      return true;
-    }
-    const toBag = addToGrid(state.bag, defId, runLoot);
-    if (!toBag) {
-      gameEvents.emit("message", `${item.name} slips away — inventory full`);
-      return false;
-    }
-    set({ bag: toBag });
-    afterPickup(item.name, "bag");
+    set({ ...routed.next, health: clampedHealth({ ...state, ...routed.next }) });
+    playPickup();
+    gameEvents.emit(
+      "message",
+      routed.to === "equipped" ? `${item.name} equipped` : `${item.name} → ${routed.to}`,
+    );
     syncVillage(get());
     return true;
   },
@@ -371,7 +445,7 @@ export const useGame = create<GameState>((set, get) => ({
       return;
     }
     // Offline: the local save is the record — same shared roll, local dice.
-    const rolled = rollGamble(new Rng((Math.random() * 0xffffffff) >>> 0), state.checkpoint);
+    const rolled = rollGamble(new Rng((Math.random() * 0xffffffff) >>> 0), state.deepest);
     const bag = addToGrid(state.bag, rolled, false)!;
     set({ gold: state.gold - GAMBLE_PRICE, bag });
     playPickup();
@@ -393,8 +467,9 @@ export const useGame = create<GameState>((set, get) => ({
         gameEvents.emit("message", "The feather only works in the dungeon");
         return;
       }
-      set({ belt: takeOneAt(state.belt, index) });
-      escapeByFeather(set, get);
+      if (isTraveling()) return;
+      set({ belt: takeOneAt(state.belt, index), phase: "loading", prompt: null, overlay: "none" });
+      void travel("feather", () => escapeByFeather(set, get));
       return;
     }
     if (effect.heal && state.health >= getStats().maxHealth) {
@@ -445,10 +520,11 @@ export const useGame = create<GameState>((set, get) => ({
     if (get().overlay !== overlay) set({ overlay, prompt: overlay === "none" ? get().prompt : null });
   },
 
-  takeDamage: (amount) => {
+  takeDamage: (amount, source) => {
     const state = get();
     if (state.phase !== "dungeon" && state.phase !== "village") return;
     if (import.meta.env.DEV && devInvuln) return; // dev-room god mode
+    killCredit.record(source, performance.now(), useNet.getState().playerId || "self");
     const stats = getStats();
     const dealt = amount * stats.damageTakenMult;
     const health = Math.max(0, state.health - dealt);
@@ -456,7 +532,12 @@ export const useGame = create<GameState>((set, get) => ({
     gameEvents.emit("playerHurt", { amount: dealt });
     gameEvents.emit("shake", Math.min(dealt / 40, 1));
     if (health <= 0) {
-      die(set, get);
+      // "loading" at once so nothing can hurt (or move, or cast for) the
+      // falling wizard while the world burns away; the death itself — losses,
+      // the grave, leaving the floor — runs at the journey's switch, while
+      // the floor is still mounted underneath.
+      set({ health: 0, phase: "loading", prompt: null, overlay: "none" });
+      void travel("death", () => die(set, get));
     } else {
       set({ health });
     }
@@ -481,26 +562,41 @@ export const useGame = create<GameState>((set, get) => ({
     }
     // Accumulate and flush in chunks: writing the store at 60 Hz re-renders
     // the HUD every frame for no visible benefit.
-    manaAccumulator += PLAYER.manaRegen * getStats().manaRegenMult * dt;
+    manaAccumulator +=
+      PLAYER.manaRegen * getStats().manaRegenMult * getFloorRules().manaRegenMult * dt;
     if (manaAccumulator >= 1.25) {
       set({ mana: Math.min(PLAYER.maxMana, mana + manaAccumulator) });
       manaAccumulator = 0;
     }
   },
 
-  respawn: () => {
-    set({
-      phase: "village",
-      floor: 0,
-      health: getStats().maxHealth,
-      mana: PLAYER.maxMana,
-      prompt: null,
-      overlay: "none",
+  respawn: async () => {
+    if (isTraveling()) return;
+    // floor 0 now: the village (already mounted behind the death screen)
+    // stays up under the tunnel instead of the lost floor remounting.
+    set({ phase: "loading", floor: 0, prompt: null, overlay: "none" });
+    await travel("respawn", () => {
+      set({
+        phase: "village",
+        floor: 0,
+        health: getStats().maxHealth,
+        mana: PLAYER.maxMana,
+        prompt: null,
+        overlay: "none",
+      });
     });
   },
 
-  setPrompt: (prompt) => {
-    if (get().prompt !== prompt) set({ prompt });
+  setPrompt: (prompt, at = null) => {
+    const prev = get();
+    // Same prompt, anchor moved by less than a hand's width: no store churn
+    // (floating loot bobs every frame).
+    const moved =
+      (at === null) !== (prev.promptAt === null) ||
+      (at !== null &&
+        prev.promptAt !== null &&
+        (at[0] - prev.promptAt[0]) ** 2 + (at[1] - prev.promptAt[1]) ** 2 + (at[2] - prev.promptAt[2]) ** 2 > 0.01);
+    if (prev.prompt !== prompt || moved) set({ prompt, promptAt: at });
   },
 
   toggleShadows: () => {
@@ -512,6 +608,29 @@ export const useGame = create<GameState>((set, get) => ({
       // Setting is session-only without storage.
     }
     gameEvents.emit("message", `Shadows ${shadows ? "on" : "off"}`);
+  },
+
+  toggleHeadphones: () => {
+    const headphones = !get().headphones;
+    set({ headphones });
+    setHeadphones(headphones);
+    try {
+      localStorage.setItem(HEADPHONES_KEY, headphones ? "1" : "0");
+    } catch {
+      // Setting is session-only without storage.
+    }
+    gameEvents.emit("message", `Sound for ${headphones ? "headphones" : "speakers"}`);
+  },
+
+  toggleReflections: () => {
+    const reflections = !get().reflections;
+    set({ reflections });
+    try {
+      localStorage.setItem(REFLECTIONS_KEY, reflections ? "1" : "0");
+    } catch {
+      // Setting is session-only without storage.
+    }
+    gameEvents.emit("message", `Reflections ${reflections ? "on" : "off"}`);
   },
 
   setPlayerName: (name) => {
@@ -527,11 +646,6 @@ export const useGame = create<GameState>((set, get) => ({
 
 // ── Internals ────────────────────────────────────────────────────────────────
 
-function afterPickup(name: string, where: string): void {
-  playPickup();
-  gameEvents.emit("message", `${name} → ${where}`);
-}
-
 /** Health never exceeds the (possibly just-changed) max. */
 function clampedHealth(state: Pick<GameState, "health" | "equipment">): number {
   return Math.min(state.health, computeStats(state.equipment).maxHealth);
@@ -542,31 +656,17 @@ function carriedOf(state: GameState): Carried {
 }
 
 /** Everything carried becomes safe; run gold joins the purse. */
-function bankCarried(state: GameState) {
+function bankedState(state: GameState) {
   return {
-    equipment: {
-      staff: { ...state.equipment.staff, runLoot: false },
-      amulet: state.equipment.amulet && { ...state.equipment.amulet, runLoot: false },
-      cloak: state.equipment.cloak && { ...state.equipment.cloak, runLoot: false },
-      boots: state.equipment.boots && { ...state.equipment.boots, runLoot: false },
-    },
-    bag: markBanked(state.bag),
-    belt: markBanked(state.belt),
+    ...bankKit(state),
     gold: state.gold + state.runGold,
     runGold: 0,
   };
 }
 
-function persistCurrent(state: {
-  checkpoint: number;
-  equipment: Equipment;
-  bag: Grid;
-  belt: Grid;
-  chest: Grid;
-  gold: number;
-}): void {
+function persistCurrent(state: SaveData): void {
   persistSave({
-    checkpoint: state.checkpoint,
+    deepest: state.deepest,
     equipment: state.equipment,
     bag: state.bag,
     belt: state.belt,
@@ -584,21 +684,21 @@ function syncVillage(state: GameState): void {
   session.sendStash(toWireInventory(state));
 }
 
-/** A spent Feather of Safe Passage: bank the run from wherever you stand.
- * The checkpoint does NOT move — the feather buys safety, not progress. */
+/** A spent Feather of Safe Passage: bank the run from wherever you stand,
+ * even before the Tithe of Five is paid. It buys safety, not a new depth. */
 function escapeByFeather(
   set: (partial: Partial<GameState>) => void,
   get: () => GameState,
 ) {
   const state = get();
-  const banked = bankCarried(state);
+  const banked = bankedState(state);
   persistCurrent({ ...state, ...banked });
   session.sendEscape(toWireInventory({ ...banked, chest: state.chest }));
   session.leaveDungeon();
-  playPortal();
   set({
     phase: "village",
     ...banked,
+    run: null,
     floor: 0,
     health: computeStats(banked.equipment).maxHealth,
     mana: PLAYER.maxMana,
@@ -608,47 +708,41 @@ function escapeByFeather(
   gameEvents.emit("message", "The feather carries you home — loot banked");
 }
 
-/** Death: everything picked up during this run is lost. */
+/** Death: everything found this run is lost. On a shared floor it stays
+ * behind in a grave (encounters/Graves listens for "wizardFell"). */
 function die(
   set: (partial: Partial<GameState>) => void,
   get: () => GameState,
 ) {
   const state = get();
-  const lostItems: string[] = [];
-  const strip = (slot: "amulet" | "cloak" | "boots") => {
-    const item = state.equipment[slot];
-    if (item?.runLoot) {
-      lostItems.push(resolveItem(item.defId).name);
-      return null;
-    }
-    return item;
-  };
-  const kept: Equipment = {
-    // The staff is mandatory — a lost run staff falls back to the starter.
-    staff: state.equipment.staff.runLoot
-      ? (lostItems.push(resolveItem(state.equipment.staff.defId).name),
-        defaultSave().equipment.staff)
-      : state.equipment.staff,
-    amulet: strip("amulet"),
-    cloak: strip("cloak"),
-    boots: strip("boots"),
-  };
-  const bagResult = stripRunLoot(state.bag);
-  const beltResult = stripRunLoot(state.belt);
-  for (const s of [...bagResult.lost, ...beltResult.lost]) {
-    const name = resolveItem(s.defId).name;
-    lostItems.push(s.qty > 1 ? `${name} ×${s.qty}` : name);
-  }
-  persistCurrent({ ...state, equipment: kept, bag: bagResult.grid, belt: beltResult.grid });
+  const outcome = settleDeath(state, defaultSave().equipment.staff.defId);
+  const net = useNet.getState();
+  const selfId = net.playerId || "self";
+  const killerId = killCredit.killer(performance.now());
+  const killer = killerId ? (net.roster[killerId] ?? "a wizard") : null;
+  const shared = net.mode === "online" && Object.keys(net.roster).some((id) => id !== selfId);
+  const lost: LostStack[] = outcome.lost;
+  const grave = shared && (lost.length > 0 || state.runGold > 0);
+
+  // Before leaving: the floor must hear of the fall while we're still on it.
+  gameEvents.emit("wizardFell", { items: lost, gold: state.runGold, killerId, shared });
+
+  persistCurrent({ ...state, ...outcome.kept });
   session.sendDied(); // the server discards this run's grants
   session.leaveDungeon();
+  killCredit.reset();
   set({
     phase: "dead",
-    equipment: kept,
-    bag: bagResult.grid,
-    belt: beltResult.grid,
-    health: computeStats(kept).maxHealth,
-    lastDeath: { floor: state.floor, lostItems, lostGold: state.runGold },
+    ...outcome.kept,
+    run: null,
+    health: computeStats(outcome.kept.equipment).maxHealth,
+    lastDeath: {
+      floor: state.floor,
+      lostItems: outcome.lostNames,
+      lostGold: state.runGold,
+      killer,
+      grave,
+    },
     runGold: 0,
     prompt: null,
     overlay: "none",
@@ -677,12 +771,12 @@ netBus.on("serverSave", (save) => {
   }
   const inv = fromWireInventory(save.inventory);
   useGame.setState({
-    checkpoint: save.checkpoint,
+    deepest: save.deepest,
     ...inv,
     runGold: 0,
     health: computeStats(inv.equipment).maxHealth,
   });
-  persistCurrent({ checkpoint: save.checkpoint, ...inv });
+  persistCurrent({ deepest: save.deepest, ...inv });
 });
 
 // Reconnect resync: the session re-enters our floor after a dropped socket.
@@ -691,9 +785,15 @@ netBus.on("serverSave", (save) => {
 netBus.on("assigned", (a) => {
   const state = useGame.getState();
   if (state.phase !== "dungeon") return;
+  if (state.run && a.runFloors !== undefined && a.runFloors !== state.run.floorsPlayed) {
+    useGame.setState({ run: { ...state.run, floorsPlayed: a.runFloors } });
+  }
   if (state.floorSeed === a.seed && state.instanceId === a.instanceId) return;
   useGame.setState({ floor: a.floor, floorSeed: a.seed, instanceId: a.instanceId });
 });
+
+// The ears start as the player left them.
+setHeadphones(useGame.getState().headphones);
 
 // Dev-only hook for debugging and end-to-end scripts.
 if (typeof window !== "undefined" && import.meta.env?.DEV) {
@@ -705,6 +805,17 @@ export function getStats(): DerivedStats {
   return computeStats(useGame.getState().equipment);
 }
 
+/** What the Weighing reads from this equipment: gear level and entry floor. */
+export function resonanceOf(equipment: Equipment): { gearLevel: number; entryFloor: number } {
+  const level = gearLevel([
+    equipment.staff.defId,
+    equipment.amulet?.defId,
+    equipment.cloak?.defId,
+    equipment.boots?.defId,
+  ]);
+  return { gearLevel: level, entryFloor: entryFloorFor(level) };
+}
+
 /** Enemies think and deal contact damage only while combat is live: the
  * dungeon, or — in dev builds only — the village, so the dev-room slab can
  * spawn a test arena. In production `import.meta.env.DEV` is a literal false,
@@ -712,13 +823,4 @@ export function getStats(): DerivedStats {
 export function combatActive(): boolean {
   const phase = useGame.getState().phase;
   return phase === "dungeon" || (import.meta.env.DEV && phase === "village");
-}
-
-/** Entry floors selectable at the village portal. */
-export function entryFloors(checkpoint: number): number[] {
-  const floors = [1];
-  for (let f = DUNGEON.checkpointInterval; f <= checkpoint; f += DUNGEON.checkpointInterval) {
-    floors.push(f);
-  }
-  return floors;
 }

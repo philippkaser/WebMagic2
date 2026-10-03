@@ -3,11 +3,11 @@ import { useRapier } from "@react-three/rapier";
 import { useMemo, useRef } from "react";
 import { Group, MeshStandardMaterial, Vector3 } from "three";
 import { playHit, playPortal } from "../audio/sound";
-import { enemyCast } from "../combat/remoteEffects";
+import { enemyCast } from "../weapons/hostileEffects";
 import { floorScale } from "../core/config";
 import { gameEvents } from "../core/events";
 import { flashLight } from "../fx/DynamicLights";
-import { spawnBurst } from "../fx/Particles";
+import { castFlareFx, spikeFx, warpFx } from "../fx/effects";
 import { playerPosition } from "../game/player-state";
 import { nearestWizardTo } from "../game/targets";
 import { isHost } from "../net/netStore";
@@ -64,15 +64,8 @@ function SpikeTrap({ pos, floor }: { pos: Vec3; floor: number }) {
       armTimer.current = 1.2;
       pop.current = 1;
       useGame.getState().takeDamage(def.baseDamage * scale.enemyDamage);
-      playHit();
-      spawnBurst({
-        position: [pos[0], pos[1] + 0.15, pos[2]],
-        count: 10,
-        color: ["#c8ccd4", "#ff6a6a"],
-        speed: 3,
-        ttl: 0.4,
-        size: 0.06,
-      });
+      playHit(pos);
+      spikeFx(pos);
     }
   });
 
@@ -124,6 +117,8 @@ function DartTrap({ pos, floor }: { pos: Vec3; floor: number }) {
     if (world.castRay(losRay, target.dist - 0.6, true) !== null) return;
     fireTimer.current = 1.6;
     const speed = 26;
+    // Muzzle flash on the emitter's face, down the line of fire.
+    castFlareFx([head.x + aim.x * 0.45, head.y, head.z + aim.z * 0.45], aim, "#ffd24a", undefined, 1.6);
     aim.multiplyScalar(speed);
     enemyCast.announce({
       origin: [head.x + (aim.x / speed) * 0.5, head.y, head.z + (aim.z / speed) * 0.5],
@@ -131,8 +126,11 @@ function DartTrap({ pos, floor }: { pos: Vec3; floor: number }) {
       damage: def.baseDamage * scale.enemyDamage,
       color: "#ffd24a",
       size: 0.1,
-      blastRadius: 0,
-      blastImpulse: 0,
+      // Bolts only hurt through their burst, so a dart needs a small one —
+      // tight enough that it still has to actually reach you.
+      blastRadius: 0.9,
+      blastImpulse: 4,
+      source: "world",
     });
     flashLight([head.x, head.y, head.z], "#ffd24a", 8);
   });
@@ -166,16 +164,9 @@ function WarpTrap({ pos }: { pos: Vec3 }) {
     const dz = playerPosition.z - pos[2];
     if (dx * dx + dz * dz < r2) {
       triggered.current = true;
-      spawnBurst({
-        position: [pos[0], pos[1] + 0.6, pos[2]],
-        count: 22,
-        color: ["#b46bff", "#ffffff"],
-        speed: 5,
-        ttl: 0.7,
-        size: 0.08,
-      });
+      warpFx(pos, "#b46bff");
       flashLight([pos[0], pos[1] + 0.6, pos[2]], "#b46bff", 20);
-      playPortal();
+      playPortal(pos);
       // descend() requires an active floor session; from the dev village arena
       // there is none, so guard it (a rejected requestFloor would strand us on
       // the loading screen). In a real dungeon you're always connected.

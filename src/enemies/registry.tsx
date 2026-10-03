@@ -1,0 +1,64 @@
+import type { ReactNode } from "react";
+import type { Vec3 } from "../world/types";
+import { Sentry } from "./kinds/Sentry";
+import { Shadow } from "./kinds/Shadow";
+import { Slime } from "./kinds/Slime";
+import { Warden } from "./kinds/Warden";
+import { Wisp } from "./kinds/Wisp";
+import { ENEMY_STATS, getEnemyStats, type EnemyId, type EnemyStats } from "./roster";
+
+/** The mount layer over the enemy roster: pairs each data entry in roster.ts
+ * with how to render an instance. The dungeon floor (regular enemies and the
+ * boss alike), runtime spawns and the dev-room spawner all go through this,
+ * so adding an enemy is (1) a row in ENEMY_STATS and (2) a renderer here — no
+ * bespoke switch statements anywhere downstream. Behaviour and tuning stay in
+ * the kind components, their brains and the roster; this file is identity +
+ * JSX only. */
+
+export type { EnemyId, EnemyStats };
+export { ENEMY_STATS, getEnemyStats };
+
+export interface EnemySpawnProps {
+  entityId: string;
+  pos: Vec3;
+  floor: number;
+  /** Fired when the instance dies/despawns. Singletons (the boss) and runtime
+   * spawns use it so their owner can drop them from its list; others ignore it. */
+  onDeath: () => void;
+  /** Split depth for enemies that spawn children (the slime); 0 otherwise. */
+  generation?: number;
+}
+
+type RenderFn = (props: EnemySpawnProps) => ReactNode;
+
+const RENDERERS: Record<EnemyId, RenderFn> = {
+  wisp: ({ entityId, pos, floor }) => <Wisp entityId={entityId} position={pos} floor={floor} />,
+  sentry: ({ entityId, pos, floor }) => (
+    <Sentry entityId={entityId} position={pos} floor={floor} />
+  ),
+  shadow: ({ entityId, pos, floor }) => (
+    <Shadow entityId={entityId} position={pos} floor={floor} />
+  ),
+  slime: ({ entityId, pos, floor, generation, onDeath }) => (
+    <Slime entityId={entityId} position={pos} floor={floor} generation={generation} onDeath={onDeath} />
+  ),
+  // A singleton: the Warden always replicates as "boss", whatever id it's given.
+  boss: ({ pos, floor, onDeath }) => <Warden position={pos} floor={floor} onDeath={onDeath} />,
+};
+
+export interface EnemyDef extends EnemyStats {
+  render: RenderFn;
+}
+
+export const ENEMY_DEFS: EnemyDef[] = ENEMY_STATS.map((stats) => ({
+  ...stats,
+  render: RENDERERS[stats.id],
+}));
+
+const byId = new Map(ENEMY_DEFS.map((d) => [d.id, d]));
+
+export function getEnemyDef(id: EnemyId): EnemyDef {
+  const def = byId.get(id);
+  if (!def) throw new Error(`Unknown enemy id: ${id}`);
+  return def;
+}

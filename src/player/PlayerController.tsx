@@ -9,16 +9,24 @@ import {
 import { useEffect, useMemo, useRef } from "react";
 import { Vector3 } from "three";
 import { playDash, playJump } from "../audio/sound";
+import { groundAt, playFootstep, playLanding } from "../audio/voices";
 import { EYE_HEIGHT, GROUPS, PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
-import { spawnBurst } from "../fx/Particles";
-import { playerPosition, playerVelocity, setPlayerBody } from "../game/player-state";
+import { dashFx, dustPuffFx, hoverWispFx, runeBurstFx } from "../fx/effects";
+import { playerGait, playerPosition, playerVelocity, setPlayerBody } from "../game/player-state";
 import { publishLocalPose } from "../net/players";
 import { getStats, useGame } from "../state/gameStore";
 import type { Vec3 } from "../world/types";
 import { input } from "./input";
 
 const UP = new Vector3(0, 1, 0);
+
+/** Our own capsule: a PLAYER like every wizard, plus the LOCAL_PLAYER bit that
+ * hostile wizards' replayed spells look for (see core/config.ts GROUPS). */
+const LOCAL_PLAYER_GROUPS = interactionGroups(
+  [GROUPS.PLAYER, GROUPS.LOCAL_PLAYER],
+  [GROUPS.WORLD, GROUPS.ENEMY, GROUPS.ENEMY_PROJECTILE, GROUPS.PROP, GROUPS.HOSTILE_SPELL],
+);
 
 /** First-person character controller. A dynamic capsule (so explosions and
  * enemies can shove the player) driven with a quake-ish velocity model:
@@ -37,6 +45,7 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
   const bobPhase = useRef(0);
   const bobAmp = useRef(0);
   const landDip = useRef(0);
+  const lastStep = useRef(0);
   const trauma = useRef(0);
   const hoverClock = useRef(0);
 
@@ -132,22 +141,15 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
         jumpBuffer.current = 0;
         coyote.current = 0;
         playJump();
-        dust(t, 6);
+        dust(t, 0.45);
       } else if (stats.jump === "double" && !doubleJumpUsed.current) {
         vy = PLAYER.jumpVelocity * 0.92;
         doubleJumpUsed.current = true;
         jumpBuffer.current = 0;
         playJump();
-        spawnBurst({
-          position: [t.x, t.y - 0.8, t.z],
-          count: 10,
-          color: "#7fe08a",
-          speed: 3,
-          upward: 0.5,
-          ttl: 0.5,
-          size: 0.07,
-          gravity: -3,
-        });
+        // A rune circle flashes underfoot: the air itself was stepped on.
+        fxAt.set(t.x, t.y - FEET, t.z);
+        runeBurstFx(fxAt, DOUBLE_JUMP_COLOR);
       }
     }
 
@@ -162,17 +164,9 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
       vy = PLAYER.hoverFallSpeed;
       hoverClock.current -= dt;
       if (hoverClock.current <= 0) {
-        hoverClock.current = 0.06;
-        spawnBurst({
-          position: [t.x, t.y - 0.9, t.z],
-          count: 2,
-          color: "#8fd0ff",
-          speed: 1.6,
-          upward: -1,
-          ttl: 0.45,
-          size: 0.05,
-          gravity: 0,
-        });
+        hoverClock.current = 0.05;
+        fxAt.set(t.x, t.y - FEET, t.z);
+        hoverWispFx(fxAt, HOVER_COLOR);
       }
     }
 
@@ -192,25 +186,20 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
       dashCooldown.current = PLAYER.dashCooldown;
       playDash();
       trauma.current = Math.min(1, trauma.current + 0.14);
-      spawnBurst({
-        position: [t.x, t.y - 0.4, t.z],
-        count: 14,
-        color: "#e3c8ff",
-        speed: 4,
-        upward: 0.4,
-        ttl: 0.5,
-        size: 0.08,
-        gravity: -2,
-      });
+      // Speed lines pouring past the eyes + an afterimage where we stood.
+      fxAt.set(t.x, t.y + EYE_HEIGHT, t.z);
+      dashFx(fxAt, dir, DASH_COLOR);
     }
 
     b.setLinvel({ x: nvx, y: vy, z: nvz }, true);
 
     // Landing thump.
+    if (grounded && !wasGrounded.current && v.y < -3.5) playLanding(groundAt(t.x, t.z), Math.min(1, (-v.y - 3.5) / 14));
     if (grounded && !wasGrounded.current && v.y < -9) {
       landDip.current = Math.min(0.22, -v.y * 0.014);
       trauma.current = Math.min(1, trauma.current + 0.1);
-      dust(t, 10);
+      // Harder landings kick up more.
+      dust(t, Math.min(1.4, -v.y / 14));
     }
     wasGrounded.current = grounded;
     landDip.current = Math.max(0, landDip.current - dt * 1.1);
@@ -221,6 +210,16 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
     bobAmp.current += (targetAmp - bobAmp.current) * Math.min(1, dt * 8);
     if (bobAmp.current > 0.01) bobPhase.current += dt * (5 + hSpeed * 1.1);
     const bobY = Math.sin(bobPhase.current * 2) * 0.034 * bobAmp.current;
+    // A footfall each time the bob bottoms out (twice a cycle of the phase).
+    const step = Math.floor((bobPhase.current - Math.PI * 0.75) / Math.PI);
+    if (step !== lastStep.current) {
+      lastStep.current = step;
+      // Left foot, right foot.
+      if (grounded && bobAmp.current > 0.2) playFootstep(groundAt(t.x, t.z), 0.45 + 0.55 * Math.min(1, bobAmp.current), undefined, step & 1 ? 1 : -1);
+    }
+    playerGait.phase = bobPhase.current;
+    playerGait.amp = bobAmp.current;
+    playerGait.landDip = landDip.current;
 
     // Camera shake from trauma.
     trauma.current = Math.max(0, trauma.current - dt * 1.7);
@@ -268,26 +267,22 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
         args={[PLAYER.halfHeight, PLAYER.radius]}
         mass={1}
         friction={0}
-        collisionGroups={interactionGroups(GROUPS.PLAYER, [
-          GROUPS.WORLD,
-          GROUPS.ENEMY,
-          GROUPS.ENEMY_PROJECTILE,
-          GROUPS.PROP,
-        ])}
+        collisionGroups={LOCAL_PLAYER_GROUPS}
       />
     </RigidBody>
   );
 }
 
-function dust(t: { x: number; y: number; z: number }, count: number) {
-  spawnBurst({
-    position: [t.x, t.y - 0.85, t.z],
-    count,
-    color: ["#6b5d4d", "#4a4038"],
-    speed: 2.2,
-    upward: 1,
-    ttl: 0.5,
-    size: 0.06,
-    gravity: -6,
-  });
+/** Body centre → sole of the boots. */
+const FEET = 0.88;
+/** Boot/cloak colours of the movement effects (their items' colours). */
+const DOUBLE_JUMP_COLOR = "#7fe08a";
+const HOVER_COLOR = "#8fd0ff";
+const DASH_COLOR = "#e3c8ff";
+/** Scratch for effect positions — the fx copy what they need. */
+const fxAt = new Vector3();
+
+function dust(t: { x: number; y: number; z: number }, strength: number) {
+  fxAt.set(t.x, t.y - FEET, t.z);
+  dustPuffFx(fxAt, strength);
 }

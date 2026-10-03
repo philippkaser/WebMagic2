@@ -25,15 +25,18 @@ and harder than the last.
 The emotional loop we are chasing:
 
 - **Greed vs. fear.** Every floor you descend makes you richer and stronger,
-  but **death in the dungeon takes everything you gathered on that run.** You
-  can only bank your loot and exit at checkpoint floors (every 5th). The
-  question "one more floor, or turn back?" should be a genuine, tense choice.
+  but **death in the dungeon takes everything you gathered on that run.** The
+  deep only lets you go home after five floors; after that, every floor's
+  way-home portal is open, and the question "one more floor, or turn back?"
+  should be a genuine, tense choice.
 - **Mastery of movement and aim.** Combat rewards positioning, timing, and
   clever use of physics — not just clicking. A skilled wizard flows through a
   room; a clumsy one gets cornered.
-- **Serendipitous multiplayer.** You might round a corner on floor 3 and find
-  another real wizard already fighting there. No lobby, no matchmaking menu —
-  the world just quietly has other people in it.
+- **Serendipitous, uneasy multiplayer.** Now and then the deep lets another
+  real wizard onto your floor. You don't know who, or where — only that
+  someone is there. Swear a pact and fight together, or kill them for what
+  they carry. No lobby, no matchmaking menu — the world just, occasionally,
+  has someone else in it.
 
 ### Design pillars (use these to settle arguments)
 
@@ -62,31 +65,99 @@ The emotional loop we are chasing:
   generated **normal map** (derived from a height field via a Sobel filter),
   so torchlight and spell-flashes ripple across the coarse texels. This is the
   thing that makes it look intentional rather than just low-res.
-- **Fancy, moody lighting.** Near-black dungeons lit by warm flickering
-  torches, glowing emissive magic, and the player's own staff-light. Fog for
-  depth. A heavy vignette. Reflections on wet floor slabs and metal trim via a
-  tiny procedural environment map.
-- **Particles everywhere.** Explosions, sparks, embers rising from torches,
-  loot shimmer, dash trails, muzzle flashes.
-- **Post-processing chain:** bloom (feeds the emissive magic) → film grain →
-  vignette. The pixelation itself is *free*: the canvas renders at ~1/3
-  resolution and the browser upscales it with `image-rendering: pixelated`.
+- **Fancy, moody lighting.** Near-black dungeons lit by flickering torches,
+  glowing magic, and the player's own staff-light. Fog for depth. A heavy
+  vignette. Real reflections in wet and polished floors — a torch across the
+  hall glints in the puddle at your feet.
+- **Painted pixel surfaces** (the old Drowned Halls look, now every
+  biome's): each surface is painted texel by texel from a small palette
+  ramp — mortar lines, chipped edges, moss and grime — with a few emissive
+  specks that bloom. Each biome brings its own ramp, its own glow colour and
+  its own split-tone colour grade that eases in as you arrive, so a new
+  floor reads as the air changing. And no floor is one colour end to end:
+  each turns its band's palette a little around the colour wheel (seeded),
+  and across the floor hue, richness and brightness drift from room to
+  room — the stone, its glowing seams, the torches and the fog with it. Rooms are plain on purpose (tall 6 m
+  walls, fog, shafts of dusty light, torches): the feel comes from texture,
+  light and fog, not from clutter.
+- **Particles everywhere, and alive — in pixels.** Every particle is a
+  crisp chunk on the pixel grid: explosions with a core flash, pixel-chain
+  sparks, dithered smoke and a stepped shockwave ring; comet-tailed bolts;
+  enemies that dissolve upward as light; torches with real shader flames and
+  embers; and the air itself moving — dust in torchlight, drowned spores and
+  drips, forge embers, crystal glitter, falling ash.
+- **Portals are the showpiece.** A rift: a jagged tear in the air, rimmed
+  in pixel fire and framed in runed stone, that quickens as you come close.
+  Using one is a journey: the tear rips open over your view and you are
+  sucked in, hover in a dark void of blocky stars while the next floor
+  loads, and are spat out through a tear onto the new place. Sealed rifts
+  are frozen, cracked glass.
+- **The UI is physical and in the world.** No flat screens and no framed
+  boxes: menus are tablets that build themselves out of worn, round-edged
+  stones in front of you; prompts and messages are small slabs of slate
+  (never in your way); words burn into them as runes that settle into
+  letters and later burn away; the map (M) is a miniature of the village or
+  of the floor you've explored, laid in light on the ground a step ahead of
+  you inside a rune circle — walk around it, or over it; anyone on the floor
+  sees it, every wizard marked on it, and casting it shares what you've
+  explored; it lights the room round it, and folded, it gathers into its
+  middle and goes out in a spark; your
+  health and mana are two glass orbs whose facets catch the torch one pixel
+  at a time, their liquid sloshing as you run and turn; the HUD is sparse
+  (the tithe stones top left, the floor top right, the orbs, the belt) and
+  carried — it follows your
+  turns closely and swings with your stride; items are small objects you
+  pick up and set down. The type is pixel type — Jacquard 12 blackletter for the
+  big moments ("Floor 12", "You Died"), Jersey 15 for smaller titles,
+  Tiny5 for text, Silkscreen for labels — every font pixel on a whole number
+  of screen pixels, and every size a step of one type scale (text ×2, a big
+  number ×3, a heading's own size), so a label on the HUD, in a menu and in
+  the inventory comes out the same — in parchment on soot, arcane cyan for magic and the way onward,
+  gold for home, blood for danger. New UI must follow this — if it could be
+  a DOM panel, it's wrong.
+- **Post-processing chain:** bloom (feeds the emissive specks and magic) →
+  split-tone colour grade (per biome) → film grain → heavy vignette. The pixelation itself is *free*: the
+  world renders at ~1/3 resolution and the browser upscales it with
+  `image-rendering: pixelated` (the UI canvas above it renders at full
+  resolution so the pixel font stays crisp).
 
 ### Hard constraint: **zero binary assets**
 
 Everything — textures, normal maps, all sound — is **synthesized at runtime.**
-No image files, no audio files, no model files. This keeps the whole game a
+No image files, no audio files, no model files. The one exception is the
+four pixel fonts of the UI (Jacquard 12, Jersey 15, Tiny5, Silkscreen,
+installed from @fontsource), because good pixel type is the heart of the
+look. This keeps the whole game a
 tiny, fast-loading bundle and makes it trivially themeable in code. Any new
 art is a new procedural painter function, not an asset pipeline.
 
-- Textures: painted onto 64×64 canvases (stone brick, worn slabs, planks,
-  ceramic, barrel staves, dirt), each with a matching normal map.
+- Textures: pixel art painted texel by texel from small palette ramps
+  (stone brick, worn slabs, planks, ceramic, barrel staves, dirt, per-biome
+  walls and floors), each with a matching normal map and emissive specks.
 - Models: primitive geometry (boxes, cones, octahedra, icosahedra) with
   emissive materials. Enemies and wizards are readable silhouettes, not
   detailed meshes — which suits the pixel aesthetic.
 - Audio: procedural WebAudio synthesis — spell casts, explosions (sized by
   blast radius), hits, hurt, pickups, jumps, dashes, portal shimmer, a boss
-  roar, and looping ambient drone/wind beds per scene.
+  roar, and looping ambient drone/wind beds per scene — heard through
+  **raytraced acoustics**: the room around you is measured with rays
+  bouncing off its walls and its reverb generated to match (each depth
+  band's stone has its own sound: dry catacombs, longer bright Drowned
+  Halls, dark short forge, ringing crystal, the vast Hollow — tuned for
+  play, a hall rings about a second, never a cathedral's wash), and every
+  sound in the world is placed and reaches you the way sound would —
+  straight, or round corners from the doorway it came through, duller the
+  further it bent, a thud through rock. Each room rings on its own: walk
+  out of a hall and you still hear it ringing behind you through the
+  doorway, fading as the corridor takes you away. And sound is a place,
+  not a volume knob: each ear hears a sound at its own moment and through
+  the head's shadow (on headphones it's out there, behind you, to your
+  left), a far blast lands after its flash, a wisp streaking past bends in
+  pitch, the air dulls the far end of a hall, and a rift you stand beside
+  — or a blast you stand in — is all round you. The world has its own voices:
+  footsteps on each ground (stone, wet stone, crystal, iron, ash, cobbles,
+  grass), torches crackling, rifts humming, monsters waking, walking and
+  dying, and the small sounds each place makes by itself.
 
 ### Why this style
 
@@ -194,8 +265,8 @@ sheet):
 | --- | --- | --- |
 | Weak Healing Draught | +40 health | ~a third of an early banked run |
 | Weak Mana Draught | +60 mana | slightly cheaper than healing |
-| **Feather of Safe Passage** | exit the dungeon from ANY floor, banking your run loot — without advancing your checkpoint | ~two banked early runs; insurance you feel |
-| **Orb of Fortune** (65g) | random GEAR rolled a couple floors past your checkpoint, ~45% enchanted | the gold sink: gambling IS affix hunting |
+| **Feather of Safe Passage** | exit the dungeon from ANY floor — even before the tithe of five is paid — banking your run loot | ~two banked early runs; insurance you feel |
+| **Orb of Fortune** (65g) | random GEAR rolled a couple floors past the deepest floor you've walked home from, ~45% enchanted | the gold sink: gambling IS affix hunting (and a way to nudge your resonance deeper) |
 
 Online, every trade is server-validated: purchases against the shared price
 table, sales against provable ownership, and the Orb of Fortune is rolled BY
@@ -218,34 +289,66 @@ an item id with a suffix (`"void_staff+keen"`), so the whole provenance /
 banking / trading stack handles rarities with zero server changes — see
 ARCHITECTURE.md. Adding an affix is one entry in `items/affixes.ts`.
 
+### Item levels
+
+Every piece of gear carries an **item level** — the depth it was found at
+(±1; boss drops a little deeper). A staff's level multiplies its spell
+damage; every other piece adds a **health ward**. So gear found deep keeps
+you roughly on par with deep monsters, and an empty slot is a real weakness.
+Item levels are shown everywhere an item is ("Lv 12").
+
 ### The run structure & the central risk
 
 - **100 floors**, each harder (`floorScale` ramps enemy health, damage, and
-  count with depth).
-- **You can only leave the dungeon at checkpoint floors — every 5th (5, 10,
-  15, …).** A checkpoint floor has a golden portal that banks your loot and
-  returns you to the village. Banked checkpoints become new **entry points**:
-  next run you can start from your deepest banked checkpoint instead of floor 1.
-- **Death is the whole tension.** If you die in the dungeon, **all loot
-  gathered during that run is lost** — you respawn in the village with only
-  what you had banked. (Implementation: items carry a `runLoot` flag;
-  banking clears it, death strips everything still flagged.)
+  count with depth), in five **biomes** (below).
+- **The Weighing.** The village portal reads your gear: your **gear level**
+  is the mean item level of the four gear slots (empty slots count as zero).
+  It casts you to the floor that level belongs at (≈ 0.85 × gear level). You
+  never pick a floor — dress deeper to go deeper, strip down to go shallower.
+- **The Tithe of Five.** Every floor has a golden **way-home portal** beside
+  its exit, sealed until your run has played five floors. From your fifth
+  floor on, any way home banks everything you carry and returns you to the
+  village. The server enforces it.
+- **Death is the whole tension.** Die before you get home and **all loot
+  gathered during that run is lost** — gear you brought from home survives.
+  Alone, the dungeon keeps it. On a shared floor it stays behind in a
+  **grave chest** that anyone may plunder.
 - **Bosses every 10th floor.** The **Warden of the Deep** holds the exit room
-  and **seals both portals until it dies.** It has four attack patterns (aimed
-  volley, projectile ring, charge, telegraphed slam shockwave), an enrage
-  phase below half health, heavy knockback resistance, and guaranteed rich
-  drops for the whole party.
+  and **seals both portals until it dies.**
 
-### The signature multiplayer mechanic
+### Omens
 
-Entering floor *N* drops you into a **shared instance** of that floor if one
-has room (**max 4 wizards per floor**). Walk down from floor 1 → the floors
-you pass through are freshly generated for you, but when you reach a floor
-where others are already playing, **you join their instance** and see the same
-world. If every instance of that floor is full, a brand-new instance with a
-fresh seed is created — which the *next* wizard can then join, and so on. This
-is the "you might just run into someone" fantasy, implemented as pure
-matchmaking logic (`net/matchmaking.ts`).
+About a quarter of floors (never the first) are in a **mood**, rolled from
+the floor seed so everyone on the floor shares it, and announced shortly
+after arrival: **the Weightless Hour** (low gravity — blast-jumping gets
+silly), **the Lightless Vigil** (few torches, close fog), **the Crimson
+Omen** (angrier monsters, richer loot), **the Mana Tide**, **the Tinderbox**
+(barrels everywhere, bigger blasts), **the Teeming** (more, frailer
+monsters). Surprise is part of the charm: you never quite know what the
+next floor will be. Once it's there, it's never a mystery what it does: the
+top-right corner of the HUD names it under the floor and its biome, and
+lists its effects line by line (▼ what hurts, ▲ what helps) when you arrive
+and again whenever a map is cast.
+
+### The signature multiplayer mechanic: rare encounters
+
+- **Only wizards on the same floor can meet**, and they rarely do. Entering
+  a floor rolls an encounter; the odds rise with every floor you walk alone
+  (12% → 60%) and reset when you meet someone. Most floors are yours alone,
+  but none is guaranteed to be.
+- **Presence, not names.** When someone arrives you feel "a presence" — no
+  name, no marker. An eye on the HUD opens and burns redder as a stranger
+  closes in, and your heartbeat becomes audible. Names only appear over heads
+  within ~16 m.
+- **Fight or swear a pact.** Every stranger is hostile by default: your
+  spells hurt each other (at 55% strength, decided on the victim's machine).
+  Stand close and press **F** to offer a pact; if they accept, your magic
+  passes harmlessly between you and they wear a green halo. Pacts can be
+  broken at any moment; the betrayed wizard sees an **oathbreaker** marked in
+  red for the rest of the floor.
+- **Graves.** A wizard who dies on a shared floor leaves a grave holding
+  exactly what the death took from them. The killer — or anyone — can
+  plunder it (E), and what they take is theirs to lose again.
 
 ### Gameplay feel checklist (what "good" means here)
 
@@ -267,17 +370,46 @@ matchmaking logic (`net/matchmaking.ts`).
 The world is one vertical place: a **village of wizards perched above a
 hundred-floor dungeon that bores down into the earth.** The village is the
 safe hub — quiet, night-time, a few huts with warm windows, a central portal
-ringed with torches. Through the portal is the descent.
+ringed with torches, under a big pixel sky: the Milky Way with dark lanes of
+dust through it, thousands of single-pixel stars twinkling in hard steps, a
+small, simple moon — a real sphere in a few tones, its seas and big craters picked out by a
+sun over your shoulder, its dark side faint with earthshine — long banks
+of cloud silvered on top, and now and then a shooting star. Through the portal is the descent.
 
 Wizards go down for the classic reasons — **glory, fame, and riches** — but
 the deepest myth, the thing that drives the boldest, is that **god waits at
 the bottom of the hundredth floor.** Nobody has proven it. Everybody who's
-tried is dead or turned back at a checkpoint.
+tried is dead or turned back at the tithe of five.
 
 The dungeon is not neutral: it *keeps* what the dead were carrying. That's the
 in-fiction justification for the roguelike loot-loss — the dungeon is greedy,
-and every checkpoint is a moment of "the dungeon lets you leave, this once,
-with what you've earned."
+and the Tithe of Five is its price for letting you leave: give it five floors
+and it lets you go, this once, with what you've earned. But it is jealous and
+slow — where other living wizards stand witness, it can't swallow the dead
+fast enough, and a grave remains.
+
+### The written lore
+
+The mythos is now carved into the walls (`world/lore.ts`, ~35 fragments —
+journal scraps, Founders' inscriptions, graffiti, oaths) and collected in the
+**codex** (C). What the fragments collectively know:
+
+- **The Weighing Gate** weighs what a wizard carries and casts them where
+  their weight belongs. **The Tithe of Five** is the deep's price for
+  release.
+- Wizards rarely meet below; the deep keeps them apart and **listens** when
+  it lets them meet. Pacts sworn below bind the staff, not the heart.
+- **Wisps** are the drifting light of wizards who died alone; **sentries**
+  are the Founders' wardstones, which no longer know friend from foe;
+  **shadows** are what an oathbreaker leaves behind; **slimes** are the
+  dungeon's slow digestion; **the Warden** is the jailer, the Founders' last
+  ward.
+- The depth bands: **the Catacombs** (the builders' tombs), **the Drowned
+  Halls** (where the sea got in), **the Ember Forge** (where the Founders
+  forged their wards), **the Crystal Deep** (the dungeon's singing bones),
+  **the Hollow** (near the bottom: silence, pale light — something listens).
+- The deepest carvings hint at the secret: the Founders built the village
+  not to get something out, but to **keep something in**.
 
 ### Tone
 
@@ -291,7 +423,7 @@ oppressive. The contrast between the two is the mood.
 - What actually is at floor 100 — a literal god, a lie, a mirror?
 - The enemies are "hostile magic" (wisps, warding sentries, the Warden). Are
   they the dungeon's immune system? Failed wizards? This is unwritten.
-- Checkpoints as a "mercy" — whose mercy?
+- The Tithe of Five — whose price, and what does the deep do with the floors?
 
 None of this is on rails yet. The mechanics imply a story; the story text is
 mostly still to be written.
@@ -305,10 +437,12 @@ naturally the current systems support it.
 
 ### Enemies (the roster is meant to grow)
 
-Current: **Wisp** (floating chaser, burns on contact) and **Sentry** (fixed
-crystal turret, lobs dodgeable fire bolts with line-of-sight), plus the
-**Warden of the Deep** boss. Adding an enemy is deliberately cheap — a new
-component in `combat/` plus a spawn kind in the generator. Ideas:
+Current: **Wisp** (floating chaser, burns on contact), **Sentry** (fixed
+crystal turret, lobs dodgeable fire bolts with line-of-sight), **Shadow**
+(prowls a ring around you, then lunges from the dark), **Slime** (hops, and
+splits into smaller, faster slimes), plus the **Warden of the Deep** boss.
+Adding an enemy is deliberately cheap — a roster row, a pure brain, a model
+and a small kind file (see ARCHITECTURE.md "Extending"). Ideas:
 
 - **Charger / brute** — melee rusher that telegraphs and can be sidestepped.
 - **Shielder** — must be flanked or blast-knocked to break its guard.
@@ -334,7 +468,7 @@ own boss, enemy mix, and environmental gimmick.
 - Set bonuses across slots.
 - More consumables (scrolls, bombs, buffs) — each is one catalog entry; the
   belt/merchant/provenance plumbing is already generic.
-- Richer merchant stock at higher checkpoints; more gold sinks beyond the
+- Richer merchant stock for deeper wizards; more gold sinks beyond the
   Orb of Fortune (shrine offerings? stash upgrades?).
 
 ### Systems
@@ -350,8 +484,10 @@ own boss, enemy mix, and environmental gimmick.
 
 ### Audio
 
-Expand the procedural synth: per-staff cast timbres, enemy audio cues, richer
-ambient beds per biome, musical stingers on boss phases.
+Raytraced acoustics, placed sounds and the world's voices are in (see §2).
+Rooms ring on their own and are heard through their doorways. Next:
+per-staff cast timbres, musical stingers on boss phases, and height in the
+acoustics (pits, ledges, the vault's shape).
 
 ---
 
@@ -412,24 +548,34 @@ The whole codebase is organized around a few deliberate bets:
 
 ```
 src/
-  core/      config (all tuning numbers), seeded RNG, typed event bus
-  world/     dungeon generator (pure + tested), props, layout types
-  items/     item catalog, loot tables, loot-orb manager
-  net/       protocol, matchmaking, transport, session, synced clock,
-             snapshot buffers, typed channels, declarative entity
-             replication, wizard pose replication, remote-wizard
-             rendering, reactive net store
-  state/     zustand game store, save persistence
-  player/    input, first-person controller, staff viewmodel
-  combat/    abilities, projectiles, explosions, enemies, boss, combat system
-  fx/        pooled particle system, dynamic light pool
-  audio/     procedural WebAudio synth (sfx + ambient)
-  render/    procedural pixel textures (+normal maps), post-processing
-  scenes/    village, dungeon floor, canvas composition
-  ui/        HUD and overlays
-  game/      cross-system registries (hittables, dynamic bodies, interactions,
-             player-state, enemy target selection)
-server/      Bun WebSocket game server (relay + matchmaking + static host)
+  core/        config (all tuning numbers), seeded RNG, typed event bus
+  run/         run rules: the Weighing, the Tithe of Five, bank/death outcomes
+  items/       catalog, item levels & power, affixes, loot tables, economy,
+               inventory grids, loot-orb manager
+  world/       gen/ (staged pure generator), biomes, omens, lore, props, traps
+  enemies/     roster data, shared enemy shell, pure brains/, kinds/
+  weapons/     spell catalog, cast kinds, projectiles, explosions, singularity,
+               allegiance (who may hurt whom), cast replay
+  encounters/  pacts, presence sense, kill credit, grave chests
+  net/         protocol, matchmaking (tension clock), transport, session,
+               synced clock, snapshots, channels, entity replication,
+               wizard poses, remote wizards + collision capsules
+  state/       zustand game store, codex, save persistence
+  player/      input, first-person controller, staff viewmodel
+  fx/          shader particle system + named effects, ambient air, torch
+               flames, dynamic light pool
+  audio/       procedural WebAudio synth; raytraced acoustics, a pool of
+               placed voices, the world's own voices
+  render/      textures/ (pure painters + normal/emissive/roughness maps),
+               models/ (every mesh), post-processing
+  scenes/      village, dungeon floor, floor atmosphere, canvas composition
+  transition/  portal journeys: enter pull, vortex tunnel, arrival
+  ui3d/        the in-world UI: pixel font, rune text, tablets, item models,
+               the HUD, menus and inventory as physical things
+  ui/          the DOM leftovers: perf overlay, build stamp, dev room
+  game/        cross-system registries and seams (hostility, floor rules,
+               damage sources, interactions, player-state, targeting)
+server/        Bun WebSocket game server (relay, accounts, provenance)
 ```
 
 **Cross-system glue** avoids React prop-drilling and expensive scene queries:
@@ -493,8 +639,13 @@ table, and the extension guide.
 
 **Working today:**
 
-- Full single-player loop: village → choose entry floor → descend → fight →
-  loot → checkpoint-bank or die-and-lose.
+- Full loop: village → the Weighing casts you by gear level → descend →
+  fight → loot → walk home after five floors, or die and lose (or, on a
+  shared floor, leave a grave).
+- Item levels (gear potency and health wards scale with depth), gear-level
+  entry, the Tithe of Five — enforced server-side.
+- Five depth biomes (own surfaces, light, drone and monster mix), six omens,
+  ~35 lore carvings and the codex.
 - 100-floor procedural generation with difficulty scaling and boss floors.
 - Movement, all four equipment slots, the full ability/enemy/boss/prop set
   listed above, procedural audio, the dynamic-light look.
@@ -503,23 +654,32 @@ table, and the extension guide.
   gold drops with auto-pickup, enchanted (affixed) gear, the village merchant
   (buying AND selling), the Orb of Fortune gamble, potions, and the Feather
   of Safe Passage.
-- Real online multiplayer: shared instances, matchmaking, remote wizards with
-  name tags, host-authority replication of enemies/props/boss/loot, late-join
-  sync, host migration.
-- Persistence of checkpoint progress, banked inventory + gold, player name,
-  and the shadows quality toggle (localStorage cache; server-authoritative
+- Real online multiplayer: rare same-floor encounters (tension clock),
+  presence sense, pacts and wizard-vs-wizard combat, kill credit, grave
+  chests, host-authority replication of enemies/props/boss/loot/graves,
+  late-join sync, host migration, reconnect into the same instance.
+- The look ("gritty pixel-magic"): five biomes of painted pixel-art
+  surfaces with their own colour grades, plain 6 m halls with fog, light
+  shafts and ambient air; pixel particles for every effect; rift portals and
+  portal journeys for every scene switch; and the whole UI in the world in
+  the grimoire style (rune text in pixel fonts, framed stone-tablet menus,
+  the framed HUD, 3D items).
+- Persistence of the deepest floor, banked inventory + gold, player name,
+  and the shadows / reflections quality toggles (localStorage cache; server-authoritative
   online — including gold provenance and merchant purchase validation).
 
 **Not done yet / known gaps:**
 
-- Reconnect is basic: a dropped socket auto-reconnects and re-enters your
-  floor (resyncing state), but you may land in a fresh instance if the old
-  one emptied; no session resume tokens yet.
+- Reconnect returns you to your old instance while it exists (it's gone if
+  everyone left); no session resume tokens yet.
 - No full server authority (host is a client; a laggy/cheating host affects
   its instance).
-- Sparse content breadth: 4 staffs, ~a dozen items, 2 enemy types + 1 boss.
-- No persistent meta-progression beyond checkpoints and banked gear.
-- Lore is implied by mechanics but largely unwritten.
+- Content breadth is still modest: 7 staffs, ~20 items, 4 enemy types + 1
+  boss (the same Warden in every biome).
+- PvP damage is decided on the victim's machine (like all player damage), so
+  a hacked client could ignore it; a cast's origin is sanity-checked against
+  the caster's pose.
+- No persistent meta-progression beyond banked gear, the deepest floor and the codex.
 - Anti-cheat is foundation-level: server-side accounts/saves with
   host-attested item provenance and floor-entry validation exist, but the
   floor host is still a client (a cheating host can vouch for its
@@ -537,9 +697,12 @@ table, and the extension guide.
 | Left / Right click | Staff primary / secondary ability |
 | Space | Jump (double-jump / hover with the right boots) |
 | Shift | Blink-dash (requires Cloak of Blinking) |
-| E | Interact (portals, loot, treasure); otherwise use belt slot 2 |
+| E | Interact (portals, loot, graves, lore carvings); otherwise use belt slot 2 |
+| F | Near another wizard: offer / accept / break a pact |
 | Q | Use belt slot 1 |
 | I (or Tab) | Inventory screen |
+| C | The codex (lore carvings read) |
+| M | Cast the map (on the ground, shared with the floor) |
 | P (or F3) | FPS / frame-time overlay |
 | O (or F4) | Toggle shadows (quality option, off by default) |
 

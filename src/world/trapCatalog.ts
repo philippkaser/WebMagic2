@@ -1,7 +1,7 @@
 import type { TrapKind } from "./types";
 
 /** The trap roster as pure data — the single table of what traps exist and
- * how they're tuned, mirroring items/catalog.ts and combat/enemyStats.ts.
+ * how they're tuned, mirroring items/catalog.ts and enemies/roster.ts.
  * Adding a trap is a row here plus a case in world/traps.tsx (its behaviour)
  * and a weight the generator already reads. Kept free of component imports so
  * the generator and the components can both read it without a cycle. */
@@ -19,9 +19,10 @@ export interface TrapDef {
   /** How it sits in the world: flush with the floor, or mounted on a room-edge
    * wall (drives both placement and the mesh). */
   mount: "floor" | "wall";
-  /** Never generated on checkpoint floors — the warp mustn't yank a wizard off
-   * a floor where they came to bank. */
-  noCheckpoint: boolean;
+  /** Never generated in the exit room. Every floor's way home stands beside
+   * the descent portal, and a warp there would fling a wizard down while
+   * they're walking to the door out. */
+  avoidExitRoom: boolean;
   /** Relative weight when the generator picks which trap to place. */
   weight: number;
 }
@@ -34,7 +35,7 @@ export const TRAP_DEFS: TrapDef[] = [
     baseDamage: 18,
     radius: 1.0,
     mount: "floor",
-    noCheckpoint: false,
+    avoidExitRoom: false,
     weight: 3,
   },
   {
@@ -44,7 +45,7 @@ export const TRAP_DEFS: TrapDef[] = [
     baseDamage: 12,
     radius: 12,
     mount: "wall",
-    noCheckpoint: false,
+    avoidExitRoom: false,
     weight: 2,
   },
   {
@@ -54,7 +55,7 @@ export const TRAP_DEFS: TrapDef[] = [
     baseDamage: 0,
     radius: 1.0,
     mount: "floor",
-    noCheckpoint: true,
+    avoidExitRoom: true,
     weight: 1,
   },
 ];

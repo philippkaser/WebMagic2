@@ -14,8 +14,7 @@ import type { ServerSave, WireEquipment, WireInventory, WireStack } from "../src
 /** Server-side accounts & saves — the anti-cheat foundation.
  *
  * The client's localStorage is now just a cache; this store is the truth for
- * checkpoint progress, banked inventory (equipment + belt + bag + chest) and
- * gold. The core rule is PROVENANCE, not item knowledge (ids stay opaque
+ * run progress, banked inventory (equipment + belt + bag + chest) and gold. The core rule is PROVENANCE, not item knowledge (ids stay opaque
  * strings, keeping the server gameplay-blind):
  *
  *   an item may be banked ⇔ it was previously banked, is starter gear, or
@@ -42,7 +41,10 @@ import type { ServerSave, WireEquipment, WireInventory, WireStack } from "../src
 export interface AccountRecord {
   token: string;
   name: string;
-  checkpoint: number;
+  /** Deepest floor this wizard ever walked home from (0 = never). A trophy
+   * and the Orb of Fortune's reference depth — entry depth is decided by the
+   * gear itself (run/rules.ts), not by this. */
+  deepest: number;
   inventory: WireInventory;
   /** Item ids host-attested during the current (unbanked) run — a MULTISET
    * (duplicates count: two potions granted = two bankable potions). */
@@ -52,6 +54,9 @@ export interface AccountRecord {
   /** Floor the account is currently on (0 = not in a run) — lets a dropped
    * connection resume mid-run without opening floor-skipping. */
   runFloor: number;
+  /** Floors entered during the current run, counting the one it's on. The
+   * way home only opens at RUN.floorsBeforeExit (the Tithe of Five). */
+  runFloors: number;
 }
 
 /** Everyone owns starter gear implicitly. */
@@ -92,18 +97,20 @@ export class AccountStore {
       try {
         for (const raw of JSON.parse(initialJson) as (AccountRecord & {
           equipment?: WireEquipment; // pre-inventory record shape
+          checkpoint?: number; // pre-run-rules record shape
         })[]) {
           if (typeof raw?.token === "string" && raw.token.length > 0) {
             this.accounts.set(raw.token, {
               token: raw.token,
               name: cleanName(raw.name),
-              checkpoint: Math.max(1, Math.floor(Number(raw.checkpoint) || 1)),
+              deepest: clampFloor(raw.deepest ?? raw.checkpoint),
               inventory: sanitizeInventory(raw.inventory ?? { equipment: raw.equipment }),
               runGrants: Array.isArray(raw.runGrants)
                 ? raw.runGrants.filter(isItemId).slice(0, MAX_RUN_GRANTS)
                 : [],
               runGold: clampGold(raw.runGold, GOLD_RULES.perRunCap),
-              runFloor: Math.max(0, Math.floor(Number(raw.runFloor) || 0)),
+              runFloor: clampFloor(raw.runFloor),
+              runFloors: clampFloor(raw.runFloors),
             });
           }
         }
@@ -128,11 +135,12 @@ export class AccountStore {
     const account: AccountRecord = {
       token: this.tokenFn(),
       name: cleanName(name),
-      checkpoint: 1,
+      deepest: 0,
       inventory: defaultWireInventory(),
       runGrants: [],
       runGold: 0,
       runFloor: 0,
+      runFloors: 0,
     };
     this.accounts.set(account.token, account);
     this.flush();
@@ -144,7 +152,7 @@ export class AccountStore {
   }
 
   saveOf(account: AccountRecord): ServerSave {
-    return { checkpoint: account.checkpoint, inventory: cloneInventory(account.inventory) };
+    return { deepest: account.deepest, inventory: cloneInventory(account.inventory) };
   }
 
   /** Host attested that this account picked up an item this run. Duplicates
@@ -164,37 +172,51 @@ export class AccountStore {
     this.flush();
   }
 
-  setRunFloor(account: AccountRecord, floor: number): void {
-    if (account.runFloor !== floor) {
-      account.runFloor = floor;
-      this.flush();
-    }
+  /** A fresh run begins on `floor` (the Weighing already decided which).
+   * Any unfinished previous run is forfeited first — walking away from a run
+   * costs exactly what dying would. */
+  startRun(account: AccountRecord, floor: number): void {
+    this.endRun(account);
+    account.runFloor = floor;
+    account.runFloors = 1;
+    this.flush();
+  }
+
+  /** The run moved one floor deeper (portal or warp rune). */
+  advanceRun(account: AccountRecord, floor: number): void {
+    account.runFloor = floor;
+    account.runFloors += 1;
+    this.flush();
   }
 
   /** The run ended without banking (death/quit) — its grants are lost. */
   endRun(account: AccountRecord): void {
-    if (account.runGrants.length === 0 && account.runGold === 0 && account.runFloor === 0) return;
-    account.runGrants = [];
-    account.runGold = 0;
-    account.runFloor = 0;
+    if (
+      account.runGrants.length === 0 &&
+      account.runGold === 0 &&
+      account.runFloor === 0 &&
+      account.runFloors === 0
+    ) {
+      return;
+    }
+    this.clearRun(account);
     this.flush();
   }
 
-  /** Bank at `floor`: every submitted item must be provably owned (previous
-   * bank ∪ starter gear ∪ this run's grants, counted as a multiset); anything
-   * beyond that is stripped. Gold is clamped to banked + attested. Returns
-   * the authoritative save. */
+  /** Walk home from `floor`: every submitted item must be provably owned
+   * (previous bank ∪ starter gear ∪ this run's grants, counted as a
+   * multiset); anything beyond that is stripped. Gold is clamped to banked +
+   * attested. Returns the authoritative save. (The caller enforces WHETHER
+   * the way home is open — see the relay.) */
   bank(account: AccountRecord, floor: number, submitted: unknown): ServerSave {
     this.settle(account, submitted);
-    account.checkpoint = Math.max(account.checkpoint, floor);
-    account.runGrants = [];
-    account.runGold = 0;
-    account.runFloor = 0;
+    account.deepest = Math.max(account.deepest, floor);
+    this.clearRun(account);
     this.flush();
     return this.saveOf(account);
   }
 
-  /** Feather escape: bank from anywhere WITHOUT moving the checkpoint. Only
+  /** Feather escape: bank from anywhere WITHOUT counting as a deepest. Only
    * valid if a Feather of Safe Passage was provably owned and is now spent
    * (submitted contains one fewer than owned). Returns null if it wasn't. */
   escape(account: AccountRecord, submitted: unknown): ServerSave | null {
@@ -203,9 +225,7 @@ export class AccountStore {
     const submittedFeathers = multisetOf(sub).get(SAVE_FEATHER_ID) ?? 0;
     if ((owned.get(SAVE_FEATHER_ID) ?? 0) < submittedFeathers + 1) return null;
     this.settle(account, sub);
-    account.runGrants = [];
-    account.runGold = 0;
-    account.runFloor = 0;
+    this.clearRun(account);
     this.flush();
     return this.saveOf(account);
   }
@@ -265,6 +285,13 @@ export class AccountStore {
   }
 
   // ── Internals ──────────────────────────────────────────────────────────────
+
+  private clearRun(account: AccountRecord): void {
+    account.runGrants = [];
+    account.runGold = 0;
+    account.runFloor = 0;
+    account.runFloors = 0;
+  }
 
   /** Everything this account may legitimately bank right now. */
   private ownedMultiset(account: AccountRecord): Map<string, number> {
@@ -331,6 +358,13 @@ function safeMaxStack(itemId: string): number {
   } catch {
     return 1;
   }
+}
+
+/** Floors (and floor counts) from persistence: whole, 0…MAX_FLOOR_FIELD. */
+const MAX_FLOOR_FIELD = 1000;
+function clampFloor(raw: unknown): number {
+  const n = Math.floor(Number(raw));
+  return Number.isFinite(n) ? Math.max(0, Math.min(n, MAX_FLOOR_FIELD)) : 0;
 }
 
 function clampGold(raw: unknown, cap: number): number {

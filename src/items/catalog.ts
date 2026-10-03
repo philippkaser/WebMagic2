@@ -1,6 +1,7 @@
 import { PLAYER } from "../core/config";
 import { getAffixDef, type AffixDef } from "./affixes";
 import { splitItemId } from "./itemId";
+import { effectiveLevel, gearWard, staffPotency } from "./power";
 import type { DerivedStats, Equipment, ItemDef, Passives, Slot } from "./types";
 
 export const BASIC_STAFF_ID = "apprentice_staff";
@@ -273,21 +274,34 @@ export function getItemDef(id: string): ItemDef {
   return def;
 }
 
-/** An owned item, fully understood: base def + optional affix + display name.
- * Throws on unknown base OR affix, so it doubles as id validation. */
+/** An owned item, fully understood: base def + optional affix + level +
+ * display name. Throws on unknown base or affix, a malformed level, or a
+ * level on a consumable — so it doubles as id validation. */
 export interface ResolvedItem {
   itemId: string;
   def: ItemDef;
   affix: AffixDef | null;
+  /** Effective item level (explicit, or legacy fallback); 0 for consumables. */
+  level: number;
   name: string;
 }
 
 export function resolveItem(itemId: string): ResolvedItem {
-  const { baseId, affixId } = splitItemId(itemId);
+  const { baseId, affixId, level, wellFormed } = splitItemId(itemId);
   const def = byId.get(baseId);
   if (!def) throw new Error(`Unknown item def: ${itemId}`);
+  if (!wellFormed) throw new Error(`Malformed item level: ${itemId}`);
+  if (level !== null && def.slot === "consumable") {
+    throw new Error(`Consumables carry no level: ${itemId}`);
+  }
   const affix = affixId ? getAffixDef(affixId) : null;
-  return { itemId, def, affix, name: affix ? `${affix.name} ${def.name}` : def.name };
+  return {
+    itemId,
+    def,
+    affix,
+    level: effectiveLevel(def, level),
+    name: affix ? `${affix.name} ${def.name}` : def.name,
+  };
 }
 
 /** Base + affix passives folded into one block (what the item contributes). */
@@ -325,13 +339,16 @@ const BASE: DerivedStats = {
   dash: false,
 };
 
-/** Fold every equipped item's passives (base AND affix) into one stat block. */
+/** Fold every equipped item's passives (base AND affix) and its level's power
+ * (staff potency, gear ward — items/power.ts) into one stat block. */
 export function computeStats(equipment: Equipment): DerivedStats {
   const stats: DerivedStats = { ...BASE };
   const items = [equipment.staff, equipment.amulet, equipment.cloak, equipment.boots];
   for (const inst of items) {
     if (!inst) continue;
     const item = resolveItem(inst.defId);
+    if (item.def.slot === "staff") stats.damageMult *= staffPotency(item.level);
+    else stats.maxHealth += gearWard(item.level);
     for (const p of itemPassives(item)) {
       stats.maxHealth += p.maxHealth ?? 0;
       stats.speedMult *= p.speedMult ?? 1;

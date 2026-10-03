@@ -1,4 +1,5 @@
-import { getAbility } from "../combat/abilities";
+import { gearWard, staffPotency } from "../items/power";
+import { getAbility } from "../weapons/spells";
 import { itemPassives, type ResolvedItem } from "../items/catalog";
 import type { ItemDef, Passives, Slot } from "../items/types";
 
@@ -25,10 +26,12 @@ export interface StatLine {
 
 /** Human-readable stat lines for an item, with optional per-stat comparison
  * arrows against what's currently worn in the same slot. Lives in ui/ (not
- * items/) because it reads ability data from combat/, which depends on items/. */
+ * items/) because it reads ability data from weapons/, which depends on items/. */
 export function statLines(item: ResolvedItem, comparedTo?: ResolvedItem | null): StatLine[] {
   const def = item.def;
   const lines: StatLine[] = [];
+  const level = levelLine(item, comparedTo ?? null);
+  if (level) lines.push(level);
   if (def.primary) {
     const a = getAbility(def.primary);
     lines.push({ text: `LMB ${a.name} — ${a.info} · ${a.mana} MP` });
@@ -49,6 +52,21 @@ export function statLines(item: ResolvedItem, comparedTo?: ResolvedItem | null):
     lines.push({ text: "Consumed on use (Q/E)" });
   }
   return lines;
+}
+
+/** The item level and what it's worth: spell damage for a staff, a health
+ * ward for other gear (items/power.ts). Compared against the worn piece. */
+function levelLine(item: ResolvedItem, worn: ResolvedItem | null): StatLine | null {
+  if (item.level <= 0) return null;
+  const sameSlot = worn && worn.def.slot === item.def.slot ? worn : null;
+  if (item.def.slot === "staff") {
+    const pct = Math.round((staffPotency(item.level) - 1) * 100);
+    const delta = sameSlot ? staffPotency(item.level) - staffPotency(sameSlot.level) : 0;
+    return { text: `Lv ${item.level} — +${pct}% spell damage from depth`, delta: delta || undefined };
+  }
+  const ward = gearWard(item.level);
+  const delta = sameSlot ? ward - gearWard(sameSlot.level) : 0;
+  return { text: `Lv ${item.level} — +${ward} max health ward`, delta: delta || undefined };
 }
 
 // ── Passive comparison ───────────────────────────────────────────────────────

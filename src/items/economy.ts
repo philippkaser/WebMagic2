@@ -37,6 +37,8 @@ export function merchantPrice(itemId: string): number | null {
  * Returns null for ids he won't touch (unknown/corrupt). */
 const GEAR_SELL_BY_TIER = [0, 9, 21, 38] as const;
 const AFFIX_SELL_BONUS = 14;
+/** Deeper finds fetch a little more — enough to notice, never a gold farm. */
+const SELL_PER_LEVEL = 0.8;
 
 export function sellValue(itemId: string): number | null {
   try {
@@ -45,7 +47,11 @@ export function sellValue(itemId: string): number | null {
       const price = merchantPrice(item.def.id);
       return price !== null ? Math.ceil(price / 4) : 4;
     }
-    return GEAR_SELL_BY_TIER[item.def.tier] + (item.affix ? AFFIX_SELL_BONUS : 0);
+    return (
+      GEAR_SELL_BY_TIER[item.def.tier] +
+      (item.affix ? AFFIX_SELL_BONUS : 0) +
+      Math.floor(Math.max(0, item.level - 1) * SELL_PER_LEVEL)
+    );
   } catch {
     return null;
   }

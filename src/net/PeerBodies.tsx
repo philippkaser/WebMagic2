@@ -7,6 +7,7 @@ import {
 } from "@react-three/rapier";
 import { useRef, useState } from "react";
 import { GROUPS, PLAYER } from "../core/config";
+import { isHostileWizard } from "../game/hostility";
 import { estimatePeer, peerIds } from "./players";
 
 /** Physical presence for the other wizards on the floor.
@@ -18,13 +19,19 @@ import { estimatePeer, peerIds } from "./players";
  * physics exists in the simulation that matters — not just on their screen.
  * It also lets enemy bolts detonate on any wizard, not only the local one.
  *
- * Players deliberately do NOT collide with each other (no doorway blocking). */
+ * Players deliberately do NOT collide with each other (no doorway blocking).
+ *
+ * A HOSTILE peer's capsule also carries PEER_HOSTILE and accepts our
+ * FRIENDLY_PROJECTILEs, so our bolts burst on them (on our screen; the damage
+ * itself is decided on their machine). A sworn ally's capsule lets our magic
+ * pass straight through. */
 
-const PEER_GROUPS = interactionGroups(GROUPS.PLAYER, [
-  GROUPS.ENEMY,
-  GROUPS.PROP,
-  GROUPS.ENEMY_PROJECTILE,
-]);
+const PEER_FILTER = [GROUPS.ENEMY, GROUPS.PROP, GROUPS.ENEMY_PROJECTILE];
+const ALLY_GROUPS = interactionGroups(GROUPS.PLAYER, PEER_FILTER);
+const HOSTILE_GROUPS = interactionGroups(
+  [GROUPS.PLAYER, GROUPS.PEER_HOSTILE],
+  [...PEER_FILTER, GROUPS.FRIENDLY_PROJECTILE],
+);
 
 /** Parked here (far below the world) until the peer's first pose arrives. */
 const LIMBO = { x: 0, y: -999, z: 0 };
@@ -54,12 +61,16 @@ export function PeerBodies() {
 
 function PeerCapsule({ playerId }: { playerId: string }) {
   const body = useRef<RapierRigidBody>(null);
+  const [hostile, setHostile] = useState(() => isHostileWizard(playerId));
 
   useFrame(() => {
     const b = body.current;
     if (!b) return;
     const est = estimatePeer(playerId);
     b.setNextKinematicTranslation(est ? { x: est.p[0], y: est.p[1], z: est.p[2] } : LIMBO);
+    // Pacts change rarely; re-render only when this one flips.
+    const now = isHostileWizard(playerId);
+    if (now !== hostile) setHostile(now);
   });
 
   return (
@@ -72,7 +83,7 @@ function PeerCapsule({ playerId }: { playerId: string }) {
       <CapsuleCollider
         args={[PLAYER.halfHeight, PLAYER.radius]}
         friction={0}
-        collisionGroups={PEER_GROUPS}
+        collisionGroups={hostile ? HOSTILE_GROUPS : ALLY_GROUPS}
       />
     </RigidBody>
   );

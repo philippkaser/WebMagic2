@@ -9,11 +9,12 @@ import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS, emptyGrid, type Grid } from "../ite
 import type { Equipment, GearSlot, ItemStack } from "../items/types";
 import type { WireInventory, WireStack } from "../net/protocol";
 
-/** Saved between sessions: checkpoint progress and the banked inventory
- * (equipment, Q/E belt, bag, village chest, gold). Online this is a cache of
- * the server-authoritative save; offline it's the save of record. */
+/** Saved between sessions: the deepest floor walked home from, and the banked
+ * inventory (equipment, Q/E belt, bag, village chest, gold). Online this is a
+ * cache of the server-authoritative save; offline it's the save of record.
+ * (Where a run starts is decided by the gear itself — run/rules.ts.) */
 export interface SaveData {
-  checkpoint: number;
+  deepest: number;
   equipment: Equipment;
   bag: Grid;
   belt: Grid;
@@ -23,6 +24,8 @@ export interface SaveData {
 
 const KEY = "webmagic.save.v2";
 const LEGACY_KEY = "webmagic.save.v1";
+
+type StoredSave = Partial<SaveData> & { checkpoint?: number };
 
 export function defaultEquipment(): Equipment {
   return {
@@ -35,7 +38,7 @@ export function defaultEquipment(): Equipment {
 
 export function defaultSave(): SaveData {
   return {
-    checkpoint: 1,
+    deepest: 0,
     equipment: defaultEquipment(),
     bag: emptyGrid(BAG_SLOTS),
     belt: emptyGrid(BELT_SLOTS),
@@ -48,11 +51,15 @@ export function loadSave(): SaveData {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
-      const data = JSON.parse(raw) as Partial<SaveData>;
-      if ((data.checkpoint ?? 0) >= 1 && data.equipment?.staff) {
+      const data = JSON.parse(raw) as StoredSave;
+      if (data.equipment?.staff) {
+        const { checkpoint, ...rest } = data;
         return {
           ...defaultSave(),
-          ...data,
+          ...rest,
+          // Saves from the checkpoint era: the old checkpoint was the deepest
+          // floor banked at, which is exactly what `deepest` records now.
+          deepest: Math.max(0, Math.floor(Number(data.deepest ?? checkpoint) || 0)),
           bag: coerceGrid(data.bag, BAG_SLOTS),
           belt: coerceGrid(data.belt, BELT_SLOTS),
           chest: coerceGrid(data.chest, CHEST_SLOTS),
@@ -65,7 +72,7 @@ export function loadSave(): SaveData {
     if (legacy) {
       const data = JSON.parse(legacy) as { checkpoint: number; equipment: Equipment };
       if (data.checkpoint >= 1 && data.equipment?.staff) {
-        return { ...defaultSave(), checkpoint: data.checkpoint, equipment: data.equipment };
+        return { ...defaultSave(), deepest: data.checkpoint, equipment: data.equipment };
       }
     }
   } catch {
@@ -97,7 +104,7 @@ function coerceGrid(raw: unknown, size: number): Grid {
 // provenance, not meaning); the client validates meaning here — an id must
 // exist in the catalog and belong to the container it claims.
 
-export function toWireInventory(save: Omit<SaveData, "checkpoint">): WireInventory {
+export function toWireInventory(save: Omit<SaveData, "deepest">): WireInventory {
   const stack = (s: ItemStack | null): WireStack | null => (s ? { id: s.defId, qty: s.qty } : null);
   return {
     equipment: {
@@ -128,7 +135,7 @@ function validGearId(id: string | null, slot: GearSlot): string | null {
 }
 
 /** Everything from the wire is banked (runLoot false) by definition. */
-export function fromWireInventory(wire: WireInventory): Omit<SaveData, "checkpoint"> {
+export function fromWireInventory(wire: WireInventory): Omit<SaveData, "deepest"> {
   const grid = (cells: (WireStack | null)[], size: number): Grid =>
     Array.from({ length: size }, (_, i) => {
       const s = cells[i];

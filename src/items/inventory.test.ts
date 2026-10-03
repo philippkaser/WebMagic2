@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
+  BAG_SLOTS,
+  BELT_SLOTS,
+  CHEST_SLOTS,
   addToGrid,
   clearSlot,
   emptyGrid,
   hasRoom,
   markBanked,
   moveItem,
+  routeAcquire,
   readSlot,
   stripRunLoot,
   takeOneAt,
@@ -177,5 +181,39 @@ describe("moveItem (drag & drop)", () => {
     expect(clearSlot(inv, staffSlot)).toBeNull();
     expect(clearSlot(inv, bootsSlot)!.equipment.boots).toBeNull();
     expect(readSlot(clearSlot(inv, bootsSlot)!, bootsSlot)).toBeNull();
+  });
+});
+
+describe("routeAcquire", () => {
+  const empty = (): Carried => ({
+    equipment: { staff: { defId: "apprentice_staff", runLoot: false }, amulet: null, cloak: null, boots: null },
+    bag: emptyGrid(BAG_SLOTS),
+    belt: emptyGrid(BELT_SLOTS),
+    chest: emptyGrid(CHEST_SLOTS),
+  });
+
+  test("gear equips into an empty slot, else goes to the bag", () => {
+    const first = routeAcquire(empty(), "amulet_vigor@3", true)!;
+    expect(first.to).toBe("equipped");
+    expect(first.next.equipment.amulet).toEqual({ defId: "amulet_vigor@3", runLoot: true });
+    const second = routeAcquire(first.next, "amulet_focus", true)!;
+    expect(second.to).toBe("bag");
+    expect(second.next.bag[0]).toEqual({ defId: "amulet_focus", qty: 1, runLoot: true });
+  });
+
+  test("consumables fill the belt first, then the bag; a full kit refuses", () => {
+    let inv = empty();
+    const places: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      const r = routeAcquire(inv, "potion_hp_weak", true);
+      if (!r) break;
+      places.push(r.to);
+      inv = r.next;
+    }
+    expect(places.slice(0, 2)).toEqual(["belt", "belt"]);
+    expect(places).toContain("bag");
+    // Belt (2×5) + bag (5×5) of potions, then nothing fits.
+    expect(places).toHaveLength(35);
+    expect(routeAcquire(inv, "amulet_vigor", true)).not.toBeNull(); // empty amulet slot
   });
 });

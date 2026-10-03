@@ -31,6 +31,10 @@ export interface FloorAssignment {
   epoch: number;
   /** Everyone currently in the instance, including the recipient. */
   members: MemberInfo[];
+  /** Floors this run has played, counting this one — the server's count is
+   * the one the way home is judged by, so the client adopts it. Absent
+   * offline (the client counts for itself). */
+  runFloors?: number;
 }
 
 /** Opaque gameplay envelope, client → server. */
@@ -69,7 +73,8 @@ export interface WireInventory {
 
 /** The server-authoritative save. What the client has locally is a cache. */
 export interface ServerSave {
-  checkpoint: number;
+  /** Deepest floor ever walked home from (0 = never). */
+  deepest: number;
   inventory: WireInventory;
 }
 
@@ -77,14 +82,21 @@ export type ClientMsg =
   /** Device identity: no token = new account; the reply carries the token to
    * keep. Also updates the display name. */
   | { t: "login"; name: string; token?: string }
-  | { t: "enterFloor"; floor: number }
+  /** Enter a dungeon floor. `fresh` = a new run from the village portal: the
+   * server ignores the requested floor and casts the wizard to the depth
+   * their banked gear resonates at (run/rules.ts). Otherwise the request must
+   * continue the current run: the same floor (reconnect) or one deeper
+   * (portal, warp rune). Anything else forfeits the run and starts fresh. */
+  | { t: "enterFloor"; floor: number; fresh?: boolean }
   | { t: "leaveDungeon" }
-  /** Checkpoint banking. The server validates every item against what was
-   * actually granted this run (host-attested) and answers with `saved`. */
+  /** Walk home through a way-home portal. Refused until the run has played
+   * RUN.floorsBeforeExit floors; the server validates every item against what
+   * was actually granted this run (host-attested) and answers with `saved`. */
   | { t: "bank"; inventory: WireInventory }
   /** Feather escape: bank from ANY dungeon floor by consuming a Feather of
-   * Safe Passage. Same provenance rules as `bank`, does not move the
-   * checkpoint; the server verifies a feather was actually spent. */
+   * Safe Passage — even before the Tithe of Five is paid. Same provenance
+   * rules as `bank`, never counts as a deepest; the server verifies a feather
+   * was actually spent. */
   | { t: "escape"; inventory: WireInventory }
   /** Village-only inventory rearrangement (chest/bag/belt moves, item
    * discards). Must be a sub-multiset of the current save — nothing new can
@@ -105,11 +117,14 @@ export type ClientMsg =
   /** The run is lost — the server discards this run's grants. */
   | { t: "died" }
   /** HOST attestation: `playerId` legitimately picked up `itemId`. The only
-   * path by which an item becomes bankable. Non-host senders are ignored. */
-  | { t: "grant"; playerId: string; itemId: string }
+   * path by which an item becomes bankable. Non-host senders are ignored.
+   * `source: "grave"` = plundered from a grave: honored only against what
+   * wizards who died in that instance were actually granted (their grave
+   * pool), so a forged grave can't mint bankable items. */
+  | { t: "grant"; playerId: string; itemId: string; source?: "grave" }
   /** HOST attestation of a gold pickup — gold's provenance path, mirroring
    * `grant` (server-side sanity caps in items/economy.ts GOLD_RULES). */
-  | { t: "grantGold"; playerId: string; amount: number }
+  | { t: "grantGold"; playerId: string; amount: number; source?: "grave" }
   /** Clock sync probe; `sent` is the sender's local monotonic time. */
   | { t: "ping"; sent: number }
   | ({ t: "msg" } & Envelope);
