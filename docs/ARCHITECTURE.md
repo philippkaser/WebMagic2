@@ -444,16 +444,28 @@ flat where you walk, the forested slope north) and ~1,100 instanced pines;
 drawn in the pixel fonts, sized to the world's own pixels, re-cut when your
 gear changes the entry floor).
 
-- **The backdrop is at infinity** (`Sky.tsx`): the dome, the stars, the moon
-  and three mountain ranges ride along with the camera (they translate with
-  it, never turn), write no depth and are drawn first — so the sky never
-  clips against the far plane however far you walk, the world always draws
-  over it, and the mountains keep their size the way real ones do. The
-  ranges are silhouettes defined in ANGLES (`skyline.ts`, tested): crest
-  elevation per bearing, so a mountain is as imposing as the angle it
-  subtends; a strip per range carries its crest height so the shader knows
-  how far under the ridgeline each pixel is (gullies, snow, mist at the
-  feet, the moonlit rim on the crests by the moon).
+- **The backdrop is at infinity** (`Sky.tsx`): the dome, the stars, the
+  moon, the great range and the near hills ride along with the camera
+  (they translate with it, never turn), write no depth and are drawn first
+  — so the sky never clips against the far plane however far you walk, the
+  world always draws over it, and the mountains keep their size the way
+  real ones do.
+- **The great range is real relief** (`skyline.rangeHeight`, tested): a
+  ridged-multifractal heightfield in a ring 44–94 m round the eye (domain-
+  warped so the aretes wander and run in toward you), shaped by an envelope
+  — low round the valley, high in the north, two titans either side of the
+  moon reaching ~30°, a saddle under it that hides the moon's foot. Meshed
+  as a polar grid ordered outermost ring first, so without depth the nearer
+  ridges paint over the farther. Flat-shaded facets: dark rock, snow on the
+  gentle high faces, moonlight raking across from behind and the side so
+  every ridge has a lit and a shadowed flank, the sky lighting what faces
+  up — stepped in gamma — then the air: deeper blue with distance, mist at
+  the feet, darker where backlit against the moon. The near hills are a
+  crest in angles with a pine fringe (`hillsCrest`).
+- **The moon** is about 13° across, its face tinted by the air it's seen
+  through and bright enough to bloom; a halo drawn over its limb softens
+  the edge into the sky (a hard edge reads as near), with a wide smooth wash
+  beyond.
 - **God rays** (`render/godRays.ts`): screen-space light scattering, one
   pass at the world's resolution. Each pixel marches toward the moon's place
   on screen gathering *sky* light — pixels with no depth (the backdrop) that

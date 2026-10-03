@@ -1,9 +1,10 @@
 import { hash2 } from "../../render/textures/pixelKit";
 
-/** The mountains around the valley, as silhouettes in ANGLES: how high
- * above the horizon each ridge's crest stands at every bearing. They're
- * drawn at infinity (the backdrop follows the eye), so an angle is all a
- * mountain range needs — and angles are what make it look big.
+/** The land round the valley, as the backdrop draws it (village/Sky): it
+ * rides with the eye, so it's measured from the eye — the great range a
+ * heightfield in metres round it (ridges running in toward you, two titans
+ * either side of the moon, a saddle under it), the near hills a crest in
+ * angles. Both are as big as the angles they fill, however far you walk.
  *
  * Bearings: 0 = +x, increasing toward +z; NORTH (−z, behind the gate as
  * you come up the lane) is −π/2. The moon rises in the north, in the
@@ -13,8 +14,8 @@ export const NORTH = -Math.PI / 2;
 const DEG = Math.PI / 180;
 
 /** Where the moon stands: elevation of its centre, and its angular radius. */
-export const MOON_ELEVATION = 20 * DEG;
-export const MOON_ANGULAR_RADIUS = 9 * DEG;
+export const MOON_ELEVATION = 21 * DEG;
+export const MOON_ANGULAR_RADIUS = 6.5 * DEG;
 
 /** Signed angle from `a` to `b`, in (−π, π]. */
 export function angleDiff(a: number, b: number): number {
@@ -35,36 +36,10 @@ function ringNoise(bearing: number, cells: number, seed: number): number {
   return a + (b - a) * s;
 }
 
-/** Sharp-crested noise (1 at the ridgelines): mountains, not hills. */
-function ridged(bearing: number, cells: number, seed: number): number {
-  return 1 - Math.abs(ringNoise(bearing, cells, seed) * 2 - 1);
-}
-
-export type Layer = "far" | "mid" | "near";
-
-/** Crest elevation (radians) of a layer at a bearing. */
-export function crestElevation(layer: Layer, bearing: number): number {
-  const off = angleDiff(NORTH, bearing); // 0 behind the gate
-  const north = Math.max(0, Math.cos(off)); // 1 in the north, 0 east/west and south
-  if (layer === "far") {
-    // The great range: highest in the north, a broad jagged shoulder under
-    // the moon and two titans standing either side of it, a line of lesser
-    // peaks running round the valley.
-    const titan = (c: number, w: number, h: number) => h * Math.exp(-((off - c) * (off - c)) / (w * w));
-    const peaks = titan(-21 * DEG, 6 * DEG, 9.5 * DEG) + titan(22 * DEG, 7 * DEG, 8 * DEG);
-    const shoulder = 1.6 * DEG * Math.exp(-(off * off) / (12 * DEG * 12 * DEG));
-    // Calmer right under the moon, so it rises clear of the crest.
-    const calm = 1 - 0.65 * Math.exp(-(off * off) / (9 * DEG * 9 * DEG));
-    const jag = 4.5 * DEG * ridged(bearing, 23, 11) + 1.8 * DEG * ridged(bearing, 61, 12) + 0.6 * DEG * ringNoise(bearing, 190, 13);
-    return 5 * DEG + north * north * 4 * DEG + shoulder + peaks + jag * (0.55 + 0.45 * north) * calm;
-  }
-  if (layer === "mid") {
-    // Lower, darker shoulders: fall away under the moon so it stays clear.
-    const saddle = Math.exp(-(off * off) / (8 * DEG * 8 * DEG));
-    const jag = 3.4 * DEG * ridged(bearing, 17, 21) + 1.2 * DEG * ridged(bearing, 47, 22) + 0.4 * DEG * ringNoise(bearing, 160, 23);
-    return 2.6 * DEG + north * 3.6 * DEG + jag * (1 - 0.6 * saddle);
-  }
-  // The near hills: low and forested — a fringe of pine tips along the crest.
+/** The near hills' crest elevation (radians) at a bearing: low and
+ * forested — a fringe of pine tips along a rolling line, standing in front
+ * of the great range all round the valley. */
+export function hillsCrest(bearing: number): number {
   const roll = 1.2 * DEG * ringNoise(bearing, 13, 31) + 0.6 * DEG * ringNoise(bearing, 37, 32);
   return 0.6 * DEG + roll + pineFringe(bearing);
 }
@@ -81,4 +56,91 @@ function pineFringe(bearing: number): number {
   // Some gaps between the trees.
   if (h < 0.12) return 0;
   return Math.max(0, tip * (1 - Math.abs(f * 2 - 1) * 1.15));
+}
+
+// ── The great range, in 3D ──────────────────────────────────────────────────
+
+/** The range is a heightfield in the backdrop's own space (metres round the
+ * eye, which rides at its origin): a ring of land from RANGE_INNER to
+ * RANGE_OUTER, its ridges and valleys running in toward you like real
+ * aretes, two titans either side of the moon and a saddle beneath it. Its
+ * floor lies below the horizon, under the valley's forest. */
+export const RANGE_INNER = 44;
+export const RANGE_OUTER = 94;
+export const RANGE_FLOOR = -7;
+
+function vnoise(x: number, y: number, seed: number): number {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const a = hash2(ix, iy, seed);
+  const b = hash2(ix + 1, iy, seed);
+  const c = hash2(ix, iy + 1, seed);
+  const d = hash2(ix + 1, iy + 1, seed);
+  return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+}
+
+/** Ridged multifractal: sharp crests, each octave strongest where the last
+ * was high — peaks get detail, valleys stay smooth. 0…~1. */
+function ridgedField(x: number, y: number): number {
+  // Warp the domain so the ridges wander.
+  const wx = x + (vnoise(x * 0.35, y * 0.35, 71) - 0.5) * 2.4;
+  const wy = y + (vnoise(x * 0.35 + 9.1, y * 0.35, 72) - 0.5) * 2.4;
+  let sum = 0;
+  let norm = 0;
+  let amp = 1;
+  let freq = 1;
+  let weight = 1;
+  for (let o = 0; o < 5; o++) {
+    let n = 1 - Math.abs(vnoise(wx * freq, wy * freq, 80 + o) * 2 - 1);
+    n *= n;
+    n *= weight;
+    weight = Math.min(1, n * 1.8);
+    sum += n * amp;
+    norm += amp;
+    amp *= 0.5;
+    freq *= 2.1;
+  }
+  return sum / norm / 0.62;
+}
+
+const gauss = (d: number, w: number) => Math.exp(-(d * d) / (w * w));
+
+/** Height (m, relative to the eye) of the range at (x, z) in backdrop space. */
+export function rangeHeight(x: number, z: number): number {
+  const r = Math.hypot(x, z);
+  const off = angleDiff(NORTH, Math.atan2(z, x));
+  const north = Math.pow(Math.max(0, Math.cos(off)), 1.4);
+  // Rises from its inner edge, highest in the middle-far band.
+  const band = smoothstep(RANGE_INNER, RANGE_INNER + 20, r) * (1 - 0.3 * smoothstep(84, RANGE_OUTER, r));
+  // The massif: low hills round the valley, mountains in the north, two
+  // titans either side of the moon (far back), a saddle under it.
+  const titans =
+    20 * gauss(off + 21 * DEG, 7 * DEG) * gauss(r - 78, 11) + 16 * gauss(off - 23 * DEG, 8 * DEG) * gauss(r - 74, 12);
+  const saddle = 16 * gauss(off, 9 * DEG);
+  const envelope = Math.max(6, 10 + 26 * north + titans - saddle);
+  // Big ridges about every 10° of the far band; finer aretes on them.
+  const field = ridgedField(x / 13, z / 13);
+  return RANGE_FLOOR + band * envelope * (0.3 + 0.7 * field);
+}
+
+function smoothstep(e0: number, e1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+}
+
+/** The range's skyline from the eye: the highest elevation (radians) any of
+ * it reaches at a bearing. */
+export function rangeSilhouette(bearing: number, steps = 60): number {
+  let best = -Math.PI / 2;
+  const c = Math.cos(bearing);
+  const sn = Math.sin(bearing);
+  for (let i = 0; i <= steps; i++) {
+    const r = RANGE_INNER + ((RANGE_OUTER - RANGE_INNER) * i) / steps;
+    best = Math.max(best, Math.atan2(rangeHeight(c * r, sn * r), r));
+  }
+  return best;
 }

@@ -12,7 +12,7 @@ import {
 } from "three";
 import { AdditiveBlending, DoubleSide, type Group, PlaneGeometry, Quaternion } from "three";
 import { hash2 } from "../../render/textures/pixelKit";
-import { crestElevation, type Layer, MOON_ANGULAR_RADIUS, MOON_ELEVATION, NORTH } from "./skyline";
+import { hillsCrest, MOON_ANGULAR_RADIUS, MOON_ELEVATION, NORTH, RANGE_INNER, RANGE_OUTER, rangeHeight } from "./skyline";
 
 /** The valley's night sky, drawn as pixel art on the world's chunky pixels,
  * and drawn at INFINITY: the whole backdrop rides along with the eye (it
@@ -56,6 +56,14 @@ const STAR_R = 96;
 const MOON_D = 90;
 const MOON_R = MOON_D * Math.tan(MOON_ANGULAR_RADIUS);
 const RIDGE_R = 85;
+/** The halo square's half-width, in moon radii. */
+const HALO_SPAN = 7;
+/** The light the great range is modelled by: the moon's, from behind it,
+ * swung round to the side and up so it rakes across the faces. */
+const RANGE_KEY = (() => {
+  const east = new Vector3().crossVectors(MOON_DIR, new Vector3(0, 1, 0)).normalize();
+  return new Vector3().addScaledVector(MOON_DIR, 0.5).addScaledVector(east, 1.0).add(new Vector3(0, 0.55, 0)).normalize();
+})();
 /** Where its sun shines from: almost straight from behind you — a full
  * moon, a sliver of shade along its lower left. */
 const MOON_SUN = (() => {
@@ -137,7 +145,7 @@ function skyMaterial(): ShaderMaterial {
         // outline) — a broad wash, a brighter heart, the air right round it
         // white — and a band of lit haze along the horizon beneath it.
         float md = max(dot(d, uMoon), 0.0);
-        float mg = 0.36 * pow(md, 8.0) + 0.26 * pow(md, 48.0) + 0.3 * pow(md, 1400.0);
+        float mg = 0.5 * pow(md, 6.0) + 0.45 * pow(md, 36.0) + 0.3 * pow(md, 600.0);
         vec3 mflat = normalize(vec3(uMoon.x, 0.0, uMoon.z));
         float under = pow(max(dot(normalize(vec3(d.x, 0.0, d.z) + 1e-5), mflat), 0.0), 3.0);
         mg += 0.12 * under * exp(-h * 14.0);
@@ -348,7 +356,7 @@ function moonMaterial(sun: Vector3): ShaderMaterial {
         // speckles the night side.
         lit *= smoothstep(-0.03, 0.1, dot(n, S));
         // Albedo: bright highlands, dark seas, darker crater floors.
-        float alb = mix(0.84, 0.52, maria(n)) + clamp(h0 * 1.5, -0.08, 0.05);
+        float alb = mix(0.86, 0.62, maria(n)) + clamp(h0 * 1.5, -0.08, 0.05);
         float k = alb * lit;
         // A few dithered tones of brightness, like the rest of the world —
         // stepped as one value, so shadows stay grey rather than speckling
@@ -356,8 +364,11 @@ function moonMaterial(sun: Vector3): ShaderMaterial {
         float lv = 4.0;
         float kq = floor(clamp(k, 0.0, 1.2) * lv + bayer4(gl_FragCoord.xy) * 0.5) / lv;
         vec3 col = vec3(0.035, 0.04, 0.055) + vec3(1.0, 0.97, 0.9) * kq;
-        // Bright: past the bloom's threshold, so the moon glows.
-        gl_FragColor = vec4(col * 0.8, 1.0);
+        // Seen through a long way of night air: a little of the sky's blue
+        // in it, its seas a little paler — that's what makes it far. Bright
+        // enough to bloom.
+        col = mix(col, vec3(0.62, 0.7, 0.95), 0.16);
+        gl_FragColor = vec4(col * 0.86, 1.0);
         #include <colorspace_fragment>
       }`,
     depthWrite: false,
@@ -367,11 +378,13 @@ function moonMaterial(sun: Vector3): ShaderMaterial {
   });
 }
 
-/** The moon's halo: a camera-facing square, additive, a smooth falloff
- * (wide wash plus a tight bright core) — no rings, no outline. */
+/** The moon's halo: a camera-facing square, additive, drawn just after the
+ * moon — a bright glow hugging the limb (softening it into the air, which is
+ * what makes a moon look far), a wide wash beyond, smooth all the way out:
+ * no rings, no outline. Distances in moon radii. */
 function haloMaterial(): ShaderMaterial {
   return new ShaderMaterial({
-    uniforms: { uColor: { value: new Color("#b8c6ff") } },
+    uniforms: { uColor: { value: new Color("#c2ceff") }, uSpan: { value: HALO_SPAN } },
     vertexShader: /* glsl */ `
       varying vec2 vUv;
       void main() {
@@ -380,14 +393,22 @@ function haloMaterial(): ShaderMaterial {
       }`,
     fragmentShader: /* glsl */ `
       uniform vec3 uColor;
+      uniform float uSpan;
       varying vec2 vUv;
       ${NOISE}
       void main() {
-        // r = 1 at the square's edge; the moon's disc is r < 0.25.
-        float r = length(vUv - 0.5) * 2.0;
-        float k = 0.55 * exp(-r * r * 22.0) + 0.2 * exp(-r * 4.5) * (1.0 - r);
-        k = max(k, 0.0) + (bayer4(gl_FragCoord.xy) - 0.5) / 255.0 * 4.0;
-        gl_FragColor = vec4(uColor * k, 1.0);
+        float rm = length(vUv - 0.5) * 2.0 * uSpan; // moon radii from the centre
+        float k;
+        if (rm < 1.0) {
+          // On the disc: only a soft brightening toward the limb.
+          k = 0.1 * smoothstep(0.75, 1.0, rm);
+        } else {
+          float o = rm - 1.0;
+          k = 0.9 * exp(-o * 4.0) + 0.32 * exp(-o * 1.0) + 0.12 * exp(-o * 0.35);
+        }
+        k *= 1.0 - smoothstep(uSpan * 0.8, uSpan, rm);
+        k += (bayer4(gl_FragCoord.xy) - 0.5) / 255.0 * 4.0;
+        gl_FragColor = vec4(uColor * max(k, 0.0), 1.0);
       }`,
     blending: AdditiveBlending,
     depthWrite: false,
@@ -397,10 +418,130 @@ function haloMaterial(): ShaderMaterial {
   });
 }
 
-/** A mountain range at infinity: a strip round the eye from below the
- * horizon up to the layer's crest (skyline.ts), each column carrying its
- * crest height so the shader knows how far below the ridgeline it is. */
-function ridge(layer: Layer, columns: number): BufferGeometry {
+/** The great range (skyline.rangeHeight) as a mesh: a polar grid round the
+ * eye, its triangles ordered from the outermost ring in — drawn without
+ * depth, the nearer ridges simply paint over the farther, as from the
+ * middle of a heightfield they always stand in front. Flat-shaded: every
+ * facet one tone, like hewn rock at the world's pixels. */
+function rangeGeometry(): BufferGeometry {
+  const A = 600;
+  const R = 40;
+  const verts: number[] = [];
+  const at = (i: number, j: number) => {
+    const a = ((i % A) / A) * Math.PI * 2;
+    const r = RANGE_INNER + ((RANGE_OUTER - RANGE_INNER) * j) / R;
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    return [x, rangeHeight(x, z), z];
+  };
+  const grid: number[][][] = [];
+  for (let j = 0; j <= R; j++) {
+    const row: number[][] = [];
+    for (let i = 0; i < A; i++) row.push(at(i, j));
+    grid.push(row);
+  }
+  // Outermost ring first.
+  for (let j = R - 1; j >= 0; j--) {
+    for (let i = 0; i < A; i++) {
+      const a = grid[j]![i]!;
+      const b = grid[j]![(i + 1) % A]!;
+      const c = grid[j + 1]![i]!;
+      const d = grid[j + 1]![(i + 1) % A]!;
+      verts.push(...a, ...c, ...b, ...b, ...c, ...d);
+    }
+  }
+  const g = new BufferGeometry();
+  g.setAttribute("position", new BufferAttribute(new Float32Array(verts), 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+/** The range's look: dark rock and snow on the gentle high faces, lit from
+ * behind by the moon (the crests and every face turned to it catch a cold
+ * rim) and from above by the sky; then the air — the farther the ridge the
+ * deeper it sinks into the blue haze, the valley's mist pooled at its feet,
+ * the haze glowing toward the moon so the ranges stand dark against it. */
+function rangeMaterial(): ShaderMaterial {
+  return new ShaderMaterial({
+    side: DoubleSide,
+    uniforms: {
+      uMoon: { value: MOON_DIR },
+      uKey: { value: RANGE_KEY },
+      uHaze: { value: new Color("#222c58") },
+      uMoonGlow: { value: new Color("#5a6cb8") },
+      // Albedos, not display colours: dark rock, bright snow.
+      uRock: { value: new Color("#4a5270") },
+      uSnow: { value: new Color("#dce4ff") },
+      // Light: the night sky's blue, from above.
+      uSky: { value: new Color("#2c3668") },
+      uInner: { value: RANGE_INNER },
+      uOuter: { value: RANGE_OUTER },
+    },
+    vertexShader: /* glsl */ `
+      varying vec3 vPos;
+      varying vec3 vN;
+      void main() {
+        vPos = position;
+        vN = normal;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uMoon;
+      uniform vec3 uKey;
+      uniform vec3 uHaze;
+      uniform vec3 uMoonGlow;
+      uniform vec3 uRock;
+      uniform vec3 uSnow;
+      uniform vec3 uSky;
+      uniform float uInner;
+      uniform float uOuter;
+      varying vec3 vPos;
+      varying vec3 vN;
+      ${NOISE}
+      void main() {
+        vec3 n = normalize(vN);
+        // Faces must face the eye (the grid's winding varies).
+        if (dot(n, -vPos) < 0.0) n = -n;
+        vec3 d = normalize(vPos);
+        float dith = bayer4(gl_FragCoord.xy);
+        float r = length(vPos.xz);
+        float md = max(dot(d, uMoon), 0.0);
+        // Snow on the high faces gentle enough to hold it, ragged at its line.
+        float line = 6.0 + (fbm(vPos * 0.12) - 0.5) * 10.0;
+        float snow = step(line, vPos.y) * smoothstep(0.28, 0.5, n.y);
+        vec3 alb = mix(uRock, uSnow, snow);
+        // The moonlight rakes across the range from behind and to the side,
+        // so every ridge has a lit flank and a shadowed one; the sky lights
+        // whatever faces up.
+        float key = max(dot(n, uKey), 0.0);
+        float sky = 0.15 + 0.85 * clamp(n.y, 0.0, 1.0);
+        vec3 c = alb * (uSky * sky + vec3(0.62, 0.7, 0.95) * key * 0.75);
+        // A few tones, stepped where the eye sees steps (gamma, not linear:
+        // linear steps would swallow every dark face whole).
+        vec3 g = pow(max(c, 0.0), vec3(1.0 / 2.2));
+        g = floor(g * 12.0 + dith) / 12.0;
+        c = pow(g, vec3(2.2));
+        // The air between: deeper with distance, thick low down, glowing
+        // toward the moon (less than the open sky — the ranges stand dark).
+        vec3 haze = uHaze + uMoonGlow * 0.12 * pow(md, 6.0);
+        float far = smoothstep(uInner, uOuter, r);
+        // Backlit against the moon, the faces turned from it go darker still.
+        float hz = (0.06 + 0.42 * far) * (1.0 - 0.45 * pow(md, 10.0));
+        hz = max(hz, smoothstep(2.0, -6.0, vPos.y) * 0.95);
+        c = mix(c, haze, floor(clamp(hz, 0.0, 1.0) * 10.0 + dith) / 10.0);
+        gl_FragColor = vec4(c, 1.0);
+        #include <colorspace_fragment>
+      }`,
+    depthWrite: false,
+    depthTest: false,
+    fog: false,
+  });
+}
+
+/** The near hills at infinity: a strip round the eye from below the horizon
+ * up to their crest (skyline.hillsCrest), each column carrying its crest
+ * height so the shader knows how far below the ridgeline it is. */
+function ridge(columns: number): BufferGeometry {
   const n = columns;
   const pos = new Float32Array((n + 1) * 2 * 3);
   const crest = new Float32Array((n + 1) * 2);
@@ -408,7 +549,7 @@ function ridge(layer: Layer, columns: number): BufferGeometry {
   const foot = -Math.tan((12 * Math.PI) / 180) * RIDGE_R;
   for (let i = 0; i <= n; i++) {
     const a = (i / n) * Math.PI * 2;
-    const y = Math.tan(crestElevation(layer, a)) * RIDGE_R;
+    const y = Math.tan(hillsCrest(a)) * RIDGE_R;
     const x = Math.cos(a) * RIDGE_R;
     const z = Math.sin(a) * RIDGE_R;
     pos.set([x, foot, z, x, y, z], i * 6);
@@ -510,7 +651,7 @@ const tmpA = new Vector3();
 const tmpB = new Vector3();
 
 /** Draw order of the backdrop's layers (all before the world). */
-const ORDER = { dome: -20, stars: -19, halo: -18, moon: -17, far: -16, mid: -15, near: -14 } as const;
+const ORDER = { dome: -20, stars: -19, moon: -18, halo: -17, range: -16, near: -14 } as const;
 
 export function Sky() {
   const res = useMemo(() => {
@@ -520,15 +661,13 @@ export function Sky() {
       domeMat: skyMaterial(),
       starGeo: stars.geometry,
       starMat: stars.material,
-      far: ridge("far", 1440),
-      farMat: ridgeMaterial({ rock: "#121830", haze: 0.3, snow: 12, rim: 1.8 }),
-      mid: ridge("mid", 1440),
-      midMat: ridgeMaterial({ rock: "#080c1c", haze: 0.2, snow: Infinity, rim: 1.0 }),
-      near: ridge("near", 2400),
+      range: rangeGeometry(),
+      rangeMat: rangeMaterial(),
+      near: ridge(2400),
       nearMat: ridgeMaterial({ rock: "#04060d", haze: 0.06, snow: Infinity, rim: 0.6 }),
       moon: new SphereGeometry(MOON_R, 64, 48),
       moonMat: moonMaterial(MOON_SUN),
-      halo: new PlaneGeometry(MOON_R * 8, MOON_R * 8),
+      halo: new PlaneGeometry(MOON_R * HALO_SPAN * 2, MOON_R * HALO_SPAN * 2),
       haloMat: haloMaterial(),
     };
   }, []);
@@ -588,8 +727,7 @@ export function Sky() {
         <mesh geometry={res.halo} material={res.haloMat} renderOrder={ORDER.halo} frustumCulled={false} />
         <mesh geometry={res.moon} material={res.moonMat} renderOrder={ORDER.moon} frustumCulled={false} />
       </group>
-      <mesh geometry={res.far} material={res.farMat} renderOrder={ORDER.far} frustumCulled={false} />
-      <mesh geometry={res.mid} material={res.midMat} renderOrder={ORDER.mid} frustumCulled={false} />
+      <mesh geometry={res.range} material={res.rangeMat} renderOrder={ORDER.range} frustumCulled={false} />
       <mesh geometry={res.near} material={res.nearMat} renderOrder={ORDER.near} frustumCulled={false} />
     </group>
   );
