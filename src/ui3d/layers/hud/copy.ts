@@ -72,7 +72,7 @@ export function netStatus(mode: NetMode, amHost: boolean, inDungeon: boolean): {
 export interface ArrivalTitle {
   /** Tiny caps above the title ("You descend to", "Sanctuary"). */
   label: string;
-  /** Blackletter: "Floor 12", "The Village". */
+  /** Blackletter: "Floor 12", "Riftwatch". */
   title: string;
   /** The biome, in gold blackletter (none in the village). */
   subtitle: string | null;
@@ -81,11 +81,13 @@ export interface ArrivalTitle {
   omen: { name: string; whisper: string } | null;
 }
 
-export const VILLAGE_LORE = "Lamplight, woodsmoke, and the low hum of the rift.";
+/** What the home above the deep is called, on the banner and the HUD. */
+export const HOME_NAME = "Riftwatch";
+export const VILLAGE_LORE = "Tents and lamplight, pitched at the edge of a hole in the world.";
 
 /** What materializes ahead of you on arrival (artpass ArrivalBanner). */
 export function arrivalTitle(inDungeon: boolean, floor: number, seed: number): ArrivalTitle {
-  if (!inDungeon) return { label: "Sanctuary", title: "The Village", subtitle: null, lore: VILLAGE_LORE, omen: null };
+  if (!inDungeon) return { label: "Sanctuary", title: HOME_NAME, subtitle: null, lore: VILLAGE_LORE, omen: null };
   const omenId = seed ? rollOmen(seed, floor) : null;
   const omen = omenId ? getOmenDef(omenId) : null;
   const biome = getBiomeDef(biomeForFloor(floor));

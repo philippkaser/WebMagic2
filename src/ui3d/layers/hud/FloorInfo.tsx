@@ -8,6 +8,7 @@ import { RuneText } from "../../text/RuneText";
 import { ink } from "../../theme";
 import { useMapCast } from "../map/mapStore";
 import { apx, fontPx } from "./ap";
+import { HOME_NAME } from "./copy";
 import { HudAnchor } from "./HudAnchor";
 import { HUD_LAYOUT } from "./layout";
 
@@ -39,7 +40,7 @@ export function FloorInfo({ inDungeon }: { inDungeon: boolean }) {
   if (!inDungeon || !layout) {
     return (
       <HudAnchor h={L.h} v={L.v} inset={L.inset} distance={L.distance}>
-        <RuneText text="The Village" font="heading" px={TITLE} color={ink.parchment} anchor={[1, 0]} align="right" glow={0.4} outline={0.6} position={[0, -2 * A, 0]} />
+        <RuneText text={HOME_NAME} font="heading" px={TITLE} color={ink.parchment} anchor={[1, 0]} align="right" glow={0.4} outline={0.6} position={[0, -2 * A, 0]} />
       </HudAnchor>
     );
   }

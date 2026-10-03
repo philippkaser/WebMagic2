@@ -1,7 +1,7 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { estimatePeer, peerIds } from "../net/players";
-import { GATE_TORCHES, LANE, LANTERNS, PLAZA_R } from "../scenes/village/layout";
+import { CAMPFIRE, GATE_TORCHES, LANE, LANTERNS, PLAZA_R } from "../scenes/village/layout";
 import type { BiomeId, FloorLayout } from "../world/types";
 import { gridFromLayout, openAt, villageGrid, type AcousticGrid } from "./acoustics";
 import { listenerAt, setAcousticGrid, updateListener, type At } from "./spatial";
@@ -82,6 +82,9 @@ function sourcesFor(layout: FloorLayout | null): Source[] {
       const at: At = [x, 2.2, z];
       out.push({ key: `l${i}`, at, reach: 12, level: 0.35, start: () => startTorch(at, 0.35) });
     });
+    // The camp's fire: a bigger, louder crackle than any torch.
+    const fire: At = [CAMPFIRE[0], 0.5, CAMPFIRE[2]];
+    out.push({ key: "fire", at: fire, reach: 26, level: 1.6, start: () => startTorch(fire, 1.6) });
     const gate: At = [0, 1.4, 0];
     out.push({ key: "gate", at: gate, reach: 36, level: 1, start: () => startRiftHum(gate, 73.4) });
   }

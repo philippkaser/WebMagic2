@@ -1,46 +1,48 @@
-import { Stars } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 import { CuboidCollider, RigidBody } from "@react-three/rapier";
 import { useEffect, useMemo } from "react";
 import { Color, CylinderGeometry, Fog, MeshStandardMaterial } from "three";
 import { startAmbient, stopAmbient } from "../audio/sound";
+import { clearGodRays, setGodRays } from "../render/godRays";
 import { SpawnedEnemies } from "../enemies/SpawnedEnemies";
 import { AmbientParticles } from "../fx/AmbientParticles";
 import { resetRegistries } from "../game/registry";
 import { PlayerController } from "../player/PlayerController";
 import { getModelTextures } from "../render/models/modelPaint";
-import { getVillageTextures } from "../render/textures/villagePainters";
 import { useGame } from "../state/gameStore";
 import { DevSlab, DevSpawns } from "../world/devProps";
 import { Breakable, Portal, Torch } from "../world/props";
 import { Merchant, StorageChest } from "../world/villageProps";
-import { Cottages } from "./village/Cottages";
+import { Camp } from "./village/Camp";
+import { FloorPillar } from "./village/FloorPillar";
 import { Grounds } from "./village/Grounds";
-import { CHEST, COTTAGES, DEV_SLAB, GATE_TORCHES, MERCHANT, SPAWN, WORLD_GROUPS } from "./village/layout";
+import { BOUNDS, CHEST, DEV_SLAB, GATE_TORCHES, MERCHANT, SPAWN, WORLD_GROUPS } from "./village/layout";
+import { MoonShafts } from "./village/MoonShafts";
+import { Wilds } from "./village/Wilds";
 import { HORIZON, MOON_DIR, Sky } from "./village/Sky";
 
-/** The wizards' village: a moonlit hamlet in a ring of pines under a big
- * moon — half-timbered cottages with lit windows and smoking chimneys, a
- * cobbled lane, lamp posts, a well, and standing stones ringing the Weighing
- * Gate at its heart, the way down. (The artpass village; its decor lives in
- * ./village/.) Home economics stand by the lane: your chest, and Maro's
- * stall. */
+/** Riftwatch, the wizards' home above the deep: an expedition's camp
+ * pitched round the rift they found in a mountain valley — the Weighing
+ * Gate, the way down, in a ring of old standing stones on the paving the
+ * diggers uncovered; tents and a command pavilion, a watchtower, the fire,
+ * a palisade; the forest climbing north toward the mountains and a great
+ * moon rising between their peaks (./village/). Home economics stand by
+ * the lane: your chest, and Maro's stall. Beside the gate, the depth stone
+ * shows the floor the rift would take you to. */
 export function Village() {
   const scene = useThree((s) => s.scene);
   const shadows = useGame((s) => s.shadows);
-  // Ground reaches past the playfield so the treeline stands on something.
-  const ground = useMemo(() => {
-    const t = getVillageTextures("grass", 60, 60);
-    return new MeshStandardMaterial({ map: t.map, normalMap: t.normalMap, roughness: 0.95 });
-  }, []);
-  useEffect(() => () => ground.dispose(), [ground]);
   const moonLight = useMemo(() => MOON_DIR.clone().multiplyScalar(30).toArray(), []);
 
   useEffect(() => {
-    scene.fog = new Fog(HORIZON, 20, 80);
+    // Thin enough that the forest slope reads against the mountains.
+    scene.fog = new Fog(HORIZON, 28, 135);
     scene.background = new Color(HORIZON);
     startAmbient("village");
+    // The moon's light streaming over the valley, past the peaks and pines.
+    setGodRays(MOON_DIR, "#9fb2ff", 1.0);
     return () => {
+      clearGodRays();
       scene.fog = null;
       stopAmbient();
       resetRegistries();
@@ -54,7 +56,9 @@ export function Village() {
 
   return (
     <group>
-      <ambientLight intensity={0.26} color="#6a78b8" />
+      <ambientLight intensity={0.2} color="#6a78b8" />
+      {/* Moonlit sky above, dark ground below: tops of things catch the sky. */}
+      <hemisphereLight args={["#5868b0", "#0a0c10", 0.45]} />
       <directionalLight
         position={moonLight}
         intensity={0.65}
@@ -67,23 +71,21 @@ export function Village() {
         shadow-camera-bottom={-28}
       />
       <Sky />
-      <Stars radius={100} depth={20} count={2000} factor={4} saturation={0} fade speed={0.6} />
       <AmbientParticles biome="village" omen={null} ceiling={8} />
 
       {/* Ground + invisible perimeter */}
       <RigidBody type="fixed" colliders={false}>
-        <CuboidCollider args={[26, 0.5, 26]} position={[0, -0.5, 0]} collisionGroups={WORLD_GROUPS} />
-        <CuboidCollider args={[26, 3, 0.5]} position={[0, 3, -25]} collisionGroups={WORLD_GROUPS} />
-        <CuboidCollider args={[26, 3, 0.5]} position={[0, 3, 25]} collisionGroups={WORLD_GROUPS} />
-        <CuboidCollider args={[0.5, 3, 26]} position={[-25, 3, 0]} collisionGroups={WORLD_GROUPS} />
-        <CuboidCollider args={[0.5, 3, 26]} position={[25, 3, 0]} collisionGroups={WORLD_GROUPS} />
+        <CuboidCollider args={[BOUNDS + 1, 0.5, BOUNDS + 1]} position={[0, -0.5, 0]} collisionGroups={WORLD_GROUPS} />
+        <CuboidCollider args={[BOUNDS + 1, 3, 0.5]} position={[0, 3, -BOUNDS]} collisionGroups={WORLD_GROUPS} />
+        <CuboidCollider args={[BOUNDS + 1, 3, 0.5]} position={[0, 3, BOUNDS]} collisionGroups={WORLD_GROUPS} />
+        <CuboidCollider args={[0.5, 3, BOUNDS + 1]} position={[-BOUNDS, 3, 0]} collisionGroups={WORLD_GROUPS} />
+        <CuboidCollider args={[0.5, 3, BOUNDS + 1]} position={[BOUNDS, 3, 0]} collisionGroups={WORLD_GROUPS} />
       </RigidBody>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} material={ground} receiveShadow>
-        <planeGeometry args={[140, 140]} />
-      </mesh>
-
-      <Cottages cottages={COTTAGES} />
-      <Grounds cottages={COTTAGES} />
+      <Wilds />
+      <Grounds />
+      <Camp />
+      <FloorPillar />
+      <MoonShafts />
 
       {/* Home economics: your chest by the lane, Maro's stall opposite. */}
       <StorageChest position={CHEST.pos} rotation={CHEST.rot} />

@@ -77,9 +77,15 @@ corner — check it against the latest commit when testing.
 
 ## The game
 
-- **The village** sits above the dungeon. Its portal is **the Weighing Gate**:
-  it reads the level of the gear you wear and casts you to the depth where that
-  weight belongs. You don't pick a floor — your gear does.
+- **Riftwatch** — home, "the village" in the code — sits above the dungeon:
+  an expedition's camp pitched round the rift they found in a mountain
+  valley. Tents and lamplight, a palisade, a watchtower over the forest, the
+  fire everyone sits round; north, the forest climbs toward snow-capped
+  mountains, and a great moon rises between their peaks, its light streaming
+  over the valley. The rift is **the Weighing Gate**: it reads the level of
+  the gear you wear and casts you to the depth where that weight belongs —
+  the depth stone beside it shows the floor. You don't pick a floor — your
+  gear does.
 - **Items have levels.** Gear rolls at the depth it's found (±1). A staff's
   level scales its spell damage; every other piece adds a health ward. Your
   gear level (the mean over the four slots) decides your entry floor.

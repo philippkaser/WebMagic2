@@ -13,7 +13,7 @@ import { hudUnit } from "./HudAnchor";
 /** The arrival banner (artpass hud/ArrivalBanner): "YOU DESCEND TO" in
  * arcane caps, "Floor 12" in big parchment blackletter, the biome in gold
  * blackletter, the brass flourish with its diamond, and the biome's line of
- * lore — or, in the village, SANCTUARY / The Village.
+ * lore — or, at home, SANCTUARY / Riftwatch.
  *
  * It's written into the air where you're looking — each line burning in
  * after the last, the flourish drawing itself out from its diamond — hangs

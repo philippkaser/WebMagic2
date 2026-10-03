@@ -1,52 +1,67 @@
 import { useFrame } from "@react-three/fiber";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   BackSide,
   BufferAttribute,
   BufferGeometry,
   Color,
-  DoubleSide,
   Points,
   ShaderMaterial,
   SphereGeometry,
   Vector3,
 } from "three";
+import { AdditiveBlending, DoubleSide, type Group, PlaneGeometry, Quaternion } from "three";
 import { hash2 } from "../../render/textures/pixelKit";
+import { crestElevation, type Layer, MOON_ANGULAR_RADIUS, MOON_ELEVATION, NORTH } from "./skyline";
 
-/** The village night sky, drawn as pixel art on the world's chunky pixels:
+/** The valley's night sky, drawn as pixel art on the world's chunky pixels,
+ * and drawn at INFINITY: the whole backdrop rides along with the eye (it
+ * moves with the camera, never turns with it), so however far you walk the
+ * sky never comes closer, never clips, and the mountains stay as huge as
+ * mountains are.
  *
- *  - a moonlit gradient dome, banded into a few tones with an ordered
- *    dither between them (no smooth gradient anywhere);
- *  - the Milky Way: a broad band of dithered star-dust with dark lanes of
- *    dust through it, faint at the horizon;
- *  - stars as single pixels (Points: they stay crisp and steady as you
- *    turn) — thousands, denser along the band, in a few temperatures from
- *    blue-white to ember; each twinkles in hard steps, and the brightest
- *    are little crosses;
- *  - long banks of cloud low over the hills, dark against the sky, their
- *    tops lined with moonlight on the moon's side, drifting slowly;
- *  - the moon — a real sphere at the world's pixels, its craters lit by a
- *    sun over your shoulder (moonMaterial) — in a soft glow;
- *  - now and then a shooting star;
- *  - two ridges of mountain silhouette, the far one faintly moonlit.
+ *  - a gradient dome, banded into a few tones with an ordered dither, glowing
+ *    toward the moon and along the horizon beneath it;
+ *  - the Milky Way: a broad band of dithered star-dust with dark lanes;
+ *  - stars as single pixels, in a few temperatures, twinkling in hard steps
+ *    (the brightest little crosses), drowned out near the moon;
+ *  - long banks of cloud low over the hills, their tops lined with moonlight;
+ *  - a great full moon, low in the north — right behind the gate as you come
+ *    up the lane — rising out of the saddle between two titan peaks, bright
+ *    enough to bloom, in a wide soft glow;
+ *  - three ranges of mountains (skyline.ts): the far one snow-capped and
+ *    hazed blue, its crests rimmed with moonlight; the mid one darker; the
+ *    near hills black and fringed with pines; all dissolving at their feet
+ *    into the valley's mist;
+ *  - now and then a shooting star.
  *
- * Unlit, fog-free backdrop meshes drawn behind everything. */
+ * Unlit, fog-free meshes that write no depth, drawn first: everything in
+ * the world draws over them. */
 
-export const MOON_DIR = new Vector3(0.45, 0.42, -0.79).normalize();
+export const MOON_DIR = new Vector3(
+  Math.cos(MOON_ELEVATION) * Math.cos(NORTH),
+  Math.sin(MOON_ELEVATION),
+  Math.cos(MOON_ELEVATION) * Math.sin(NORTH),
+).normalize();
 /** Horizon colour: the fog and the clear colour match it, so the distance
  * dissolves into sky instead of into black. */
 export const HORIZON = "#1a2244";
 /** The galaxy's plane (its band is the great circle around this axis). */
 const MILKY_N = new Vector3(0.62, 0.35, 0.7).normalize();
 
-/** The moon's radius at its 100 m distance (about 8° across). */
-const MOON_R = 7;
-/** Where its sun shines from: over your shoulder and to the upper right as
- * seen from the village — a gibbous moon, the terminator on its lower left. */
+/** Backdrop distances from the eye (all well inside the camera's far
+ * plane; their draw order, not their depth, layers them). */
+const DOME_R = 100;
+const STAR_R = 96;
+const MOON_D = 90;
+const MOON_R = MOON_D * Math.tan(MOON_ANGULAR_RADIUS);
+const RIDGE_R = 85;
+/** Where its sun shines from: almost straight from behind you — a full
+ * moon, a sliver of shade along its lower left. */
 const MOON_SUN = (() => {
   const right = new Vector3().crossVectors(MOON_DIR, new Vector3(0, 1, 0)).normalize();
   const up = new Vector3().crossVectors(right, MOON_DIR).normalize();
-  return new Vector3().addScaledVector(MOON_DIR, -0.45).addScaledVector(right, 0.8).addScaledVector(up, 0.35).normalize();
+  return new Vector3().addScaledVector(MOON_DIR, -1).addScaledVector(right, 0.22).addScaledVector(up, 0.18).normalize();
 })();
 
 const NOISE = /* glsl */ `
@@ -77,12 +92,13 @@ function skyMaterial(): ShaderMaterial {
   return new ShaderMaterial({
     side: BackSide,
     depthWrite: false,
+    depthTest: false,
     fog: false,
     uniforms: {
       uHorizon: { value: new Color(HORIZON) },
       uZenith: { value: new Color("#03040b") },
       uMoon: { value: MOON_DIR },
-      uMoonGlow: { value: new Color("#3a4a80") },
+      uMoonGlow: { value: new Color("#5a6cb8") },
       uBand: { value: new Color("#8f86d8") },
       uMilky: { value: MILKY_N },
       uTime: { value: 0 },
@@ -117,10 +133,15 @@ function skyMaterial(): ShaderMaterial {
         float t = pow(h, 0.45);
         float q = floor(t * 7.0 + dith) / 7.0;
         vec3 c = mix(uHorizon, uZenith, clamp(q, 0.0, 1.0));
-        // The moon's glow: soft, in fine dithered steps (hard rings around
-        // it read as an outline).
-        float mg = pow(max(dot(d, uMoon), 0.0), 14.0);
-        c += uMoonGlow * floor(mg * 14.0 + dith) / 14.0 * 0.7;
+        // The moon's glow: wide and smooth (any ring around it reads as an
+        // outline) — a broad wash, a brighter heart, the air right round it
+        // white — and a band of lit haze along the horizon beneath it.
+        float md = max(dot(d, uMoon), 0.0);
+        float mg = 0.36 * pow(md, 8.0) + 0.26 * pow(md, 48.0) + 0.3 * pow(md, 1400.0);
+        vec3 mflat = normalize(vec3(uMoon.x, 0.0, uMoon.z));
+        float under = pow(max(dot(normalize(vec3(d.x, 0.0, d.z) + 1e-5), mflat), 0.0), 3.0);
+        mg += 0.12 * under * exp(-h * 14.0);
+        c += uMoonGlow * mg + (dith - 0.5) / 255.0 * 3.0;
 
         // The Milky Way: star-dust in a band, cut by dark lanes.
         float off = dot(d, uMilky);
@@ -190,7 +211,7 @@ function starField(count: number): { geometry: BufferGeometry; material: ShaderM
     const off = v.dot(MILKY_N);
     const keep = 0.35 + 0.65 * Math.exp((-off * off) / 0.02);
     if (hash2(tries, 3, 7) > keep) continue;
-    pos.push(v.x * 110, v.y * 110, v.z * 110);
+    pos.push(v.x * STAR_R, v.y * STAR_R, v.z * STAR_R);
     const b = hash2(tries, 4, 7);
     size.push(b > 0.985 ? 3 : b > 0.9 ? 2 : 1);
     const t = temps[Math.floor(hash2(tries, 5, 7) * temps.length)]!;
@@ -205,12 +226,13 @@ function starField(count: number): { geometry: BufferGeometry; material: ShaderM
   geometry.setAttribute("aColor", new BufferAttribute(new Float32Array(color), 3));
   geometry.setAttribute("aPhase", new BufferAttribute(new Float32Array(phase), 1));
   const material = new ShaderMaterial({
-    uniforms: { uTime: { value: 0 } },
+    uniforms: { uTime: { value: 0 }, uMoon: { value: MOON_DIR } },
     vertexShader: /* glsl */ `
       attribute float aSize;
       attribute vec3 aColor;
       attribute float aPhase;
       uniform float uTime;
+      uniform vec3 uMoon;
       varying vec3 vColor;
       varying float vSize;
       void main() {
@@ -219,7 +241,9 @@ function starField(count: number): { geometry: BufferGeometry; material: ShaderM
         float air = smoothstep(0.0, 0.35, dir.y);
         float tw = 0.75 + 0.25 * sin(uTime * (1.3 + fract(aPhase) * 2.5) + aPhase);
         tw = floor(tw * 4.0 + 0.5) / 4.0;
-        vColor = aColor * tw * (0.35 + 0.65 * air);
+        // The moon's glare drowns the stars around it.
+        float glare = smoothstep(0.985, 0.93, dot(dir, uMoon));
+        vColor = aColor * tw * (0.35 + 0.65 * air) * glare;
         vSize = aSize;
         gl_PointSize = aSize;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
@@ -239,6 +263,7 @@ function starField(count: number): { geometry: BufferGeometry; material: ShaderM
         #include <colorspace_fragment>
       }`,
     depthWrite: false,
+    depthTest: false,
     fog: false,
     toneMapped: false,
   });
@@ -331,87 +356,186 @@ function moonMaterial(sun: Vector3): ShaderMaterial {
         float lv = 4.0;
         float kq = floor(clamp(k, 0.0, 1.2) * lv + bayer4(gl_FragCoord.xy) * 0.5) / lv;
         vec3 col = vec3(0.035, 0.04, 0.055) + vec3(1.0, 0.97, 0.9) * kq;
-        gl_FragColor = vec4(col * 0.78, 1.0);
+        // Bright: past the bloom's threshold, so the moon glows.
+        gl_FragColor = vec4(col * 0.8, 1.0);
         #include <colorspace_fragment>
       }`,
+    depthWrite: false,
+    depthTest: false,
     fog: false,
     toneMapped: false,
   });
 }
 
-/** Jagged ring of peaks: a triangle strip from y = −2 up to a noisy crest. */
-function ridge(radius: number, base: number, amp: number, seed: number): BufferGeometry {
-  const n = 160;
-  const pos = new Float32Array((n + 1) * 2 * 3);
-  const idx: number[] = [];
-  for (let i = 0; i <= n; i++) {
-    const a = (i / n) * Math.PI * 2;
-    const k = i % n;
-    const crest =
-      base +
-      amp * (0.55 * Math.abs(Math.sin(a * 3 + seed)) + 0.3 * Math.abs(Math.sin(a * 7.3 + seed * 2)) + 0.15 * hash2(k, 0, seed));
-    const x = Math.cos(a) * radius;
-    const z = Math.sin(a) * radius;
-    pos.set([x, -2, z, x, crest, z], i * 6);
-    if (i < n) idx.push(i * 2, i * 2 + 2, i * 2 + 1, i * 2 + 1, i * 2 + 2, i * 2 + 3);
-  }
-  const g = new BufferGeometry();
-  g.setAttribute("position", new BufferAttribute(pos, 3));
-  g.setIndex(idx);
-  return g;
-}
-
-/** A ridge's material: dark, and — for the far one — a moonlit band along
- * its crest where it faces the moon. */
-function ridgeMaterial(color: string, moonlit: number): ShaderMaterial {
+/** The moon's halo: a camera-facing square, additive, a smooth falloff
+ * (wide wash plus a tight bright core) — no rings, no outline. */
+function haloMaterial(): ShaderMaterial {
   return new ShaderMaterial({
-    side: DoubleSide,
-    fog: false,
-    uniforms: { uColor: { value: new Color(color) }, uMoon: { value: MOON_DIR }, uLit: { value: moonlit } },
+    uniforms: { uColor: { value: new Color("#b8c6ff") } },
     vertexShader: /* glsl */ `
-      varying vec3 vWorld;
+      varying vec2 vUv;
       void main() {
-        vWorld = position;
+        vUv = uv;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }`,
     fragmentShader: /* glsl */ `
       uniform vec3 uColor;
-      uniform vec3 uMoon;
-      uniform float uLit;
-      varying vec3 vWorld;
+      varying vec2 vUv;
+      ${NOISE}
       void main() {
-        float toward = max(dot(normalize(vec3(vWorld.x, 0.0, vWorld.z)), normalize(vec3(uMoon.x, 0.0, uMoon.z))), 0.0);
-        float hgt = clamp((vWorld.y + 2.0) / 22.0, 0.0, 1.0);
-        float k = floor(hgt * toward * toward * 3.0) / 3.0;
-        gl_FragColor = vec4(uColor * (1.0 + k * uLit), 1.0);
+        // r = 1 at the square's edge; the moon's disc is r < 0.25.
+        float r = length(vUv - 0.5) * 2.0;
+        float k = 0.55 * exp(-r * r * 22.0) + 0.2 * exp(-r * 4.5) * (1.0 - r);
+        k = max(k, 0.0) + (bayer4(gl_FragCoord.xy) - 0.5) / 255.0 * 4.0;
+        gl_FragColor = vec4(uColor * k, 1.0);
+      }`,
+    blending: AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+    fog: false,
+    toneMapped: false,
+  });
+}
+
+/** A mountain range at infinity: a strip round the eye from below the
+ * horizon up to the layer's crest (skyline.ts), each column carrying its
+ * crest height so the shader knows how far below the ridgeline it is. */
+function ridge(layer: Layer, columns: number): BufferGeometry {
+  const n = columns;
+  const pos = new Float32Array((n + 1) * 2 * 3);
+  const crest = new Float32Array((n + 1) * 2);
+  const idx: number[] = [];
+  const foot = -Math.tan((12 * Math.PI) / 180) * RIDGE_R;
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const y = Math.tan(crestElevation(layer, a)) * RIDGE_R;
+    const x = Math.cos(a) * RIDGE_R;
+    const z = Math.sin(a) * RIDGE_R;
+    pos.set([x, foot, z, x, y, z], i * 6);
+    crest.set([y, y], i * 2);
+    if (i < n) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+  }
+  const g = new BufferGeometry();
+  g.setAttribute("position", new BufferAttribute(pos, 3));
+  g.setAttribute("aCrest", new BufferAttribute(crest, 1));
+  g.setIndex(idx);
+  return g;
+}
+
+interface RidgeLook {
+  rock: string;
+  /** How much of the valley's haze lies over the whole range (0…1). */
+  haze: number;
+  /** Snow on the peaks above this elevation (degrees; Infinity: none). */
+  snow: number;
+  /** Moonlight on the crests nearest the moon. */
+  rim: number;
+}
+
+/** A range's material: dark rock with faint gullies, snow on the high far
+ * peaks, the valley's mist rising over its feet (blue, glowing toward the
+ * moon), and the crests by the moon rimmed with light — all in a few
+ * dithered tones. */
+function ridgeMaterial(look: RidgeLook): ShaderMaterial {
+  return new ShaderMaterial({
+    side: DoubleSide,
+    uniforms: {
+      uRock: { value: new Color(look.rock) },
+      uSnowCol: { value: new Color("#4c5884") },
+      uHaze: { value: new Color(HORIZON) },
+      uMoonGlow: { value: new Color("#5a6cb8") },
+      uMoon: { value: MOON_DIR },
+      uHazeAmt: { value: look.haze },
+      uSnow: { value: (look.snow * Math.PI) / 180 },
+      uRim: { value: look.rim },
+    },
+    vertexShader: /* glsl */ `
+      attribute float aCrest;
+      varying vec3 vPos;
+      varying float vCrest;
+      void main() {
+        vPos = position;
+        vCrest = aCrest;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uRock;
+      uniform vec3 uSnowCol;
+      uniform vec3 uHaze;
+      uniform vec3 uMoonGlow;
+      uniform vec3 uMoon;
+      uniform float uHazeAmt;
+      uniform float uSnow;
+      uniform float uRim;
+      varying vec3 vPos;
+      varying float vCrest;
+      ${NOISE}
+      void main() {
+        vec3 d = normalize(vPos);
+        float dith = bayer4(gl_FragCoord.xy);
+        float r = length(vPos.xz);
+        float el = atan(vPos.y, r);
+        float below = atan(vCrest, r) - el; // radians under the ridgeline
+        float az = atan(d.z, d.x);
+        float md = max(dot(d, uMoon), 0.0);
+        // Rock, with gullies running down from the crest.
+        float gully = fbm(vec3(az * 60.0, el * 18.0, 0.0));
+        vec3 c = uRock * (0.75 + 0.5 * floor(gully * 3.0 + dith) / 3.0);
+        // Snow on the high peaks, in the gullies, ragged at its line — in
+        // shadow (the moon is behind the range), so blue-grey, not white.
+        float line = uSnow + (fbm(vec3(az * 40.0, el * 30.0, 4.0)) - 0.5) * 0.04;
+        if (el > line && gully > 0.48) {
+          float s = floor(clamp((gully - 0.48) * 4.0 + (el - line) * 12.0, 0.0, 1.0) * 3.0 + dith) / 3.0;
+          c = mix(c, uSnowCol, s);
+        }
+        // The valley's mist: over the whole range a little, thick at its feet;
+        // lit from within toward the moon.
+        // (Less glow than the open sky: the ranges stand dark against it.)
+        vec3 haze = uHaze + uMoonGlow * 0.3 * pow(md, 8.0);
+        float mist = uHazeAmt + (1.0 - uHazeAmt) * smoothstep(0.05, -0.02, el);
+        c = mix(c, haze, floor(clamp(mist, 0.0, 1.0) * 6.0 + dith) / 6.0);
+        // Moonlight catching the crests nearest the moon (they're backlit).
+        float rim = smoothstep(0.007, 0.0, below) * pow(md, 90.0) * uRim;
+        c += vec3(0.55, 0.62, 0.95) * floor(rim * 3.0 + dith) / 3.0;
+        gl_FragColor = vec4(c, 1.0);
         #include <colorspace_fragment>
       }`,
+    depthWrite: false,
+    depthTest: false,
+    fog: false,
   });
 }
 
 const tmpA = new Vector3();
 const tmpB = new Vector3();
 
+/** Draw order of the backdrop's layers (all before the world). */
+const ORDER = { dome: -20, stars: -19, halo: -18, moon: -17, far: -16, mid: -15, near: -14 } as const;
+
 export function Sky() {
   const res = useMemo(() => {
     const stars = starField(2600);
     return {
-      dome: new SphereGeometry(120, 32, 16),
+      dome: new SphereGeometry(DOME_R, 32, 16),
       domeMat: skyMaterial(),
       starGeo: stars.geometry,
       starMat: stars.material,
-      far: ridge(95, 6, 16, 1.7),
-      farMat: ridgeMaterial("#0b0f22", 1.4),
-      near: ridge(72, 1, 9, 4.2),
-      nearMat: ridgeMaterial("#05070f", 0.5),
+      far: ridge("far", 1440),
+      farMat: ridgeMaterial({ rock: "#121830", haze: 0.3, snow: 12, rim: 1.8 }),
+      mid: ridge("mid", 1440),
+      midMat: ridgeMaterial({ rock: "#080c1c", haze: 0.2, snow: Infinity, rim: 1.0 }),
+      near: ridge("near", 2400),
+      nearMat: ridgeMaterial({ rock: "#04060d", haze: 0.06, snow: Infinity, rim: 0.6 }),
       moon: new SphereGeometry(MOON_R, 64, 48),
       moonMat: moonMaterial(MOON_SUN),
+      halo: new PlaneGeometry(MOON_R * 8, MOON_R * 8),
+      haloMat: haloMaterial(),
     };
   }, []);
   const points = useMemo(() => {
     const p = new Points(res.starGeo, res.starMat);
     p.frustumCulled = false;
-    p.renderOrder = -1.5;
+    p.renderOrder = ORDER.stars;
     return p;
   }, [res]);
   useEffect(
@@ -420,10 +544,16 @@ export function Sky() {
     },
     [res],
   );
-  const moonPos = useMemo(() => MOON_DIR.clone().multiplyScalar(100), []);
+  const rig = useRef<Group>(null);
+  const moonPos = useMemo(() => MOON_DIR.clone().multiplyScalar(MOON_D), []);
+  // Facing the eye: the halo square's normal (+z) turned back along the
+  // moon's direction (the eye is always at the rig's origin).
+  const moonFacing = useMemo(() => new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), MOON_DIR.clone().negate()), []);
   // Shooting stars: one every 7–18 s, across 0.7 s.
   const meteor = useMemo(() => ({ next: 4, start: -10, a: new Vector3(), b: new Vector3() }), []);
-  useFrame(({ clock }) => {
+  useFrame(({ clock, camera }) => {
+    // At infinity: the backdrop goes wherever the eye goes.
+    rig.current?.position.copy(camera.position);
     const t = clock.elapsedTime;
     const u = res.domeMat.uniforms;
     u.uTime!.value = t;
@@ -450,14 +580,17 @@ export function Sky() {
     }
   });
   return (
-    <group>
-      <mesh geometry={res.dome} material={res.domeMat} renderOrder={-2} frustumCulled={false} />
+    <group ref={rig}>
+      <mesh geometry={res.dome} material={res.domeMat} renderOrder={ORDER.dome} frustumCulled={false} />
       <primitive object={points} />
-      <mesh geometry={res.far} material={res.farMat} renderOrder={-1} />
-      <mesh geometry={res.near} material={res.nearMat} renderOrder={-1} />
-      <group position={moonPos} onUpdate={(g) => g.lookAt(0, 0, 0)}>
-        <mesh geometry={res.moon} material={res.moonMat} />
+      {/* Moon and halo face the eye (the rig's origin). */}
+      <group position={moonPos} quaternion={moonFacing}>
+        <mesh geometry={res.halo} material={res.haloMat} renderOrder={ORDER.halo} frustumCulled={false} />
+        <mesh geometry={res.moon} material={res.moonMat} renderOrder={ORDER.moon} frustumCulled={false} />
       </group>
+      <mesh geometry={res.far} material={res.farMat} renderOrder={ORDER.far} frustumCulled={false} />
+      <mesh geometry={res.mid} material={res.midMat} renderOrder={ORDER.mid} frustumCulled={false} />
+      <mesh geometry={res.near} material={res.nearMat} renderOrder={ORDER.near} frustumCulled={false} />
     </group>
   );
 }

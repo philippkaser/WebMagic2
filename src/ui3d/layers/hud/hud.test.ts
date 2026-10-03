@@ -255,7 +255,7 @@ describe("copy", () => {
 
   test("arrival titles: village, calm floor, omen floor", () => {
     const village = arrivalTitle(false, 0, 0);
-    expect(village).toMatchObject({ label: "Sanctuary", title: "The Village", subtitle: null, lore: VILLAGE_LORE, omen: null });
+    expect(village).toMatchObject({ label: "Sanctuary", title: "Riftwatch", subtitle: null, lore: VILLAGE_LORE, omen: null });
     const calm = arrivalTitle(true, 1, 12345);
     expect(calm.label).toBe("You descend to");
     expect(calm.title).toBe("Floor 1");

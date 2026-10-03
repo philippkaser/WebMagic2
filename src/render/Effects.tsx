@@ -1,12 +1,14 @@
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import { Effect } from "postprocessing";
 import { useMemo } from "react";
 import { Color, Uniform } from "three";
 import type { Grade } from "../world/biomes";
+import { GodRaysEffect } from "./godRays";
 
-/** The gritty-pixel post chain (ported from the artpass branch): bloom
- * feeds the emissive magic, torches and painted specks, a split-tone colour
+/** The gritty-pixel post chain (ported from the artpass branch): god rays
+ * where a scene has a source in its sky (the village's moon; ./godRays),
+ * bloom feeds the emissive magic, torches and painted specks, a split-tone colour
  * grade sets each place's mood, then a whisper of film grain and a heavy
  * vignette. The pixelation itself is free: the canvas renders at dpr 0.35
  * and the browser upscales it with image-rendering: pixelated (see
@@ -14,9 +16,12 @@ import type { Grade } from "../world/biomes";
  * of native resolution. */
 export function Effects() {
   const grade = useMemo(() => new GradeEffect(), []);
+  const camera = useThree((s) => s.camera);
+  const rays = useMemo(() => new GodRaysEffect(camera), [camera]);
   useFrame((_, dt) => grade.approach(target, Math.min(dt, 0.1)));
   return (
     <EffectComposer multisampling={0}>
+      <primitive object={rays} dispose={null} />
       <Bloom mipmapBlur intensity={1.2} luminanceThreshold={0.5} luminanceSmoothing={0.25} />
       <primitive object={grade} dispose={null} />
       <Noise opacity={0.06} />
