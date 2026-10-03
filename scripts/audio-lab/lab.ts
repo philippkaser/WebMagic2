@@ -9,7 +9,10 @@ import { playCast, playExplosion, startAmbient } from "../../src/audio/sound";
 import { emitterAt, oneShotAt, selfOut, setAcousticGrid, setHeadphones, updateListener, type Emitter } from "../../src/audio/spatial";
 import { chooseLoops, playEnemyStep, playFootstep, playRoomVoice, startTorch, type Loop } from "../../src/audio/voices";
 import { generateFloor } from "../../src/world/gen";
+import { BANK } from "./bank";
 import { buildScene, wav } from "./scene";
+
+const BANK_BY_NAME = new Map(Object.values(BANK).flat().map((s) => [s.name, s]));
 
 const SR = 48000;
 /** As AudioWorld: the torches that reach you loudest, re-traced a few times a second. */
@@ -52,6 +55,8 @@ async function render(name: string): Promise<string> {
   const movers: Emitter[] = [];
   let nextLog = 0;
   const fired = new Set<number>();
+  const bankStops = new Map<string, () => void>();
+  const bankLogged = new Set<string>();
   const step = (t: number) => {
     pose(t);
     const tick = t >= nextLoopTick;
@@ -159,6 +164,18 @@ async function render(name: string): Promise<string> {
         case "impulse-at": {
           const n = oneShotAt(e.at!, 3);
           if (n) impulse(ctx, n, ctx.currentTime);
+          break;
+        }
+        case "bank": {
+          if (e.stop) {
+            bankStops.get(e.name!)?.();
+            bankStops.delete(e.name!);
+            break;
+          }
+          if (!bankLogged.has(e.name!)) console.log(`[lab] bank ${e.name} ${t.toFixed(3)}`);
+          bankLogged.add(e.name!);
+          const stop = BANK_BY_NAME.get(e.name!)!.play(e.at!);
+          if (stop) bankStops.set(e.name!, stop);
           break;
         }
         case "impulse-dry":

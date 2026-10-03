@@ -23,6 +23,9 @@
 //   leave-tone    a tone in the hall as you walk out (no warble round the door)
 //   spin          a tone ahead while you whip round (no clicks as the ears swing)
 //   stress        every voice busy (how hard the audio thread works)
+//   bank-<group>  every sound of a group one after another (bank.ts: combat,
+//                 creatures, steps, world, events, travel, ui, menus,
+//                 ambient); "bank" plays them all. Logs each one's start.
 // With none named, renders them all. Add ":speakers" to a scene's name to
 // render it for speakers rather than headphones (e.g. orbit:speakers).
 //

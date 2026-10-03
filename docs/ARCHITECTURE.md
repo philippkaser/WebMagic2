@@ -433,8 +433,21 @@ limiting and hit/pickup sanitization already run server-/authority-side.
 
 ## Sound (`audio/`)
 
-Every sound is synthesized (`sound.ts`, `voices.ts`) and, unless it's a
-UI blip, heard through a small raytraced acoustics model:
+Every sound is synthesized (`sound.ts`, `voices.ts`, `uiSounds.ts`, the
+menus' `menuSounds.ts`) from the voices in `synth.ts`: `tone` (sweeps,
+detune, vibrato; bright waves through a lowpass that closes as the note
+dies), `noise` in three colours (white hiss, pink air, brown rumble),
+`strike` (a struck object by its inharmonic modes — bell, bowl, glass,
+metal, stone), `fm` (index falling as the note dies: magic's shimmer),
+`voice` (a buzz or breath through vowel formants, optionally rattling:
+growls, whispers, a creaking stone), `crackle` (grains: debris, embers)
+and `saturated` (grit for blasts and roars). The master bus ends in a
+gentle compressor (a pile-up holds together) and a soft clipper (it
+saturates instead of clipping). The audio lab's `bank-<group>` scenes
+render every sound in turn, to hear and measure a change sound by sound.
+
+Unless it's a UI blip, a sound is heard through a small raytraced
+acoustics model:
 
 - **The level as sound sees it** (`acoustics.ts`, pure and tested): an
   `AcousticGrid` of solid/open cells — the dungeon's tiles (2 m, rock past

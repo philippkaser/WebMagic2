@@ -2,6 +2,7 @@
 // generated floor — a torch-lit hall, the walk out of it down a corridor.
 import { TILE } from "../../src/core/config";
 import type { FloorLayout } from "../../src/world/types";
+import { BANK } from "./bank";
 
 export type P3 = [number, number, number];
 export interface Ev {
@@ -9,6 +10,10 @@ export interface Ev {
   kind: string;
   at?: P3;
   loud?: number;
+  /** A bank sound's name ("bank" events). */
+  name?: string;
+  /** Stop the bank sound's loop (if it made one). */
+  stop?: boolean;
 }
 /** A sound that follows a path: steady noise, or a steady tone (pitch). */
 export interface Moving {
@@ -107,6 +112,23 @@ export function buildScene(layout: FloorLayout, name: string): Scene {
     for (let t = from; t < to; t += 0.3) events.push({ t, kind: "step", loud: 0.9 });
   };
   const end = path[path.length - 1]!;
+  if (name.startsWith("bank")) {
+    // Every sound of a group (or all), one after another, the placed ones
+    // 3 m ahead in the hall.
+    const groups = name === "bank" ? Object.keys(BANK) : [name.slice(5)];
+    const ahead: P3 = [center[0] - 3 * Math.sin(facingTorch), 1.2, center[1] - 3 * Math.cos(facingTorch)];
+    let t = 0.3;
+    for (const g of groups) {
+      const sounds = BANK[g];
+      if (!sounds) throw new Error("unknown bank group " + g);
+      for (const s of sounds) {
+        for (const off of s.times ?? [0]) events.push({ t: t + off, kind: "bank", name: s.name, at: ahead });
+        events.push({ t: t + s.dur * 0.8, kind: "bank", name: s.name, stop: true });
+        t += s.dur + 0.35;
+      }
+    }
+    return { duration: t + 0.5, pose: () => ({ x: center[0], z: center[1], yaw: facingTorch }), events, torches: false, ambient: false };
+  }
   switch (name) {
     case "walk":
       steps(walkFrom + 0.1, walkEnd);
