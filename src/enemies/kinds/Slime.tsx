@@ -1,5 +1,5 @@
 import { useFrame } from "@react-three/fiber";
-import { BallCollider, RigidBody } from "@react-three/rapier";
+import { RigidBody } from "@react-three/rapier";
 import { useMemo, useRef } from "react";
 import type { Mesh, MeshStandardMaterial } from "three";
 import { ENEMY_GLOW, SlimeModel } from "../../render/models/enemies";
@@ -7,7 +7,9 @@ import type { Vec3 } from "../../world/types";
 import { createChaseInput, createSteering, type Vec } from "../brains/common";
 import { createSlimeBrain, SLIME_MAX_GEN, slimeSquash, tickSlime } from "../brains/slime";
 import { spawnEnemy } from "../spawnedStore";
-import { ENEMY_GROUPS, ENEMY_LOOT_CHANCE, useContactDamage, useEnemy } from "../useEnemy";
+import { bodyProps, SpecCollider } from "../../game/bodies";
+import { slimeBody } from "../../sim/bodies";
+import { ENEMY_LOOT_CHANCE, useContactDamage, useEnemy } from "../useEnemy";
 
 /** Slime — a gelatinous melee blob that hops toward its prey and, on death,
  * SPLITS into two smaller, faster copies (down to a terminal generation; see
@@ -30,6 +32,7 @@ export function Slime({
   const gen = Math.min(generation, SLIME_MAX_GEN);
   const brain = useMemo(() => createSlimeBrain(gen), [gen]);
   const cfg = brain.gen;
+  const body = useMemo(() => slimeBody(gen), [gen]);
   const radius = 0.5 * cfg.size;
   const last = gen >= SLIME_MAX_GEN;
   const mesh = useRef<Mesh>(null);
@@ -89,16 +92,8 @@ export function Slime({
 
   if (e.dead) return null;
   return (
-    <RigidBody
-      ref={e.body}
-      position={position}
-      type={e.net.bodyType}
-      colliders={false}
-      gravityScale={1}
-      linearDamping={0.1}
-      enabledRotations={[false, false, false]}
-    >
-      <BallCollider args={[radius]} mass={1.2 * cfg.size} collisionGroups={ENEMY_GROUPS} />
+    <RigidBody ref={e.body} position={position} {...bodyProps(body)} type={e.net.bodyType}>
+      <SpecCollider spec={body} />
       <SlimeModel size={cfg.size} meshRef={mesh} materialRef={mat} />
     </RigidBody>
   );

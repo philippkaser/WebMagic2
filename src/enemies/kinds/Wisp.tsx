@@ -1,5 +1,5 @@
 import { useFrame } from "@react-three/fiber";
-import { BallCollider, RigidBody } from "@react-three/rapier";
+import { RigidBody } from "@react-three/rapier";
 import { useMemo, useRef } from "react";
 import type { MeshStandardMaterial } from "three";
 import { ENEMY_GLOW, WispModel } from "../../render/models/enemies";
@@ -7,13 +7,14 @@ import type { Vec3 } from "../../world/types";
 import { createChaseInput, createSteering } from "../brains/common";
 import { tickWisp } from "../brains/wisp";
 import {
-  ENEMY_GROUPS,
   ENEMY_LOOT_CHANCE,
   useContactDamage,
   useEnemy,
   type EnemyDeathFx,
   type EnemyDrops,
 } from "../useEnemy";
+import { bodyProps, SpecCollider } from "../../game/bodies";
+import { ENEMY_BODIES } from "../../sim/bodies";
 
 const DEATH_FX: EnemyDeathFx = {
   // It comes apart as light: sparks flung wide, then the soul rises.
@@ -22,6 +23,7 @@ const DEATH_FX: EnemyDeathFx = {
   soul: "#c89cff",
 };
 const DROPS: EnemyDrops = { lootChance: ENEMY_LOOT_CHANCE, minY: 0.6 };
+const BODY = ENEMY_BODIES.wisp;
 
 /** Wisp — a floating mote of hostile magic. Chases the nearest wizard and
  * burns on contact. The floor authority runs its brain (brains/wisp.ts);
@@ -63,16 +65,8 @@ export function Wisp({ position, floor, entityId }: { position: Vec3; floor: num
 
   if (e.dead) return null;
   return (
-    <RigidBody
-      ref={e.body}
-      position={position}
-      type={e.net.bodyType}
-      colliders={false}
-      gravityScale={0}
-      linearDamping={0.5}
-      enabledRotations={[false, false, false]}
-    >
-      <BallCollider args={[0.42]} mass={2} collisionGroups={ENEMY_GROUPS} />
+    <RigidBody ref={e.body} position={position} {...bodyProps(BODY)} type={e.net.bodyType}>
+      <SpecCollider spec={BODY} />
       <WispModel materialRef={mat} />
     </RigidBody>
   );

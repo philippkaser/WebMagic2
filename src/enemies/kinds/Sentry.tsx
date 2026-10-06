@@ -1,5 +1,5 @@
 import { useFrame } from "@react-three/fiber";
-import { CuboidCollider, RigidBody, useRapier } from "@react-three/rapier";
+import { RigidBody, useRapier } from "@react-three/rapier";
 import { useMemo, useRef } from "react";
 import type { Group, MeshStandardMaterial } from "three";
 import { flashLight } from "../../fx/DynamicLights";
@@ -11,7 +11,9 @@ import { enemyCast } from "../../weapons/hostileEffects";
 import type { Vec3 } from "../../world/types";
 import { aimDir, type Vec } from "../brains/common";
 import { createSentryBrain, createSentryTick, SENTRY, sentryLead, sentryYaw, tickSentry } from "../brains/sentry";
-import { ENEMY_GROUPS, ENEMY_LOOT_CHANCE, useEnemy, type EnemyDeathFx, type EnemyDrops } from "../useEnemy";
+import { bodyProps, SpecCollider } from "../../game/bodies";
+import { ENEMY_BODIES } from "../../sim/bodies";
+import { ENEMY_LOOT_CHANCE, useEnemy, type EnemyDeathFx, type EnemyDrops } from "../useEnemy";
 
 const BOLT_COLOR = "#ff5136";
 const DEATH_FX: EnemyDeathFx = {
@@ -99,8 +101,8 @@ export function Sentry({ position, floor, entityId }: { position: Vec3; floor: n
 
   if (e.dead) return null;
   return (
-    <RigidBody ref={e.body} position={position} type="fixed" colliders={false}>
-      <CuboidCollider args={[0.42, 0.55, 0.42]} position={[0, 0.55, 0]} collisionGroups={ENEMY_GROUPS} />
+    <RigidBody ref={e.body} position={position} {...bodyProps(ENEMY_BODIES.sentry)}>
+      <SpecCollider spec={ENEMY_BODIES.sentry} />
       <SentryModel headRef={head} materialRef={mat} />
     </RigidBody>
   );

@@ -1,5 +1,5 @@
 import { useFrame } from "@react-three/fiber";
-import { BallCollider, RigidBody } from "@react-three/rapier";
+import { RigidBody } from "@react-three/rapier";
 import { useEffect, useMemo, useRef } from "react";
 import type { Group, MeshStandardMaterial } from "three";
 import { playBossRoar } from "../../audio/sound";
@@ -33,7 +33,9 @@ import {
   wardenVolleyBolt,
   wardenVolleyCount,
 } from "../brains/warden";
-import { ENEMY_GROUPS, useContactDamage, useEnemy } from "../useEnemy";
+import { useContactDamage, useEnemy } from "../useEnemy";
+import { bodyProps, SpecCollider } from "../../game/bodies";
+import { ENEMY_BODIES } from "../../sim/bodies";
 
 /** The boss is a singleton: its net id and HUD bar are fixed. */
 const BOSS_ID = "boss";
@@ -42,6 +44,7 @@ const EMBER = "#ff8b3d";
 /** The slam's blast radius (before the floor's explosion rule). */
 const WARDEN_SLAM_RADIUS = 5.2;
 const UP_AXIS: Vec3 = [0, 1, 0];
+const BODY = ENEMY_BODIES.boss;
 
 /** Warden of the Deep — the floor boss (every 10th floor). The authority runs
  * its brain (brains/warden.ts); the replication framework moves its body on
@@ -230,16 +233,8 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
 
   if (e.dead) return null;
   return (
-    <RigidBody
-      ref={e.body}
-      position={position}
-      type={e.net.bodyType}
-      colliders={false}
-      gravityScale={0}
-      linearDamping={0.8}
-      enabledRotations={[false, false, false]}
-    >
-      <BallCollider args={[1.15]} mass={30} collisionGroups={ENEMY_GROUPS} />
+    <RigidBody ref={e.body} position={position} {...bodyProps(BODY)} type={e.net.bodyType}>
+      <SpecCollider spec={BODY} />
       <WardenModel shellRef={shell} materialRef={mat} />
     </RigidBody>
   );

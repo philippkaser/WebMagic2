@@ -1,12 +1,5 @@
 import { useFrame } from "@react-three/fiber";
-import {
-  BallCollider,
-  CuboidCollider,
-  CylinderCollider,
-  interactionGroups,
-  RigidBody,
-  type RapierRigidBody,
-} from "@react-three/rapier";
+import { CuboidCollider, interactionGroups, RigidBody, type RapierRigidBody } from "@react-three/rapier";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, MeshStandardMaterial, Vector3 } from "three";
 import { playHit, playPortal, playSealBreak, playSealedTouch } from "../audio/sound";
@@ -22,6 +15,7 @@ import {
 import { shatterFx, torchEmberFx, torchSmokeFx, torchSparkFx, runeBurstFx, soulRiseFx } from "../fx/effects";
 import { addFlame, removeFlame, type FlameHandle } from "../fx/Flames";
 import { spawnBurst } from "../fx/Particles";
+import { bodyProps, SpecCollider } from "../game/bodies";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { allocId, registerDynamicBody, registerHittable } from "../game/registry";
@@ -35,6 +29,7 @@ import { registerSyncProvider } from "../net/entities";
 import { isHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
 import { useNetBody } from "../net/NetSystems";
+import { PROP_BODIES } from "../sim/bodies";
 import { useGame } from "../state/gameStore";
 import { registerPortalAnchor } from "../transition/portals";
 import { smoothstep } from "../transition/timeline";
@@ -46,27 +41,17 @@ import { BarrelModel, CrateModel, PotModel } from "../render/models/PropModels";
 import { TORCH_EMBER_INTENSITY, TorchModel } from "../render/models/TorchModel";
 import type { PropKind, Vec3 } from "./types";
 
-const PROP_GROUPS = interactionGroups(GROUPS.PROP, [
-  GROUPS.WORLD,
-  GROUPS.PLAYER,
-  GROUPS.ENEMY,
-  GROUPS.FRIENDLY_PROJECTILE,
-  GROUPS.ENEMY_PROJECTILE,
-  GROUPS.PROP,
-]);
-
 interface PropSpec {
   hp: number;
-  mass: number;
   shards: string[];
   lootChance: number;
   explodes: boolean;
 }
 
 const SPECS: Record<PropKind, PropSpec> = {
-  crate: { hp: 26, mass: 1.1, shards: ["#a8743c", "#6b4a24", "#8a5c2e"], lootChance: 0.08, explodes: false },
-  barrel: { hp: 42, mass: 2, shards: ["#8a5c2e", "#5a3a1c", "#6e6e74"], lootChance: 0.08, explodes: true },
-  pot: { hp: 6, mass: 0.4, shards: ["#c98d5f", "#8a5a3a", "#e0b48a"], lootChance: 0.12, explodes: false },
+  crate: { hp: 26, shards: ["#a8743c", "#6b4a24", "#8a5c2e"], lootChance: 0.08, explodes: false },
+  barrel: { hp: 42, shards: ["#8a5c2e", "#5a3a1c", "#6e6e74"], lootChance: 0.08, explodes: true },
+  pot: { hp: 6, shards: ["#c98d5f", "#8a5a3a", "#e0b48a"], lootChance: 0.12, explodes: false },
 };
 
 /** Debris amount per prop (a pot is a handful of sherds, a barrel a lot of
@@ -196,32 +181,11 @@ export function Breakable({
 
   if (dead) return null;
   return (
-    <RigidBody
-      ref={body}
-      position={position}
-      type={net.bodyType}
-      colliders={false}
-      linearDamping={0.2}
-      angularDamping={0.4}
-    >
-      {kind === "crate" && (
-        <>
-          <CuboidCollider args={[0.42, 0.42, 0.42]} mass={spec.mass} collisionGroups={PROP_GROUPS} />
-          <CrateModel />
-        </>
-      )}
-      {kind === "barrel" && (
-        <>
-          <CylinderCollider args={[0.48, 0.4]} mass={spec.mass} collisionGroups={PROP_GROUPS} />
-          <BarrelModel />
-        </>
-      )}
-      {kind === "pot" && (
-        <>
-          <BallCollider args={[0.3]} mass={spec.mass} collisionGroups={PROP_GROUPS} />
-          <PotModel seed={entityId} />
-        </>
-      )}
+    <RigidBody ref={body} position={position} {...bodyProps(PROP_BODIES[kind])} type={net.bodyType}>
+      <SpecCollider spec={PROP_BODIES[kind]} />
+      {kind === "crate" && <CrateModel />}
+      {kind === "barrel" && <BarrelModel />}
+      {kind === "pot" && <PotModel seed={entityId} />}
     </RigidBody>
   );
 }

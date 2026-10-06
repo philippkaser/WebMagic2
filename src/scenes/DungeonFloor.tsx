@@ -1,9 +1,9 @@
 import { useThree } from "@react-three/fiber";
-import { CuboidCollider, interactionGroups, RigidBody } from "@react-three/rapier";
+import { CuboidCollider, RigidBody } from "@react-three/rapier";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { getEnemyDef } from "../enemies/registry";
 import { SpawnedEnemies } from "../enemies/SpawnedEnemies";
-import { GROUPS, TILE, WALL_HEIGHT } from "../core/config";
+import { TILE, WALL_HEIGHT } from "../core/config";
 import { AmbientParticles } from "../fx/AmbientParticles";
 import { addLightSource, removeLightSource } from "../fx/DynamicLights";
 import { resetRegistries } from "../game/registry";
@@ -17,6 +17,7 @@ import { DungeonStone } from "../render/models/DungeonStone";
 import { LightShafts } from "../render/models/LightShaftModel";
 import { RuneCircleModel } from "../render/models/RuneCircleModel";
 import { floorsUntilExit } from "../run/rules";
+import { WORLD_GROUPS } from "../sim/bodies";
 import { useGame } from "../state/gameStore";
 import { LoreRunes } from "../world/loreRunes";
 import { Breakable, Portal, Torch, TreasurePedestal } from "../world/props";
@@ -24,14 +25,6 @@ import { Trap } from "../world/traps";
 import { getBiomeDef } from "../world/biomes";
 import type { FloorLayout, Vec3 } from "../world/types";
 import { useFloorAtmosphere } from "./floorAtmosphere";
-
-const WORLD_GROUPS = interactionGroups(GROUPS.WORLD, [
-  GROUPS.PLAYER,
-  GROUPS.ENEMY,
-  GROUPS.FRIENDLY_PROJECTILE,
-  GROUPS.ENEMY_PROJECTILE,
-  GROUPS.PROP,
-]);
 
 /** Regular enemies never despawn through the registry's onDeath (they manage
  * their own death); only the boss, rendered separately below, needs it. */

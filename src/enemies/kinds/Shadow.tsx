@@ -1,5 +1,5 @@
 import { useFrame } from "@react-three/fiber";
-import { BallCollider, RigidBody } from "@react-three/rapier";
+import { RigidBody } from "@react-three/rapier";
 import { useMemo, useRef } from "react";
 import type { MeshStandardMaterial } from "three";
 import { ENEMY_GLOW, SHADOW_OPACITY, ShadowModel } from "../../render/models/enemies";
@@ -7,13 +7,14 @@ import type { Vec3 } from "../../world/types";
 import { createChaseInput, createSteering } from "../brains/common";
 import { createShadowBrain, tickShadow } from "../brains/shadow";
 import {
-  ENEMY_GROUPS,
   ENEMY_LOOT_CHANCE,
   useContactDamage,
   useEnemy,
   type EnemyDeathFx,
   type EnemyDrops,
 } from "../useEnemy";
+import { bodyProps, SpecCollider } from "../../game/bodies";
+import { ENEMY_BODIES } from "../../sim/bodies";
 
 const DEATH_FX: EnemyDeathFx = {
   // It unravels into the dark it came from: a slow bloom of shadow-smoke.
@@ -22,6 +23,7 @@ const DEATH_FX: EnemyDeathFx = {
   soul: "#9a6aff",
 };
 const DROPS: EnemyDrops = { lootChance: ENEMY_LOOT_CHANCE, minY: 0.6 };
+const BODY = ENEMY_BODIES.shadow;
 
 /** Shadow — a lurking stalker. Instead of the wisp's straight chase it plays
  * keep-away: prowls a ring around its target, then darts in for a strike and
@@ -68,16 +70,8 @@ export function Shadow({ position, floor, entityId }: { position: Vec3; floor: n
 
   if (e.dead) return null;
   return (
-    <RigidBody
-      ref={e.body}
-      position={position}
-      type={e.net.bodyType}
-      colliders={false}
-      gravityScale={0}
-      linearDamping={0.6}
-      enabledRotations={[false, false, false]}
-    >
-      <BallCollider args={[0.44]} mass={2} collisionGroups={ENEMY_GROUPS} />
+    <RigidBody ref={e.body} position={position} {...bodyProps(BODY)} type={e.net.bodyType}>
+      <SpecCollider spec={BODY} />
       <ShadowModel materialRef={mat} />
     </RigidBody>
   );

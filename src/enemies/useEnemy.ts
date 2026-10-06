@@ -1,9 +1,9 @@
-import { interactionGroups, type RapierRigidBody } from "@react-three/rapier";
+import type { RapierRigidBody } from "@react-three/rapier";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { playHit } from "../audio/sound";
 import { listenerAt } from "../audio/spatial";
 import { ENEMY_STRIDE, isEnemyVoice, playEnemyDeath, playEnemyStep, playEnemyWake } from "../audio/voices";
-import { floorScale, GROUPS, PLAYER } from "../core/config";
+import { floorScale, PLAYER } from "../core/config";
 import { flashLight } from "../fx/DynamicLights";
 import { hitSparksFx, soulDissolveFx } from "../fx/effects";
 import { spawnBurst, type BurstOptions } from "../fx/Particles";
@@ -33,16 +33,6 @@ import { getEnemyStats, type EnemyId } from "./roster";
  * rules live in items/LootOrbs). That keeps omens out of every component —
  * but it does mean a floor's rules must be installed before its enemies
  * mount. */
-
-/** Enemy bodies collide with the world, wizards, each other, props and
- * wizard spells (never their own bolts). */
-export const ENEMY_GROUPS = interactionGroups(GROUPS.ENEMY, [
-  GROUPS.WORLD,
-  GROUPS.PLAYER,
-  GROUPS.ENEMY,
-  GROUPS.PROP,
-  GROUPS.FRIENDLY_PROJECTILE,
-]);
 
 /** Base chance a regular enemy drops an item. */
 export const ENEMY_LOOT_CHANCE = 0.24;
