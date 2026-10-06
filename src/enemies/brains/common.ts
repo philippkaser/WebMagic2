@@ -4,13 +4,14 @@
  * (its own pose, the nearest wizard, the clock) they decide how it should
  * move and when it should attack. They never import three, Rapier or React —
  * inputs are plain {x,y,z} records (structurally satisfied by a three Vector3
- * or a Rapier translation()/linvel() result, so components pass those straight
- * in) — which keeps every state machine and every piece of steering math
+ * or a Rapier translation()/linvel() result, so controllers pass those
+ * straight in) — which keeps every state machine and every piece of steering math
  * unit-testable under `bun test` with no scene, no physics and no clock.
  *
  * Allocation rule: brains run every frame for every enemy, so they write into
- * caller-owned output objects instead of returning fresh ones. A component
- * allocates its input/output records once (useMemo) and reuses them. */
+ * caller-owned output objects instead of returning fresh ones. A controller
+ * (sim/enemies/controllers.ts) allocates its input/output records once and
+ * reuses them. */
 
 export interface Vec {
   x: number;
@@ -23,7 +24,7 @@ export interface Vec {
 export type RandomSource = () => number;
 
 /** What a chasing enemy senses each frame. Shared by the wisp, shadow and
- * slime so a component fills one record and hands it to its brain. */
+ * slime so a controller fills one record and hands it to its brain. */
 export interface ChaseInput {
   /** The body's position and velocity this frame. */
   pos: Vec;
@@ -54,7 +55,7 @@ export interface Move {
 }
 
 /** A chaser's decision: the move plus the latched wake state, which the
- * component stores back into the shell's aggro ref. */
+ * controller stores back into its core (EnemyCore.steer). */
 export interface Steering extends Move {
   aggro: boolean;
 }

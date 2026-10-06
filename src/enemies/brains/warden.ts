@@ -14,7 +14,7 @@ import { blendFactor, blendVelocity, type Move, type RandomSource, type Vec } fr
  * and rings. Dice come from an injected source so fights are testable. */
 
 export type WardenAttack = "volley" | "ring" | "charge" | "slam";
-/** What the component must do this frame: launch an attack, detonate an
+/** What the controller must do this frame: launch an attack, detonate an
  * armed slam, or nothing. */
 export type WardenAction = WardenAttack | "boom" | null;
 
@@ -148,8 +148,9 @@ export function tickWardenMove(b: WardenBrain, i: WardenMoveInput, out: Move): M
   return out;
 }
 
-/** One frame of the attack clock. Returns what to launch (the component owns
- * the effects: announcing bolts/booms, flashes, shakes). Picking "charge" or
+/** One frame of the attack clock. Returns what to launch (the controller,
+ * sim/enemies/controllers.ts, announces bolts and booms and cues the view's
+ * flashes and shakes). Picking "charge" or
  * "slam" arms the matching brain timer here, so movement and the telegraph
  * pick it up on the following frames. */
 export function tickWardenAttack(

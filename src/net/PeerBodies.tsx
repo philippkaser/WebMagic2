@@ -8,6 +8,7 @@ import {
 import { useRef, useState } from "react";
 import { GROUPS, PLAYER } from "../core/config";
 import { isHostileWizard } from "../game/hostility";
+import { WIZARD_GROUPS } from "../sim/bodies";
 import { estimatePeer, peerIds } from "./players";
 
 /** Physical presence for the other wizards on the floor.
@@ -27,7 +28,8 @@ import { estimatePeer, peerIds } from "./players";
  * pass straight through. */
 
 const PEER_FILTER = [GROUPS.ENEMY, GROUPS.PROP, GROUPS.ENEMY_PROJECTILE];
-const ALLY_GROUPS = interactionGroups(GROUPS.PLAYER, PEER_FILTER);
+/** The same capsule a headless floor host gives every wizard. */
+const ALLY_GROUPS = WIZARD_GROUPS;
 const HOSTILE_GROUPS = interactionGroups(
   [GROUPS.PLAYER, GROUPS.PEER_HOSTILE],
   [...PEER_FILTER, GROUPS.FRIENDLY_PROJECTILE],

@@ -1,44 +1,46 @@
+import type { RigidBody } from "@dimforge/rapier3d-compat";
 import type { RapierRigidBody } from "@react-three/rapier";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { playHit } from "../audio/sound";
 import { listenerAt } from "../audio/spatial";
 import { ENEMY_STRIDE, isEnemyVoice, playEnemyDeath, playEnemyStep, playEnemyWake } from "../audio/voices";
-import { floorScale, PLAYER } from "../core/config";
+import { PLAYER } from "../core/config";
 import { flashLight } from "../fx/DynamicLights";
 import { hitSparksFx, soulDissolveFx } from "../fx/effects";
 import { spawnBurst, type BurstOptions } from "../fx/Particles";
+import { browserSim } from "../game/browserSim";
 import { ENEMY_SOURCE } from "../game/damageSource";
 import { getFloorRules } from "../game/floorRules";
 import { getPlayerBody, playerPosition } from "../game/player-state";
 import { allocId, registerHittable } from "../game/registry";
-import { nearestWizardTo } from "../game/targets";
-import { reportLoot } from "../items/LootOrbs";
 import { isHost } from "../net/netStore";
 import { useNetBody, type NetBody } from "../net/NetSystems";
-import { combatActive, getStats, useGame } from "../state/gameStore";
+import { enemyOptions, type EnemyController } from "../sim/enemies/controllers";
+import { EnemyCore, enemyDamage as simEnemyDamage } from "../sim/enemies/core";
+import type { SimCue } from "../sim/world";
+import { combatActive, useGame } from "../state/gameStore";
 import { sanitizeHit, type HitData } from "../weapons/damage";
 import type { Vec3 } from "../world/types";
-import type { ChaseInput, Steering, Vec } from "./brains/common";
-import { getEnemyStats, type EnemyId } from "./roster";
+import type { Vec } from "./brains/common";
+import type { EnemyId } from "./roster";
 
-/** The shared enemy shell: everything an enemy is that isn't its brain or its
- * looks. Every kind used to carry its own copy of this — health from the
- * roster, the dead latch, the hit flash, aggro and knockback timers, a death
- * that bursts, flashes and drops loot, and the replication wiring — so it
- * lives here once, and a kind file is left with its brain wiring and model.
+/** An enemy's VIEW: its body in the React scene, its looks, its sounds, and
+ * its replication wiring. What it IS — health, hits, knockback, the wake
+ * latch, death and loot (sim/enemies/core.ts) — and how it fights (its
+ * controller, sim/enemies/controllers.ts) are plain TypeScript the headless
+ * FloorSim runs too; here they run in the browser through browserSim, and
+ * only on the floor's authority. A kind file is left with its model, its
+ * visual feedback and its contact burn.
  *
  * Floor rules (game/floorRules.ts) are read live at the moment they matter:
- * health at spawn, damage when it's dealt, speed each frame (loot and gold
- * rules live in items/LootOrbs). That keeps omens out of every component —
- * but it does mean a floor's rules must be installed before its enemies
- * mount. */
+ * health at spawn, damage when it's dealt, speed each frame. That keeps
+ * omens out of every component — but it does mean a floor's rules must be
+ * installed before its enemies mount. */
 
-const ZERO: Readonly<Vec> = Object.freeze({ x: 0, y: 0, z: 0 });
-
-/** Damage an enemy deals at `floor`: depth scaling × the floor's damage rule.
- * Everything an enemy inflicts (contact, bolts, slams) goes through this. */
+/** Damage an enemy deals at `floor` under the current floor's rule — what a
+ * contact burn costs the local player. */
 export function enemyDamage(base: number, floor: number): number {
-  return base * floorScale(floor).enemyDamage * getFloorRules().enemyDamageMult;
+  return simEnemyDamage(base, floor, getFloorRules().enemyDamageMult);
 }
 
 /** The standard death: the creature's energy dissolving upward as rising
@@ -56,30 +58,21 @@ export interface EnemyDeathFx {
   scale?: number;
 }
 
-/** Where its drops land. WHAT drops is the floor's loot book's call
- * (items/dropTables.ts): the authority only reports the death. */
-export interface EnemyDrops {
-  /** Drops land this far above the body origin… */
-  lift?: number;
-  /** …but never below this height (fliers can die skimming the floor). */
-  minY?: number;
-}
-
+/** A view's options. What the enemy IS beyond its kind — its health scale,
+ * where its loot lands, how hard it is to shove — is the sim's
+ * (sim/enemies/controllers.ts enemyOptions), so it's the same wherever the
+ * floor is simulated. */
 export interface UseEnemyOptions {
   /** Roster id — where baseHealth comes from. */
   kind: EnemyId;
   entityId: string;
   position: Vec3;
   floor: number;
-  /** Multiplier on the roster's baseHealth (slime generations). */
-  healthScale?: number;
-  /** A slime's split generation (0 for everything else) — what the loot
-   * report says it was. */
+  /** A slime's split generation (0 for everything else). */
   generation?: number;
   /** Omit for a fully custom death (the Warden's, via onDeathFx). */
   deathFx?: EnemyDeathFx;
-  drops?: EnemyDrops;
-  /** Extra effects of a real (non-silent) death: splits, boss drops, messages. */
+  /** Extra effects of a real (non-silent) death, on every machine. */
   onDeathFx?: (at: Vec) => void;
   /** Runs on EVERY death, including silent late-join catch-up. */
   onKilled?: () => void;
@@ -87,92 +80,67 @@ export interface UseEnemyOptions {
   hitColor?: string;
   /** Sentries never move — replicate hp only. */
   immobile?: boolean;
-  /** Fraction of knockback impulses that actually applies (bosses resist). */
-  knockbackScale?: number;
-  /** How fast the hit flash fades (per second). */
-  flashDecay?: number;
-  /** Authoritative hp changed while alive — applied damage on the authority,
-   * a snapshot on a replica. */
+  /** Health changed while alive — applied damage on the authority, a
+   * snapshot on a replica. */
   onHp?: (hp: number, maxHp: number) => void;
+  /** Something the authority's controller wants shown (sim/world.ts SimCue). */
+  onCue?: (cue: SimCue) => void;
 }
 
-export interface EnemyShell {
+export interface EnemyShell<C extends EnemyController> {
   body: RefObject<RapierRigidBody | null>;
-  hp: RefObject<number>;
-  /** Health at spawn (roster × generation × depth × floor rule). */
-  maxHp: number;
+  /** Its authority state (health, flash, wake…) — see sim/enemies/core.ts. */
+  core: EnemyCore;
+  /** Its kind's controller (brain state the view may read). */
+  ctl: C;
   dead: boolean;
-  deadRef: RefObject<boolean>;
-  /** Hit flash, 1 on a hit and fading to 0 — drive an emissive with it. */
-  flash: RefObject<number>;
-  /** Woken — set by damage from anyone, or by the brain's proximity check. */
-  aggro: RefObject<boolean>;
-  /** Knockback in flight (> 0) — brains leave the body to physics. */
-  knockTimer: RefObject<number>;
   net: NetBody;
-  /** Damage this enemy deals for a base amount (see enemyDamage). */
-  damage(base: number): number;
-  /** Per-frame preamble: the body when this enemy should act this frame
-   * (mounted, alive, combat live), else null. Fades the hit flash and runs
-   * down the knockback timer. */
-  beginFrame(dt: number): RapierRigidBody | null;
-  /** Fill a chase brain's senses: body pose, nearest wizard, clock, wake and
-   * knock state, the floor's speed rule. `vel` defaults to a read of the
-   * body's velocity, made only when an awake, unstaggered brain will steer
-   * with it (it's a physics-engine round trip). */
-  sense(input: ChaseInput, b: RapierRigidBody, pos: Vec, time: number, dt: number, vel?: Vec): ChaseInput;
-  /** Apply a chase brain's decision: latch its wake state, set its velocity. */
-  steer(b: RapierRigidBody, s: Steering): void;
+  /** Per frame: the body when this enemy should act (mounted, alive, combat
+   * live), else null — after letting the controller think, on the authority
+   * only, and voicing it. */
+  frame(dt: number, time: number): RapierRigidBody | null;
 }
 
-export function useEnemy(options: UseEnemyOptions): EnemyShell {
-  // Latest options behind a ref: the callbacks below stay stable across
+export function useEnemy<C extends EnemyController>(
+  options: UseEnemyOptions,
+  makeController: (core: EnemyCore) => C,
+): EnemyShell<C> {
+  // Latest options behind a ref: the hooks below stay stable across
   // re-renders, so the hittable and net registrations never churn.
   const opts = useRef(options);
   opts.current = options;
-  const { floor, flashDecay = 5 } = options;
-
   const body = useRef<RapierRigidBody>(null);
-  const [maxHp] = useState(
-    () =>
-      getEnemyStats(options.kind).baseHealth *
-      (options.healthScale ?? 1) *
-      floorScale(floor).enemyHealth *
-      getFloorRules().enemyHealthMult,
-  );
-  const hp = useRef(maxHp);
-  const deadRef = useRef(false);
   const [dead, setDead] = useState(false);
-  const flash = useRef(0);
-  const aggro = useRef(false);
-  const knockTimer = useRef(0);
   // Its voice: woken once, a footfall every stride it walks.
   const voice = useRef({ woke: false, cried: -Infinity, x: NaN, z: NaN, walked: 0 });
 
-  const kill = useCallback((silent = false) => {
-    if (deadRef.current) return;
-    deadRef.current = true;
-    const o = opts.current;
-    const t = body.current?.translation() ?? { x: o.position[0], y: o.position[1], z: o.position[2] };
-    if (!silent) {
-      const fx = o.deathFx;
-      if (fx) {
-        const at: Vec3 = [t.x, t.y + (fx.lift ?? 0), t.z];
-        spawnBurst({ ...fx.burst, position: at });
-        soulDissolveFx(at, fx.soul ?? fx.light.color, fx.scale ?? 1);
-        flashLight(at, fx.light.color, fx.light.intensity);
+  const [{ core, ctl }] = useState(() => {
+    const o = options;
+    const core = new EnemyCore(
+      browserSim,
+      enemyOptions(o.entityId, o.kind, o.floor, o.position, o.generation),
+      () => body.current,
+    );
+    core.onHp = (hp, maxHp) => opts.current.onHp?.(hp, maxHp);
+    core.onCue = (cue) => opts.current.onCue?.(cue);
+    core.onDeath = (t, silent) => {
+      const c = opts.current;
+      if (!silent) {
+        const fx = c.deathFx;
+        if (fx) {
+          const at: Vec3 = [t.x, t.y + (fx.lift ?? 0), t.z];
+          spawnBurst({ ...fx.burst, position: at });
+          soulDissolveFx(at, fx.soul ?? fx.light.color, fx.scale ?? 1);
+          flashLight(at, fx.light.color, fx.light.intensity);
+        }
+        c.onDeathFx?.(t);
+        if (isEnemyVoice(c.kind)) playEnemyDeath(c.kind, [t.x, t.y, t.z]);
       }
-      const drops = o.drops;
-      if (drops && o.kind !== "boss") {
-        const at: Vec3 = [t.x, Math.max(t.y + (drops.lift ?? 0), drops.minY ?? -Infinity), t.z];
-        reportLoot(o.entityId, { kind: "enemy", enemy: o.kind, gen: o.generation ?? 0 }, at);
-      }
-      o.onDeathFx?.(t);
-      if (isEnemyVoice(o.kind)) playEnemyDeath(o.kind, [t.x, t.y, t.z]);
-    }
-    o.onKilled?.();
-    setDead(true);
-  }, []);
+      c.onKilled?.();
+      setDead(true);
+    };
+    return { core, ctl: makeController(core) };
+  });
 
   const hitFeedback = useCallback(() => {
     const color = opts.current.hitColor;
@@ -181,75 +149,27 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
     hitSparksFx(t, color);
   }, []);
 
-  // Getting shot wakes an enemy, no matter who shot.
-  const onDamaged = useCallback(() => {
-    aggro.current = true;
-  }, []);
-
-  const onHp = useCallback(
-    (current: number) => {
-      if (!deadRef.current) opts.current.onHp?.(current, maxHp);
-    },
-    [maxHp],
-  );
-
   const net = useEnemyNet({
     entityId: options.entityId,
     body,
-    hp,
-    deadRef,
-    flash,
+    core,
     dead,
     immobile: options.immobile,
-    knockTimer,
-    knockbackScale: options.knockbackScale,
-    onKill: kill,
     hitFeedback,
-    onDamaged,
-    onHp,
   });
 
   return {
     body,
-    hp,
-    maxHp,
+    core,
+    ctl,
     dead,
-    deadRef,
-    flash,
-    aggro,
-    knockTimer,
     net,
-    damage: (base) => enemyDamage(base, floor),
-    beginFrame(dt) {
-      const b = body.current;
-      if (!b || deadRef.current || !combatActive()) return null;
-      flash.current = Math.max(0, flash.current - dt * flashDecay);
-      knockTimer.current -= dt;
-      hearEnemy(opts.current.kind, b, aggro.current, voice.current);
+    frame(dt, time) {
+      const b = core.beginFrame(dt, combatActive()) as RapierRigidBody | null;
+      if (!b) return null;
+      hearEnemy(opts.current.kind, b, core.aggro, voice.current);
+      if (net.isAuthority) ctl.think(b, dt, time);
       return b;
-    },
-    sense(input, b, pos, time, dt, vel) {
-      const target = nearestWizardTo(pos.x, pos.y, pos.z);
-      const awake = aggro.current;
-      const knocked = knockTimer.current > 0;
-      input.pos = pos;
-      input.vel = vel ?? (awake && !knocked ? b.linvel() : ZERO);
-      input.target = target.pos; // shared scratch — valid until the next query
-      input.targetDist = target.dist;
-      input.time = time;
-      input.dt = dt;
-      input.aggro = awake;
-      // Only a sleeping enemy needs the stealth factor, so the stat rebuild
-      // happens once per wake check, never per frame for an awake enemy.
-      input.aggroMult = awake ? 1 : getStats().aggroMult;
-      input.knocked = knocked;
-      input.floor = floor;
-      input.speedMult = getFloorRules().enemySpeedMult;
-      return input;
-    },
-    steer(b, s) {
-      aggro.current = s.aggro;
-      if (s.apply) b.setLinvel(s.vel, true);
     },
   };
 }
@@ -261,7 +181,7 @@ const HEARD_WITHIN = 30;
  * client (replicas walk too), and only within earshot. */
 function hearEnemy(
   kind: EnemyId,
-  b: RapierRigidBody,
+  b: RigidBody,
   awake: boolean,
   v: { woke: boolean; cried: number; x: number; z: number; walked: number },
 ): void {
@@ -349,91 +269,38 @@ export function useContactDamage(spec: ContactDamage): (at: Vec, dt: number, arm
 
 /** Shared enemy networking: registers the entity with the replication
  * framework (snapshots, interpolation, late-join and migration are all
- * automatic) and wires the hittable so damage routes to the authority. The
- * networking core of useEnemy; exported for anything enemy-like that wants
- * the same routing without the rest of the shell. */
-export function useEnemyNet(opts: {
+ * automatic) and wires the hittable so damage routes to the authority — the
+ * core takes it there. */
+function useEnemyNet(opts: {
   entityId: string;
   body: RefObject<RapierRigidBody | null>;
-  hp: RefObject<number>;
-  deadRef: RefObject<boolean>;
-  flash: RefObject<number>;
+  core: EnemyCore;
   dead: boolean;
   /** Sentries never move — replicate hp only. */
   immobile?: boolean;
-  knockTimer?: RefObject<number>;
-  /** Fraction of knockback impulses that actually applies (bosses resist). */
-  knockbackScale?: number;
-  /** silent = late-join catch-up: apply the death without VFX. */
-  onKill: (silent?: boolean) => void;
   hitFeedback?: () => void;
-  /** Authority: damage landed (from anyone) — wake up and fight back. */
-  onDamaged?: () => void;
-  /** Authoritative hp changed (applied here, or a snapshot on a replica). */
-  onHp?: (hp: number) => void;
 }): NetBody {
-  const {
-    entityId,
-    body,
-    hp,
-    deadRef,
-    flash,
-    dead,
-    immobile,
-    knockTimer,
-    knockbackScale = 1,
-    onKill,
-    hitFeedback,
-    onDamaged,
-    onHp,
-  } = opts;
-
+  const { entityId, body, core, dead, immobile, hitFeedback } = opts;
+  const knockbackScale = core.opts.knockbackScale ?? 1;
   const netRef = useRef<NetBody | null>(null);
-
-  const applyDamage = useCallback(
-    (damage: number, impulse: { x: number; y: number; z: number }) => {
-      if (deadRef.current) return;
-      hp.current -= damage;
-      flash.current = 1;
-      if (knockTimer) knockTimer.current = 0.4;
-      body.current?.applyImpulse(
-        {
-          x: impulse.x * knockbackScale,
-          y: impulse.y * knockbackScale,
-          z: impulse.z * knockbackScale,
-        },
-        true,
-      );
-      onHp?.(hp.current);
-      onDamaged?.();
-      if (hp.current <= 0) {
-        onKill();
-        netRef.current?.despawn();
-      }
-    },
-    [body, deadRef, flash, hp, knockTimer, knockbackScale, onKill, onDamaged, onHp],
-  );
 
   const net = useNetBody({
     id: entityId,
     body,
     immobile,
     enabled: !dead,
-    fields: () => ({ hp: hp.current }),
+    fields: () => core.fields(),
     onFields: (f) => {
-      if (f.hp !== undefined) {
-        hp.current = f.hp;
-        onHp?.(f.hp);
-      }
+      if (f.hp !== undefined) core.syncHp(f.hp);
     },
     onCommand: (cmd, data) => {
       if (cmd === "hit") {
         // Capped by the depth we're on: staff levels scale legit damage.
         const d = sanitizeHit(data, useGame.getState().floor);
-        if (d) applyDamage(d.damage, d.impulse);
+        if (d) core.hit(d.damage, d.impulse);
       }
     },
-    onDespawn: (_data, catchup) => onKill(catchup),
+    onDespawn: (_data, catchup) => core.despawned(catchup),
   });
   netRef.current = net;
 
@@ -444,8 +311,8 @@ export function useEnemyNet(opts: {
       team: "enemy",
       getPosition: () => body.current?.translation() ?? { x: 0, y: -999, z: 0 },
       hit: (damage, impulse) => {
-        if (deadRef.current) return;
-        flash.current = 1;
+        if (core.dead) return;
+        core.flash = 1;
         const at = body.current?.translation();
         playHit(at ? [at.x, at.y, at.z] : undefined);
         hitFeedback?.();
@@ -454,14 +321,14 @@ export function useEnemyNet(opts: {
         // knockback predicted immediately, so the reaction never waits on
         // the round trip).
         if (isHost()) {
-          applyDamage(damage, impulse);
+          core.hit(damage, impulse);
         } else {
           netRef.current?.command("hit", { damage, impulse } satisfies HitData);
           netRef.current?.predictImpulse(impulse, knockbackScale);
         }
       },
     });
-  }, [dead, applyDamage, body, deadRef, flash, hitFeedback, knockbackScale]);
+  }, [dead, core, body, hitFeedback, knockbackScale]);
 
   return net;
 }

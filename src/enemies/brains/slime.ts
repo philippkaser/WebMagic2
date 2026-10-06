@@ -6,8 +6,8 @@ import { clamp, type ChaseInput, type RandomSource, type Steering } from "./comm
  * no finesse to ease into).
  *
  * The per-generation table lives here too: each split makes a smaller,
- * faster, weaker slime, and the hop brain and the component both key off the
- * same row. */
+ * faster, weaker slime, and the hop brain, its body (sim/bodies.ts) and its
+ * view all key off the same row. */
 
 /** Deepest split: a generation-2 slime dies for good instead of splitting. */
 export const SLIME_MAX_GEN = 2;

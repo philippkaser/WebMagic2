@@ -12,6 +12,7 @@ import { PactSystem } from "../encounters/PactSystem";
 import { PresenceSystem } from "../encounters/PresenceSystem";
 import { DynamicLights } from "../fx/DynamicLights";
 import { FxSystems } from "../fx/Particles";
+import { BindSimPhysics } from "../game/browserSim";
 import { ConsumableSystem } from "../game/ConsumableSystem";
 import { InteractionSystem } from "../game/interactions";
 import { LootOrbs } from "../items/LootOrbs";
@@ -78,6 +79,7 @@ export function GameScene() {
           ) : (
             <Village />
           )}
+          <BindSimPhysics />
           <Projectiles />
           <BlackHoles />
           <LootOrbs />

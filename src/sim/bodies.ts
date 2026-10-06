@@ -53,6 +53,11 @@ export const ENEMY_GROUPS = interactionGroups(GROUPS.ENEMY, [
   GROUPS.FRIENDLY_PROJECTILE,
 ]);
 
+/** Another wizard's capsule as a floor authority sees it (net/PeerBodies,
+ * and the headless FloorSim's wizards): enemies, props and enemy bolts bump
+ * into it; wizards never block each other. */
+export const WIZARD_GROUPS = interactionGroups(GROUPS.PLAYER, [GROUPS.ENEMY, GROUPS.PROP, GROUPS.ENEMY_PROJECTILE]);
+
 // ── Fixed pieces ─────────────────────────────────────────────────────────────
 
 /** A fixed box collider, relative to the piece it belongs to. */

@@ -183,7 +183,8 @@ src/
   run/         run rules: the Weighing, the Tithe of Five, death/bank outcomes (pure)
   items/       catalog, item levels & power, affixes, loot tables, economy, inventory
   world/       gen/ (staged, pure floor generator), biomes, omens, lore, props, traps
-  enemies/     roster (data), shared shell, pure brains/, one file per kind in kinds/
+  enemies/     roster (data), pure brains/, the views (useEnemy, one file per
+               kind in kinds/)
   weapons/     spell catalog (data), cast kinds, projectiles, explosions, allegiance
   encounters/  pacts, presence sense, kill credit, grave chests
   net/         protocol, matchmaking, transport, session, replication, remote wizards
@@ -201,8 +202,9 @@ src/
                HUD, menus and inventory as layers
   ui/          DOM leftovers: perf overlay, build stamp, dev room
   game/        cross-system seams: registries, hostility, floor rules, damage sources
-  sim/         what a floor IS physically (the body table) and its headless
-               physics world — shared by the browser and a server
+  sim/         the floor simulation, shared by the browser and a server: the
+               body table, headless physics, enemy cores and controllers,
+               and FloorSim — a floor's authority without a browser
 server/        Bun WebSocket server: the router (relay.ts, gameplay-blind),
                the ledger (ledger.ts: runs, pace, saves, grants), accounts
 ```

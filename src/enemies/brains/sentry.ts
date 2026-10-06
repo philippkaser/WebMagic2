@@ -2,8 +2,9 @@ import { wrapAngle, type RandomSource, type Vec } from "./common";
 
 /** Sentry brain — the turret. It never moves, so its brain is a reload clock
  * plus aiming math: glow brighter through a short wind-up, then (if a wizard
- * is in range and in sight — the line-of-sight raycast stays in the component,
- * it needs the physics world) loose a slow bolt that LEADS the target.
+ * is in range and in sight — the line-of-sight raycast is its controller's,
+ * sim/enemies/controllers.ts, it needs the physics world) loose a slow bolt
+ * that LEADS the target.
  *
  * The lead is deliberately partial: a perfect intercept would make bolts
  * undodgeable, so the sentry aims only part-way along the target's motion,

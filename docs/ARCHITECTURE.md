@@ -11,8 +11,10 @@ rewrites:
    `enemies/brains/` + `enemies/roster`, `weapons/{spellCatalog,allegiance,
    castMessage,hits}`, `encounters/{pacts,graveRules,killCredit}`,
    `render/textures/painters/`, `fx/particleSim`, `transition/timeline`,
-   `ui3d/font/`. Deterministic, unit-tested with `bun test`, and safe to run
-   on a server.
+   `ui3d/font/`, and `sim/` (the floor simulation: bodies, headless physics,
+   the enemies' cores and controllers, the headless floor host — plain
+   TypeScript over Rapier, no React or three.js). Deterministic, unit-tested
+   with `bun test`, and safe to run on a server.
 2. **Runtime state**: the zustand store (`state/gameStore.ts`) owns the game
    flow (menu → village → dungeon → death), equipment and run-loot rules.
    Frame-hot data (player position/velocity) lives outside React in
@@ -266,7 +268,9 @@ every source on its floor dead at once and claim every orb for itself. That
 gets it exactly the luck of that floor, rolled by the server, no faster
 than the deep's pace lets it go: farming without fighting, not minting.
 Headless server-side hosts close it for shared floors (the path above —
-the headless physics world in `src/sim/` is its first piece). Positions,
+`src/sim/floorSim.ts` already runs a whole floor's enemies headless, see
+*The floor simulation* below; seating it on the server as the host of
+shared floors is the next step). Positions,
 your own health and death, and spell casts are client-reported, so PvP and
 movement trust the client (closed by the same headless hosts); item
 *stats* are client-computed (likewise); grave contents are declared by the
@@ -305,6 +309,54 @@ What follows from it:
   shards, ragdolls, dust) is LOCAL — every machine simulates its own, no
   server ever does, and it never goes on the wire. A body that decides
   gameplay is a row in `sim/bodies.ts`, and it must be able to sleep.
+
+### The floor simulation (`src/sim/`)
+
+What a floor's authority decides — every enemy's health, wake, steering,
+attacks, splits, deaths and loot reports — is plain TypeScript in
+`src/sim/`, so the same code runs in a host's browser and headless on a
+server:
+
+- **`sim/world.ts`** — the `SimWorld` interface: everything the sim asks of
+  wherever it runs (the floor's rules, the nearest wizard, line of sight,
+  dice) and the one way out, `act()`. **Actions** are authoritative facts
+  (a bolt cast, a slam, a split, a death, a loot report); **cues** are
+  cosmetic and go to the entity's own view (a muzzle flare, a slam's
+  warning circle) — a headless host has no views, so its cues vanish.
+- **`sim/enemies/core.ts`** — `EnemyCore`: one enemy's authority state
+  (health from roster × depth × floor rule, the hit flash, the wake latch,
+  knockback, and a death that reports `died` + `loot` exactly once) over a
+  Rapier body. Replicas only mirror it (`syncHp`, `despawned`).
+- **`sim/enemies/controllers.ts`** — one controller per kind wrapping its
+  pure brain (`enemies/brains/`): senses, decides, steers, fires. Also
+  `enemyOptions` (a kind's traits beyond the roster: where loot lands,
+  slime health per generation, the Warden's knockback resistance) and
+  `createEnemy`, so every host builds an enemy the same way.
+- **Views** (`enemies/useEnemy.ts`, `enemies/kinds/`) hold a core and a
+  controller, let the controller think only on the floor's authority, and
+  keep what is the browser's: the model, sounds, death effects, the local
+  contact burn, replication wiring. `game/browserSim.tsx` is the browser's
+  `SimWorld`: wizards from the live poses, sight from the scene's Rapier
+  world, every action announced as a host event.
+- **`sim/floorSim.ts`** — `FloorSim`, a floor authority without a browser:
+  the floor's physics (`floorPhysics.ts`) plus every enemy the layout spawns
+  under the client's entity ids, wizards in as kinematic capsules, hit
+  commands in (sanitized as a browser host sanitizes them), and out:
+  `drain()` (the actions a browser host would announce) and `snapshot()`
+  (the replication wire format, `EntitySnap`, with the same delta filter).
+  An empty floor idles. Same layout, same wizards and same dice play out
+  identically (tested).
+
+`bun run physics-bench` ends with the whole floor host fighting — real
+brains and physics, wizards circling enemies and landing a hit every half
+second: about **0.05 ms per tick (0.15–0.25 % of a core at 30–60 Hz)** and
+**~12 KiB/s to each player (~5 KiB/s deflated)**, snapshots and actions
+together. A core hosts hundreds of fighting floors; the bandwidth rule
+above still decides what can be added.
+
+Not in the sim yet: props are physical there (enemies bump them, snapshots
+move them) but breaking them is still the browser prop's job, and traps,
+treasure and portals stay in the scene.
 
 ### Scaling plan (server-side, future work)
 
@@ -403,11 +455,13 @@ What follows from it:
 - Rapier via `@react-three/rapier`. Collision groups (`core/config.ts#GROUPS`)
   keep friendly fire, enemy fire, props, the player — and hostile wizards —
   interacting correctly.
-- **Enemies** (`enemies/`): `roster.ts` (data) → `useEnemy.ts` (the shared
-  shell: health from roster × depth × floor rule, death FX and drops, hit
-  routing, local contact damage) → a pure brain in `brains/` (unit-tested
-  steering/state machines over plain vectors) → a presentational model in
-  `render/models/enemies.tsx`. Each kind in `kinds/` is just that wiring.
+- **Enemies**: `enemies/roster.ts` (data) → a pure brain in
+  `enemies/brains/` (unit-tested steering/state machines over plain vectors)
+  → its controller and the shared `EnemyCore` in `sim/enemies/` (health,
+  hits, wake, death and loot reports; see *The floor simulation*) → a view:
+  `enemies/useEnemy.ts` (death FX, hit feedback, voice, local contact
+  damage, replication) and a kind in `enemies/kinds/` with its model from
+  `render/models/enemies.tsx`.
 - **Spells** (`weapons/`): `spellCatalog.ts` is the data (kind + numbers;
   tooltips are derived from them), `castKinds.ts` implements each kind,
   `projectiles.tsx`/`explosions.ts`/`singularity.tsx` do the physics. Void
@@ -859,7 +913,7 @@ and the way onward, gold for home, blood for danger.
 | Encounter frequency | `core/config.ts#ENCOUNTERS` |
 | Economy tuning (prices, gold drops) | `items/economy.ts` (the one balance sheet, shared client + server) |
 | New spell | a row in `weapons/spellCatalog.ts` (+ a kind in `weapons/castKinds.ts` if it's a new shape); reference it from a staff |
-| New enemy | row in `enemies/roster.ts`, brain in `enemies/brains/`, model in `render/models/enemies.tsx`, kind in `enemies/kinds/`, renderer in `enemies/registry.tsx`, spawn weight in `world/gen/population.ts` |
+| New enemy | row in `enemies/roster.ts`, body in `sim/bodies.ts`, brain in `enemies/brains/`, controller + `enemyOptions` case in `sim/enemies/controllers.ts`, model in `render/models/enemies.tsx`, view in `enemies/kinds/`, renderer in `enemies/registry.tsx`, spawn weight in `world/gen/population.ts` |
 | New prop | `world/props.tsx` spec + `render/models/PropModels.tsx` + generator prop table |
 | New biome | row in `world/biomes.ts` + surfaces in `render/textures/painters/` (`kinds.ts`) + a drone in `scenes/floorAtmosphere.ts` |
 | New omen | row in `world/omens.ts` (rules via `game/floorRules.ts`) |

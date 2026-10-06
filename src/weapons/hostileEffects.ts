@@ -1,6 +1,6 @@
 import { ENEMY_SOURCE, WORLD_SOURCE, type DamageSource } from "../game/damageSource";
 import { hostEvent } from "../net/channels";
-import type { Vec3 } from "../world/types";
+import type { BoomData, CastData } from "../sim/world";
 import { explode } from "./explosions";
 import { fireProjectile } from "./projectiles";
 
@@ -21,17 +21,8 @@ function dungeonSource(tag: DungeonSourceTag | undefined): DamageSource {
   return tag === "world" ? WORLD_SOURCE : ENEMY_SOURCE;
 }
 
-export interface EnemyCastData {
-  origin: Vec3;
-  velocity: Vec3;
-  damage: number;
-  color: string;
-  size: number;
-  blastRadius: number;
-  blastImpulse: number;
-  /** Default "enemy"; trap darts send "world". */
-  source?: DungeonSourceTag;
-}
+/** An enemy bolt — the sim's CastData (sim/world.ts), trap darts included. */
+export type EnemyCastData = CastData;
 
 export const enemyCast = hostEvent<EnemyCastData>("enemyCast", (d, meta) => {
   fireProjectile({
@@ -48,15 +39,7 @@ export const enemyCast = hostEvent<EnemyCastData>("enemyCast", (d, meta) => {
   });
 });
 
-export interface BoomData {
-  pos: Vec3;
-  radius: number;
-  damage: number;
-  impulse: number;
-  color: string;
-  /** Default "enemy" (boss slams); a trap-triggered blast would send "world". */
-  source?: DungeonSourceTag;
-}
+export type { BoomData };
 
 export const enemyBoom = hostEvent<BoomData>("enemyBoom", (d, meta) => {
   explode({

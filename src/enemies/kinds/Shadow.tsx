@@ -1,19 +1,17 @@
 import { useFrame } from "@react-three/fiber";
 import { RigidBody } from "@react-three/rapier";
-import { useMemo, useRef } from "react";
+import { useRef } from "react";
 import type { MeshStandardMaterial } from "three";
 import { ENEMY_GLOW, SHADOW_OPACITY, ShadowModel } from "../../render/models/enemies";
 import type { Vec3 } from "../../world/types";
-import { createChaseInput, createSteering } from "../brains/common";
-import { createShadowBrain, tickShadow } from "../brains/shadow";
 import {
   useContactDamage,
   useEnemy,
   type EnemyDeathFx,
-  type EnemyDrops,
 } from "../useEnemy";
 import { bodyProps, SpecCollider } from "../../game/bodies";
 import { ENEMY_BODIES } from "../../sim/bodies";
+import { ShadowController } from "../../sim/enemies/controllers";
 
 const DEATH_FX: EnemyDeathFx = {
   // It unravels into the dark it came from: a slow bloom of shadow-smoke.
@@ -21,7 +19,6 @@ const DEATH_FX: EnemyDeathFx = {
   light: { color: "#6a3d9a", intensity: 18 },
   soul: "#9a6aff",
 };
-const DROPS: EnemyDrops = { minY: 0.6 };
 const BODY = ENEMY_BODIES.shadow;
 
 /** Shadow — a lurking stalker. Instead of the wisp's straight chase it plays
@@ -30,15 +27,10 @@ const BODY = ENEMY_BODIES.shadow;
  * authority runs the brain, replicas are driven by the net layer. */
 export function Shadow({ position, floor, entityId }: { position: Vec3; floor: number; entityId: string }) {
   const mat = useRef<MeshStandardMaterial>(null);
-  const e = useEnemy({
-    kind: "shadow",
-    entityId,
-    position,
-    floor,
-    deathFx: DEATH_FX,
-    drops: DROPS,
-    hitColor: "#8a5cc0",
-  });
+  const e = useEnemy(
+    { kind: "shadow", entityId, position, floor, deathFx: DEATH_FX, hitColor: "#8a5cc0" },
+    (core) => new ShadowController(core),
+  );
   // Contact strike — lands mostly on a lunge; local, like the wisp's burn.
   const touch = useContactDamage({
     range: 1.5,
@@ -47,24 +39,16 @@ export function Shadow({ position, floor, entityId }: { position: Vec3; floor: n
     push: { force: 5, planar: 0.3, lift: 1.5 },
     burst: ["#2a1a44", "#6a3d9a"],
   });
-  const brain = useMemo(() => createShadowBrain(), []);
-  const senses = useMemo(createChaseInput, []);
-  const steering = useMemo(createSteering, []);
 
   useFrame(({ clock }, dt) => {
-    const b = e.beginFrame(dt);
+    const b = e.frame(dt, clock.elapsedTime);
     if (!b) return;
     if (mat.current) {
-      mat.current.emissiveIntensity = ENEMY_GLOW.shadow + e.flash.current * 6;
+      mat.current.emissiveIntensity = ENEMY_GLOW.shadow + e.core.flash * 6;
       // It solidifies to strike (the brain's mode only advances on the authority).
-      mat.current.opacity = brain.mode === "lunge" ? SHADOW_OPACITY.lunging : SHADOW_OPACITY.lurking;
+      mat.current.opacity = e.ctl.brain.mode === "lunge" ? SHADOW_OPACITY.lunging : SHADOW_OPACITY.lurking;
     }
-
-    const t = b.translation();
-    touch(t, dt);
-
-    if (!e.net.isAuthority) return;
-    e.steer(b, tickShadow(brain, e.sense(senses, b, t, clock.elapsedTime, dt), steering));
+    touch(b.translation(), dt);
   });
 
   if (e.dead) return null;

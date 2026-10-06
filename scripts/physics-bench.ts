@@ -13,11 +13,18 @@
 //   brawl  — every half second explosions shove a third of the props and
 //            every enemy, and 40 bolts are in flight: a worst case
 //   ×N     — the floor with N times its props (more physics objects later)
+//
+// Then the whole floor host (sim/floorSim.ts): the real enemy brains and
+// controllers plus physics, with 1 and 4 wizards circling enemies and
+// landing a hit every half second — what a server pays to host a floor, and
+// what it sends each player (snapshots + the actions it announces).
 import RAPIER from "@dimforge/rapier3d-compat";
 import { Rng } from "../src/core/rng";
 import { q2, q3 } from "../src/net/snapshots";
 import { PROP_BODIES, type BodySpec } from "../src/sim/bodies";
 import { buildFloorPhysics, type FloorPhysics } from "../src/sim/floorPhysics";
+import { FloorSim } from "../src/sim/floorSim";
+import { hitCapForFloor } from "../src/weapons/hits";
 import { generateFloor } from "../src/world/gen";
 import type { FloorLayout } from "../src/world/types";
 
@@ -217,3 +224,113 @@ const line = (cells: string[]) => cells.map((c, i) => c.padStart(widths[i])).joi
 console.log(line(head));
 for (const r of rows) console.log(line(r));
 console.log(`\n${FLOORS.length * SEEDS.length} floors per row (floors ${FLOORS.join(", ")}), ${SECONDS} s each.`);
+
+// ── The whole floor host ─────────────────────────────────────────────────────
+
+interface SimResult {
+  meanMs: number;
+  p95Ms: number;
+  bytesPerSec: number;
+  deflatedPerSec: number;
+  kills: number;
+}
+
+function envelopeBytes(ch: string, data: unknown, now: number): [number, number] {
+  const json = JSON.stringify({ t: "msg", ch, from: "server", epoch: 1, serverTime: now, data });
+  return [json.length, Bun.deflateSync(new TextEncoder().encode(json)).length];
+}
+
+function runSim(layout: FloorLayout, floor: number, hz: number, wizards: number, seed: number): SimResult {
+  const rng = new Rng(seed);
+  const sim = new FloorSim(RAPIER, layout, floor, { random: () => rng.next() });
+  const dt = 1 / hz;
+  for (let i = 0; i < hz * 2; i++) sim.step(dt); // settle
+  // Each wizard circles one enemy's post, 5 m out.
+  const posts = sim
+    .living()
+    .slice(0, wizards)
+    .map((id) => sim.physics.bodies.get(id)!.translation())
+    .map((t) => ({ x: t.x, z: t.z }));
+  const times: number[] = [];
+  let bytes = 0;
+  let deflated = 0;
+  let kills = 0;
+  let nextSnap = 0;
+  const damage = hitCapForFloor(floor) * 0.25;
+  for (let i = 0; i < hz * SECONDS; i++) {
+    const t = i * dt;
+    const now = t * 1000;
+    posts.forEach((c, k) => {
+      const a = t * 0.8 + k;
+      const pos = { x: c.x + Math.cos(a) * 5, y: 1.1, z: c.z + Math.sin(a) * 5 };
+      sim.setWizard(`w${k}`, pos, { x: -Math.sin(a) * 4, y: 0, z: Math.cos(a) * 4 });
+      if (i % Math.round(hz / 2) === k % Math.round(hz / 2)) {
+        // A hit on the nearest living enemy.
+        let best = "";
+        let bestD = Infinity;
+        for (const id of sim.living()) {
+          const b = sim.physics.bodies.get(id)!.translation();
+          const d = (b.x - pos.x) ** 2 + (b.z - pos.z) ** 2;
+          if (d < bestD) {
+            bestD = d;
+            best = id;
+          }
+        }
+        if (best) sim.hit(best, { damage, impulse: { x: 0, y: 2, z: 0 } });
+      }
+    });
+    const t0 = performance.now();
+    sim.step(dt);
+    times.push(performance.now() - t0);
+    if (now >= nextSnap) {
+      nextSnap += 1000 / SNAP_HZ;
+      const ents = sim.snapshot();
+      if (ents.length > 0) {
+        const [b, d] = envelopeBytes("a:snap", { ents }, now);
+        bytes += b;
+        deflated += d;
+      }
+      for (const action of sim.drain()) {
+        if (action.type === "died") kills++;
+        const [b, d] = envelopeBytes(`h:${action.type}`, action, now);
+        bytes += b;
+        deflated += d;
+      }
+    }
+  }
+  sim.free();
+  const sorted = [...times].sort((a, b) => a - b);
+  return {
+    meanMs: times.reduce((a, b) => a + b, 0) / times.length,
+    p95Ms: sorted[Math.floor(sorted.length * 0.95)],
+    bytesPerSec: bytes / SECONDS,
+    deflatedPerSec: deflated / SECONDS,
+    kills,
+  };
+}
+
+const simRows: string[][] = [];
+for (const hz of [30, 60]) {
+  for (const wizards of [1, 4]) {
+    const rs: SimResult[] = [];
+    for (const floor of FLOORS) {
+      for (const seed of SEEDS) rs.push(runSim(generateFloor(seed * 7919 + floor, floor), floor, hz, wizards, seed));
+    }
+    const avg = (k: keyof SimResult) => rs.reduce((a, r) => a + r[k], 0) / rs.length;
+    simRows.push([
+      `${hz} Hz`,
+      `${wizards}`,
+      avg("meanMs").toFixed(3),
+      Math.max(...rs.map((r) => r.p95Ms)).toFixed(2),
+      `${((avg("meanMs") * hz) / 10).toFixed(2)} %`,
+      avg("kills").toFixed(1),
+      `${(avg("bytesPerSec") / 1024).toFixed(1)} KiB/s`,
+      `${(avg("deflatedPerSec") / 1024).toFixed(1)} KiB/s`,
+    ]);
+  }
+}
+const simHead = ["tick", "wizards", "ms/tick", "p95 ms", "core", "kills", "to each player", "deflated"];
+const simWidths = simHead.map((h, i) => Math.max(h.length, ...simRows.map((r) => r[i].length)));
+console.log("\nWhole floor host (sim/floorSim.ts: brains + physics), fighting:");
+console.log(simHead.map((c, i) => c.padStart(simWidths[i])).join("  "));
+for (const r of simRows) console.log(r.map((c, i) => c.padStart(simWidths[i])).join("  "));

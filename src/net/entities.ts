@@ -1,3 +1,4 @@
+import type { EntitySnap } from "../sim/world";
 import { netBus } from "./bus";
 import { hostCommand, onAuthority, sendAuthorityTo } from "./channels";
 import { netClock } from "./clock";
@@ -72,13 +73,8 @@ export interface NetEntitySpec {
 
 // ── Wire formats (inside opaque envelopes) ───────────────────────────────────
 
-interface WireSnap {
-  id: string;
-  p: [number, number, number];
-  v?: [number, number, number];
-  q?: [number, number, number, number];
-  f?: Record<string, number>;
-}
+/** The same snapshot a headless floor host sends (sim/floorSim.ts). */
+type WireSnap = EntitySnap;
 
 interface DespawnMsg {
   id: string;
@@ -147,8 +143,7 @@ export function registerNetEntity(spec: NetEntitySpec): NetEntityHandle {
 
   return {
     despawn(data?: unknown) {
-      if (!isHost()) return;
-      session.sendEnvelope("a:despawn", { id: spec.id, data } satisfies DespawnMsg);
+      announceDespawn(spec.id, data);
     },
     command(cmd: string, data: unknown) {
       entityCmd.request({ id: spec.id, cmd, data });
@@ -167,6 +162,13 @@ export function registerNetEntity(spec: NetEntitySpec): NetEntityHandle {
       if (entities.get(spec.id) === entry) entities.delete(spec.id);
     },
   };
+}
+
+/** Authority: tell everyone entity `id` despawned (death, break) — the
+ * authority applies its own death directly; this informs the replicas. */
+export function announceDespawn(id: string, data?: unknown): void {
+  if (!isHost()) return;
+  session.sendEnvelope("a:despawn", { id, data } satisfies DespawnMsg);
 }
 
 export function setExpectedEntities(ids: string[]): void {
