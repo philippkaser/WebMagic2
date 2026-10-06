@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { FloorDirectory } from "../src/net/matchmaking";
+import { maxGoldDrop } from "../src/items/economy";
 import { entryFloorFor } from "../src/run/rules";
 import type { ServerMsg } from "../src/net/protocol";
 import { AccountStore, defaultWireInventory } from "./accounts";
@@ -40,8 +41,11 @@ beforeEach(() => {
   store = new AccountStore();
   // Dice always 0: every encounter roll succeeds, so wizards sent to the same
   // floor share an instance (routing tests need company; the tension clock
-  // has its own tests in matchmaking.test.ts).
-  relay = new Relay(new FloorDirectory(4, () => 1234, () => now, () => 0), store, () => now);
+  // has its own tests in matchmaking.test.ts). The pace is lifted here — runs
+  // descend 10 ms a floor — and has its own tests below.
+  relay = new Relay(new FloorDirectory(4, () => 1234, () => now, () => 0), store, () => now, undefined, {
+    pace: null,
+  });
   a = makePeer("A");
   b = makePeer("B");
   c = makePeer("C");
@@ -348,10 +352,10 @@ describe("accounts: grants and banking", () => {
     const tokenB = lastOf(b, "loggedIn")!.token;
     join(a, 5); // a is host
     join(b, 5);
-    relay.handle(b.id, { t: "grantGold", playerId: b.id, amount: 50 }); // self-vouch
+    relay.handle(b.id, { t: "grantGold", playerId: b.id, amount: 12 }); // self-vouch
     expect(store.get(tokenB)!.runGold).toBe(0);
-    relay.handle(a.id, { t: "grantGold", playerId: b.id, amount: 50 }); // host
-    expect(store.get(tokenB)!.runGold).toBe(50);
+    relay.handle(a.id, { t: "grantGold", playerId: b.id, amount: 12 }); // host
+    expect(store.get(tokenB)!.runGold).toBe(12);
     // Mid-run, village-only messages are dropped.
     b.inbox.length = 0;
     relay.handle(b.id, { t: "stash", inventory: defaultWireInventory() });
@@ -389,7 +393,9 @@ describe("graves: plunder is bounded by what the dead were granted", () => {
 
     // b legitimately picks up an amulet, then dies with others watching.
     relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "amulet_vigor@4" });
-    relay.handle(a.id, { t: "grantGold", playerId: b.id, amount: 30 });
+    relay.handle(a.id, { t: "grantGold", playerId: b.id, amount: 10 });
+    relay.handle(a.id, { t: "grantGold", playerId: b.id, amount: 10 });
+    relay.handle(a.id, { t: "grantGold", playerId: b.id, amount: 10 });
     relay.handle(b.id, { t: "died" });
 
     // c plunders the grave: the amulet once, the gold up to what b carried.
@@ -417,5 +423,125 @@ describe("graves: plunder is bounded by what the dead were granted", () => {
     expect(lastOf(a, "floorAssigned")!.assignment.runFloors).toBe(1);
     enter(a, 2);
     expect(lastOf(a, "floorAssigned")!.assignment.runFloors).toBe(2);
+  });
+});
+
+describe("a lone wizard is its own host — the floor still bounds what it finds", () => {
+  test("a self-attested find must be this floor's loot, its gold a floor's purse", () => {
+    enter(a, 1, true); // alone: A is the host of its own floor 1
+    relay.handle(a.id, { t: "grant", playerId: a.id, itemId: "void_staff+keen@120" });
+    relay.handle(a.id, { t: "grant", playerId: a.id, itemId: "totally_made_up_item" });
+    relay.handle(a.id, { t: "grant", playerId: a.id, itemId: "ember_staff@2" });
+    expect(accountOf(a).runGrants).toEqual(["ember_staff@2"]);
+    relay.handle(a.id, { t: "grantGold", playerId: a.id, amount: 500 });
+    expect(accountOf(a).runGold).toBe(maxGoldDrop(1));
+  });
+});
+
+describe("drops: what one wizard lets fall, another may take — nothing more", () => {
+  beforeEach(() => {
+    join(a, 5); // host
+    join(b, 5);
+    join(c, 5);
+  });
+
+  test("a gift moves from the dropper to the taker, whatever its depth", () => {
+    // B brought a deep amulet from home — deeper than floor 5's own loot.
+    accountOf(b).inventory.bag[0] = { id: "amulet_vigor@30", qty: 1 };
+    relay.handle(b.id, { t: "drop", itemId: "amulet_vigor@30", runLoot: false });
+    expect(accountOf(b).inventory.bag[0]).toBeNull(); // given up
+    relay.handle(a.id, { t: "grant", playerId: c.id, itemId: "amulet_vigor@30", source: "drop" });
+    relay.handle(a.id, { t: "grant", playerId: c.id, itemId: "amulet_vigor@30", source: "drop" });
+    expect(accountOf(c).runGrants).toEqual(["amulet_vigor@30"]); // once
+  });
+
+  test("a run find dropped comes out of the dropper's grants", () => {
+    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "ember_staff@5" });
+    relay.handle(b.id, { t: "drop", itemId: "ember_staff@5", runLoot: true });
+    expect(accountOf(b).runGrants).toEqual([]);
+    relay.handle(a.id, { t: "grant", playerId: c.id, itemId: "ember_staff@5", source: "drop" });
+    expect(accountOf(c).runGrants).toEqual(["ember_staff@5"]);
+  });
+
+  test("a drop of something never owned mints nothing — as a drop or as a find", () => {
+    relay.handle(b.id, { t: "drop", itemId: "amulet_vigor@30", runLoot: false });
+    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "amulet_vigor@30", source: "drop" });
+    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "amulet_vigor@30" });
+    expect(accountOf(b).runGrants).toEqual([]);
+  });
+});
+
+describe("the deep's pace", () => {
+  let tasks: { at: number; fn: () => void }[];
+  let paced: Relay;
+  let p: TestPeer;
+
+  /** Let `ms` pass, running whatever the relay scheduled for that time. */
+  function advance(ms: number) {
+    now += ms;
+    const due = tasks.filter((t) => t.at <= now);
+    tasks = tasks.filter((t) => t.at > now);
+    for (const t of due) t.fn();
+  }
+  function enterPaced(floor: number, fresh = false) {
+    paced.handle(p.id, { t: "enterFloor", floor, fresh });
+  }
+  const assignments = () => p.inbox.filter((m) => m.t === "floorAssigned").length;
+  const pacedAccount = () => store.get((lastOf(p, "loggedIn") as { token: string }).token)!;
+
+  beforeEach(() => {
+    tasks = [];
+    paced = new Relay(new FloorDirectory(4, () => 1, () => now, () => 0), store, () => now, undefined, {
+      pace: { msPerFloor: 1000, burst: 2 },
+      schedule: (fn, ms) => tasks.push({ at: now + ms, fn }),
+    });
+    p = makePeer("P");
+    paced.connect(p);
+    paced.handle(p.id, { t: "login", name: "P" });
+  });
+
+  test("five floors and a bank can't happen in a moment", () => {
+    enterPaced(1, true);
+    for (let f = 2; f <= 5; f++) enterPaced(f);
+    expect(assignments()).toBe(2); // the burst; the rest is held
+    expect(pacedAccount().runFloors).toBe(2);
+    paced.handle(p.id, { t: "bank", inventory: defaultWireInventory() });
+    expect(pacedAccount().runFloors).toBe(2); // the way home stays shut
+  });
+
+  test("a floor asked for too soon is answered once it's due", () => {
+    enterPaced(1, true);
+    enterPaced(2);
+    enterPaced(3);
+    expect(assignments()).toBe(2);
+    advance(999);
+    expect(assignments()).toBe(2);
+    advance(1);
+    expect(assignments()).toBe(3);
+    expect(lastOf(p, "floorAssigned")!.assignment.runFloors).toBe(3);
+  });
+
+  test("anything newer drops a held request; so does a disconnect", () => {
+    enterPaced(1, true);
+    enterPaced(2);
+    enterPaced(3); // held
+    paced.handle(p.id, { t: "leaveDungeon" });
+    advance(5000);
+    expect(assignments()).toBe(2);
+
+    enterPaced(3); // the 5 s rest refilled the burst: straight through
+    expect(assignments()).toBe(3);
+    enterPaced(4);
+    enterPaced(5); // held
+    paced.disconnect(p.id);
+    advance(5000);
+    expect(assignments()).toBe(4);
+  });
+
+  test("re-entering the floor you're on is never held", () => {
+    enterPaced(1, true);
+    enterPaced(2);
+    enterPaced(2); // a reconnect, with no token left
+    expect(assignments()).toBe(3);
   });
 });

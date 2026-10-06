@@ -50,6 +50,9 @@ interface Orb {
   defId: string | null;
   gold: number;
   position: Vec3;
+  /** A wizard dropped it (vs the floor dropping it): its pickup is granted
+   * out of what that wizard gave up, not as a find (server/relay.ts). */
+  dropped?: boolean;
 }
 
 let orbCounter = 1;
@@ -57,9 +60,20 @@ let pushOrb: ((orb: Orb) => void) | null = null;
 let takeOrbLocal: ((orbId: string, by: string) => void) | null = null;
 let liveOrbs: (() => Orb[]) | null = null;
 
-const orbSpawned = hostEvent<{ orbId: string; defId: string | null; gold: number; pos: Vec3 }>(
-  "orbSpawned",
-  (d) => pushOrb?.({ id: d.orbId, defId: d.defId ?? null, gold: d.gold ?? 0, position: d.pos }),
+const orbSpawned = hostEvent<{
+  orbId: string;
+  defId: string | null;
+  gold: number;
+  pos: Vec3;
+  dropped?: boolean;
+}>("orbSpawned", (d) =>
+  pushOrb?.({
+    id: d.orbId,
+    defId: d.defId ?? null,
+    gold: d.gold ?? 0,
+    position: d.pos,
+    dropped: d.dropped === true,
+  }),
 );
 
 const orbTaken = hostEvent<{ orbId: string; by: string }>("orbTaken", (d) =>
@@ -79,14 +93,19 @@ const takeOrb = hostCommand<{ orbId: string }>("takeOrb", (d, meta) => {
   if (wizardDistSqTo(meta.from, orb.position[0], orb.position[1], orb.position[2]) > TAKE_RANGE_SQ)
     return;
   orbTaken.announce({ orbId: d.orbId, by: meta.from });
-  // Host attestation makes the pickup bankable server-side for that player.
-  if (orb.defId) session.attestGrant(meta.from, orb.defId);
+  // Host attestation makes the pickup bankable server-side for that player —
+  // a dropped orb out of what its dropper gave up, anything else as a find
+  // the server checks against this floor's loot.
+  if (orb.defId) session.attestGrant(meta.from, orb.defId, orb.dropped ? "drop" : undefined);
   else if (orb.gold > 0) session.attestGold(meta.from, orb.gold);
 });
 
 /** Player-dropped items become real orbs at the dropper's feet — anyone on
  * the floor can take them, which makes dropping double as gifting. The host
- * validates the position against the dropper like any pickup. */
+ * validates the position against the dropper like any pickup; the dropper
+ * has already told the server (releaseItem), which is what makes the item
+ * bankable for whoever takes it — so a dropOrb for an item nobody gave up
+ * shows an orb, but grants nothing. */
 const dropOrb = hostCommand<{ defId: string; pos: Vec3 }>("dropOrb", (d, meta) => {
   if (typeof d.defId !== "string" || !Array.isArray(d.pos)) return;
   try {
@@ -95,15 +114,16 @@ const dropOrb = hostCommand<{ defId: string; pos: Vec3 }>("dropOrb", (d, meta) =
     return; // unknown id from a hacked/newer client — refuse to spawn it
   }
   if (wizardDistSqTo(meta.from, d.pos[0], d.pos[1], d.pos[2]) > TAKE_RANGE_SQ) return;
-  announceOrb(d.defId, 0, d.pos);
+  announceOrb(d.defId, 0, d.pos, true);
 });
 
-function announceOrb(defId: string | null, gold: number, pos: Vec3): void {
+function announceOrb(defId: string | null, gold: number, pos: Vec3, dropped = false): void {
   orbSpawned.announce({
     orbId: `orb_${orbCounter++}_${Math.random().toString(36).slice(2, 6)}`,
     defId,
     gold,
     pos,
+    dropped,
   });
 }
 
@@ -169,6 +189,10 @@ export function LootOrbs() {
   useEffect(() => {
     pushOrb = (orb) => setOrbs((prev) => (prev.some((o) => o.id === orb.id) ? prev : [...prev, orb]));
     takeOrbLocal = (orbId, by) => {
+      // Gone from the authority's list NOW, not at the next render: a second
+      // take request landing in between must find nothing to grant (one orb,
+      // one grant).
+      orbsRef.current = orbsRef.current.filter((o) => o.id !== orbId);
       setOrbs((prev) => {
         const orb = prev.find((o) => o.id === orbId);
         if (!orb) return prev;
@@ -197,10 +221,13 @@ export function LootOrbs() {
         for (const orb of (data as Orb[]) ?? []) pushOrb?.(orb);
       },
     });
-    // Inventory drops: scatter the stack around the player's feet.
-    const offDrop = gameEvents.on("dropItems", ({ defId, qty }) => {
+    // Inventory drops: scatter the stack around the player's feet. Each copy
+    // is given up to the server first (same socket, so it lands before the
+    // host can grant anyone the orb).
+    const offDrop = gameEvents.on("dropItems", ({ defId, qty, runLoot }) => {
       for (let i = 0; i < Math.min(qty, 8); i++) {
         const a = Math.random() * Math.PI * 2;
+        session.releaseItem(defId, runLoot);
         dropOrb.request({
           defId,
           pos: [

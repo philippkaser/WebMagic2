@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { canLeave, entryFloorFor, entryFloorForGear, floorsUntilExit, gearLevel, RUN } from "./rules";
+import {
+  canLeave,
+  entryFloorFor,
+  entryFloorForGear,
+  floorsUntilExit,
+  gearLevel,
+  paceWaitMs,
+  RUN,
+  spendPace,
+  type PaceState,
+} from "./rules";
 
 describe("the Weighing (gear level → entry floor)", () => {
   test("starter gear resonates weakly and enters on floor 1", () => {
@@ -38,5 +48,41 @@ describe("the Tithe of Five (exit rule)", () => {
     expect(floorsUntilExit(5)).toBe(0);
     expect(canLeave(5)).toBe(true);
     expect(canLeave(9)).toBe(true);
+  });
+});
+
+describe("the deep's pace", () => {
+  const rules = { msPerFloor: 1000, burst: 3 };
+
+  test("a full burst goes through at once; the next floor waits for a token", () => {
+    let state: PaceState | undefined;
+    for (let i = 0; i < 3; i++) {
+      expect(paceWaitMs(state, 0, rules)).toBe(0);
+      state = spendPace(state, 0, rules);
+    }
+    expect(paceWaitMs(state, 0, rules)).toBe(1000);
+    expect(paceWaitMs(state, 400, rules)).toBe(600);
+    expect(paceWaitMs(state, 1000, rules)).toBe(0);
+  });
+
+  test("tokens come back over time, never past the burst", () => {
+    let state = spendPace(undefined, 0, rules); // 2 left
+    state = spendPace(state, 0, rules); // 1 left
+    expect(paceWaitMs(spendPace(state, 0, rules), 0, rules)).toBe(1000);
+    // A long rest refills only to the burst: three floors, then a wait.
+    let rested: PaceState | undefined = state;
+    for (let i = 0; i < 3; i++) rested = spendPace(rested, 60_000, rules);
+    expect(paceWaitMs(rested, 60_000, rules)).toBe(1000);
+  });
+
+  test("waiting exactly the asked time is always enough (no float shortfall)", () => {
+    let state: PaceState | undefined;
+    let now = 0;
+    for (let i = 0; i < 50; i++) {
+      now += paceWaitMs(state, now, { msPerFloor: 15_000, burst: 3 });
+      expect(paceWaitMs(state, now, { msPerFloor: 15_000, burst: 3 })).toBe(0);
+      state = spendPace(state, now, { msPerFloor: 15_000, burst: 3 });
+      now += 7; // a little drift between requests
+    }
   });
 });

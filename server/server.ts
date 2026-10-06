@@ -10,6 +10,7 @@ import { writeFileSync } from "node:fs";
 import { ENCOUNTERS } from "../src/core/config";
 import { FloorDirectory } from "../src/net/matchmaking";
 import type { ClientMsg } from "../src/net/protocol";
+import { PACE } from "../src/run/rules";
 import { AccountStore } from "./accounts";
 import { Relay, type RelayPeer } from "./relay";
 
@@ -76,13 +77,25 @@ const encounterOverride = Number(process.env.ENCOUNTER_CHANCE);
 const encounterTuning = Number.isFinite(encounterOverride)
   ? { baseChance: encounterOverride, perSoloFloor: 0, maxChance: encounterOverride }
   : ENCOUNTERS;
+// FLOOR_PACE_MS sets how long a new floor takes to come due (ms per floor;
+// 0 lifts the pace — a testing knob: the e2e smoke test descends faster than
+// any wizard could walk). Unset, run/rules.ts PACE applies.
+const paceEnv = process.env.FLOOR_PACE_MS;
+const paceOverride = paceEnv === undefined || paceEnv === "" ? NaN : Number(paceEnv);
+const pace = Number.isFinite(paceOverride)
+  ? paceOverride > 0
+    ? { ...PACE, msPerFloor: paceOverride }
+    : null
+  : PACE;
 const relay = new Relay(
   new FloorDirectory(MAX_PLAYERS_PER_FLOOR, undefined, undefined, undefined, encounterTuning),
   accounts,
   () => Date.now(),
   log,
+  { pace },
 );
 if (encounterTuning !== ENCOUNTERS) log(`encounter chance forced to ${encounterOverride}`);
+if (pace !== PACE) log(pace ? `floor pace forced to ${pace.msPerFloor} ms` : "floor pace lifted");
 const sockets = new Map<string, ServerWebSocket<SocketData>>();
 
 function peerFor(ws: ServerWebSocket<SocketData>): RelayPeer {

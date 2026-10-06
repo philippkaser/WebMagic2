@@ -4,10 +4,12 @@ import {
   GAMBLE_PRICE,
   GOLD_RULES,
   isSubMultiset,
+  maxGoldDrop,
   merchantPrice,
   multisetOf,
   sellValue,
 } from "../src/items/economy";
+import { couldDropOn } from "../src/items/loot";
 import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS } from "../src/items/inventory";
 import type { ServerSave, WireEquipment, WireInventory, WireStack } from "../src/net/protocol";
 
@@ -22,10 +24,12 @@ import type { ServerSave, WireEquipment, WireInventory, WireStack } from "../src
  *   Gold follows the same rule with amounts (grantGold), under sanity caps.
  *
  * Hosts attest grants because loot is host-authoritative already (an orb can
- * only be taken once, and only the host announces pickups) — the beneficiary
- * never vouches for itself. Death or quitting discards the run's grants.
- * A hacked client can therefore repaint its own screen, but nothing survives
- * a bank round trip that the floor's authority didn't hand out.
+ * only be taken once, and only the host announces pickups). But a wizard
+ * alone on a floor IS its host, so an attestation alone proves little: what
+ * was FOUND must also be something that floor could drop (grantFound — a
+ * real item, no deeper than the floor reaches), and what another wizard
+ * gave up (a grave, a drop — release) is matched by the relay against what
+ * was actually given up. Death or quitting discards the run's grants.
  *
  * The only item MEANING the server borrows from the shared pure catalog is
  * the same kind it always has (starter ids): merchant prices and the feather
@@ -155,21 +159,59 @@ export class AccountStore {
     return { deepest: account.deepest, inventory: cloneInventory(account.inventory) };
   }
 
-  /** Host attested that this account picked up an item this run. Duplicates
-   * are counted — the grants are a multiset. */
-  grant(account: AccountRecord, itemId: string): void {
-    if (!isItemId(itemId)) return;
-    if (account.runGrants.length >= MAX_RUN_GRANTS) return;
-    account.runGrants.push(itemId);
-    this.flush();
+  /** Host attested that this account found `itemId` on `floor` (an orb, the
+   * floor's treasure). Recorded only if that floor could have dropped it — a
+   * lone wizard is its own host, so the attestation alone isn't enough.
+   * Returns whether it was recorded. */
+  grantFound(account: AccountRecord, itemId: string, floor: number): boolean {
+    if (!couldDropOn(itemId, floor)) return false;
+    return this.grant(account, itemId);
   }
 
-  /** Host attested a gold pickup this run (sanity-capped, never trusted raw). */
-  grantGold(account: AccountRecord, amount: number): void {
-    const n = clampGold(amount, GOLD_RULES.perGrantCap);
+  /** Record a grant without asking where it came from — for what another
+   * wizard gave up (graves, drops), which the relay has already matched
+   * against what was given up. Duplicates are counted — the grants are a
+   * multiset. Returns whether it was recorded. */
+  grant(account: AccountRecord, itemId: string): boolean {
+    if (!isItemId(itemId)) return false;
+    if (account.runGrants.length >= MAX_RUN_GRANTS) return false;
+    account.runGrants.push(itemId);
+    this.flush();
+    return true;
+  }
+
+  /** Host attested gold found on `floor` — capped to the richest orb that
+   * floor can drop (never trusted raw). */
+  grantFoundGold(account: AccountRecord, amount: number, floor: number): void {
+    this.grantGold(account, amount, Math.min(GOLD_RULES.perGrantCap, maxGoldDrop(floor)));
+  }
+
+  /** Record gold for this run, at most `cap` of it (default: the absolute
+   * per-grant backstop; the relay lifts it for grave gold, which its pool
+   * already bounds). */
+  grantGold(account: AccountRecord, amount: number, cap: number = GOLD_RULES.perGrantCap): void {
+    const n = clampGold(amount, cap);
     if (n <= 0) return;
     account.runGold = Math.min(account.runGold + n, GOLD_RULES.perRunCap);
     this.flush();
+  }
+
+  /** The wizard let one copy of `itemId` fall on a floor. `runLoot` names the
+   * copy: one granted this run, or one from the banked save (brought from
+   * home). Takes it off the account and returns true — or returns false and
+   * changes nothing when no such copy is owned (then nothing was given up,
+   * and the relay grants nobody anything for it). */
+  release(account: AccountRecord, itemId: string, runLoot: boolean): boolean {
+    if (!isItemId(itemId)) return false;
+    if (runLoot) {
+      const i = account.runGrants.indexOf(itemId);
+      if (i === -1) return false;
+      account.runGrants.splice(i, 1);
+    } else if (!takeOne(account.inventory, itemId)) {
+      return false;
+    }
+    this.flush();
+    return true;
   }
 
   /** A fresh run begins on `floor` (the Weighing already decided which).
@@ -293,17 +335,20 @@ export class AccountStore {
     account.runFloors = 0;
   }
 
-  /** Everything this account may legitimately bank right now. */
+  /** Everything this account may legitimately bank right now. Starter gear
+   * is owned implicitly — at least one copy, never one more per bank. */
   private ownedMultiset(account: AccountRecord): Map<string, number> {
     const owned = multisetOf(account.inventory);
-    for (const id of DEFAULT_ITEMS) owned.set(id, (owned.get(id) ?? 0) + 1);
+    for (const id of DEFAULT_ITEMS) owned.set(id, Math.max(owned.get(id) ?? 0, 1));
     for (const id of account.runGrants) owned.set(id, (owned.get(id) ?? 0) + 1);
     return owned;
   }
 
   /** Provenance-settle a submitted inventory into the account: clamp every
-   * cell to the owned multiset (consuming as it goes), clamp gold, keep the
-   * previous staff/boots if the submitted ones don't check out. */
+   * cell to the owned multiset (consuming as it goes), clamp gold. A staff
+   * that doesn't check out falls back to the previous one — claimed from the
+   * budget like any cell, so it can't also bank a second copy elsewhere —
+   * or, failing that, the starter staff (a wizard always has one). */
   private settle(account: AccountRecord, submitted: unknown): void {
     const sub = sanitizeInventory(submitted);
     const budget = this.ownedMultiset(account);
@@ -321,9 +366,14 @@ export class AccountStore {
         return qty > 0 ? { id: stack.id, qty } : null;
       });
 
+    const prevStaff = account.inventory.equipment.staff;
     account.inventory = {
       equipment: {
-        staff: claim(sub.equipment.staff) ? sub.equipment.staff : account.inventory.equipment.staff,
+        staff: claim(sub.equipment.staff)
+          ? sub.equipment.staff
+          : claim(prevStaff)
+            ? prevStaff
+            : BASIC_STAFF_ID,
         amulet: sub.equipment.amulet && claim(sub.equipment.amulet) ? sub.equipment.amulet : null,
         cloak: sub.equipment.cloak && claim(sub.equipment.cloak) ? sub.equipment.cloak : null,
         boots: sub.equipment.boots && claim(sub.equipment.boots) ? sub.equipment.boots : null,
@@ -402,6 +452,32 @@ export function sanitizeInventory(raw: unknown): WireInventory {
     chest: sanitizeGrid(d.chest, CHEST_SLOTS),
     gold: clampGold(d.gold, GOLD_RULES.accountCap),
   };
+}
+
+/** Remove one copy of `itemId` from a banked inventory, in place: from the
+ * bag, belt or chest first, then the gear slots. The staff slot never goes
+ * empty — a given-up staff leaves the starter one (which can't itself be
+ * given up: it would come straight back). False if no copy was there. */
+function takeOne(inv: WireInventory, itemId: string): boolean {
+  for (const grid of [inv.bag, inv.belt, inv.chest]) {
+    const i = grid.findIndex((s) => s?.id === itemId);
+    if (i === -1) continue;
+    const stack = grid[i]!;
+    grid[i] = stack.qty > 1 ? { id: itemId, qty: stack.qty - 1 } : null;
+    return true;
+  }
+  const eq = inv.equipment;
+  for (const slot of ["amulet", "cloak", "boots"] as const) {
+    if (eq[slot] === itemId) {
+      eq[slot] = null;
+      return true;
+    }
+  }
+  if (eq.staff === itemId && itemId !== BASIC_STAFF_ID) {
+    eq.staff = BASIC_STAFF_ID;
+    return true;
+  }
+  return false;
 }
 
 function cloneInventory(inv: WireInventory): WireInventory {

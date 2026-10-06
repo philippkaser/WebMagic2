@@ -98,7 +98,11 @@ describe("item ids & enchantments", () => {
     const plain = sellValue("amulet_vigor")!;
     const enchanted = sellValue("amulet_vigor+keen")!;
     expect(enchanted).toBeGreaterThan(plain);
-    expect(sellValue("void_staff")!).toBeGreaterThan(sellValue("apprentice_staff")!);
+    expect(sellValue("void_staff")!).toBeGreaterThan(sellValue("ember_staff")!);
+    // The free starter kit is worth nothing to Maro; a found copy sells.
+    expect(sellValue("apprentice_staff")).toBeNull();
+    expect(sellValue("worn_boots")).toBeNull();
+    expect(sellValue("apprentice_staff@1")!).toBeGreaterThan(0);
     expect(sellValue("potion_hp_weak")).toBe(9); // ceil(35 / 4)
     expect(sellValue("garbage_id")).toBeNull();
     // Selling must never beat buying (no merchant arbitrage).

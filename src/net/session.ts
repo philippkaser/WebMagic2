@@ -125,9 +125,16 @@ export class GameSession {
     this.transport?.send({ t: "died" });
   }
 
+  /** We let one copy of an item fall to the floor — the server takes it off
+   * our account, so whoever picks it up can be granted it. */
+  releaseItem(itemId: string, runLoot: boolean): void {
+    this.transport?.send({ t: "drop", itemId, runLoot });
+  }
+
   /** HOST only (the server ignores anyone else): attest that a player
-   * legitimately picked up an item, making it bankable for them. */
-  attestGrant(playerId: string, itemId: string, source?: "grave"): void {
+   * legitimately picked up an item, making it bankable for them. `source`:
+   * plundered from a grave, or picked up after another wizard dropped it. */
+  attestGrant(playerId: string, itemId: string, source?: "grave" | "drop"): void {
     this.transport?.send({ t: "grant", playerId, itemId, source });
   }
 

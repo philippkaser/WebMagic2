@@ -86,7 +86,9 @@ export type ClientMsg =
    * server ignores the requested floor and casts the wizard to the depth
    * their banked gear resonates at (run/rules.ts). Otherwise the request must
    * continue the current run: the same floor (reconnect) or one deeper
-   * (portal, warp rune). Anything else forfeits the run and starts fresh. */
+   * (portal, warp rune). Anything else forfeits the run and starts fresh.
+   * New floors keep the deep's pace (run/rules.ts PACE): one asked for too
+   * soon is answered once it's due, not refused. */
   | { t: "enterFloor"; floor: number; fresh?: boolean }
   | { t: "leaveDungeon" }
   /** Walk home through a way-home portal. Refused until the run has played
@@ -116,14 +118,22 @@ export type ClientMsg =
   | { t: "gamble" }
   /** The run is lost — the server discards this run's grants. */
   | { t: "died" }
+  /** The sender let one copy of `itemId` fall to the floor (an inventory
+   * drop — anyone there may take it). `runLoot` says which copy: one found
+   * this run, or one brought from home. The server takes it off the sender
+   * first, so whoever picks it up is granted exactly what was given up. */
+  | { t: "drop"; itemId: string; runLoot: boolean }
   /** HOST attestation: `playerId` legitimately picked up `itemId`. The only
    * path by which an item becomes bankable. Non-host senders are ignored.
-   * `source: "grave"` = plundered from a grave: honored only against what
-   * wizards who died in that instance were actually granted (their grave
-   * pool), so a forged grave can't mint bankable items. */
-  | { t: "grant"; playerId: string; itemId: string; source?: "grave" }
+   * Without a source it was FOUND here (an orb, the floor treasure) and must
+   * be something this floor could drop (items/loot.ts couldDropOn).
+   * `source: "grave" | "drop"` = something another wizard gave up here (died
+   * carrying it, or dropped it): honored only against what was actually
+   * given up in this instance, so a forged grave or drop mints nothing. */
+  | { t: "grant"; playerId: string; itemId: string; source?: "grave" | "drop" }
   /** HOST attestation of a gold pickup — gold's provenance path, mirroring
-   * `grant` (server-side sanity caps in items/economy.ts GOLD_RULES). */
+   * `grant`: found gold is capped to the richest orb the floor can drop
+   * (items/economy.ts maxGoldDrop), grave gold to what the dead carried. */
   | { t: "grantGold"; playerId: string; amount: number; source?: "grave" }
   /** Clock sync probe; `sent` is the sender's local monotonic time. */
   | { t: "ping"; sent: number }

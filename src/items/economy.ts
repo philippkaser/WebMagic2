@@ -1,6 +1,7 @@
 import type { Rng } from "../core/rng";
-import { resolveItem, SAVE_FEATHER_ID } from "./catalog";
+import { BASIC_BOOTS_ID, BASIC_STAFF_ID, resolveItem, SAVE_FEATHER_ID } from "./catalog";
 import type { WireInventory, WireStack } from "../net/protocol";
+import { isBossFloor } from "../world/gen/pois";
 
 /** The economy balance sheet — every gold and price number lives here.
  *
@@ -34,13 +35,20 @@ export function merchantPrice(itemId: string): number | null {
 /** What Maro pays for an item — deliberately stingy (roughly a quarter of
  * worth) so selling clears clutter without becoming the main income. Gear by
  * tier, +bonus if enchanted; consumables at a quarter of his own price.
- * Returns null for ids he won't touch (unknown/corrupt). */
+ * Returns null for ids he won't touch (unknown/corrupt, and the starter kit
+ * below). */
 const GEAR_SELL_BY_TIER = [0, 9, 21, 38] as const;
+/** Every wizard is handed the plain starter staff and boots for free (the
+ * server counts them as owned, server/accounts.ts), so Maro won't pay for
+ * them — otherwise they'd be gold from nothing. Found copies carry a level
+ * ("apprentice_staff@4") and sell like any other find. */
+const UNSELLABLE: ReadonlySet<string> = new Set([BASIC_STAFF_ID, BASIC_BOOTS_ID]);
 const AFFIX_SELL_BONUS = 14;
 /** Deeper finds fetch a little more — enough to notice, never a gold farm. */
 const SELL_PER_LEVEL = 0.8;
 
 export function sellValue(itemId: string): number | null {
+  if (UNSELLABLE.has(itemId)) return null;
   try {
     const item = resolveItem(itemId);
     if (item.def.slot === "consumable") {
@@ -85,10 +93,32 @@ export function bossGoldAmount(rng: Rng, floor: number): number {
   return Math.round(20 + floor * 2.2 + rng.next() * 14);
 }
 
+/** The richest omen's gold multiplier (world/omens.ts; economy.test.ts pins
+ * that no omen pays more). */
+export const MAX_GOLD_MULT = 1.5;
+
+/** Every roll at its top — for reading off the drop formulas' ceilings. */
+const TOP_ROLL = { next: () => 1 } as unknown as Rng;
+
+/** The richest single gold orb `floor` can drop: its best source (the
+ * Warden on boss floors, otherwise a monster) at the top of its roll, under
+ * the richest omen. The server caps every host-attested gold pickup on that
+ * floor to it. */
+export function maxGoldDrop(floor: number): number {
+  const f = Math.max(1, floor);
+  const best = Math.max(
+    enemyGoldAmount(TOP_ROLL, f),
+    propGoldAmount(TOP_ROLL, f),
+    isBossFloor(f) ? bossGoldAmount(TOP_ROLL, f) : 0,
+  );
+  return Math.ceil(best * MAX_GOLD_MULT);
+}
+
 // ── Server-side sanity caps (anti-cheat bounds, not balance) ────────────────
 
 export const GOLD_RULES = {
-  /** No single host-attested pickup exceeds this — far above any real drop. */
+  /** No single host-attested pickup exceeds this — far above any real drop
+   * (the floor's own bound, maxGoldDrop, is the tighter one). */
   perGrantCap: 500,
   /** Ceiling on gold attested per run — bounds a cheating host's damage. */
   perRunCap: 10_000,

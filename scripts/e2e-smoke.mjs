@@ -3,10 +3,11 @@
 // death → grave → plunder, and the server honoring the plunder). Drives the
 // game through its dev-only window hooks (__game, __castAt, __pact, …).
 //
-// Needs a dev client and a game server with forced encounters and a known
+// Needs a dev client and a game server with forced encounters, the pace
+// lifted (the script descends faster than any wizard could walk) and a known
 // data file (so the script can inspect server-side grants):
 //
-//   DATA_FILE=/tmp/wm-e2e.json ENCOUNTER_CHANCE=1 bun server/server.ts &
+//   DATA_FILE=/tmp/wm-e2e.json ENCOUNTER_CHANCE=1 FLOOR_PACE_MS=0 bun server/server.ts &
 //   bunx vite --port 3000 &
 //   DATA_FILE=/tmp/wm-e2e.json bun run e2e        (runs under node)
 //
@@ -167,12 +168,34 @@ async function waitPhase(w, phase, timeout = 30000) {
   // Break the pact, give B some run loot, and let A kill B.
   await a.page.evaluate((id) => window.__pact(id), idB);
   await sleep(700);
+  const at = await b.page.evaluate(() => window.__playerPos());
+  // A gift: Mira drops her boots, Oswin picks them up. The server must move
+  // them from her account to his (a drop is given up, never duplicated).
+  await b.page.evaluate(() => window.__game.getState().dropStack({ container: "equipment", slot: "boots" }));
+  await a.page.evaluate(([x, y, z]) => window.__teleport(x + 1, y + 0.5, z), at);
+  await sleep(1500);
+  await a.page.keyboard.down("KeyE");
+  await sleep(150);
+  await a.page.keyboard.up("KeyE");
+  await sleep(1200);
+  const oswinBag = await a.page.evaluate(() => window.__game.getState().bag.map((s) => s?.defId ?? null));
+  check("a dropped item is a gift: the floor-mate picks it up", oswinBag.includes("worn_boots"),
+    JSON.stringify(oswinBag));
+  if (DATA_FILE) {
+    await sleep(600); // the store's write debounce
+    const accounts = JSON.parse(readFileSync(DATA_FILE, "utf8"));
+    const oswin = accounts.filter((acc) => acc.name === "Oswin").at(-1);
+    const mira = accounts.filter((acc) => acc.name === "Mira").at(-1);
+    check("the server moves the gift: granted to the taker, gone from the dropper",
+      !!oswin?.runGrants.includes("worn_boots") && mira?.inventory.equipment.boots === null,
+      JSON.stringify({ oswin: oswin?.runGrants, miraBoots: mira?.inventory.equipment.boots }));
+  }
   // Mira picks up loot the honest way: the host drops real orbs at her feet,
   // she takes the item (E) and walks over the coins (auto) — host-granted.
-  const at = await b.page.evaluate(() => window.__playerPos());
+  // (Floor-1 sized: the server caps a find to what the floor could drop.)
   await a.page.evaluate(([x, y, z]) => {
     window.__spawnOrb("amulet_vigor@3", 0, [x + 0.4, Math.max(0.4, y - 0.5), z]);
-    window.__spawnOrb(null, 40, [x - 0.3, Math.max(0.4, y - 0.5), z]);
+    window.__spawnOrb(null, 6, [x - 0.3, Math.max(0.4, y - 0.5), z]);
   }, at);
   await sleep(1500);
   await b.page.keyboard.down("KeyE");
@@ -210,7 +233,7 @@ async function waitPhase(w, phase, timeout = 30000) {
     const accounts = DATA_FILE ? JSON.parse(readFileSync(DATA_FILE, "utf8")) : [];
     const oswin = accounts.filter((acc) => acc.name === "Oswin").at(-1);
     check("the server honors the grave plunder as a grant",
-      !!oswin && oswin.runGrants.includes("amulet_vigor@3") && oswin.runGold >= 40,
+      !!oswin && oswin.runGrants.includes("amulet_vigor@3") && oswin.runGold >= 6,
       JSON.stringify({ grants: oswin?.runGrants, gold: oswin?.runGold }));
   }
   check("encounter had no page errors (A)", a.errors.length === 0, a.errors.slice(0, 3).join(" | "));

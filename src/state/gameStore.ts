@@ -392,7 +392,7 @@ export const useGame = create<GameState>((set, get) => ({
     set({ ...next, health: clampedHealth({ ...state, ...next }) });
     if (state.phase === "dungeon") {
       // Real orbs at your feet — a floor-mate can pick them up (gifting!).
-      gameEvents.emit("dropItems", { defId: stack.defId, qty: stack.qty });
+      gameEvents.emit("dropItems", { defId: stack.defId, qty: stack.qty, runLoot: stack.runLoot });
       gameEvents.emit("message", `Dropped ${name}${stack.qty > 1 ? ` ×${stack.qty}` : ""}`);
     } else {
       gameEvents.emit("message", `Discarded ${name}${stack.qty > 1 ? ` ×${stack.qty}` : ""}`);

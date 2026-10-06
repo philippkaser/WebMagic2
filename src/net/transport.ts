@@ -142,6 +142,7 @@ export class LocalTransport implements Transport {
       case "sell":
       case "gamble":
       case "died":
+      case "drop":
       case "grant":
       case "grantGold":
         // Offline progress is persisted client-side.

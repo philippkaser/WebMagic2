@@ -66,3 +66,43 @@ export function floorsUntilExit(floorsPlayed: number): number {
 export function canLeave(floorsPlayed: number): boolean {
   return floorsUntilExit(floorsPlayed) === 0;
 }
+
+// ── The deep's pace ──────────────────────────────────────────────────────────
+
+/** Nobody goes deeper faster than a fast human walks. Every floor a wizard
+ * enters — a fresh run through the gate, or one floor deeper — spends one
+ * token; tokens come back one per `msPerFloor`, and a wizard holds at most
+ * `burst`. A lucky chain of warp runes never waits, but a script that skips
+ * floors does: the server holds an early floor request back until a token is
+ * due (server/relay.ts), and the wizard just hovers a little longer in the
+ * rift. Re-entering the floor you're on (a reconnect) is free. */
+export interface PaceRules {
+  msPerFloor: number;
+  burst: number;
+}
+
+export const PACE: PaceRules = { msPerFloor: 15_000, burst: 3 };
+
+/** One account's tokens as of `at` (server time, ms). Absent = a full burst. */
+export interface PaceState {
+  tokens: number;
+  at: number;
+}
+
+function tokensAt(state: PaceState | undefined, now: number, rules: PaceRules): number {
+  if (!state) return rules.burst;
+  return Math.min(rules.burst, state.tokens + Math.max(0, now - state.at) / rules.msPerFloor);
+}
+
+/** How long until another floor may be entered (0 = now). */
+export function paceWaitMs(state: PaceState | undefined, now: number, rules: PaceRules = PACE): number {
+  const held = tokensAt(state, now, rules);
+  // (The epsilon keeps a wait of exactly the computed length from coming
+  // back 1 ms short to float rounding.)
+  return held >= 1 - 1e-9 ? 0 : Math.ceil((1 - held) * rules.msPerFloor);
+}
+
+/** Spend a token on entering a floor (callers check paceWaitMs first). */
+export function spendPace(state: PaceState | undefined, now: number, rules: PaceRules = PACE): PaceState {
+  return { tokens: tokensAt(state, now, rules) - 1, at: now };
+}

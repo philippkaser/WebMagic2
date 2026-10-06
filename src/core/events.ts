@@ -34,8 +34,10 @@ export interface GameEvents extends Record<string, unknown> {
   /** Boss health fraction 0..1 for the HUD bar, or null to hide it. */
   bossHp: { name: string; frac: number } | null;
   /** Player dropped items from the inventory — the loot system spawns real
-   * orbs at their feet (decoupled: the store can't import presentation). */
-  dropItems: { defId: string; qty: number };
+   * orbs at their feet (decoupled: the store can't import presentation).
+   * `runLoot`: found this run (vs brought from home) — the server needs to
+   * know which copy was given up. */
+  dropItems: { defId: string; qty: number; runLoot: boolean };
   /** The local wizard just died, still standing on its floor. `items`/`gold`
    * are what the death took; on a `shared` floor the encounters layer raises
    * a grave with them (the store can't import presentation or net systems). */

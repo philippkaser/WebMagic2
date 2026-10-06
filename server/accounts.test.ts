@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SAVE_FEATHER_ID } from "../src/items/catalog";
-import { MERCHANT_STOCK } from "../src/items/economy";
+import { maxGoldDrop, MERCHANT_STOCK } from "../src/items/economy";
 import type { WireInventory } from "../src/net/protocol";
 import { GAMBLE_PRICE, sellValue } from "../src/items/economy";
 import { AccountStore, defaultWireInventory, sanitizeInventory } from "./accounts";
@@ -332,6 +332,73 @@ describe("AccountStore", () => {
     expect(s.bag[1]).toBeNull();
     expect(s.belt).toHaveLength(2);
     expect(s.gold).toBe(0);
+  });
+});
+
+describe("AccountStore: no item from nothing", () => {
+  test("a staff that doesn't check out can't double the banked one", () => {
+    const store = new AccountStore();
+    const acc = store.login(undefined, "Dana");
+    acc.inventory.equipment.staff = "ember_staff@3"; // banked on an earlier run
+    // Submit an unowned staff in hand and the real one in the chest: the
+    // fallback used to keep the banked staff equipped AND bank the chest copy.
+    const save = store.bank(acc, 5, inv({
+      equipment: { ...defaultWireInventory().equipment, staff: "not_owned" },
+      chest: pad([{ id: "ember_staff@3", qty: 1 }], 30),
+    }));
+    expect(save.inventory.equipment.staff).toBe("ember_staff@3");
+    expect(save.inventory.chest[0]).toBeNull();
+  });
+
+  test("starter gear is owned once — never one more per bank", () => {
+    const store = new AccountStore();
+    const acc = store.login(undefined, "Dana");
+    const save = store.bank(acc, 5, inv({
+      chest: pad([{ id: "apprentice_staff", qty: 1 }, { id: "worn_boots", qty: 1 }], 30),
+    }));
+    // The equipped starter staff and boots used the one implicit copy each.
+    expect(save.inventory.chest.filter(Boolean)).toEqual([]);
+    // Still implicit: a wizard who has none may bank one.
+    acc.inventory.equipment.boots = null;
+    expect(store.bank(acc, 5, inv()).inventory.equipment.boots).toBe("worn_boots");
+  });
+
+  test("a find must be something its floor could drop", () => {
+    const store = new AccountStore();
+    const acc = store.login(undefined, "Dana");
+    expect(store.grantFound(acc, "void_staff+keen@120", 1)).toBe(false);
+    expect(store.grantFound(acc, "totally_made_up_item", 1)).toBe(false);
+    expect(store.grantFound(acc, "ember_staff@4", 1)).toBe(true);
+    expect(acc.runGrants).toEqual(["ember_staff@4"]);
+  });
+
+  test("found gold is capped to the richest orb the floor can drop", () => {
+    const store = new AccountStore();
+    const acc = store.login(undefined, "Dana");
+    store.grantFoundGold(acc, 500, 1);
+    expect(acc.runGold).toBe(maxGoldDrop(1));
+  });
+
+  test("release takes the named copy off the account — or nothing", () => {
+    const store = new AccountStore();
+    const acc = store.login(undefined, "Dana");
+    store.grant(acc, "amulet_vigor@3");
+    acc.inventory.bag[0] = { id: "potion_hp_weak", qty: 2 };
+    acc.inventory.equipment.staff = "ember_staff@3";
+
+    // A run find comes out of this run's grants…
+    expect(store.release(acc, "amulet_vigor@3", true)).toBe(true);
+    expect(acc.runGrants).toEqual([]);
+    expect(store.release(acc, "amulet_vigor@3", true)).toBe(false);
+    // …a copy from home out of the banked save, one at a time.
+    expect(store.release(acc, "potion_hp_weak", false)).toBe(true);
+    expect(acc.inventory.bag[0]).toEqual({ id: "potion_hp_weak", qty: 1 });
+    // A given-up staff leaves the starter one; the starter one stays.
+    expect(store.release(acc, "ember_staff@3", false)).toBe(true);
+    expect(acc.inventory.equipment.staff).toBe("apprentice_staff");
+    expect(store.release(acc, "apprentice_staff", false)).toBe(false);
+    // Nothing owned, nothing released.
+    expect(store.release(acc, "void_staff@40", false)).toBe(false);
   });
 });
 

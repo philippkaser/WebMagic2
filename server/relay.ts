@@ -1,5 +1,6 @@
 import { DUNGEON } from "../src/core/config";
 import { Rng } from "../src/core/rng";
+import { GOLD_RULES } from "../src/items/economy";
 import { rollGamble } from "../src/items/loot";
 import { FloorDirectory, type JoinOptions } from "../src/net/matchmaking";
 import {
@@ -10,7 +11,15 @@ import {
   type MemberInfo,
   type ServerMsg,
 } from "../src/net/protocol";
-import { canLeave, entryFloorForGear } from "../src/run/rules";
+import {
+  canLeave,
+  entryFloorForGear,
+  PACE,
+  paceWaitMs,
+  spendPace,
+  type PaceRules,
+  type PaceState,
+} from "../src/run/rules";
 import type { AccountRecord, AccountStore } from "./accounts";
 
 /** The gameplay-blind relay core. Pure logic (I/O injected via `send`), so
@@ -21,7 +30,8 @@ import type { AccountRecord, AccountStore } from "./accounts";
  *  - identity: device-token login backed by the AccountStore
  *  - matchmaking via FloorDirectory (rare same-floor encounters, max 4 per
  *    instance), with run validation: fresh runs start where the account's
- *    banked gear resonates, continuing runs only go one floor deeper
+ *    banked gear resonates, continuing runs only go one floor deeper — and
+ *    no faster than the deep's pace (run/rules.ts PACE)
  *  - host designation + migration (epoch bumps on every change)
  *  - clock pongs (one shared timeline for interpolation)
  *  - relaying opaque envelopes by channel-prefix rule:
@@ -29,8 +39,10 @@ import type { AccountRecord, AccountStore } from "./accounts";
  *      "h:" anyone → current host only
  *      "p:" anyone → the rest of the instance
  *  - asking the host to world-sync each late joiner
- *  - saves: host-attested item grants, provenance-checked banking (only once
- *    the run has paid the Tithe of Five), run loss
+ *  - saves: host-attested item grants (found loot must be something the
+ *    floor could drop; what a wizard gave up — a grave, a drop — only up to
+ *    what was given up), provenance-checked banking (only once the run has
+ *    paid the Tithe of Five), run loss
  *
  * Everything else is client-side gameplay code. Adding a networked feature
  * never changes this file. */
@@ -40,6 +52,30 @@ export interface RelayPeer {
   name: string;
   send(msg: ServerMsg): void;
 }
+
+export interface RelayOptions {
+  /** The deep's pace for new floors; null lifts it (tests, the e2e smoke
+   * test). Default: run/rules.ts PACE. */
+  pace?: PaceRules | null;
+  /** Runs `fn` after `ms` — how a floor request that came too soon is held
+   * back. Default: setTimeout. */
+  schedule?: (fn: () => void, ms: number) => void;
+}
+
+/** Messages that change an account's course: any of them drops a floor
+ * request still being held back for the pace (the newest intent wins). */
+const CHANGES_COURSE: ReadonlySet<ClientMsg["t"]> = new Set<ClientMsg["t"]>([
+  "login",
+  "enterFloor",
+  "leaveDungeon",
+  "bank",
+  "escape",
+  "stash",
+  "buy",
+  "sell",
+  "gamble",
+  "died",
+]);
 
 const MAX_NAME = 24;
 
@@ -52,16 +88,28 @@ export class Relay {
    * dropped connection resumes in the same world (not a fresh roll). Only
    * held while the account has a run open. */
   private lastInstance = new Map<string, string>();
-  /** instance id → what wizards who died there were granted this run (the
-   * upper bound on anything plundered from their graves). */
-  private gravePools = new Map<string, { items: Map<string, number>; gold: number }>();
+  /** instance id → what wizards gave up there: the run grants of those who
+   * died on it (their graves) and every copy dropped on it. The upper bound
+   * on anything granted with source "grave" or "drop". */
+  private floorPools = new Map<string, { items: Map<string, number>; gold: number }>();
+  /** account token → its pace tokens (run/rules.ts). */
+  private paces = new Map<string, PaceState>();
+  /** peerId → the ticket of its floor request being held for the pace. */
+  private heldEntries = new Map<string, number>();
+  private nextTicket = 1;
+  private pace: PaceRules | null;
+  private schedule: (fn: () => void, ms: number) => void;
 
   constructor(
     private directory: FloorDirectory,
     private accounts: AccountStore,
     private now: () => number = () => Date.now(),
     private log: (text: string) => void = () => {},
-  ) {}
+    options: RelayOptions = {},
+  ) {
+    this.pace = options.pace === undefined ? PACE : options.pace;
+    this.schedule = options.schedule ?? ((fn, ms) => void setTimeout(fn, ms));
+  }
 
   connect(peer: RelayPeer): void {
     this.peers.set(peer.id, peer);
@@ -77,11 +125,13 @@ export class Relay {
     this.directory.forget(peerId);
     this.peers.delete(peerId);
     this.tokens.delete(peerId);
+    this.heldEntries.delete(peerId);
   }
 
   handle(peerId: string, msg: ClientMsg): void {
     const peer = this.peers.get(peerId);
     if (!peer) return;
+    if (CHANGES_COURSE.has(msg.t)) this.heldEntries.delete(peerId);
     switch (msg.t) {
       case "login": {
         const account = this.accounts.login(
@@ -97,7 +147,7 @@ export class Relay {
         peer.send({ t: "pong", sent: msg.sent, serverTime: this.now() });
         break;
       case "enterFloor":
-        this.enterFloor(
+        this.requestEntry(
           peer,
           Math.max(1, Math.min(DUNGEON.maxFloor, Math.floor(Number(msg.floor)) || 1)),
           msg.fresh === true,
@@ -185,13 +235,27 @@ export class Relay {
         // Died where others stood witness: what this run was granted may
         // lie in a grave now, so it becomes plunderable — and nothing else.
         if (inst && inst.players.size > 1) {
-          const pool = this.gravePools.get(inst.id) ?? { items: new Map(), gold: 0 };
+          const pool = this.poolOf(inst.id);
           for (const id of account.runGrants) pool.items.set(id, (pool.items.get(id) ?? 0) + 1);
           pool.gold += account.runGold;
-          this.gravePools.set(inst.id, pool);
         }
         this.accounts.endRun(account);
         this.lastInstance.delete(account.token);
+        break;
+      }
+      case "drop": {
+        // An inventory drop: the copy comes off the dropper's account before
+        // anyone can be granted it, and goes into the floor's pool — so a
+        // forged drop mints nothing, and a dropper can't keep what someone
+        // else has picked up.
+        const inst = this.directory.instanceOf(peer.id);
+        if (!inst || typeof msg.itemId !== "string") return;
+        if (!this.accounts.release(this.accountOf(peer), msg.itemId, msg.runLoot === true)) {
+          this.log(`${peer.id} dropped ${msg.itemId} it doesn't own — nothing given up`);
+          return;
+        }
+        const pool = this.poolOf(inst.id);
+        pool.items.set(msg.itemId, (pool.items.get(msg.itemId) ?? 0) + 1);
         break;
       }
       case "grant": {
@@ -203,16 +267,21 @@ export class Relay {
         if (!inst || !inst.players.has(msg.playerId)) return;
         const target = this.peers.get(msg.playerId);
         if (!target) return;
-        if (msg.source === "grave") {
-          const pool = this.gravePools.get(inst.id);
+        if (msg.source === "grave" || msg.source === "drop") {
+          // Something another wizard gave up here — never more than that.
+          const pool = this.floorPools.get(inst.id);
           const left = pool?.items.get(msg.itemId) ?? 0;
           if (!pool || left < 1) {
-            this.log(`refused grave grant of ${msg.itemId} in ${inst.id} (not in any grave)`);
+            this.log(`refused ${msg.source} grant of ${msg.itemId} in ${inst.id} (nobody gave one up)`);
             return;
           }
           pool.items.set(msg.itemId, left - 1);
+          this.accounts.grant(this.accountOf(target), msg.itemId);
+        } else if (!this.accounts.grantFound(this.accountOf(target), msg.itemId, inst.floor)) {
+          // A lone wizard is its own host: what it says it found must be
+          // something this floor could have dropped.
+          this.log(`refused grant of ${msg.itemId} on floor ${inst.floor} (not this floor's loot)`);
         }
-        this.accounts.grant(this.accountOf(target), msg.itemId);
         break;
       }
       case "grantGold": {
@@ -223,14 +292,16 @@ export class Relay {
         if (!inst || !inst.players.has(msg.playerId)) return;
         const target = this.peers.get(msg.playerId);
         if (!target) return;
-        let amount = msg.amount;
         if (msg.source === "grave") {
-          const pool = this.gravePools.get(inst.id);
-          amount = Math.min(amount, pool?.gold ?? 0);
-          if (!pool || amount <= 0) return;
+          const pool = this.floorPools.get(inst.id);
+          const amount = Math.floor(Math.min(msg.amount, pool?.gold ?? 0));
+          if (!pool || !(amount > 0)) return;
           pool.gold -= amount;
+          // The pool already bounds it — no per-pickup cap on top.
+          this.accounts.grantGold(this.accountOf(target), amount, GOLD_RULES.perRunCap);
+        } else {
+          this.accounts.grantFoundGold(this.accountOf(target), msg.amount, inst.floor);
         }
-        this.accounts.grantGold(this.accountOf(target), amount);
         break;
       }
       case "msg":
@@ -251,6 +322,33 @@ export class Relay {
   }
 
   // ── Instances ──────────────────────────────────────────────────────────────
+
+  /** A floor request, kept to the deep's pace: re-entering the floor you're
+   * on (a reconnect) goes straight through; a new floor spends a pace token,
+   * and one asked for before a token is due is HELD — answered when it is,
+   * unless something newer from this wizard (or a disconnect) drops it. The
+   * client just hovers a little longer in the rift. */
+  private requestEntry(peer: RelayPeer, requested: number, fresh: boolean): void {
+    const account = this.accountOf(peer);
+    const resume = !fresh && account.runFloor > 0 && requested === account.runFloor;
+    if (this.pace && !resume) {
+      const state = this.paces.get(account.token);
+      const wait = paceWaitMs(state, this.now(), this.pace);
+      if (wait > 0) {
+        const ticket = this.nextTicket++;
+        this.heldEntries.set(peer.id, ticket);
+        this.log(`${peer.id} is ahead of the deep's pace — floor request held ${wait} ms`);
+        this.schedule(() => {
+          if (this.heldEntries.get(peer.id) !== ticket || !this.peers.has(peer.id)) return;
+          this.heldEntries.delete(peer.id);
+          this.requestEntry(peer, requested, fresh);
+        }, wait);
+        return;
+      }
+      this.paces.set(account.token, spendPace(state, this.now(), this.pace));
+    }
+    this.enterFloor(peer, requested, fresh);
+  }
 
   private enterFloor(peer: RelayPeer, requested: number, fresh: boolean): void {
     const account = this.accountOf(peer);
@@ -375,12 +473,21 @@ export class Relay {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
+  private poolOf(instanceId: string): { items: Map<string, number>; gold: number } {
+    let pool = this.floorPools.get(instanceId);
+    if (!pool) {
+      pool = { items: new Map(), gold: 0 };
+      this.floorPools.set(instanceId, pool);
+    }
+    return pool;
+  }
+
   /** Drop per-instance bookkeeping for instances the directory has let go
    * (empty ones linger briefly for reconnects, then vanish). */
   private pruneGone(): void {
     for (const id of this.epochs.keys()) if (!this.directory.instanceById(id)) this.epochs.delete(id);
-    for (const id of this.gravePools.keys()) {
-      if (!this.directory.instanceById(id)) this.gravePools.delete(id);
+    for (const id of this.floorPools.keys()) {
+      if (!this.directory.instanceById(id)) this.floorPools.delete(id);
     }
   }
 

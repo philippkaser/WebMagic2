@@ -200,12 +200,26 @@ always known the starter-gear ids):
    replaces one `persist` callback.
 3. **Item & gold provenance** — the core rule: *an item may be banked ⇔
    previously banked ∪ starter gear ∪ granted this run by the floor HOST's
-   attestation* (`grant` messages; the beneficiary can never vouch for
-   itself, mirroring loot authority). Grants are a **multiset** — two granted
-   potions are two bankable potions. Gold follows the same path via
-   `grantGold` under sanity caps (`items/economy.ts#GOLD_RULES`). Banking
-   (`bank` → `saved`) strips anything else; death (`died`) or quitting
-   forfeits the run's grants. Three village/dungeon variants share the rules:
+   attestation* (`grant` messages, mirroring loot authority). Grants are a
+   **multiset** — two granted potions are two bankable potions; starter gear
+   counts as owned once (never once more per bank) and Maro won't buy it.
+   A wizard alone on a floor *is* its host, so an attestation alone proves
+   little; the server also checks where a grant came from:
+   - **found** (no `source`: an orb, the floor treasure) — must be something
+     that floor could drop: a real catalog id, no deeper than floor + 3
+     (`items/loot.ts#couldDropOn`). Found gold is capped per pickup to the
+     richest orb the floor can drop (`items/economy.ts#maxGoldDrop`), under
+     the absolute `GOLD_RULES` caps.
+   - **given up** (`source: "grave" | "drop"`) — honored only against the
+     instance's pool of what wizards gave up there: the run grants of those
+     who died on it, and every copy **dropped** on it. A drop is announced by
+     the dropper first (`drop` → the server takes that copy off its account:
+     a run find from its grants, a copy from home from its save), so a gift
+     moves between accounts, and a forged drop or grave mints nothing.
+
+   Banking (`bank` → `saved`) strips anything else; death (`died`) or
+   quitting forfeits the run's grants. Three village/dungeon variants share
+   the rules:
    - `stash` — village-only rearrangement (chest/bag/belt moves); must be a
      sub-multiset of the current save, so nothing new can enter this way.
    - `buy` — merchant purchase; the submitted inventory may contain exactly
@@ -226,18 +240,29 @@ always known the starter-gear ids):
    Anything else forfeits the unfinished run (like dying) and starts fresh.
    Banking (`bank`) is refused until `runFloors ≥ 5` — the Tithe of Five —
    and records the floor you are *actually matchmade into* as `deepest`.
+   New floors keep **the deep's pace** (`run/rules.ts#PACE`): each fresh run
+   or descent spends a token, tokens return one per 15 s, at most 3 held. A
+   floor asked for too soon is *held* by the relay and answered when due —
+   the wizard just hovers longer in the rift — so a script can't play five
+   floors (or reach floor 95, where the loot is deep) in a moment.
+   Re-entering your own floor (a reconnect) is never held.
 
-Known limits, in honesty order: the floor host is still a client, so a
-cheating **host** can attest bogus grants for its floor-mates (fix: headless
-server-side hosts, the path above); item *stats* are client-computed (fix
-follows server hosts); player-dropped items (`dropOrb` → pickup grant) leave
-the dropper's server-side ownership intact, so a hacked dropper could keep
-what an honest taker was granted — a small dupe window in the same trust
-class as host attestation (closed by the same fix); grave chests ride the
-same path (the dying wizard declares its losses, the host grants each
-plundered copy); device tokens are bearer
-secrets in localStorage (fine for a foundation, replaced by real auth). Rate
-limiting and hit/pickup sanitization already run server-/authority-side.
+Known limits, in honesty order: the floor host is still a client — and a
+wizard alone on a floor is its own host — so a hacked client can still
+attest finds for itself. The checks above *bound* that, they don't close
+it: only what its floor could drop, gold up to the floor's richest orb per
+pickup, within the per-run caps (200 items, `GOLD_RULES.perRunCap`), no
+deeper than the deep's pace lets it go. The fix is the server rolling the
+loot itself (the host reports a kill, the server rolls the drop from the
+shared tables and issues the orb; one grant per server-issued orb), with
+headless server-side hosts (the path above) as the step after. Positions,
+your own health and death, and spell casts are client-reported, so PvP and
+movement trust the client (closed by the same headless hosts); item *stats*
+are client-computed (likewise); grave contents are declared by the dying
+wizard (bounded by the pool, so they can't mint); device tokens are bearer
+secrets in localStorage (fine for a foundation, replaced by real auth).
+Rate limiting and hit/pickup sanitization already run
+server-/authority-side.
 
 ### Scaling plan (server-side, future work)
 
