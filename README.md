@@ -51,6 +51,11 @@ bunx vite --port 3000 &
 bun run audio-lab            # or name scenes: bun run audio-lab walk imp-room
 ```
 
+Physics budget: `bun run physics-bench` runs real floors through the
+headless physics world and prints what a floor costs (CPU per step and
+snapshot bandwidth), including with 5× and 10× the props — re-run it when
+adding physical things (docs/ARCHITECTURE.md, "Physics budget").
+
 ## Controls
 
 | Input | Action |

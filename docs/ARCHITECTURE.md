@@ -264,6 +264,37 @@ secrets in localStorage (fine for a foundation, replaced by real auth).
 Rate limiting and hit/pickup sanitization already run
 server-/authority-side.
 
+### Physics budget (measured)
+
+`src/sim/bodies.ts` is the one table of physical bodies (colliders,
+masses, damping, gravity, collision groups); the React components build
+their bodies from it (`game/bodies.tsx`) and so does the headless floor
+world (`src/sim/floorPhysics.ts`: a generated layout → a Rapier world with
+the client's entity ids, no React or three.js). `bun run physics-bench`
+runs real floors through it. On the dev container (one core of a 4-core
+VM), per floor:
+
+| Load | Awake bodies | Physics per step | Share of a core @ 30 Hz | Snapshots per player | …deflated |
+| --- | --- | --- | --- | --- | --- |
+| Patrol (enemies move, props rest) | ~10 | 0.06–0.08 ms | 0.2 % | 14 KiB/s | 5 KiB/s |
+| Brawl (explosions everywhere, 40 bolts) | ~70 | 0.3 ms | 1 % | 94 KiB/s | 24 KiB/s |
+| Brawl with 10× the props | ~300 | 1.5 ms | 4.5 % | 337 KiB/s | 94 KiB/s |
+
+What follows from it:
+
+- **CPU is not the limit.** Sleeping bodies cost almost nothing; even ten
+  times today's props in a permanent brawl is a few percent of a core, so
+  one core simulates a hundred-odd ordinary shared floors.
+- **Bandwidth is.** Every *awake* replicated body costs ~1.4 KiB/s per
+  player as JSON at 20 Hz. The socket compresses (`perMessageDeflate`,
+  3–4×). The next levers, in order: a binary snapshot encoding (~3×),
+  sending far bodies less often, and rest-state sync for props (send the
+  shove, let every machine tumble it, correct the pose once it sleeps).
+- **Rules for new physical things:** a body that decides nothing (debris,
+  shards, ragdolls, dust) is LOCAL — every machine simulates its own, no
+  server ever does, and it never goes on the wire. A body that decides
+  gameplay is a row in `sim/bodies.ts`, and it must be able to sleep.
+
 ### Scaling plan (server-side, future work)
 
 - **Authoritative floor-instance processes**: each instance is an isolated

@@ -13,9 +13,11 @@
     "test": "bun test src server",
     "typecheck": "tsc -b",
     "e2e": "node scripts/e2e-smoke.mjs",
-    "audio-lab": "node scripts/audio-lab/render.mjs"
+    "audio-lab": "node scripts/audio-lab/render.mjs",
+    "physics-bench": "bun scripts/physics-bench.ts"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "0.19.2",
     "@fontsource/jacquard-12": "^5.3.0",
     "@fontsource/jersey-15": "^5.3.0",
     "@fontsource/silkscreen": "^5.3.0",

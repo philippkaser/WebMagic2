@@ -1,9 +1,8 @@
 import { useFrame } from "@react-three/fiber";
-import { CuboidCollider, interactionGroups, RigidBody, type RapierRigidBody } from "@react-three/rapier";
+import { CuboidCollider, RigidBody, type RapierRigidBody } from "@react-three/rapier";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, MeshStandardMaterial, Vector3 } from "three";
 import { playHit, playPortal, playSealBreak, playSealedTouch } from "../audio/sound";
-import { GROUPS } from "../core/config";
 import { Rng, hashSeed } from "../core/rng";
 import { explode, sanitizeHit, type HitData } from "../weapons/damage";
 import {
@@ -29,14 +28,13 @@ import { registerSyncProvider } from "../net/entities";
 import { isHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
 import { useNetBody } from "../net/NetSystems";
-import { PROP_BODIES } from "../sim/bodies";
+import { PROP_BODIES, RIFT_STONES, WORLD_GROUPS } from "../sim/bodies";
 import { useGame } from "../state/gameStore";
 import { registerPortalAnchor } from "../transition/portals";
 import { smoothstep } from "../transition/timeline";
 import { isTraveling } from "../transition/travel";
 import { PEDESTAL_ORB_Y, PedestalModel } from "../render/models/PedestalModel";
 import { RIFT_Y, PortalModel, newPortalDrive, riftActivity } from "../render/models/PortalModel";
-import { RIFT_STONES } from "../render/models/RiftFrameModel";
 import { BarrelModel, CrateModel, PotModel } from "../render/models/PropModels";
 import { TORCH_EMBER_INTENSITY, TorchModel } from "../render/models/TorchModel";
 import type { PropKind, Vec3 } from "./types";
@@ -311,14 +309,6 @@ export function Torch({
 
 /** Rift stones are architecture: solid to wizards, monsters, spells and
  * tumbling props alike. */
-const RIFT_STONE_GROUPS = interactionGroups(GROUPS.WORLD, [
-  GROUPS.PLAYER,
-  GROUPS.ENEMY,
-  GROUPS.FRIENDLY_PROJECTILE,
-  GROUPS.ENEMY_PROJECTILE,
-  GROUPS.PROP,
-]);
-
 /** Interactive rift. The look is render/models/PortalModel (the tear, its
  * mote swarm, the rune dais and standing stones); this is the behaviour: the
  * pooled light, sparks thrown off the tear's rim, the stones' colliders, the
@@ -472,7 +462,7 @@ export function Portal({
       {/* The standing stones are solid; the dais stays walk-through. */}
       <RigidBody type="fixed" colliders={false}>
         {RIFT_STONES.map((s, i) => (
-          <CuboidCollider key={i} position={s.pos} args={s.half} collisionGroups={RIFT_STONE_GROUPS} />
+          <CuboidCollider key={i} position={s.pos} args={s.half} collisionGroups={WORLD_GROUPS} />
         ))}
       </RigidBody>
     </group>

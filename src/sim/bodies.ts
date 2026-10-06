@@ -53,6 +53,23 @@ export const ENEMY_GROUPS = interactionGroups(GROUPS.ENEMY, [
   GROUPS.FRIENDLY_PROJECTILE,
 ]);
 
+// ── Fixed pieces ─────────────────────────────────────────────────────────────
+
+/** A fixed box collider, relative to the piece it belongs to. */
+export interface FixedBox {
+  pos: Vec3;
+  half: Vec3;
+}
+
+/** The solid standing stones of every rift (portal-local centre + half
+ * extents; render/models/RiftFrameModel draws them). Both stand behind the
+ * tear and inside x ∈ ±2.1, so the way home two tiles along x from the
+ * descent never overlaps them. */
+export const RIFT_STONES: readonly FixedBox[] = [
+  { pos: [-1.75, 1.3, -1.3], half: [0.3, 1.3, 0.3] },
+  { pos: [1.75, 0.8, -1.2], half: [0.32, 0.8, 0.32] },
+];
+
 // ── Bodies ───────────────────────────────────────────────────────────────────
 
 export type ShapeSpec =

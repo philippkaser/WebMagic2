@@ -5,6 +5,7 @@
     "": {
       "name": "webmagic",
       "dependencies": {
+        "@dimforge/rapier3d-compat": "0.19.2",
         "@fontsource/jacquard-12": "^5.3.0",
         "@fontsource/jersey-15": "^5.3.0",
         "@fontsource/silkscreen": "^5.3.0",

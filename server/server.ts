@@ -138,6 +138,9 @@ Bun.serve<SocketData>({
   },
   websocket: {
     idleTimeout: IDLE_TIMEOUT_S,
+    // Snapshots are most of the traffic and JSON compresses 3–4× (measured:
+    // bun run physics-bench). Browsers negotiate it on their own.
+    perMessageDeflate: true,
     open(ws) {
       sockets.set(ws.data.id, ws);
       relay.connect(peerFor(ws));
