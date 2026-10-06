@@ -93,13 +93,15 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
         gameEvents.emit("bossHp", null);
         onDeath(); // unseal the portals either way
       },
-      // Damage (on the authority) or a snapshot (on a replica) also wakes it.
+      // A wound wakes it too (applied on the authority, a snapshot on a
+      // replica) — an unhurt Warden's health says nothing about its sleep;
+      // the authority's wake cue does.
       onHp: (current, maxHp) => {
-        if (!announced.current) {
+        if (!announced.current && current < maxHp) {
           announced.current = true;
           gameEvents.emit("message", `${BOSS_NAME} wakes`);
         }
-        gameEvents.emit("bossHp", { name: BOSS_NAME, frac: Math.max(current / maxHp, 0) });
+        if (announced.current) gameEvents.emit("bossHp", { name: BOSS_NAME, frac: Math.max(current / maxHp, 0) });
       },
     },
     (core) => new WardenController(core),

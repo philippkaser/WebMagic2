@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { registerSyncProvider } from "../net/entities";
+import { SYNC } from "../net/floorProtocol";
 import { useGame } from "../state/gameStore";
 import { Slime } from "./kinds/Slime";
 import { getEnemyDef } from "./registry";
@@ -21,7 +22,7 @@ export function SpawnedEnemies() {
     spawnHandlers.remove = (id) => setSpawns((prev) => prev.filter((x) => x.id !== id));
     spawnHandlers.live = () => ref.current;
     // Late joiner learns the live children and spawns them silently.
-    const unregister = registerSyncProvider("spawnedEnemies", {
+    const unregister = registerSyncProvider(SYNC.spawnedEnemies, {
       collect: () => ref.current,
       apply: (data) => {
         for (const s of (data as SpawnedEnemy[]) ?? []) spawnHandlers.push?.(s);

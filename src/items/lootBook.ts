@@ -81,6 +81,11 @@ export class LootBook {
     return { orbId, itemId, gold };
   }
 
+  /** What an orb holds, without taking it. Null if unknown or taken. */
+  peek(orbId: string): LootDrop | null {
+    return this.open.get(orbId) ?? null;
+  }
+
   /** Take an orb: what it holds, once. Null if unknown or already taken. */
   claim(orbId: string): LootDrop | null {
     const drop = this.open.get(orbId);

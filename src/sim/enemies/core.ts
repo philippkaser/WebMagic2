@@ -152,8 +152,10 @@ export class EnemyCore {
     if (s.apply) b.setLinvel(s.vel, true);
   }
 
+  /** Something worth showing: on this machine's view, and every other's. */
   cue(cue: SimCue): void {
     this.onCue?.(cue);
+    this.world.cue(this.opts.id, cue);
   }
 
   /** What replicates beside the pose. */

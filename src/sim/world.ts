@@ -18,8 +18,9 @@ import type { Vec3 } from "../world/types";
  *    death, loot. The browser host announces them as host events; a
  *    headless host sends them to the floor.
  *  - CUES are cosmetic and go to the entity's own view (EnemyCore.onCue):
- *    a muzzle flare, a slam's warning circle. A headless host has no views,
- *    so its cues simply vanish. */
+ *    a muzzle flare, a slam's warning circle — and, through `cue()`, to
+ *    every other machine's view of it (the replicas', or all of them when a
+ *    headless host runs the floor). */
 
 /** A wizard as the sim sees it: where, how fast, how far. */
 export interface SimTarget {
@@ -94,9 +95,11 @@ export interface SimWorld {
   /** Stealth: how far a sleeping enemy's wake radius reaches (1 = fully). */
   aggroMult(): number;
   /** Is the straight path from `from` along unit `dir` clear for `dist`
-   * metres — no wall or prop in the way (`self` ignored)? */
-  clearShot(from: Vec, dir: Vec, dist: number, self: RigidBody): boolean;
+   * metres — no wall or prop in the way (`self`, the shooter's body, ignored)? */
+  clearShot(from: Vec, dir: Vec, dist: number, self: RigidBody | null): boolean;
   /** The sim's dice. */
   random(): number;
   act(action: SimAction): void;
+  /** Show `cue` on every other machine's view of entity `id`. */
+  cue(id: string, cue: SimCue): void;
 }

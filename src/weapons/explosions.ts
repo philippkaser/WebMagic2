@@ -8,6 +8,7 @@ import { getFloorRules } from "../game/floorRules";
 import { isHostileWizard } from "../game/hostility";
 import { getPlayerBody, playerPosition } from "../game/player-state";
 import { forEachHittable } from "../game/registry";
+import { blastFalloff } from "../sim/props";
 import { useGame } from "../state/gameStore";
 import { localBlastEffect, type DamageTeam } from "./allegiance";
 import { localWizardId } from "./localWizard";
@@ -43,6 +44,7 @@ export interface ExplosionOptions {
 
 const tmp = new Vector3();
 const center = new Vector3();
+const shove = { x: 0, y: 0, z: 0 };
 
 /** Radial damage + physical impulse. This is the heart of the sandbox: every
  * spell detonation shoves crates, pots, enemies and (a little) the caster. */
@@ -73,14 +75,9 @@ export function explode(opts: ExplosionOptions): void {
     forEachHittable((h) => {
       const hurtEnemies = team === "player" || team === "neutral";
       if (h.team === "enemy" && !hurtEnemies) return;
-      const p = h.getPosition();
-      tmp.set(p.x - center.x, p.y - center.y, p.z - center.z);
-      const dist = tmp.length();
-      if (dist > radius) return;
-      const falloff = 1 - dist / radius;
-      tmp.normalize().multiplyScalar(impulse * falloff);
-      tmp.y += impulse * falloff * 0.35; // lift things — more satisfying
-      h.hit(damage * falloff, { x: tmp.x, y: tmp.y, z: tmp.z });
+      // The falloff a headless floor host uses too (sim/props.ts).
+      const dealt = blastFalloff(center, h.getPosition(), radius, damage, impulse, shove);
+      if (dealt !== null) h.hit(dealt, { x: shove.x, y: shove.y, z: shove.z });
     });
   }
 

@@ -4,7 +4,9 @@ import { useEffect } from "react";
 import { spawnEnemy } from "../enemies/spawnedStore";
 import { reportLoot } from "../items/LootOrbs";
 import { announceDespawn } from "../net/entities";
-import type { SimWorld } from "../sim/world";
+import { hostEvent } from "../net/channels";
+import { FLOOR, type EnemyCueMsg } from "../net/floorProtocol";
+import type { SimCue, SimWorld } from "../sim/world";
 import { getStats } from "../state/gameStore";
 import { enemyBoom, enemyCast } from "../weapons/hostileEffects";
 import { getFloorRules } from "./floorRules";
@@ -17,6 +19,24 @@ import { nearestWizardTo } from "./targets";
  * interface with its own physics and an outbox instead. */
 
 let physics: { world: RAPIER.World; ray: RAPIER.Ray } | null = null;
+
+/** Entity id → its view's cue handler (enemies/useEnemy registers). */
+const cueViews = new Map<string, (cue: SimCue) => void>();
+
+/** Cues from the floor's authority, for this machine's view of the enemy
+ * (the authority's own view had it directly). */
+const enemyCue = hostEvent<EnemyCueMsg>(FLOOR.enemyCue, (d, meta) => {
+  if (meta.self || typeof d?.id !== "string") return;
+  cueViews.get(d.id)?.(d.cue);
+});
+
+/** A view hears the cues the floor's authority shows for entity `id`. */
+export function onEnemyCue(id: string, fn: (cue: SimCue) => void): () => void {
+  cueViews.set(id, fn);
+  return () => {
+    if (cueViews.get(id) === fn) cueViews.delete(id);
+  };
+}
 
 export const browserSim: SimWorld = {
   rules: getFloorRules,
@@ -31,9 +51,10 @@ export const browserSim: SimWorld = {
     ray.dir.x = dir.x;
     ray.dir.y = dir.y;
     ray.dir.z = dir.z;
-    return physics.world.castRay(ray, dist, true, undefined, undefined, undefined, self) === null;
+    return physics.world.castRay(ray, dist, true, undefined, undefined, undefined, self ?? undefined) === null;
   },
   random: Math.random,
+  cue: (id, cue) => enemyCue.announce({ id, cue }),
   act(a) {
     switch (a.type) {
       case "cast":

@@ -8,7 +8,7 @@ import type { DamageSource } from "../game/damageSource";
 import { isHostileWizard } from "../game/hostility";
 import { getPlayerBody, playerPosition } from "../game/player-state";
 import { forEachDynamicBody, forEachHittable } from "../game/registry";
-import { isHost } from "../net/netStore";
+import { appliesSpellEffects, isHost } from "../net/netStore";
 import { holePullsLocal, type DamageTeam } from "./allegiance";
 import { explode } from "./explosions";
 import { localWizardId } from "./localWizard";
@@ -22,8 +22,10 @@ import type { ProjectileSpec } from "./projectiles";
  * Multiplayer: seeds are normal networked projectiles, so peers already see
  * them (cosmetic); the Collapse cast is peer-replayed, so every client
  * collapses its copies of THAT caster's seeds and spawns matching black holes.
- * The pull on enemies/props and the implosion's entity damage are
- * host-authoritative (like explosions). The local wizard is pulled locally by
+ * The pull on enemies/props and the implosion's entity damage are applied
+ * once: by the floor's host on a wizard-hosted floor, by the caster on a
+ * server-hosted one (its hits travel as commands, like any spell's —
+ * net/netStore.ts appliesSpellEffects). The local wizard is pulled locally by
  * its own and hostile wizards' holes, and hurt only by hostile ones
  * (allegiance.ts — the same rule as every blast). */
 
@@ -236,12 +238,16 @@ function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Whether this machine moves and hurts entities with this hole (see top).
+  const authority = useRef<boolean | null>(null);
+  if (authority.current === null) authority.current = appliesSpellEffects(ownerOf(hole.source), localWizardId());
+
   const implode = useCallback(() => {
     if (imploded.current) return;
     imploded.current = true;
     collapseFlashFx(hole.pos);
-    // Host does entity damage; replicas replay VFX + local-player effects
-    // only. The local wizard is hurt only by a hostile caster's implosion.
+    // One machine does entity damage; the rest replay VFX + local-player
+    // effects only. The local wizard is hurt only by a hostile caster's.
     explode({
       position: hole.pos,
       radius: BH_RADIUS,
@@ -252,7 +258,7 @@ function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void 
       color: "#b06bff",
       particles: 34,
       light: 30,
-      remote: !isHost(),
+      remote: !authority.current,
     });
   }, [hole]);
 
@@ -269,7 +275,23 @@ function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void 
     if (doTug) tug.current = 0.1;
 
     // Enemies and props are the authority's to move.
-    if (isHost()) {
+    if (authority.current && !isHost()) {
+      // A caster on a server-hosted floor: the pull travels as hits (no
+      // damage on props), ten tugs a second — the host moves the bodies.
+      if (doTug) {
+        forEachHittable((h) => {
+          const p = h.getPosition();
+          const dx = cx - p.x;
+          const dy = cy - p.y;
+          const dz = cz - p.z;
+          const dist = Math.hypot(dx, dy, dz);
+          if (dist > BH_RADIUS || dist < 0.2) return;
+          const enemy = h.team === "enemy";
+          const inv = (BH_PULL * (1 - dist / BH_RADIUS) * (enemy ? 1 : 0.3)) / dist;
+          h.hit(enemy ? 1.5 : 0, { x: dx * inv, y: dy * inv + (enemy ? 1 : 0), z: dz * inv });
+        });
+      }
+    } else if (authority.current) {
       if (doTug) {
         forEachHittable((h) => {
           if (h.team !== "enemy") return; // props are pulled as bodies below

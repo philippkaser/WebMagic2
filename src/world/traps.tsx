@@ -1,16 +1,15 @@
 import { useFrame } from "@react-three/fiber";
-import { useRapier } from "@react-three/rapier";
-import { useMemo, useRef } from "react";
-import { Group, MeshStandardMaterial, Vector3 } from "three";
+import { useMemo, useRef, useState } from "react";
+import { Group, MeshStandardMaterial } from "three";
 import { playHit, playPortal } from "../audio/sound";
-import { enemyCast } from "../weapons/hostileEffects";
 import { floorScale } from "../core/config";
 import { gameEvents } from "../core/events";
 import { flashLight } from "../fx/DynamicLights";
 import { castFlareFx, spikeFx, warpFx } from "../fx/effects";
+import { browserSim } from "../game/browserSim";
 import { playerPosition } from "../game/player-state";
-import { nearestWizardTo } from "../game/targets";
 import { isHost } from "../net/netStore";
+import { DART, DartTrapController } from "../sim/traps";
 import { combatActive, useGame } from "../state/gameStore";
 import { getTrapDef } from "./trapCatalog";
 import type { TrapKind, Vec3 } from "./types";
@@ -89,50 +88,19 @@ function SpikeTrap({ pos, floor }: { pos: Vec3; floor: number }) {
 }
 
 /** Wall emitter that fires a fast straight bolt at the nearest wizard in range
- * with clear line of sight. Host-authoritative like the sentry's shot. */
+ * with clear line of sight. Its clock and aim are the sim's
+ * (sim/traps.ts) and run on the floor's authority only, like the sentry. */
 function DartTrap({ pos, floor }: { pos: Vec3; floor: number }) {
-  const def = getTrapDef("dart");
-  const scale = useMemo(() => floorScale(floor), [floor]);
-  const fireTimer = useRef(1 + Math.random() * 1.5);
-  const { world, rapier } = useRapier();
-  const losRay = useMemo(() => new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }), [rapier]);
-  const aim = useMemo(() => new Vector3(), []);
+  const [dart] = useState(() => new DartTrapController(browserSim, pos, floor));
 
   useFrame((_, dt) => {
     if (!combatActive() || !isHost()) return;
-    fireTimer.current -= dt;
-    if (fireTimer.current > 0) return;
-    const head = { x: pos[0], y: pos[1] + 0.6, z: pos[2] };
-    const target = nearestWizardTo(head.x, head.y, head.z);
-    if (target.dist > def.radius) return;
-    aim.set(target.pos.x - head.x, target.pos.y - head.y, target.pos.z - head.z).normalize();
-    losRay.origin.x = head.x;
-    losRay.origin.y = head.y;
-    losRay.origin.z = head.z;
-    losRay.dir.x = aim.x;
-    losRay.dir.y = aim.y;
-    losRay.dir.z = aim.z;
-    // maxToi stops 0.6 short of the target, so the wizard's own collider never
-    // counts as "blocked" — only walls/props between do.
-    if (world.castRay(losRay, target.dist - 0.6, true) !== null) return;
-    fireTimer.current = 1.6;
-    const speed = 26;
+    const aim = dart.think(dt);
+    if (!aim) return;
     // Muzzle flash on the emitter's face, down the line of fire.
-    castFlareFx([head.x + aim.x * 0.45, head.y, head.z + aim.z * 0.45], aim, "#ffd24a", undefined, 1.6);
-    aim.multiplyScalar(speed);
-    enemyCast.announce({
-      origin: [head.x + (aim.x / speed) * 0.5, head.y, head.z + (aim.z / speed) * 0.5],
-      velocity: [aim.x, aim.y, aim.z],
-      damage: def.baseDamage * scale.enemyDamage,
-      color: "#ffd24a",
-      size: 0.1,
-      // Bolts only hurt through their burst, so a dart needs a small one —
-      // tight enough that it still has to actually reach you.
-      blastRadius: 0.9,
-      blastImpulse: 4,
-      source: "world",
-    });
-    flashLight([head.x, head.y, head.z], "#ffd24a", 8);
+    const head = { x: pos[0], y: pos[1] + DART.headHeight, z: pos[2] };
+    castFlareFx([head.x + aim.x * 0.45, head.y, head.z + aim.z * 0.45], aim, DART.color, undefined, 1.6);
+    flashLight([head.x, head.y, head.z], DART.color, 8);
   });
 
   return (

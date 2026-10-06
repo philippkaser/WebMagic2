@@ -121,8 +121,10 @@ wizard, not just the local one).
 ### Host-authority replication
 
 Every floor instance has a **simulation host** — its first joiner, promoted
-in join order when the host leaves (`hostChanged`, epoch-stamped). The host's
-simulation of enemies, props, the boss and loot is the truth; the relay
+in join order when the host leaves (`hostChanged`, epoch-stamped), or the
+server itself where the hosting policy says so (see *Who hosts a floor*
+below). The host's simulation of enemies, props, the boss and loot is the
+truth; the relay
 *enforces* authority (`a:` traffic from non-hosts is dropped). Offline play is
 simply "always host", so single-player runs the exact same code path — and
 `hostCommand.request()` dispatches locally on the host, so gameplay call
@@ -137,6 +139,7 @@ sites have **no host/replica branches at all**.
 | Prop position **and rotation** | same snapshots with quaternions — tumbling replicates; resting props go silent |
 | Deaths & prop breaks | `a:despawn` lifecycle events (silent replay for late joiners) |
 | Sentry/boss shots, boss slams | `hostEvent`s replayed everywhere (real on host, cosmetic elsewhere) |
+| Muzzle flashes, the boss's wake, its slam's warning circle | `a:enemyCue` — the authority's cues, shown by every view of that enemy |
 | Loot drops & pickups, floor treasure | host-granted `hostCommand`/`hostEvent` — an orb can never be taken twice |
 
 **Damage authority rule:** exactly one simulation may damage an entity — the
@@ -169,11 +172,12 @@ identify stale-host traffic.
 into the current floor; the normal join path resyncs the world. If the server
 stays unreachable the session falls back to offline seamlessly.
 
-**Path to server authority:** move the host role into a headless process
-that speaks the same protocol (it's just another "client" the server always
-designates as host). The replication core (`entities.ts`, `snapshots.ts`,
-`clock.ts`) is pure logic with injected I/O precisely so it can run there.
-Nothing else changes.
+**The floor host's protocol** (`net/floorProtocol.ts`) names every channel a
+floor's authority speaks and what travels on it — snapshots, despawns, the
+world sync, enemy events, orbs, the treasure, graves, and the commands
+(`hit`, take, drop, plunder) that go the other way — plus the rules every
+host applies (pickup ranges, where orbs land). The client modules and the
+server's floor host both import it, so the two kinds of host can't drift.
 
 ### Accounts & server-side persistence (the anti-cheat foundation)
 
@@ -262,22 +266,22 @@ always known the starter-gear ids):
    floors (or reach floor 95, where the loot is deep) in a moment.
    Re-entering your own floor (a reconnect) is never held.
 
-Known limits, in honesty order: the floor host is still a client — and a
-wizard alone on a floor is its own host — so a hacked host can report
-every source on its floor dead at once and claim every orb for itself. That
-gets it exactly the luck of that floor, rolled by the server, no faster
-than the deep's pace lets it go: farming without fighting, not minting.
-Headless server-side hosts close it for shared floors (the path above —
-`src/sim/floorSim.ts` already runs a whole floor's enemies headless, see
-*The floor simulation* below; seating it on the server as the host of
-shared floors is the next step). Positions,
-your own health and death, and spell casts are client-reported, so PvP and
-movement trust the client (closed by the same headless hosts); item
-*stats* are client-computed (likewise); grave contents are declared by the
-dying wizard (bounded by the pool, so they can't mint); device tokens are
-bearer secrets in localStorage (fine for a foundation, replaced by real
-auth). Rate limiting and hit/pickup sanitization already run
-server-/authority-side.
+Known limits, in honesty order: a wizard alone on a floor still hosts it
+(by default — see *Who hosts a floor*), so a hacked solo host can report
+every source on its floor dead at once and claim every orb for itself.
+That gets it exactly the luck of that floor, rolled by the server, no
+faster than the deep's pace lets it go: farming without fighting, not
+minting — and nobody else is there to be cheated. On every floor two
+wizards share, the server hosts: no wizard decides what died or who took
+what. What remains client-reported even there: a wizard's hits on
+enemies (capped per hit by depth, `weapons/hits.ts`, but not yet checked
+against a server-side copy of their spells), positions (so movement and
+pickup range trust the client's pose), your own health and death, and
+spell casts, so PvP still trusts the victim's machine; item *stats* are
+client-computed; grave contents are declared by the dying wizard
+(bounded by the pool, so they can't mint); device tokens are bearer
+secrets in localStorage (fine for a foundation, replaced by real auth).
+Rate limiting and hit/pickup sanitization run server-/authority-side.
 
 ### Physics budget (measured)
 
@@ -354,9 +358,53 @@ second: about **0.05 ms per tick (0.15–0.25 % of a core at 30–60 Hz)** and
 together. A core hosts hundreds of fighting floors; the bandwidth rule
 above still decides what can be added.
 
-Not in the sim yet: props are physical there (enemies bump them, snapshots
-move them) but breaking them is still the browser prop's job, and traps,
-treasure and portals stay in the scene.
+Props break there too (`sim/props.ts`: health, the barrel's blast, chain
+reactions, the Warden's slam), dart launchers fire (`sim/traps.ts`), and a
+sim can start as a **replica** of a floor someone else is hosting
+(`mirror`, `mirrorDespawn`, `mirrorSpawn`) and take it over — host
+migration with a headless host on the receiving end. Not simulated there:
+enemy bolts in flight (every client flies its own copy and its burst hurts
+that client's wizard) and wizards' spells, whose hits arrive as commands.
+
+### Who hosts a floor (`server/hosting.ts`, `server/floorHost.ts`)
+
+A floor's host is pluggable. The router asks the **hosting policy**
+(`SERVER_HOSTS`):
+
+| Policy | Who hosts | When to use |
+| --- | --- | --- |
+| `never` | the floor's oldest wizard (browser) | cheapest; trusts that browser |
+| `shared` (default) | a wizard while alone; **the server from the moment a second wizard is seated** | nobody can cheat anyone but themselves |
+| `always` | the server, from the first wizard | PvP arenas, or a server with cores to spare |
+
+A **server floor host** (`server/floorHost.ts`) is a headless member of the
+instance with the id `SERVER_HOST_ID`: it runs `FloorSim`, hears every
+member's poses and to-host commands, and does everything a browser host
+does — enemy events, snapshots, hits, orbs (rolled and claimed through the
+ledger in-process), dropped copies (only as what the book holds for that
+orb), the treasure, graves, and late-join syncs. To clients it is just a
+host: the same channels, the same rules (`net/floorProtocol.ts`).
+
+**Handover** works like any host migration. When the policy wants a floor
+the server doesn't host yet, the router creates the floor host as a
+**replica**: it applies the wizard host's authority traffic and asks that
+host for a world sync (`syncRequest` for `SERVER_HOST_ID`). When the sync
+arrives — or after `HANDOVER_TIMEOUT_MS`, or the moment the wizard host
+leaves — the router promotes it: epoch + 1, `hostChanged` to everyone, and
+every wizard is a replica from then on. The server keeps a floor it has
+taken until the floor is gone; everyone else leaving doesn't hand it back.
+
+On a server-hosted floor the two spell effects that used to be the host's
+(the singularity's pull and implosion) are applied by their **caster**, as
+commands, like every other spell's hits (`net/netStore.ts
+appliesSpellEffects`). A wizard who stops sending poses (dead, frozen) stops
+being hunted after 2 s; their last position still counts for range checks
+(a fallen wizard's grave). The floors tick at ~60 Hz in `server/server.ts`
+(`Relay.tick`).
+
+One race is known and small: a loot report a wizard host sends in the last
+moment before the handover is refused (it is no longer the host when it
+lands), so that source drops nothing.
 
 ### Scaling plan (server-side, future work)
 

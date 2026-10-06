@@ -26,6 +26,7 @@ function scriptedWorld() {
     clearShot: () => clear,
     random: () => ((roll = (roll * 9301 + 49297) % 233280) / 233280),
     act: (a) => actions.push(a),
+    cue: () => {},
   };
   return { world, actions, target, setClear: (c: boolean) => (clear = c) };
 }

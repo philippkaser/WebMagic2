@@ -5,6 +5,7 @@
  * Dev:  bun run dev:server   (vite proxies /ws to it)
  * Prod: bun run start        (serves dist/ and /ws from one process)
  */
+import RAPIER from "@dimforge/rapier3d-compat";
 import type { ServerWebSocket } from "bun";
 import { writeFileSync } from "node:fs";
 import { ENCOUNTERS } from "../src/core/config";
@@ -12,6 +13,7 @@ import { FloorDirectory } from "../src/net/matchmaking";
 import type { ClientMsg } from "../src/net/protocol";
 import { PACE } from "../src/run/rules";
 import { AccountStore } from "./accounts";
+import { parseHostingPolicy, serverHosting } from "./hosting";
 import { Relay, type RelayPeer } from "./relay";
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -91,13 +93,28 @@ const pace = Number.isFinite(paceOverride)
 // e2e smoke test and the dev room use it. A cheat by definition: never set
 // it on a real server.
 const devLoot = process.env.DEV_LOOT === "1";
+// SERVER_HOSTS picks who hosts floors (server/hosting.ts): "shared" (the
+// default) hands a floor to the server once a second wizard is on it,
+// "always" hosts every floor here, "never" leaves every floor to its
+// wizards' browsers.
+const hostingPolicy = parseHostingPolicy(process.env.SERVER_HOSTS);
+await RAPIER.init();
 const relay = new Relay(
   new FloorDirectory(MAX_PLAYERS_PER_FLOOR, undefined, undefined, undefined, encounterTuning),
   accounts,
   () => Date.now(),
   log,
-  { pace, devLoot },
+  { pace, devLoot, hosting: serverHosting(RAPIER, hostingPolicy) },
 );
+log(`floors hosted server-side: ${hostingPolicy}`);
+// The server-hosted floors' clock: ~60 Hz, real elapsed time (the hosts
+// step in fixed steps of their own).
+let lastTick = performance.now();
+setInterval(() => {
+  const now = performance.now();
+  relay.tick(Math.min((now - lastTick) / 1000, 0.25));
+  lastTick = now;
+}, 1000 / 60);
 if (devLoot) log("DEV_LOOT is on — hosts may spawn any item. Testing only!");
 if (encounterTuning !== ENCOUNTERS) log(`encounter chance forced to ${encounterOverride}`);
 if (pace !== PACE) log(pace ? `floor pace forced to ${pace.msPerFloor} ms` : "floor pace lifted");

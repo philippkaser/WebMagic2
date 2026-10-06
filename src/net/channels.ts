@@ -6,7 +6,9 @@ import { session } from "./session";
 /** Typed gameplay messages over the relay's opaque envelopes.
  *
  * Game systems declare messages at module level and never look at sockets,
- * hosts or the server again. Three shapes cover everything:
+ * hosts or the server again. Three shapes cover everything — and the floor
+ * host's channels among them are also spoken by a server-side host
+ * (net/floorProtocol.ts), to which `request()` simply goes over the wire:
  *
  *  - hostEvent:   authoritative fact ("this orb spawned", "the boss fired").
  *                 `announce()` applies it locally AND broadcasts when we are

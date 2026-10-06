@@ -8,7 +8,7 @@ import { PLAYER } from "../core/config";
 import { flashLight } from "../fx/DynamicLights";
 import { hitSparksFx, soulDissolveFx } from "../fx/effects";
 import { spawnBurst, type BurstOptions } from "../fx/Particles";
-import { browserSim } from "../game/browserSim";
+import { browserSim, onEnemyCue } from "../game/browserSim";
 import { ENEMY_SOURCE } from "../game/damageSource";
 import { getFloorRules } from "../game/floorRules";
 import { getPlayerBody, playerPosition } from "../game/player-state";
@@ -157,6 +157,13 @@ export function useEnemy<C extends EnemyController>(
     immobile: options.immobile,
     hitFeedback,
   });
+
+  // What the floor's authority shows for this enemy elsewhere (its slam's
+  // warning circle, its muzzle flash) shows here too.
+  useEffect(() => {
+    if (dead) return;
+    return onEnemyCue(options.entityId, (cue) => core.onCue?.(cue));
+  }, [dead, core, options.entityId]);
 
   return {
     body,

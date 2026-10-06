@@ -23,6 +23,18 @@ import { playerPosition } from "../game/player-state";
 import { wizardDistSqTo } from "../game/targets";
 import { netBus } from "../net/bus";
 import { hostCommand, hostEvent } from "../net/channels";
+import {
+  FLOOR,
+  ORB_TAKE_RANGE_SQ,
+  orbSpread,
+  SYNC,
+  type DevOrbMsg,
+  type DropOrbMsg,
+  type OrbSpawnedMsg,
+  type OrbTakenMsg,
+  type SyncedOrb,
+  type TakeOrbMsg,
+} from "../net/floorProtocol";
 import { registerSyncProvider } from "../net/entities";
 import { isHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
@@ -60,26 +72,21 @@ let pushOrb: ((orb: Orb) => void) | null = null;
 let takeOrbLocal: ((orbId: string, by: string) => void) | null = null;
 let liveOrbs: (() => Orb[]) | null = null;
 
-const orbSpawned = hostEvent<{ orbId: string; defId: string | null; gold: number; pos: Vec3 }>(
-  "orbSpawned",
-  (d) => pushOrb?.({ id: d.orbId, defId: d.defId ?? null, gold: d.gold ?? 0, position: d.pos }),
+// The floor host's channels (net/floorProtocol.ts) — a server-side host
+// (server/floorHost.ts) answers the same commands by the same rules.
+
+const orbSpawned = hostEvent<OrbSpawnedMsg>(FLOOR.orbSpawned, (d) =>
+  pushOrb?.({ id: d.orbId, defId: d.defId ?? null, gold: d.gold ?? 0, position: d.pos }),
 );
 
-const orbTaken = hostEvent<{ orbId: string; by: string }>("orbTaken", (d) =>
-  takeOrbLocal?.(d.orbId, d.by),
-);
+const orbTaken = hostEvent<OrbTakenMsg>(FLOOR.orbTaken, (d) => takeOrbLocal?.(d.orbId, d.by));
 
-/** Grant radius. Pickups are offered within ~2.3 m; the slack covers the
- * requester's movement during one round trip. Anything farther is a client
- * trying to vacuum loot across the map. */
-const TAKE_RANGE_SQ = 6 * 6;
-
-const takeOrb = hostCommand<{ orbId: string }>("takeOrb", (d, meta) => {
+const takeOrb = hostCommand<TakeOrbMsg>(FLOOR.takeOrb, (d, meta) => {
   // First come, first served — only if the orb still exists and the
   // requesting wizard is actually standing at it.
   const orb = liveOrbs?.().find((o) => o.id === d.orbId);
   if (!orb) return;
-  if (wizardDistSqTo(meta.from, orb.position[0], orb.position[1], orb.position[2]) > TAKE_RANGE_SQ)
+  if (wizardDistSqTo(meta.from, orb.position[0], orb.position[1], orb.position[2]) > ORB_TAKE_RANGE_SQ)
     return;
   orbTaken.announce({ orbId: d.orbId, by: meta.from });
   // The book grants what it put in this orb, once — whatever this host says.
@@ -91,7 +98,7 @@ const takeOrb = hostCommand<{ orbId: string }>("takeOrb", (d, meta) => {
  * gave the copy up to the book first and spawns the orb id it got back; the
  * host checks only that it IS a dropped copy's id and lies at the dropper's
  * feet (the book still decides what claiming it grants). */
-const dropOrb = hostCommand<{ orbId: string; defId: string; pos: Vec3 }>("dropOrb", (d, meta) => {
+const dropOrb = hostCommand<DropOrbMsg>(FLOOR.dropOrb, (d, meta) => {
   if (typeof d.orbId !== "string" || !d.orbId.startsWith(DROPPED_ORB_PREFIX)) return;
   if (typeof d.defId !== "string" || !Array.isArray(d.pos)) return;
   try {
@@ -99,7 +106,7 @@ const dropOrb = hostCommand<{ orbId: string; defId: string; pos: Vec3 }>("dropOr
   } catch {
     return; // unknown id from a hacked/newer client — refuse to spawn it
   }
-  if (wizardDistSqTo(meta.from, d.pos[0], d.pos[1], d.pos[2]) > TAKE_RANGE_SQ) return;
+  if (wizardDistSqTo(meta.from, d.pos[0], d.pos[1], d.pos[2]) > ORB_TAKE_RANGE_SQ) return;
   orbSpawned.announce({ orbId: d.orbId, defId: d.defId, gold: 0, pos: d.pos });
 });
 
@@ -109,34 +116,31 @@ export function reportLoot(id: string, source: LootSource, at: Vec3): void {
   session.requestLoot(id, source, at);
 }
 
-/** Where the i-th of n orbs from one source lands: the first on the spot,
- * the rest in a small ring around it. */
-function spread(at: readonly number[], i: number, n: number): Vec3 {
-  if (i === 0 || n < 2) return [at[0], at[1], at[2]];
-  const a = (i / (n - 1)) * Math.PI * 2;
-  return [at[0] + Math.cos(a) * 0.7, at[1], at[2] + Math.sin(a) * 0.7];
-}
-
 // The book answered a report: spawn its orbs for the floor (host only — a
 // reply that arrives after a migration is the old host's to drop).
 netBus.on("lootRolled", ({ at, orbs }) => {
   if (!isHost()) return;
   orbs.forEach((o, i) =>
-    orbSpawned.announce({ orbId: o.orbId, defId: o.itemId, gold: o.gold, pos: spread(at, i, orbs.length) }),
+    orbSpawned.announce({ orbId: o.orbId, defId: o.itemId, gold: o.gold, pos: orbSpread(at, i, orbs.length) }),
   );
 });
 
-// Dev-only hook for end-to-end scripts: the host asks the book for a
-// specific orb (item or gold). A real server honors it only when started
-// for testing (DEV_LOOT=1); the pickup is claimed like any other.
+// Dev builds: ask the floor's host for a specific orb (item or gold). A
+// browser host asks the book; a real server honors it only when started for
+// testing (DEV_LOOT=1); the pickup is claimed like any other.
+const devOrb = hostCommand<DevOrbMsg>(FLOOR.devOrb, (d) => {
+  if (!import.meta.env?.DEV) return;
+  session.requestLoot("dev", { kind: "dev", itemId: d.defId, gold: d.gold }, d.pos);
+});
+
+// Dev-only hook for end-to-end scripts.
 if (typeof window !== "undefined" && import.meta.env?.DEV) {
   (window as unknown as Record<string, unknown>).__spawnOrb = (
     defId: string | null,
     gold: number,
     pos: Vec3,
   ) => {
-    if (!isHost()) return false;
-    session.requestLoot("dev", { kind: "dev", itemId: defId, gold }, pos);
+    devOrb.request({ defId, gold, pos });
     return true;
   };
   // The live orbs on this client (id, item or gold, where).
@@ -178,10 +182,10 @@ export function LootOrbs() {
     };
     liveOrbs = () => orbsRef.current;
     // Late-join sync: ship the live orb list; the joiner spawns them silently.
-    const unregister = registerSyncProvider("orbs", {
-      collect: () => orbsRef.current,
+    const unregister = registerSyncProvider(SYNC.orbs, {
+      collect: (): SyncedOrb[] => orbsRef.current,
       apply: (data) => {
-        for (const orb of (data as Orb[]) ?? []) pushOrb?.(orb);
+        for (const orb of (data as SyncedOrb[]) ?? []) pushOrb?.(orb);
       },
     });
     // Inventory drops: each copy is given up to the book first; the orb it

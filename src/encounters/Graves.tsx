@@ -12,12 +12,21 @@ import { wizardDistSqTo } from "../game/targets";
 import { robeColorOf } from "../game/wizardLook";
 import { netBus } from "../net/bus";
 import { hostCommand, hostEvent } from "../net/channels";
+import {
+  FLOOR,
+  GRAVE_LOOT_RANGE_SQ,
+  GRAVE_RAISE_RANGE_SQ,
+  SYNC,
+  type GraveDropMsg,
+  type GraveLootedMsg,
+  type GraveLootMsg,
+  type LiveGrave,
+} from "../net/floorProtocol";
 import { registerSyncProvider } from "../net/entities";
 import { useNet } from "../net/netStore";
 import { session } from "../net/session";
 import { GraveModel } from "../render/models/GraveModel";
 import { useGame } from "../state/gameStore";
-import type { Vec3 } from "../world/types";
 import {
   graveIsEmpty,
   graveItemCount,
@@ -25,9 +34,6 @@ import {
   sanitizeGraveContents,
   sanitizePicks,
   takeFromGrave,
-  type GraveItem,
-  type GravePick,
-  type GraveRecord,
 } from "./graveRules";
 
 /** Grave chests, live — see graveRules.ts for the rules and the lore.
@@ -40,27 +46,6 @@ import {
  * late-join world sync and survive host migration (every client holds the
  * full list). They vanish with the floor. */
 
-interface GraveDropMsg {
-  items: GraveItem[];
-  gold: number;
-  pos: Vec3;
-  killerId: string | null;
-}
-
-interface GraveLootMsg {
-  graveId: string;
-  picks: GravePick[];
-  gold: boolean;
-}
-
-interface GraveLootedMsg {
-  graveId: string;
-  by: string;
-  picks: GravePick[];
-  gold: boolean;
-}
-
-type LiveGrave = GraveRecord & { killerId: string | null };
 
 const useGraves = create<{ graves: LiveGrave[] }>(() => ({ graves: [] }));
 
@@ -69,10 +54,6 @@ if (typeof window !== "undefined" && import.meta.env?.DEV) {
   (window as unknown as Record<string, unknown>).__graves = () => useGraves.getState().graves;
 }
 
-/** A grave is raised within reach of where its owner actually was. */
-const RAISE_RANGE_SQ = 10 * 10;
-/** Plunder is granted within ~2.4 m of the grave, plus a round trip of slack. */
-const LOOT_RANGE_SQ = 6 * 6;
 const PROMPT_RANGE_SQ = 2.4 * 2.4;
 
 let graveCounter = 1;
@@ -81,13 +62,13 @@ function selfId(): string {
   return useNet.getState().playerId || "self";
 }
 
-const graveSpawned = hostEvent<LiveGrave>("graveSpawned", (g) => {
+const graveSpawned = hostEvent<LiveGrave>(FLOOR.graveSpawned, (g) => {
   if (useGraves.getState().graves.some((x) => x.id === g.id)) return;
   useGraves.setState({ graves: [...useGraves.getState().graves, g] });
   announceFall(g);
 });
 
-const graveLooted = hostEvent<GraveLootedMsg>("graveLooted", (d) => {
+const graveLooted = hostEvent<GraveLootedMsg>(FLOOR.graveLooted, (d) => {
   const graves = useGraves.getState().graves;
   const grave = graves.find((g) => g.id === d.graveId);
   if (!grave) return;
@@ -103,12 +84,12 @@ const graveLooted = hostEvent<GraveLootedMsg>("graveLooted", (d) => {
 });
 
 /** Host: raise a grave for a wizard who just fell on this floor. */
-const graveDrop = hostCommand<GraveDropMsg>("graveDrop", (d, meta) => {
+const graveDrop = hostCommand<GraveDropMsg>(FLOOR.graveDrop, (d, meta) => {
   const contents = sanitizeGraveContents(d);
   if (!contents) return;
   const pos = d?.pos;
   if (!Array.isArray(pos) || pos.length !== 3 || !pos.every((n) => Number.isFinite(n))) return;
-  if (wizardDistSqTo(meta.from, pos[0], pos[1], pos[2]) > RAISE_RANGE_SQ) return;
+  if (wizardDistSqTo(meta.from, pos[0], pos[1], pos[2]) > GRAVE_RAISE_RANGE_SQ) return;
   const roster = useNet.getState().roster;
   const killerId = typeof d.killerId === "string" && roster[d.killerId] ? d.killerId : null;
   graveSpawned.announce({
@@ -124,10 +105,10 @@ const graveDrop = hostCommand<GraveDropMsg>("graveDrop", (d, meta) => {
 });
 
 /** Host: someone at a grave wants what fits in their pack. */
-const lootGrave = hostCommand<GraveLootMsg>("lootGrave", (d, meta) => {
+const lootGrave = hostCommand<GraveLootMsg>(FLOOR.lootGrave, (d, meta) => {
   const grave = useGraves.getState().graves.find((g) => g.id === d?.graveId);
   if (!grave) return;
-  if (wizardDistSqTo(meta.from, grave.pos[0], grave.pos[1], grave.pos[2]) > LOOT_RANGE_SQ) return;
+  if (wizardDistSqTo(meta.from, grave.pos[0], grave.pos[1], grave.pos[2]) > GRAVE_LOOT_RANGE_SQ) return;
   const picks = sanitizePicks(grave, d.picks);
   const gold = d.gold === true && grave.gold > 0;
   if (picks.length === 0 && !gold) return;
@@ -175,7 +156,7 @@ export function Graves() {
 
   useEffect(
     () =>
-      registerSyncProvider("graves", {
+      registerSyncProvider(SYNC.graves, {
         collect: () => useGraves.getState().graves,
         apply: (data) => {
           if (Array.isArray(data)) useGraves.setState({ graves: data as LiveGrave[] });

@@ -29,7 +29,8 @@ processes in separate terminals: `bun run dev:server` and `bun dev`.
 
 Testing encounters locally: two browser windows only meet ~12% of the time by
 design. Start the server with `ENCOUNTER_CHANCE=1 bun run dev:server` to make
-every same-floor entry meet whoever is already there.
+every same-floor entry meet whoever is already there. `SERVER_HOSTS=always`
+has the server host even a solo floor (to play against a server host alone).
 
 End-to-end smoke test (headless Chromium, two wizards: a full solo run, then
 PvP, a pact, a gift dropped and picked up, a death, a grave and its plunder —
@@ -166,7 +167,10 @@ matchmaker keeps them apart most of the time (the encounter "tension clock").
 Everyone in an instance generates the identical floor from the shared seed.
 
 Shared floors are truly shared: each instance has a **simulation host**
-whose enemies, props, boss, loot and graves are authoritative. Replicas
+whose enemies, props, boss, loot and graves are authoritative. A wizard
+alone hosts their own floor; the moment a second wizard arrives the
+**server takes the floor over** and hosts it (`SERVER_HOSTS=shared`, the
+default — `always` hosts every floor server-side, `never` none). Replicas
 predict and reconcile. Your own health is always decided locally — which is
 also how wizard-vs-wizard damage works: a stranger's spell hurts you on your
 own machine, and the last wizard who hurt you takes the kill credit. The
@@ -206,7 +210,9 @@ src/
                body table, headless physics, enemy cores and controllers,
                and FloorSim — a floor's authority without a browser
 server/        Bun WebSocket server: the router (relay.ts, gameplay-blind),
-               the ledger (ledger.ts: runs, pace, saves, grants), accounts
+               the ledger (ledger.ts: runs, pace, saves, grants), accounts,
+               and server-side floor hosts (floorHost.ts, hosting.ts) for
+               floors wizards share
 ```
 
 Design rules that keep it future-proof:
@@ -225,6 +231,7 @@ Design rules that keep it future-proof:
 
 ## Roadmap
 
-- Headless server-side floor hosts (full authority; closes the host-trust gap)
+- Server-side checks on wizards' own hits and movement (a server copy of
+  their spells), so shared floors trust no client at all
 - A unique boss per biome
 - More omens, carvings and enemy archetypes; biome-specific hazards

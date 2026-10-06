@@ -1,6 +1,7 @@
 import { netBus } from "./bus";
 import { peerMessage } from "./channels";
 import { netClock } from "./clock";
+import { FLOOR, type PoseMsg } from "./floorProtocol";
 import { useNet } from "./netStore";
 import {
   makeSampledPose,
@@ -21,13 +22,7 @@ import {
  *    GAMEPLAY: enemy targeting, aim leading, aggro. This is why enemies
  *    threaten and lead every wizard on the floor, not just the host's. */
 
-export interface PoseMsg {
-  p: [number, number, number];
-  v: [number, number, number];
-  /** yaw, pitch */
-  a: [number, number];
-  staffId: string;
-}
+export type { PoseMsg };
 
 export interface PeerWizard {
   id: string;
@@ -39,7 +34,7 @@ export interface PeerWizard {
 
 const peers = new Map<string, PeerWizard>();
 
-const pose = peerMessage<PoseMsg>("pose", (msg, meta) => {
+const pose = peerMessage<PoseMsg>(FLOOR.pose, (msg, meta) => {
   let peer = peers.get(meta.from);
   if (!peer) {
     peer = { id: meta.from, buffer: new SnapshotBuffer(), staffId: msg.staffId, lastSeen: 0 };

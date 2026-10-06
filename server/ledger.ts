@@ -3,8 +3,9 @@ import { Rng } from "../src/core/rng";
 import { resolveItem } from "../src/items/catalog";
 import { GOLD_RULES } from "../src/items/economy";
 import { rollGamble } from "../src/items/loot";
+import type { LootDrop, LootSource } from "../src/items/dropTables";
 import { DROPPED_ORB_PREFIX, LootBook, type IssuedOrb } from "../src/items/lootBook";
-import type { ClientMsg, ServerMsg } from "../src/net/protocol";
+import type { ClientMsg, DevLoot, ServerMsg } from "../src/net/protocol";
 import {
   canLeave,
   entryFloorForGear,
@@ -37,9 +38,10 @@ import type { AccountRecord, AccountStore } from "./accounts";
  *    of Fortune, run loss
  *
  * It reaches the router only through `LedgerWorld`, so either side can be
- * replaced (a database behind the AccountStore, a server-side floor host
- * behind the router) without touching the other. Pure logic, time and
- * scheduling injected. */
+ * replaced (a database behind the AccountStore, say) without touching the
+ * other; a floor's host reaches it by message (a wizard's browser) or
+ * in-process (server/floorHost.ts) through the same bounded calls. Pure
+ * logic, time and scheduling injected. */
 
 /** A floor instance as the ledger sees it. */
 export interface SeatedFloor {
@@ -62,7 +64,9 @@ export interface FloorEntry {
 /** What the ledger needs from the router — and nothing more. */
 export interface LedgerWorld {
   instanceOf(peerId: string): SeatedFloor | null;
-  /** The instance's host (its oldest member); "" outside one. */
+  instanceById(instanceId: string): SeatedFloor | null;
+  /** The instance's host (its oldest member, or a server-side host); ""
+   * outside one. */
   hostOf(peerId: string): string;
   isConnected(peerId: string): boolean;
   nameOf(peerId: string): string;
@@ -261,26 +265,11 @@ export class Ledger {
         break;
       }
       case "loot": {
-        // Only the floor's host reports deaths and breaks; the book decides
-        // whether that was a real source of this floor, and rolls its drops.
-        if (this.world.hostOf(peerId) !== peerId) return;
-        const inst = this.world.instanceOf(peerId);
-        if (!inst || typeof msg.id !== "string") return;
-        const book = this.bookOf(inst);
-        const source = msg.source; // untrusted: the book only believes a split's generation
-        let orbs: IssuedOrb[] | null;
-        if (source?.kind === "dev") {
-          const dev = this.devDrop(source);
-          if (!dev) return;
-          orbs = [book.issue(dev.itemId, dev.gold)];
-        } else {
-          orbs = book.roll(msg.id, source);
-          if (!orbs) {
-            this.log(`refused loot for ${msg.id.slice(0, 40)} in ${inst.id} (not this floor's, or already rolled)`);
-            return;
-          }
-        }
-        if (orbs.length > 0) send({ t: "lootRolled", id: msg.id, at: finiteVec3(msg.at), orbs });
+        // Only the floor's host reports deaths and breaks.
+        const inst = this.hostedBy(peerId);
+        if (!inst) return;
+        const orbs = this.rollLoot(inst.id, msg.id, msg.source);
+        if (orbs && orbs.length > 0) send({ t: "lootRolled", id: msg.id, at: finiteVec3(msg.at), orbs });
         break;
       }
       case "drop": {
@@ -297,54 +286,113 @@ export class Ledger {
         break;
       }
       case "claim": {
-        // Only the instance host may attest pickups, and only for members of
-        // its own instance — loot provenance mirrors loot authority. What is
-        // granted is what the book put in the orb, once.
-        if (this.world.hostOf(peerId) !== peerId) return;
-        if (typeof msg.playerId !== "string" || typeof msg.orbId !== "string") return;
-        const inst = this.world.instanceOf(peerId);
-        if (!inst || !inst.players.has(msg.playerId) || !this.world.isConnected(msg.playerId)) return;
-        const drop = this.bookOf(inst).claim(msg.orbId);
-        if (!drop) {
-          this.log(`refused claim of orb ${msg.orbId.slice(0, 40)} in ${inst.id} (unknown, or taken)`);
-          return;
-        }
-        const target = this.accountOf(msg.playerId);
-        if (drop.itemId) this.accounts.grant(target, drop.itemId);
-        if (drop.gold > 0) this.accounts.grantGold(target, drop.gold, GOLD_RULES.perRunCap);
+        // Only the instance host may attest pickups — loot provenance
+        // mirrors loot authority.
+        const inst = this.hostedBy(peerId);
+        if (inst) this.claimOrb(inst.id, msg.playerId, msg.orbId);
         break;
       }
       case "grant": {
-        // Grave plunder, host-attested: honored only against what the dead
-        // were granted in this instance (anything found is claimed by orb).
-        if (this.world.hostOf(peerId) !== peerId) return;
-        if (msg.source !== "grave" || typeof msg.playerId !== "string" || typeof msg.itemId !== "string") return;
-        const inst = this.world.instanceOf(peerId);
-        if (!inst || !inst.players.has(msg.playerId) || !this.world.isConnected(msg.playerId)) return;
-        const pool = this.gravePools.get(inst.id);
-        const left = pool?.items.get(msg.itemId) ?? 0;
-        if (!pool || left < 1) {
-          this.log(`refused grave grant of ${msg.itemId.slice(0, 64)} in ${inst.id} (not in any grave)`);
-          return;
-        }
-        pool.items.set(msg.itemId, left - 1);
-        this.accounts.grant(this.accountOf(msg.playerId), msg.itemId);
+        const inst = this.hostedBy(peerId);
+        if (inst && msg.source === "grave") this.graveGrant(inst.id, msg.playerId, msg.itemId);
         break;
       }
       case "grantGold": {
-        // Grave gold, up to what the dead carried — the pool bounds it.
-        if (this.world.hostOf(peerId) !== peerId) return;
-        if (msg.source !== "grave" || typeof msg.playerId !== "string" || typeof msg.amount !== "number") return;
-        const inst = this.world.instanceOf(peerId);
-        if (!inst || !inst.players.has(msg.playerId) || !this.world.isConnected(msg.playerId)) return;
-        const pool = this.gravePools.get(inst.id);
-        const amount = Math.floor(Math.min(msg.amount, pool?.gold ?? 0));
-        if (!pool || !(amount > 0)) return;
-        pool.gold -= amount;
-        this.accounts.grantGold(this.accountOf(msg.playerId), amount, GOLD_RULES.perRunCap);
+        const inst = this.hostedBy(peerId);
+        if (inst && msg.source === "grave") this.graveGold(inst.id, msg.playerId, msg.amount);
         break;
       }
     }
+  }
+
+  // ── The floor host's side ──────────────────────────────────────────────────
+  // What a floor's host may ask of the ledger, whichever host it is: a
+  // wizard's browser (the "loot"/"claim"/"grant" messages above, checked to
+  // come from the instance's host) or a server-side floor host, which calls
+  // these in-process. Every one is bounded by the instance's own books, so
+  // even a lying host can only move what its floor really holds.
+
+  /** `id` died or broke: what it dropped, as orbs (none is a valid answer).
+   * `source` is untrusted — the book only believes a slime split's
+   * generation; a `dev` source is honored only by a ledger started for
+   * testing. Null = refused (not this floor's, or already rolled). */
+  rollLoot(instanceId: string, id: unknown, source: unknown): IssuedOrb[] | null {
+    const inst = this.world.instanceById(instanceId);
+    if (!inst || typeof id !== "string") return null;
+    const book = this.bookOf(inst);
+    const s = source as LootSource | DevLoot | undefined;
+    if (s?.kind === "dev") {
+      const dev = this.devDrop(s);
+      return dev ? [book.issue(dev.itemId, dev.gold)] : null;
+    }
+    const orbs = book.roll(id, s);
+    if (!orbs) this.log(`refused loot for ${id.slice(0, 40)} in ${inst.id} (not this floor's, or already rolled)`);
+    return orbs;
+  }
+
+  /** What orb `orbId` holds, if it's still on the floor (unclaimed). */
+  orbHolds(instanceId: string, orbId: unknown): LootDrop | null {
+    const inst = this.world.instanceById(instanceId);
+    if (!inst || typeof orbId !== "string") return null;
+    return this.bookOf(inst).peek(orbId);
+  }
+
+  /** `playerId` took orb `orbId`: grant what the book put in it, once. Only
+   * for a connected member of the instance. */
+  claimOrb(instanceId: string, playerId: unknown, orbId: unknown): boolean {
+    const inst = this.memberFloor(instanceId, playerId);
+    if (!inst || typeof orbId !== "string") return false;
+    const drop = this.bookOf(inst).claim(orbId);
+    if (!drop) {
+      this.log(`refused claim of orb ${orbId.slice(0, 40)} in ${inst.id} (unknown, or taken)`);
+      return false;
+    }
+    const target = this.accountOf(playerId as string);
+    if (drop.itemId) this.accounts.grant(target, drop.itemId);
+    if (drop.gold > 0) this.accounts.grantGold(target, drop.gold, GOLD_RULES.perRunCap);
+    return true;
+  }
+
+  /** Grave plunder: honored only against what the dead were granted in this
+   * instance (anything found is claimed by orb). */
+  graveGrant(instanceId: string, playerId: unknown, itemId: unknown): boolean {
+    const inst = this.memberFloor(instanceId, playerId);
+    if (!inst || typeof itemId !== "string") return false;
+    const pool = this.gravePools.get(inst.id);
+    const left = pool?.items.get(itemId) ?? 0;
+    if (!pool || left < 1) {
+      this.log(`refused grave grant of ${itemId.slice(0, 64)} in ${inst.id} (not in any grave)`);
+      return false;
+    }
+    pool.items.set(itemId, left - 1);
+    this.accounts.grant(this.accountOf(playerId as string), itemId);
+    return true;
+  }
+
+  /** Grave gold, up to what the dead carried — the pool bounds it. */
+  graveGold(instanceId: string, playerId: unknown, amount: unknown): boolean {
+    const inst = this.memberFloor(instanceId, playerId);
+    if (!inst || typeof amount !== "number") return false;
+    const pool = this.gravePools.get(inst.id);
+    const grant = Math.floor(Math.min(amount, pool?.gold ?? 0));
+    if (!pool || !(grant > 0)) return false;
+    pool.gold -= grant;
+    this.accounts.grantGold(this.accountOf(playerId as string), grant, GOLD_RULES.perRunCap);
+    return true;
+  }
+
+  /** The instance `peerId` hosts, or null if it isn't its host. */
+  private hostedBy(peerId: string): SeatedFloor | null {
+    if (this.world.hostOf(peerId) !== peerId) return null;
+    return this.world.instanceOf(peerId);
+  }
+
+  /** The instance, if `playerId` is a connected wizard on it. */
+  private memberFloor(instanceId: string, playerId: unknown): SeatedFloor | null {
+    const inst = this.world.instanceById(instanceId);
+    if (!inst || typeof playerId !== "string") return null;
+    if (!inst.players.has(playerId) || !this.world.isConnected(playerId)) return null;
+    return inst;
   }
 
   /** Account bound to this connection — auto-minted for clients that never
@@ -428,7 +476,7 @@ export class Ledger {
   }
 
   /** A dev drop, when this ledger honors them: a real item, or some gold. */
-  private devDrop(raw: unknown): { itemId: string | null; gold: number } | null {
+  private devDrop(raw: DevLoot): { itemId: string | null; gold: number } | null {
     if (!this.devLoot) {
       this.log("refused a dev loot report (devLoot is off)");
       return null;

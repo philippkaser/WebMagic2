@@ -1,7 +1,10 @@
 import { hostEvent } from "../net/channels";
+import { FLOOR, type SpawnedEnemy } from "../net/floorProtocol";
 import { isHost } from "../net/netStore";
 import type { Vec3 } from "../world/types";
 import type { EnemyId } from "./roster";
+
+export type { SpawnedEnemy };
 
 /** Runtime enemy spawns (slime splits today; nests/summoners later). Mirrors
  * items/LootOrbs: the host alone decides to spawn, and announces it as a host
@@ -9,15 +12,6 @@ import type { EnemyId } from "./roster";
  * no matter who's on the floor. Late-join is covered by a sync provider the
  * <SpawnedEnemies> component registers. Kept JSX-free so kinds/Slime.tsx can
  * call spawnEnemy() from a death handler without an import cycle. */
-
-export interface SpawnedEnemy {
-  id: string;
-  kind: EnemyId;
-  /** Split depth — 0 is a naturally-generated enemy, children count up. */
-  generation: number;
-  pos: Vec3;
-  floor: number;
-}
 
 /** Set by the mounted <SpawnedEnemies> component; null when unmounted. */
 export const spawnHandlers: {
@@ -28,7 +22,7 @@ export const spawnHandlers: {
 
 let counter = 1;
 
-const enemySpawned = hostEvent<SpawnedEnemy>("enemySpawned", (d) => spawnHandlers.push?.(d));
+const enemySpawned = hostEvent<SpawnedEnemy>(FLOOR.enemySpawned, (d) => spawnHandlers.push?.(d));
 
 /** Host-authoritative spawn. No-op off the host — replicas receive the event,
  * so a split rolls once and every client renders the same children. */

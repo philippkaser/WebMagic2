@@ -2,7 +2,9 @@ import type { EntitySnap } from "../sim/world";
 import { netBus } from "./bus";
 import { hostCommand, onAuthority, sendAuthorityTo } from "./channels";
 import { netClock } from "./clock";
+import { FLOOR, type CmdMsg, type DespawnMsg, type SnapMsg, type WorldSyncMsg } from "./floorProtocol";
 import { isHost, useNet } from "./netStore";
+import { CHANNEL_AUTHORITY } from "./protocol";
 import {
   makeSampledPose,
   q2,
@@ -72,26 +74,10 @@ export interface NetEntitySpec {
 }
 
 // ── Wire formats (inside opaque envelopes) ───────────────────────────────────
+// The floor host's protocol (net/floorProtocol.ts) — a headless host
+// (server/floorHost.ts) speaks the same.
 
-/** The same snapshot a headless floor host sends (sim/floorSim.ts). */
 type WireSnap = EntitySnap;
-
-interface DespawnMsg {
-  id: string;
-  data?: unknown;
-}
-
-interface CmdMsg {
-  id: string;
-  cmd: string;
-  data: unknown;
-}
-
-interface WorldSyncMsg {
-  dead: string[];
-  ents: WireSnap[];
-  custom: Record<string, unknown>;
-}
 
 // ── Registry state ───────────────────────────────────────────────────────────
 
@@ -168,7 +154,7 @@ export function registerNetEntity(spec: NetEntitySpec): NetEntityHandle {
  * authority applies its own death directly; this informs the replicas. */
 export function announceDespawn(id: string, data?: unknown): void {
   if (!isHost()) return;
-  session.sendEnvelope("a:despawn", { id, data } satisfies DespawnMsg);
+  session.sendEnvelope(CHANNEL_AUTHORITY + FLOOR.despawn, { id, data } satisfies DespawnMsg);
 }
 
 export function setExpectedEntities(ids: string[]): void {
@@ -204,7 +190,7 @@ export function registerSyncProvider(key: string, provider: SyncProvider): () =>
 
 // ── Incoming routing (module-level: exactly one subscriber app-wide) ─────────
 
-onAuthority<{ ents: WireSnap[] }>("snap", (msg, meta) => {
+onAuthority<SnapMsg>(FLOOR.snap, (msg, meta) => {
   if (isHost()) return; // stale packet around a host migration
   for (const snap of msg.ents) {
     const entry = entities.get(snap.id);
@@ -215,14 +201,14 @@ onAuthority<{ ents: WireSnap[] }>("snap", (msg, meta) => {
   }
 });
 
-onAuthority<DespawnMsg>("despawn", (msg, meta) => {
+onAuthority<DespawnMsg>(FLOOR.despawn, (msg, meta) => {
   if (meta.self) return;
   const entry = entities.get(msg.id);
   if (entry) entry.spec.onDespawn?.(msg.data, false);
   else pendingDespawns.set(msg.id, msg.data);
 });
 
-const entityCmd = hostCommand<CmdMsg>("entityCmd");
+const entityCmd = hostCommand<CmdMsg>(FLOOR.entityCmd);
 entityCmd.on((msg, meta) => {
   entities.get(msg.id)?.spec.onCommand?.(msg.cmd, msg.data, meta.from);
 });
@@ -245,11 +231,11 @@ netBus.on("syncRequest", ({ playerId }) => {
     ents,
     custom,
   };
-  sendAuthorityTo("worldSync", msg, playerId);
+  sendAuthorityTo(FLOOR.worldSync, msg, playerId);
 });
 
 // Late joiner: apply the host's authoritative state.
-onAuthority<WorldSyncMsg>("worldSync", (msg, meta) => {
+onAuthority<WorldSyncMsg>(FLOOR.worldSync, (msg, meta) => {
   if (isHost() || meta.self) return;
   for (const id of msg.dead) {
     const entry = entities.get(id);
@@ -337,7 +323,7 @@ export function authorityTick(): void {
     const snap = captureSnap(entry, false);
     if (snap) batch.push(snap);
   }
-  if (batch.length > 0) session.sendEnvelope("a:snap", { ents: batch });
+  if (batch.length > 0) session.sendEnvelope(CHANNEL_AUTHORITY + FLOOR.snap, { ents: batch } satisfies SnapMsg);
 }
 
 const targetPos = { x: 0, y: 0, z: 0 };

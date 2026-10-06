@@ -72,6 +72,11 @@ export function buildFloorPhysics(R: Rapier, layout: FloorLayout): FloorPhysics 
   layout.enemies.forEach((e, i) => add(`e${i}`, enemyBody(e.kind), e.pos));
   layout.props.forEach((p, i) => add(`p${i}`, PROP_BODIES[p.kind], p.pos));
   if (layout.boss) add("boss", enemyBody("boss"), layout.boss);
+  // Rapier builds its scene-query structures during a step: until one, rays
+  // see an empty world (a sentry would fire through walls on its first
+  // tick). One settling step makes the floor queryable from the start.
+  world.timestep = 1 / 60;
+  world.step();
 
   return {
     world,

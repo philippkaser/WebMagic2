@@ -24,11 +24,13 @@ import { treasureItem } from "../items/dropTables";
 import { reportLoot } from "../items/LootOrbs";
 import { TREASURE_ORB } from "../items/lootBook";
 import { hostCommand, hostEvent } from "../net/channels";
+import { FLOOR, SYNC, TREASURE_RANGE_SQ, type TreasureTakenMsg } from "../net/floorProtocol";
 import { registerSyncProvider } from "../net/entities";
 import { isHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
 import { useNetBody } from "../net/NetSystems";
 import { PROP_BODIES, RIFT_STONES, WORLD_GROUPS } from "../sim/bodies";
+import { PROP_LOOT_MIN_Y, PROP_RULES } from "../sim/props";
 import { useGame } from "../state/gameStore";
 import { registerPortalAnchor } from "../transition/portals";
 import { smoothstep } from "../transition/timeline";
@@ -39,16 +41,12 @@ import { BarrelModel, CrateModel, PotModel } from "../render/models/PropModels";
 import { TORCH_EMBER_INTENSITY, TorchModel } from "../render/models/TorchModel";
 import type { PropKind, Vec3 } from "./types";
 
-interface PropSpec {
-  hp: number;
-  shards: string[];
-  explodes: boolean;
-}
-
-const SPECS: Record<PropKind, PropSpec> = {
-  crate: { hp: 26, shards: ["#a8743c", "#6b4a24", "#8a5c2e"], explodes: false },
-  barrel: { hp: 42, shards: ["#8a5c2e", "#5a3a1c", "#6e6e74"], explodes: true },
-  pot: { hp: 6, shards: ["#c98d5f", "#8a5a3a", "#e0b48a"], explodes: false },
+/** Debris colours per prop. What a prop takes and what it does when it
+ * breaks is the sim's (sim/props.ts) — the same on any floor host. */
+const SHARDS: Record<PropKind, string[]> = {
+  crate: ["#a8743c", "#6b4a24", "#8a5c2e"],
+  barrel: ["#8a5c2e", "#5a3a1c", "#6e6e74"],
+  pot: ["#c98d5f", "#8a5a3a", "#e0b48a"],
 };
 
 /** Debris amount per prop (a pot is a handful of sherds, a barrel a lot of
@@ -72,8 +70,8 @@ export function Breakable({
   entityId: string;
 }) {
   const body = useRef<RapierRigidBody>(null);
-  const spec = SPECS[kind];
-  const hp = useRef(spec.hp);
+  const rules = PROP_RULES[kind];
+  const hp = useRef(rules.hp);
   const deadRef = useRef(false);
   const [dead, setDead] = useState(false);
 
@@ -84,10 +82,11 @@ export function Breakable({
       const t = body.current?.translation() ?? { x: position[0], y: position[1], z: position[2] };
       if (!silent) {
         // Tumbling lit chunks that bounce and settle, and a puff of dust.
-        shatterFx(t, spec.shards, SHATTER_SCALE[kind]);
+        shatterFx(t, SHARDS[kind], SHATTER_SCALE[kind]);
         // What it hid is the loot book's roll; the authority reports the break.
-        if (!remote) reportLoot(entityId, { kind: "prop", prop: kind }, [t.x, Math.max(t.y, 0.5), t.z]);
-        if (spec.explodes) {
+        if (!remote) reportLoot(entityId, { kind: "prop", prop: kind }, [t.x, Math.max(t.y, PROP_LOOT_MIN_Y), t.z]);
+        const blast = rules.blast;
+        if (blast) {
           // Defer so the chain reaction never re-enters this hit handler. A
           // replicated break explodes cosmetically vs entities (the host's
           // copy is authoritative) but still hurts and shoves the local player.
@@ -95,9 +94,9 @@ export function Breakable({
           queueMicrotask(() =>
             explode({
               position: at,
-              radius: 3.4,
-              damage: 26,
-              impulse: 28,
+              radius: blast.radius,
+              damage: blast.damage,
+              impulse: blast.impulse,
               team: "neutral",
               color: "#ff9a3c",
               particles: 36,
@@ -109,7 +108,7 @@ export function Breakable({
       }
       setDead(true);
     },
-    [floor, position, spec, kind],
+    [floor, position, rules, kind],
   );
 
   const net = useNetBody({
@@ -479,15 +478,11 @@ let consumeTreasure: ((by: string, silent: boolean) => void) | null = null;
 let treasureTakenNow: (() => boolean) | null = null;
 let treasurePos: Vec3 | null = null;
 
-const treasureTaken = hostEvent<{ by: string }>("treasureTaken", (d) => {
+const treasureTaken = hostEvent<TreasureTakenMsg>(FLOOR.treasureTaken, (d) => {
   consumeTreasure?.(d.by, false);
 });
 
-/** Grant radius — interaction is offered within ~2.5 m; the slack covers one
- * round trip of movement. Farther requests are a client cheating. */
-const TREASURE_RANGE_SQ = 6 * 6;
-
-const takeTreasure = hostCommand<Record<string, never>>("takeTreasure", (_d, meta) => {
+const takeTreasure = hostCommand<Record<string, never>>(FLOOR.takeTreasure, (_d, meta) => {
   if (treasureTakenNow?.()) return;
   const p = treasurePos;
   if (!p || wizardDistSqTo(meta.from, p[0], p[1], p[2]) > TREASURE_RANGE_SQ) return;
@@ -538,7 +533,7 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
     consumeTreasure = consume;
     treasureTakenNow = () => takenRef.current;
     treasurePos = position;
-    const unregister = registerSyncProvider("treasure", {
+    const unregister = registerSyncProvider(SYNC.treasure, {
       collect: () => takenRef.current,
       apply: (data) => {
         if (data === true) consume("", true);

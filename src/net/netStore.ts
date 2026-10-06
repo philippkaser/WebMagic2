@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { SERVER_HOST_ID } from "./protocol";
 
 /** Reactive networking state, updated by the GameSession. Components use it
  * to switch between simulating (authority) and replicating (everyone else). */
@@ -30,6 +31,22 @@ export function floorPlayerCount(s: NetState): number {
  * the host code path is exactly the classic single-player path. */
 export function isHost(): boolean {
   return selectIsHost(useNet.getState());
+}
+
+/** Is the current floor hosted by the server (server/floorHost.ts)? Then
+ * every wizard is a replica, and the effects of each wizard's own spells
+ * are that wizard's to report. */
+export function isServerHosted(): boolean {
+  const s = useNet.getState();
+  return s.mode === "online" && s.hostId === SERVER_HOST_ID;
+}
+
+/** Does this machine apply the entity effects of a spell cast by `casterId`
+ * (its pull, its blast)? The floor's host does on a wizard-hosted floor —
+ * it sees every hole — but on a server-hosted floor the caster does, and its
+ * hits travel as commands like every other spell's. */
+export function appliesSpellEffects(casterId: string, localId: string): boolean {
+  return isServerHosted() ? casterId === localId : isHost();
 }
 
 /** Reactive variant for components that must re-render on host migration. */

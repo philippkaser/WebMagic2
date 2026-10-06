@@ -1,21 +1,24 @@
 import type RAPIER from "@dimforge/rapier3d-compat";
 import { PLAYER } from "../core/config";
 import type { Vec } from "../enemies/brains/common";
-import type { EnemyId } from "../enemies/roster";
+import { ENEMY_STATS, type EnemyId } from "../enemies/roster";
 import { NEUTRAL_FLOOR_RULES, type FloorRules } from "../game/floorRules";
 import { q2, q3 } from "../net/snapshots";
 import { sanitizeHit } from "../weapons/hits";
 import { omenRules } from "../world/omens";
-import type { FloorLayout, Vec3 } from "../world/types";
+import type { FloorLayout, PropKind, Vec3 } from "../world/types";
 import { enemyBody, WIZARD_GROUPS } from "./bodies";
 import { createEnemy, enemyOptions, type EnemyController } from "./enemies/controllers";
 import type { EnemyCore } from "./enemies/core";
 import { buildFloorPhysics, type FloorPhysics, type Rapier } from "./floorPhysics";
-import type { EntitySnap, SimAction, SimTarget, SimWorld } from "./world";
+import { blastFalloff, PROP_LOOT_MIN_Y, PROP_RULES } from "./props";
+import { DartTrapController } from "./traps";
+import type { EntitySnap, SimAction, SimCue, SimTarget, SimWorld } from "./world";
 
 /** A floor's simulation, headless: its physics (sim/floorPhysics.ts), every
  * enemy the layout spawns running the same core and controller the browser
- * host runs (sim/enemies), and the wizards on it as kinematic capsules.
+ * host runs (sim/enemies), its breakable props (sim/props.ts) and dart
+ * launchers (sim/traps.ts), and the wizards on it as kinematic capsules.
  *
  * It is a floor authority without a browser — for a floor hosted on a server
  * (any floor two strangers share), for tests and for benchmarks. The caller
@@ -23,19 +26,34 @@ import type { EntitySnap, SimAction, SimTarget, SimWorld } from "./world";
  *
  *  - in:  wizard poses (setWizard / removeWizard) and hit commands (hit),
  *         which are sanitized here exactly as a browser host sanitizes them;
- *  - out: drain() — the authoritative actions (bolts, slams, splits, deaths,
- *         loot reports) a browser host would announce as host events — and
- *         snapshot() — entity snapshots in the replication wire format
- *         (sim/world.ts EntitySnap).
+ *  - out: drain() — the authoritative actions (bolts, slams, splits, deaths
+ *         and breaks, loot reports) a browser host would announce as host
+ *         events — and snapshot() — entity snapshots in the replication
+ *         wire format (sim/world.ts EntitySnap).
  *
  * Entity ids are the browser's ("e3", "p12", "boss", "s1"), so a client can't
- * tell which kind of host it is playing against. Props are physical here
- * (enemies bump them, snapshots move them); breaking them is still the
- * browser prop's job. */
+ * tell which kind of host it is playing against. A sim can also start as a
+ * REPLICA of a floor someone else has been hosting (mirror / mirrorDespawn /
+ * mirrorSpawn — the same facts a browser replica applies) and take over from
+ * there: host migration, with a headless host on the receiving end.
+ *
+ * Not simulated here: enemy bolts in flight (every client flies its own
+ * copy; their bursts hurt wizards client-side and leave props be), and the
+ * wizards' own spells, whose hits arrive as commands from their casters. */
 
 export interface FloorSimOptions {
-  /** The sim's dice (brains, splits). Defaults to Math.random. */
+  /** The sim's dice (brains, splits, trap clocks). Defaults to Math.random. */
   random?: () => number;
+}
+
+/** An enemy spawned at runtime (a slime's child) — what a late joiner must
+ * be told to spawn (enemies/spawnedStore.ts SpawnedEnemy, the same shape). */
+export interface SpawnRecord {
+  id: string;
+  kind: EnemyId;
+  generation: number;
+  pos: Vec3;
+  floor: number;
 }
 
 interface SimEnemy {
@@ -49,6 +67,22 @@ interface Wizard {
   body: RAPIER.RigidBody;
   pos: Vec;
   vel: Vec;
+}
+
+interface Blast {
+  at: Vec;
+  /** Base radius — the floor's explosionRadiusMult scales it. */
+  radius: number;
+  damage: number;
+  impulse: number;
+  /** Neutral blasts (barrels) hurt enemies too; the Warden's slam doesn't. */
+  hurtsEnemies: boolean;
+}
+
+const ENEMY_KINDS: ReadonlySet<string> = new Set(ENEMY_STATS.map((e) => e.id));
+
+function isTriple(v: unknown): v is Vec3 {
+  return Array.isArray(v) && v.length === 3 && v.every((n) => typeof n === "number" && Number.isFinite(n));
 }
 
 /** Re-send an unchanged awake entity at least this often (sim seconds). */
@@ -75,15 +109,23 @@ export class FloorSim {
 
   private readonly R: Rapier;
   private readonly enemies = new Map<string, SimEnemy>();
+  private readonly props = new Map<string, { kind: PropKind; hp: number }>();
+  private readonly spawnRecords = new Map<string, SpawnRecord>();
+  private readonly darts: DartTrapController[];
   private readonly wizards = new Map<string, Wizard>();
-  /** Every id this floor has had (layout and spawned) — the dead are these
-   * minus the living, which is what a late joiner must learn. */
+  /** Every id the layout put on this floor — the dead are these minus the
+   * living, which is what a late joiner must learn. (Runtime spawns travel
+   * as their own live list.) */
   private readonly known: string[] = [];
   private readonly outbox: SimAction[] = [];
+  private readonly cueBox: { id: string; cue: SimCue }[] = [];
+  private readonly blasts: Blast[] = [];
   private readonly sent = new Map<string, Sent>();
   private readonly ray: RAPIER.Ray;
   private readonly target: SimTarget = { pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 }, dist: Infinity };
+  private readonly shove: Vec = { x: 0, y: 0, z: 0 };
   private spawned = 0;
+  private flushing = false;
 
   /** What the sim asks of the world — answered from this floor alone. */
   readonly world: SimWorld;
@@ -108,15 +150,21 @@ export class FloorSim {
         ray.dir.x = dir.x;
         ray.dir.y = dir.y;
         ray.dir.z = dir.z;
-        return this.physics.world.castRay(ray, dist, true, undefined, undefined, undefined, self) === null;
+        return this.physics.world.castRay(ray, dist, true, undefined, undefined, undefined, self ?? undefined) === null;
       },
       random,
       act: (a) => this.act(a),
+      // Copied: a cue's vectors are its controller's scratch.
+      cue: (id, cue) => this.cueBox.push({ id, cue: structuredClone(cue) }),
     };
 
     layout.enemies.forEach((e, i) => this.addEnemy(`e${i}`, e.kind, e.pos, 0));
     if (layout.boss) this.addEnemy("boss", "boss", layout.boss, 0);
-    layout.props.forEach((_, i) => this.known.push(`p${i}`));
+    layout.props.forEach((p, i) => this.props.set(`p${i}`, { kind: p.kind, hp: PROP_RULES[p.kind].hp }));
+    this.known.push(...this.enemies.keys(), ...this.props.keys());
+    this.darts = layout.traps
+      .filter((t) => t.kind === "dart")
+      .map((t) => new DartTrapController(this.world, t.pos, floor));
   }
 
   // ── In ─────────────────────────────────────────────────────────────────────
@@ -152,30 +200,85 @@ export class FloorSim {
     this.wizards.delete(id);
   }
 
+  /** Where a wizard last said they were (null if not on the floor). */
+  wizardAt(id: string): Readonly<Vec> | null {
+    return this.wizards.get(id)?.pos ?? null;
+  }
+
   /** A "hit" command from a wizard, straight off the wire: sanitized and
-   * capped for this depth, then taken by the enemy. False when it couldn't
-   * land (malformed, or no such living enemy). */
+   * capped for this depth, then taken by the enemy or prop. False when it
+   * couldn't land (malformed, or nothing living by that id). */
   hit(id: string, data: unknown): boolean {
-    const e = this.enemies.get(id);
     const d = sanitizeHit(data, this.floor);
-    if (!e || e.core.dead || !d) return false;
-    e.core.hit(d.damage, d.impulse);
+    if (!d || !this.alive(id)) return false;
+    this.strike(id, d.damage, d.impulse);
+    this.flush();
     return true;
   }
 
   // ── Tick ───────────────────────────────────────────────────────────────────
 
-  /** One tick: every living enemy thinks, then the world steps. An empty
-   * floor idles — nobody to hunt, nothing to decide. */
+  /** One tick: every living enemy and dart launcher thinks, then the world
+   * steps. An empty floor idles — nobody to hunt, nothing to decide. */
   step(dt: number): void {
     if (this.wizards.size > 0) {
       for (const e of this.enemies.values()) {
         const b = e.core.beginFrame(dt);
         if (b) e.ctl.think(b, dt, this.time);
       }
+      for (const dart of this.darts) dart.think(dt);
+      this.flush();
     }
     this.physics.step(dt);
     this.time += dt;
+  }
+
+  // ── Replica (before taking a floor over) ───────────────────────────────────
+
+  /** The floor's current host says where `snap.id` is and what it holds.
+   * (Its word is checked for shape — it is another machine's.) */
+  mirror(snap: EntitySnap): void {
+    if (!snap || typeof snap.id !== "string" || !isTriple(snap.p)) return;
+    const body = this.physics.bodies.get(snap.id);
+    if (!body) return;
+    const [x, y, z] = snap.p;
+    body.setTranslation({ x, y, z }, true);
+    if (isTriple(snap.v)) body.setLinvel({ x: snap.v[0], y: snap.v[1], z: snap.v[2] }, true);
+    if (Array.isArray(snap.q) && snap.q.length === 4 && snap.q.every(Number.isFinite)) {
+      body.setRotation({ x: snap.q[0], y: snap.q[1], z: snap.q[2], w: snap.q[3] }, true);
+    }
+    const hp = typeof snap.f === "object" && snap.f ? snap.f.hp : undefined;
+    if (typeof hp !== "number" || !Number.isFinite(hp)) return;
+    const e = this.enemies.get(snap.id);
+    if (e) {
+      e.core.syncHp(hp);
+      // Hurt means it was in a fight: it wakes into this host's hands awake.
+      if (hp < e.core.maxHp) e.core.aggro = true;
+    }
+    const prop = this.props.get(snap.id);
+    if (prop) prop.hp = hp;
+  }
+
+  /** The floor's current host says `id` died or broke. */
+  mirrorDespawn(id: string): void {
+    const e = this.enemies.get(id);
+    if (e) {
+      e.core.despawned(true);
+      this.forget(id);
+      return;
+    }
+    if (this.props.has(id)) this.forget(id);
+  }
+
+  /** The floor's current host spawned an enemy at runtime. */
+  mirrorSpawn(s: SpawnRecord): void {
+    if (!s || typeof s.id !== "string" || this.physics.bodies.has(s.id) || !isTriple(s.pos)) return;
+    if (!ENEMY_KINDS.has(s.kind) || s.kind === "boss" || !Number.isFinite(s.generation)) return;
+    this.addEnemy(s.id, s.kind, s.pos, s.generation);
+    this.spawnRecords.set(s.id, { ...s, floor: this.floor });
+    // Our own children are named past every name the floor has used.
+    const n = /^s(\d+)$/.exec(s.id);
+    if (n) this.spawned = Math.max(this.spawned, Number(n[1]));
   }
 
   // ── Out ────────────────────────────────────────────────────────────────────
@@ -185,6 +288,11 @@ export class FloorSim {
     return this.outbox.splice(0);
   }
 
+  /** The cues since the last drain — for the clients' views. */
+  drainCues(): { id: string; cue: SimCue }[] {
+    return this.cueBox.splice(0);
+  }
+
   /** Snapshots of the floor's entities. `full` = everything that lives (a
    * late joiner's sync); otherwise only what changed since the last call,
    * with a keepalive while awake — the browser host's delta filter. */
@@ -192,7 +300,7 @@ export class FloorSim {
     const out: EntitySnap[] = [];
     for (const [id, body] of this.physics.bodies) {
       const e = this.enemies.get(id);
-      const prop = !e;
+      const prop = this.props.get(id);
       const t = body.translation();
       const snap: EntitySnap = { id, p: [q2(t.x), q2(t.y), q2(t.z)] };
       if (!e?.immobile) {
@@ -200,8 +308,10 @@ export class FloorSim {
         snap.v = [q2(v.x), q2(v.y), q2(v.z)];
       }
       if (prop) {
+        // Props tumble — their rotation replicates too.
         const q = body.rotation();
         snap.q = [q3(q.x), q3(q.y), q3(q.z), q3(q.w)];
+        snap.f = { hp: prop.hp };
       }
       if (e) snap.f = e.core.fields();
       // A fixed body (the sentry) never moves: only its fields can change.
@@ -215,14 +325,29 @@ export class FloorSim {
     return [...this.enemies.keys()];
   }
 
-  /** Everything that was on this floor and isn't any more. */
+  /** Is `id` a living enemy or an unbroken prop? */
+  alive(id: string): boolean {
+    return (this.enemies.has(id) && !this.enemies.get(id)!.core.dead) || this.props.has(id);
+  }
+
+  /** Every layout entity that was on this floor and isn't any more. */
   gone(): string[] {
     return this.known.filter((id) => !this.physics.bodies.has(id));
+  }
+
+  /** The runtime spawns still alive (a late joiner spawns these). */
+  spawns(): SpawnRecord[] {
+    return [...this.spawnRecords.values()];
   }
 
   /** An enemy's authority state (tests, debugging). */
   enemy(id: string): EnemyCore | undefined {
     return this.enemies.get(id)?.core;
+  }
+
+  /** A prop's health, if it stands. */
+  propHp(id: string): number | undefined {
+    return this.props.get(id)?.hp;
   }
 
   /** Stepping cost: dynamic bodies, how many are awake, wizards. */
@@ -234,6 +359,7 @@ export class FloorSim {
   free(): void {
     this.physics.free();
     this.enemies.clear();
+    this.props.clear();
     this.wizards.clear();
   }
 
@@ -248,7 +374,61 @@ export class FloorSim {
       () => this.physics.bodies.get(id) ?? null,
     );
     this.enemies.set(id, { core, ctl, immobile: spec.type === "fixed" });
-    this.known.push(id);
+  }
+
+  /** Damage and a shove land on an enemy or a prop (already sanitized). */
+  private strike(id: string, damage: number, impulse: Vec): void {
+    const e = this.enemies.get(id);
+    if (e) {
+      e.core.hit(damage, impulse);
+      return;
+    }
+    const prop = this.props.get(id);
+    if (!prop) return;
+    prop.hp -= damage;
+    const body = this.physics.bodies.get(id);
+    body?.applyImpulse(impulse, true);
+    if (prop.hp > 0 || !body) return;
+    // It breaks: gone for everyone, its hiding place rolled by the loot book,
+    // and a barrel goes up (queued, so a chain reaction never re-enters here).
+    const t = body.translation();
+    this.forget(id);
+    this.outbox.push({ type: "died", id });
+    this.outbox.push({ type: "loot", id, source: { kind: "prop", prop: prop.kind }, at: [t.x, Math.max(t.y, PROP_LOOT_MIN_Y), t.z] });
+    const blast = PROP_RULES[prop.kind].blast;
+    if (blast) this.blasts.push({ at: { x: t.x, y: t.y, z: t.z }, ...blast, hurtsEnemies: true });
+  }
+
+  /** Detonate queued blasts — and whatever they set off — in order. */
+  private flush(): void {
+    if (this.flushing) return;
+    this.flushing = true;
+    try {
+      for (let blast = this.blasts.shift(); blast; blast = this.blasts.shift()) this.detonate(blast);
+    } finally {
+      this.flushing = false;
+    }
+  }
+
+  private detonate(b: Blast): void {
+    const radius = b.radius * this.rules.explosionRadiusMult;
+    const shove = this.shove;
+    for (const [id, body] of [...this.physics.bodies]) {
+      const enemy = this.enemies.has(id);
+      if (enemy && !b.hurtsEnemies) continue;
+      if (!enemy && !this.props.has(id)) continue;
+      const dealt = blastFalloff(b.at, body.translation(), radius, b.damage, b.impulse, shove);
+      if (dealt !== null && this.alive(id)) this.strike(id, dealt, { x: shove.x, y: shove.y, z: shove.z });
+    }
+  }
+
+  /** Out of the world: an entity that died or broke. */
+  private forget(id: string): void {
+    this.enemies.delete(id);
+    this.props.delete(id);
+    this.spawnRecords.delete(id);
+    this.physics.remove(id);
+    this.sent.delete(id);
   }
 
   private act(a: SimAction): void {
@@ -257,14 +437,24 @@ export class FloorSim {
         // This host names the child, so every client spawns the same one.
         const id = a.id ?? `s${++this.spawned}`;
         this.addEnemy(id, a.kind, a.pos, a.generation);
+        this.spawnRecords.set(id, { id, kind: a.kind, generation: a.generation, pos: a.pos, floor: a.floor });
         this.outbox.push({ ...a, id });
         return;
       }
       case "died":
         // The death has read its body's last position already (core.die).
-        this.enemies.delete(a.id);
-        this.physics.remove(a.id);
-        this.sent.delete(a.id);
+        this.forget(a.id);
+        break;
+      case "boom":
+        // The Warden's slam shoves and breaks props here, as on a browser
+        // host (its damage to wizards is each client's own business).
+        this.blasts.push({
+          at: { x: a.data.pos[0], y: a.data.pos[1], z: a.data.pos[2] },
+          radius: a.data.radius,
+          damage: a.data.damage,
+          impulse: a.data.impulse,
+          hurtsEnemies: false,
+        });
         break;
     }
     this.outbox.push(a);

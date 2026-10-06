@@ -1,5 +1,6 @@
 import { ENEMY_SOURCE, WORLD_SOURCE, type DamageSource } from "../game/damageSource";
 import { hostEvent } from "../net/channels";
+import { FLOOR } from "../net/floorProtocol";
 import type { BoomData, CastData } from "../sim/world";
 import { explode } from "./explosions";
 import { fireProjectile } from "./projectiles";
@@ -24,7 +25,7 @@ function dungeonSource(tag: DungeonSourceTag | undefined): DamageSource {
 /** An enemy bolt — the sim's CastData (sim/world.ts), trap darts included. */
 export type EnemyCastData = CastData;
 
-export const enemyCast = hostEvent<EnemyCastData>("enemyCast", (d, meta) => {
+export const enemyCast = hostEvent<EnemyCastData>(FLOOR.enemyCast, (d, meta) => {
   fireProjectile({
     team: "enemy",
     source: dungeonSource(d.source),
@@ -41,7 +42,7 @@ export const enemyCast = hostEvent<EnemyCastData>("enemyCast", (d, meta) => {
 
 export type { BoomData };
 
-export const enemyBoom = hostEvent<BoomData>("enemyBoom", (d, meta) => {
+export const enemyBoom = hostEvent<BoomData>(FLOOR.enemyBoom, (d, meta) => {
   explode({
     position: d.pos,
     radius: d.radius,

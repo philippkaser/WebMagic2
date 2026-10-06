@@ -36,7 +36,8 @@ export interface FloorAssignment {
   floor: number;
   /** Deterministic seed — every client in the instance generates the same floor. */
   seed: number;
-  /** The instance's simulation host (first joiner; migrates on leave). */
+  /** The instance's simulation host: its first joiner (migrating on leave),
+   * or SERVER_HOST_ID when the server hosts the floor. */
   hostId: string;
   /** Host generation, bumped on every migration. Authority traffic is
    * relay-stamped with it so stale-host packets are identifiable. */
@@ -175,6 +176,10 @@ export type ServerMsg =
   /** Relayed gameplay envelope. `serverTime` is stamped at relay time, which
    * gives every receiver one consistent timeline for interpolation. */
   | { t: "msg"; ch: string; from: string; epoch: number; serverTime: number; data: unknown };
+
+/** The host id of a floor the SERVER hosts (server/floorHost.ts). Never a
+ * wizard's id; every wizard on such a floor is a replica. */
+export const SERVER_HOST_ID = "@host";
 
 export const CHANNEL_AUTHORITY = "a:";
 export const CHANNEL_TO_HOST = "h:";

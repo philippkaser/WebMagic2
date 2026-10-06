@@ -7,6 +7,8 @@ import { SLIME_MAX_GEN } from "../enemies/brains/slime";
 import { hitCapForFloor } from "../weapons/hits";
 import { generateFloor } from "../world/gen";
 import { FloorSim } from "./floorSim";
+import { PROP_RULES } from "./props";
+import { DART } from "./traps";
 import type { SimAction } from "./world";
 
 beforeAll(async () => {
@@ -187,7 +189,7 @@ describe("FloorSim", () => {
     expect(sentry.f?.hp).toBeGreaterThan(0);
     const prop = full.find((e) => e.id.startsWith("p"))!;
     expect(prop.q).toHaveLength(4); // props tumble
-    expect(prop.f).toBeUndefined();
+    expect(prop.f?.hp).toBeGreaterThan(0);
 
     s.snapshot(); // prime the delta filter
     expect(s.snapshot()).toEqual([]); // nothing moved, nothing changed
@@ -215,6 +217,87 @@ describe("FloorSim", () => {
     const a = play();
     expect(a.actions.length).toBeGreaterThan(0);
     expect(play()).toEqual(a);
+  });
+
+  test("a prop breaks: gone for everyone, its hiding place rolled", () => {
+    const s = sim(1, 1);
+    const id = "p0";
+    const kind = generateFloor(1, 1).props[0].kind;
+    expect(s.propHp(id)).toBe(PROP_RULES[kind].hp);
+    expect(s.hit(id, { damage: 1, impulse: { x: 0, y: 1, z: 0 } })).toBe(true);
+    expect(s.propHp(id)).toBe(PROP_RULES[kind].hp - 1);
+    s.hit(id, { damage: 1e9, impulse: ZERO });
+    const actions = s.drain();
+    expect(actions.slice(0, 2)).toEqual([
+      { type: "died", id },
+      expect.objectContaining({ type: "loot", id, source: { kind: "prop", prop: kind } }),
+    ]);
+    expect(s.alive(id)).toBe(false);
+    expect(s.gone()).toEqual([id]);
+    expect(s.hit(id, { damage: 1, impulse: ZERO })).toBe(false);
+    s.free();
+  });
+
+  test("a barrel goes up and takes its neighbour with it", () => {
+    const s = sim(3, 3); // p9 and p11 are barrels side by side
+    s.hit("p9", { damage: PROP_RULES.barrel.hp, impulse: ZERO });
+    const died = ofType(s.drain(), "died").map((a) => a.id);
+    expect(died).toContain("p9");
+    // The neighbour took the blast: broken, or at least hurt.
+    expect(died.includes("p11") || s.propHp("p11")! < PROP_RULES.barrel.hp).toBe(true);
+    s.free();
+  });
+
+  test("a dart launcher fires at a wizard in its sight, blamed on the dungeon", () => {
+    const layout = generateFloor(5, 6);
+    const dart = layout.traps.find((t) => t.kind === "dart")!;
+    const s = sim(5, 6);
+    // Stand in front of it, in the open.
+    const head = { x: dart.pos[0], y: dart.pos[1] + DART.headHeight, z: dart.pos[2] };
+    let spot: Vec | null = null;
+    for (let i = 0; i < 16 && !spot; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const dir = { x: Math.cos(a), y: 0, z: Math.sin(a) };
+      if (s.world.clearShot(head, dir, 6.5, null)) spot = { x: head.x + dir.x * 5, y: head.y, z: head.z + dir.z * 5 };
+    }
+    s.setWizard("w1", spot!, ZERO);
+    run(s, 4);
+    const darts = ofType(s.drain(), "cast").filter((c) => c.data.source === "world");
+    expect(darts.length).toBeGreaterThan(0);
+    s.free();
+  });
+
+  test("a replica takes the floor over from what its host said", () => {
+    const host = sim(3, 6, 7);
+    const replica = sim(3, 6, 8);
+    const slime = firstOf(host, "slime");
+    const wisp = firstOf(host, "wisp");
+    host.setWizard("w1", openSpot(host, wisp, 5), ZERO);
+    run(host, 2);
+    host.hit(wisp, { damage: 1, impulse: ZERO });
+    host.hit(slime, { damage: 1e9, impulse: ZERO });
+    host.hit("p0", { damage: 1e9, impulse: ZERO });
+    run(host, 0.5);
+    // Everything the host announced, the replica applies…
+    for (const a of host.drain()) {
+      if (a.type === "died") replica.mirrorDespawn(a.id);
+      if (a.type === "spawn") replica.mirrorSpawn({ id: a.id!, kind: a.kind, generation: a.generation, pos: a.pos, floor: a.floor });
+    }
+    for (const snap of host.snapshot(true)) replica.mirror(snap);
+    // …and then it is the same floor.
+    expect(replica.living().sort()).toEqual(host.living().sort());
+    expect(replica.gone().sort()).toEqual(host.gone().sort());
+    expect(replica.spawns()).toEqual(host.spawns());
+    expect(replica.enemy(wisp)!.hp).toBe(host.enemy(wisp)!.hp);
+    expect(replica.enemy(wisp)!.aggro).toBe(true); // hurt: it was fighting
+    expect(dist(where(replica, wisp), where(host, wisp))).toBeLessThan(0.02);
+    // Its own children are named past the ones it inherited.
+    const child = replica.spawns()[0].id;
+    replica.hit(child, { damage: 1e9, impulse: ZERO });
+    const names = ofType(replica.drain(), "spawn").map((a) => a.id!);
+    for (const n of names) expect(host.spawns().map((x) => x.id)).not.toContain(n);
+    host.free();
+    replica.free();
   });
 
   test("a wizard who leaves takes their capsule along", () => {
