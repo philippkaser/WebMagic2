@@ -1,18 +1,30 @@
-/** Wire protocol between client and the relay server.
+/** Wire protocol between client and the server.
  *
- * The server is deliberately GAMEPLAY-BLIND. It handles matchmaking, host
- * designation, clock pongs and relaying of opaque channel envelopes — it
- * never learns what an "enemy" or an "orb" is. All gameplay messages are
- * defined client-side (net/channels.ts), so adding a networked feature never
- * touches the server or this file.
+ * Two kinds of messages. Gameplay travels in opaque channel envelopes the
+ * ROUTER (server/relay.ts) relays without reading — what an enemy or a
+ * spell is never reaches it, and all of it is defined client-side
+ * (net/channels.ts), so adding a networked feature never touches the server
+ * or this file. Everything an account owns goes to the LEDGER
+ * (server/ledger.ts): login, runs, saves, and loot — the floor host reports
+ * what died, the ledger rolls what it dropped and grants each orb once.
  *
- * The entire authorization model is the channel-name prefix:
+ * The envelopes' authorization model is the channel-name prefix:
  *
  *   "a:"  authority — only the instance host may send; relayed to the rest
  *         of the instance (or to one member via `to`, e.g. late-join sync).
  *   "h:"  to-host   — anyone may send; delivered to the current host only.
  *   "p:"  peer      — anyone may send; broadcast to the rest of the instance.
  */
+
+import type { LootSource } from "../items/dropTables";
+import type { IssuedOrb } from "../items/lootBook";
+
+/** A specific drop, for tests and the dev room (see ClientMsg "loot"). */
+export interface DevLoot {
+  kind: "dev";
+  itemId: string | null;
+  gold: number;
+}
 
 export interface MemberInfo {
   id: string;
@@ -118,23 +130,27 @@ export type ClientMsg =
   | { t: "gamble" }
   /** The run is lost — the server discards this run's grants. */
   | { t: "died" }
+  /** HOST report: `id` died or broke at `at` (enemy "e3", prop "p12", the
+   * "boss", or a runtime spawn described by `source`). The server rolls what
+   * it drops from its own loot book (items/lootBook.ts) and answers the host
+   * with `lootRolled` — the host says WHAT fell, never what it dropped. A
+   * `dev` source (a specific item or gold) is honored only by a server
+   * started for testing. */
+  | { t: "loot"; id: string; source: LootSource | DevLoot; at: [number, number, number] }
   /** The sender let one copy of `itemId` fall to the floor (an inventory
    * drop — anyone there may take it). `runLoot` says which copy: one found
    * this run, or one brought from home. The server takes it off the sender
-   * first, so whoever picks it up is granted exactly what was given up. */
+   * and answers with `released`: the copy, now an orb anyone may claim. */
   | { t: "drop"; itemId: string; runLoot: boolean }
-  /** HOST attestation: `playerId` legitimately picked up `itemId`. The only
-   * path by which an item becomes bankable. Non-host senders are ignored.
-   * Without a source it was FOUND here (an orb, the floor treasure) and must
-   * be something this floor could drop (items/loot.ts couldDropOn).
-   * `source: "grave" | "drop"` = something another wizard gave up here (died
-   * carrying it, or dropped it): honored only against what was actually
-   * given up in this instance, so a forged grave or drop mints nothing. */
-  | { t: "grant"; playerId: string; itemId: string; source?: "grave" | "drop" }
-  /** HOST attestation of a gold pickup — gold's provenance path, mirroring
-   * `grant`: found gold is capped to the richest orb the floor can drop
-   * (items/economy.ts maxGoldDrop), grave gold to what the dead carried. */
-  | { t: "grantGold"; playerId: string; amount: number; source?: "grave" }
+  /** HOST attestation: `playerId` took orb `orbId` (a drop, a gift, the floor
+   * treasure). The ONLY way anything found becomes bankable: the server
+   * grants what it put in that orb, once. */
+  | { t: "claim"; playerId: string; orbId: string }
+  /** HOST attestation: `playerId` plundered `itemId` from a grave — honored
+   * only against what the wizards who died in this instance were granted. */
+  | { t: "grant"; playerId: string; itemId: string; source: "grave" }
+  /** HOST attestation: grave gold, up to what the dead carried. */
+  | { t: "grantGold"; playerId: string; amount: number; source: "grave" }
   /** Clock sync probe; `sent` is the sender's local monotonic time. */
   | { t: "ping"; sent: number }
   | ({ t: "msg" } & Envelope);
@@ -152,6 +168,10 @@ export type ServerMsg =
   /** Server → host: a joiner needs the current world state. The host answers
    * on an "a:" channel with `to` = that player. */
   | { t: "syncRequest"; playerId: string }
+  /** To the host: what `id` dropped, as orbs to spawn at `at`. */
+  | { t: "lootRolled"; id: string; at: [number, number, number]; orbs: IssuedOrb[] }
+  /** To a dropper: its dropped copy, now orb `orb` — ask the host to spawn it. */
+  | { t: "released"; orb: IssuedOrb }
   /** Relayed gameplay envelope. `serverTime` is stamped at relay time, which
    * gives every receiver one consistent timeline for interpolation. */
   | { t: "msg"; ch: string; from: string; epoch: number; serverTime: number; data: unknown };

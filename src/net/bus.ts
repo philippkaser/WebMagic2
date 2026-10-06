@@ -1,4 +1,5 @@
 import { Emitter } from "../core/events";
+import type { IssuedOrb } from "../items/lootBook";
 import type { FloorAssignment, MemberInfo, ServerSave } from "./protocol";
 
 /** Internal networking event hub. The session publishes connection/relay
@@ -23,6 +24,10 @@ export interface NetBusEvents extends Record<string, unknown> {
   serverSave: ServerSave;
   /** The connection dropped and was re-established with a fresh identity. */
   reconnected: undefined;
+  /** To the host: what a death or break dropped, as orbs to spawn at `at`. */
+  lootRolled: { id: string; at: [number, number, number]; orbs: IssuedOrb[] };
+  /** To a dropper: the dropped copy, now an orb for the host to spawn. */
+  released: IssuedOrb;
 }
 
 export const netBus = new Emitter<NetBusEvents>();

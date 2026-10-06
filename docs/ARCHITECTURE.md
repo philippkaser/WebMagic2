@@ -187,8 +187,8 @@ router — without touching the other.
 **Rarities ride inside item ids.** An enchanted item is `"defId+affixId"` —
 one opaque string. Because every server-side rule (grants, provenance
 multisets, banking, selling) already operates on opaque id strings, the whole
-rarity system needed no protocol or server changes: the host attests the
-exact rolled id, and it banks/sells/trades like any other item.
+rarity system needed no protocol or server changes: the loot book issues
+the exact rolled id, and it banks/sells/trades like any other item.
 
 
 The server owns four things a client must never be trusted with — while
@@ -208,23 +208,27 @@ always known the starter-gear ids):
    file today (`DATA_FILE`), flushed on shutdown; swapping in a database
    replaces one `persist` callback.
 3. **Item & gold provenance** — the core rule: *an item may be banked ⇔
-   previously banked ∪ starter gear ∪ granted this run by the floor HOST's
-   attestation* (`grant` messages, mirroring loot authority). Grants are a
+   previously banked ∪ starter gear ∪ granted this run*. Grants are a
    **multiset** — two granted potions are two bankable potions; starter gear
    counts as owned once (never once more per bank) and Maro won't buy it.
-   A wizard alone on a floor *is* its host, so an attestation alone proves
-   little; the server also checks where a grant came from:
-   - **found** (no `source`: an orb, the floor treasure) — must be something
-     that floor could drop: a real catalog id, no deeper than floor + 3
-     (`items/loot.ts#couldDropOn`). Found gold is capped per pickup to the
-     richest orb the floor can drop (`items/economy.ts#maxGoldDrop`), under
-     the absolute `GOLD_RULES` caps.
-   - **given up** (`source: "grave" | "drop"`) — honored only against the
-     instance's pool of what wizards gave up there: the run grants of those
-     who died on it, and every copy **dropped** on it. A drop is announced by
-     the dropper first (`drop` → the server takes that copy off its account:
-     a run find from its grants, a copy from home from its save), so a gift
-     moves between accounts, and a forged drop or grave mints nothing.
+   Grants never come from a client's say-so — not even the host's, and a
+   wizard alone on a floor IS its host. They come from the **loot book**
+   (`items/lootBook.ts`), one per floor instance, built by the ledger from
+   the instance's seed: the floor host reports what died or broke (`loot`
+   with the entity id), the book checks it is a source that floor really
+   holds and hasn't rolled yet (slime splits within the split budget), rolls
+   its drops with the shared tables (`items/dropTables.ts`) and its own
+   dice, and answers the host with orbs (`lootRolled`). A pickup is the host
+   saying WHO took an orb (`claim`); the book grants what it put in that orb,
+   once. The floor treasure is a book orb from the start. A **drop** (`drop`)
+   takes the copy off the dropper's account (a run find from its grants, a
+   copy from home from its save) and comes back as a dropped orb
+   (`released`) for the host to spawn — gifts move between accounts, never
+   multiply. Grave plunder (`grant`/`grantGold` with `source: "grave"`) is
+   honored only against what the wizards who died there were granted. The
+   offline loopback keeps the same book, so single-player loot is the same
+   code. (`DEV_LOOT=1` lets a host ask for a specific orb — the e2e test's
+   knob; never on a real server.)
 
    Banking (`bank` → `saved`) strips anything else; death (`died`) or
    quitting forfeits the run's grants. Three village/dungeon variants share
@@ -257,20 +261,18 @@ always known the starter-gear ids):
    Re-entering your own floor (a reconnect) is never held.
 
 Known limits, in honesty order: the floor host is still a client — and a
-wizard alone on a floor is its own host — so a hacked client can still
-attest finds for itself. The checks above *bound* that, they don't close
-it: only what its floor could drop, gold up to the floor's richest orb per
-pickup, within the per-run caps (200 items, `GOLD_RULES.perRunCap`), no
-deeper than the deep's pace lets it go. The fix is the server rolling the
-loot itself (the host reports a kill, the server rolls the drop from the
-shared tables and issues the orb; one grant per server-issued orb), with
-headless server-side hosts (the path above) as the step after. Positions,
+wizard alone on a floor is its own host — so a hacked host can report
+every source on its floor dead at once and claim every orb for itself. That
+gets it exactly the luck of that floor, rolled by the server, no faster
+than the deep's pace lets it go: farming without fighting, not minting.
+Headless server-side hosts close it for shared floors (the path above —
+the headless physics world in `src/sim/` is its first piece). Positions,
 your own health and death, and spell casts are client-reported, so PvP and
-movement trust the client (closed by the same headless hosts); item *stats*
-are client-computed (likewise); grave contents are declared by the dying
-wizard (bounded by the pool, so they can't mint); device tokens are bearer
-secrets in localStorage (fine for a foundation, replaced by real auth).
-Rate limiting and hit/pickup sanitization already run
+movement trust the client (closed by the same headless hosts); item
+*stats* are client-computed (likewise); grave contents are declared by the
+dying wizard (bounded by the pool, so they can't mint); device tokens are
+bearer secrets in localStorage (fine for a foundation, replaced by real
+auth). Rate limiting and hit/pickup sanitization already run
 server-/authority-side.
 
 ### Physics budget (measured)
@@ -364,8 +366,8 @@ What follows from it:
   client asks the host (`h:graveDrop`) to raise a grave with its losses; the
   host validates (known ids, stack caps, near the wizard) and announces it
   (`a:graveSpawned`). Plunder is `h:lootGrave` → `a:graveLooted` with
-  index-stable picks, and the host attests each copy exactly like an orb
-  pickup. Graves ride the world sync (`registerSyncProvider("graves")`) and
+  index-stable picks, and the host attests each copy (`grant` with
+  `source: "grave"`), honored against what the dead were granted. Graves ride the world sync (`registerSyncProvider("graves")`) and
   survive host migration (every client holds the list).
 - **Presence** (`PresenceSystem.tsx`): arrivals are announced without names;
   a hostile wizard within 24 m makes your heartbeat audible; name tags only

@@ -87,13 +87,18 @@ const pace = Number.isFinite(paceOverride)
     ? { ...PACE, msPerFloor: paceOverride }
     : null
   : PACE;
+// DEV_LOOT=1 lets a floor host ask the loot book for a SPECIFIC orb — the
+// e2e smoke test and the dev room use it. A cheat by definition: never set
+// it on a real server.
+const devLoot = process.env.DEV_LOOT === "1";
 const relay = new Relay(
   new FloorDirectory(MAX_PLAYERS_PER_FLOOR, undefined, undefined, undefined, encounterTuning),
   accounts,
   () => Date.now(),
   log,
-  { pace },
+  { pace, devLoot },
 );
+if (devLoot) log("DEV_LOOT is on — hosts may spawn any item. Testing only!");
 if (encounterTuning !== ENCOUNTERS) log(`encounter chance forced to ${encounterOverride}`);
 if (pace !== PACE) log(pace ? `floor pace forced to ${pace.msPerFloor} ms` : "floor pace lifted");
 const sockets = new Map<string, ServerWebSocket<SocketData>>();

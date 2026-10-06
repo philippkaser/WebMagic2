@@ -1,7 +1,9 @@
 import { DUNGEON } from "../src/core/config";
 import { Rng } from "../src/core/rng";
+import { resolveItem } from "../src/items/catalog";
 import { GOLD_RULES } from "../src/items/economy";
 import { rollGamble } from "../src/items/loot";
+import { DROPPED_ORB_PREFIX, LootBook, type IssuedOrb } from "../src/items/lootBook";
 import type { ClientMsg, ServerMsg } from "../src/net/protocol";
 import {
   canLeave,
@@ -12,6 +14,7 @@ import {
   type PaceRules,
   type PaceState,
 } from "../src/run/rules";
+import { generateFloor } from "../src/world/gen";
 import type { AccountRecord, AccountStore } from "./accounts";
 
 /** The ledger — everything the server must never take a client's word for:
@@ -25,10 +28,13 @@ import type { AccountRecord, AccountStore } from "./accounts";
  *  - runs: fresh runs start where the banked gear resonates (the Weighing),
  *    continuing runs only go one floor deeper, no faster than the deep's
  *    pace (run/rules.ts PACE) — the router seats wherever the ledger says
- *  - saves: host-attested grants (found loot must be something the floor
- *    could drop; what a wizard gave up — a grave, a drop — only up to what
- *    was given up), provenance-checked banking once the Tithe of Five is
- *    paid, the merchant, the Orb of Fortune, run loss
+ *  - loot: one book per floor instance (src/items/lootBook.ts), built from
+ *    the instance's seed. The host reports what died or broke; the ledger
+ *    rolls what it dropped and issues the orbs; a pickup claims an orb and
+ *    is granted once. Dropped copies and the floor treasure are orbs too.
+ *  - saves: provenance-checked banking once the Tithe of Five is paid,
+ *    grave plunder up to what the dead were granted, the merchant, the Orb
+ *    of Fortune, run loss
  *
  * It reaches the router only through `LedgerWorld`, so either side can be
  * replaced (a database behind the AccountStore, a server-side floor host
@@ -39,6 +45,8 @@ import type { AccountRecord, AccountStore } from "./accounts";
 export interface SeatedFloor {
   id: string;
   floor: number;
+  /** The instance's floor seed (its layout, and so its loot book). */
+  seed: number;
   players: ReadonlySet<string>;
 }
 
@@ -71,6 +79,11 @@ export interface LedgerOptions {
   /** Runs `fn` after `ms` — how a floor request that came too soon is held
    * back. Default: setTimeout. */
   schedule?: (fn: () => void, ms: number) => void;
+  /** Honor `dev` loot reports (a specific item or gold) — for the e2e smoke
+   * test and local dev only; never in production. Default false. */
+  devLoot?: boolean;
+  /** The ledger's dice (loot books, the Orb of Fortune). Default Math.random. */
+  random?: () => number;
 }
 
 /** Messages that change an account's course: any of them drops a floor
@@ -97,10 +110,12 @@ export class Ledger {
    * dropped connection resumes in the same world (not a fresh roll). Only
    * held while the account has a run open. */
   private lastInstance = new Map<string, string>();
-  /** instance id → what wizards gave up there: the run grants of those who
-   * died on it (their graves) and every copy dropped on it. The upper bound
-   * on anything granted with source "grave" or "drop". */
-  private floorPools = new Map<string, { items: Map<string, number>; gold: number }>();
+  /** instance id → what the wizards who died there (with others watching)
+   * were granted this run: the upper bound on anything plundered from their
+   * graves. */
+  private gravePools = new Map<string, { items: Map<string, number>; gold: number }>();
+  /** instance id → its loot book (made on first use, from the seed). */
+  private books = new Map<string, LootBook>();
   /** account token → its pace tokens (run/rules.ts). */
   private paces = new Map<string, PaceState>();
   /** peerId → the ticket of its floor request being held for the pace. */
@@ -108,6 +123,8 @@ export class Ledger {
   private nextTicket = 1;
   private pace: PaceRules | null;
   private schedule: (fn: () => void, ms: number) => void;
+  private devLoot: boolean;
+  private random: () => number;
 
   constructor(
     private accounts: AccountStore,
@@ -118,6 +135,8 @@ export class Ledger {
   ) {
     this.pace = options.pace === undefined ? PACE : options.pace;
     this.schedule = options.schedule ?? ((fn, ms) => void setTimeout(fn, ms));
+    this.devLoot = options.devLoot === true;
+    this.random = options.random ?? Math.random;
   }
 
   /** A connection closed. Its run stays on the account, so a reconnect
@@ -129,7 +148,8 @@ export class Ledger {
 
   /** Drop bookkeeping for instances that no longer exist. */
   prune(exists: (instanceId: string) => boolean): void {
-    for (const id of this.floorPools.keys()) if (!exists(id)) this.floorPools.delete(id);
+    for (const id of this.gravePools.keys()) if (!exists(id)) this.gravePools.delete(id);
+    for (const id of this.books.keys()) if (!exists(id)) this.books.delete(id);
   }
 
   handle(peerId: string, msg: ClientMsg): void {
@@ -220,7 +240,7 @@ export class Ledger {
         // save so the client's pending state resolves either way.
         const account = this.accountOf(peerId);
         if (this.world.instanceOf(peerId)) return; // village only
-        const rolled = rollGamble(new Rng((Math.random() * 0xffffffff) >>> 0), account.deepest);
+        const rolled = rollGamble(new Rng((this.random() * 0xffffffff) >>> 0), account.deepest);
         const save = this.accounts.gamble(account, rolled);
         send({ t: "saved", save: save ?? this.accounts.saveOf(account) });
         if (save) this.log(`${peerId} gambled and drew ${rolled}`);
@@ -232,7 +252,7 @@ export class Ledger {
         // Died where others stood witness: what this run was granted may
         // lie in a grave now, so it becomes plunderable — and nothing else.
         if (inst && inst.players.size > 1) {
-          const pool = this.poolOf(inst.id);
+          const pool = this.gravePoolOf(inst.id);
           for (const id of account.runGrants) pool.items.set(id, (pool.items.get(id) ?? 0) + 1);
           pool.gold += account.runGold;
         }
@@ -240,65 +260,88 @@ export class Ledger {
         this.lastInstance.delete(account.token);
         break;
       }
+      case "loot": {
+        // Only the floor's host reports deaths and breaks; the book decides
+        // whether that was a real source of this floor, and rolls its drops.
+        if (this.world.hostOf(peerId) !== peerId) return;
+        const inst = this.world.instanceOf(peerId);
+        if (!inst || typeof msg.id !== "string") return;
+        const book = this.bookOf(inst);
+        const source = msg.source; // untrusted: the book only believes a split's generation
+        let orbs: IssuedOrb[] | null;
+        if (source?.kind === "dev") {
+          const dev = this.devDrop(source);
+          if (!dev) return;
+          orbs = [book.issue(dev.itemId, dev.gold)];
+        } else {
+          orbs = book.roll(msg.id, source);
+          if (!orbs) {
+            this.log(`refused loot for ${msg.id.slice(0, 40)} in ${inst.id} (not this floor's, or already rolled)`);
+            return;
+          }
+        }
+        if (orbs.length > 0) send({ t: "lootRolled", id: msg.id, at: finiteVec3(msg.at), orbs });
+        break;
+      }
       case "drop": {
-        // An inventory drop: the copy comes off the dropper's account before
-        // anyone can be granted it, and goes into the floor's pool — so a
-        // forged drop mints nothing, and a dropper can't keep what someone
-        // else has picked up.
+        // An inventory drop: the copy comes off the dropper's account and
+        // becomes an orb in the floor's book — so a forged drop mints
+        // nothing, and a dropper can't keep what someone else picked up.
         const inst = this.world.instanceOf(peerId);
         if (!inst || typeof msg.itemId !== "string") return;
         if (!this.accounts.release(this.accountOf(peerId), msg.itemId, msg.runLoot === true)) {
-          this.log(`${peerId} dropped ${msg.itemId} it doesn't own — nothing given up`);
+          this.log(`${peerId} dropped ${msg.itemId.slice(0, 64)} it doesn't own — nothing given up`);
           return;
         }
-        const pool = this.poolOf(inst.id);
-        pool.items.set(msg.itemId, (pool.items.get(msg.itemId) ?? 0) + 1);
+        send({ t: "released", orb: this.bookOf(inst).issue(msg.itemId, 0, DROPPED_ORB_PREFIX) });
+        break;
+      }
+      case "claim": {
+        // Only the instance host may attest pickups, and only for members of
+        // its own instance — loot provenance mirrors loot authority. What is
+        // granted is what the book put in the orb, once.
+        if (this.world.hostOf(peerId) !== peerId) return;
+        if (typeof msg.playerId !== "string" || typeof msg.orbId !== "string") return;
+        const inst = this.world.instanceOf(peerId);
+        if (!inst || !inst.players.has(msg.playerId) || !this.world.isConnected(msg.playerId)) return;
+        const drop = this.bookOf(inst).claim(msg.orbId);
+        if (!drop) {
+          this.log(`refused claim of orb ${msg.orbId.slice(0, 40)} in ${inst.id} (unknown, or taken)`);
+          return;
+        }
+        const target = this.accountOf(msg.playerId);
+        if (drop.itemId) this.accounts.grant(target, drop.itemId);
+        if (drop.gold > 0) this.accounts.grantGold(target, drop.gold, GOLD_RULES.perRunCap);
         break;
       }
       case "grant": {
-        // Only the instance host may attest pickups, and only for members of
-        // its own instance — loot provenance mirrors loot authority.
+        // Grave plunder, host-attested: honored only against what the dead
+        // were granted in this instance (anything found is claimed by orb).
         if (this.world.hostOf(peerId) !== peerId) return;
-        if (typeof msg.playerId !== "string" || typeof msg.itemId !== "string") return;
+        if (msg.source !== "grave" || typeof msg.playerId !== "string" || typeof msg.itemId !== "string") return;
         const inst = this.world.instanceOf(peerId);
-        if (!inst || !inst.players.has(msg.playerId)) return;
-        if (!this.world.isConnected(msg.playerId)) return;
-        const target = this.accountOf(msg.playerId);
-        if (msg.source === "grave" || msg.source === "drop") {
-          // Something another wizard gave up here — never more than that.
-          const pool = this.floorPools.get(inst.id);
-          const left = pool?.items.get(msg.itemId) ?? 0;
-          if (!pool || left < 1) {
-            this.log(`refused ${msg.source} grant of ${msg.itemId} in ${inst.id} (nobody gave one up)`);
-            return;
-          }
-          pool.items.set(msg.itemId, left - 1);
-          this.accounts.grant(target, msg.itemId);
-        } else if (!this.accounts.grantFound(target, msg.itemId, inst.floor)) {
-          // A lone wizard is its own host: what it says it found must be
-          // something this floor could have dropped.
-          this.log(`refused grant of ${msg.itemId} on floor ${inst.floor} (not this floor's loot)`);
+        if (!inst || !inst.players.has(msg.playerId) || !this.world.isConnected(msg.playerId)) return;
+        const pool = this.gravePools.get(inst.id);
+        const left = pool?.items.get(msg.itemId) ?? 0;
+        if (!pool || left < 1) {
+          this.log(`refused grave grant of ${msg.itemId.slice(0, 64)} in ${inst.id} (not in any grave)`);
+          return;
         }
+        pool.items.set(msg.itemId, left - 1);
+        this.accounts.grant(this.accountOf(msg.playerId), msg.itemId);
         break;
       }
       case "grantGold": {
-        // Gold provenance mirrors item grants: host-only, own instance only.
+        // Grave gold, up to what the dead carried — the pool bounds it.
         if (this.world.hostOf(peerId) !== peerId) return;
-        if (typeof msg.playerId !== "string" || typeof msg.amount !== "number") return;
+        if (msg.source !== "grave" || typeof msg.playerId !== "string" || typeof msg.amount !== "number") return;
         const inst = this.world.instanceOf(peerId);
-        if (!inst || !inst.players.has(msg.playerId)) return;
-        if (!this.world.isConnected(msg.playerId)) return;
-        const target = this.accountOf(msg.playerId);
-        if (msg.source === "grave") {
-          const pool = this.floorPools.get(inst.id);
-          const amount = Math.floor(Math.min(msg.amount, pool?.gold ?? 0));
-          if (!pool || !(amount > 0)) return;
-          pool.gold -= amount;
-          // The pool already bounds it — no per-pickup cap on top.
-          this.accounts.grantGold(target, amount, GOLD_RULES.perRunCap);
-        } else {
-          this.accounts.grantFoundGold(target, msg.amount, inst.floor);
-        }
+        if (!inst || !inst.players.has(msg.playerId) || !this.world.isConnected(msg.playerId)) return;
+        const pool = this.gravePools.get(inst.id);
+        const amount = Math.floor(Math.min(msg.amount, pool?.gold ?? 0));
+        if (!pool || !(amount > 0)) return;
+        pool.gold -= amount;
+        this.accounts.grantGold(this.accountOf(msg.playerId), amount, GOLD_RULES.perRunCap);
         break;
       }
     }
@@ -372,12 +415,50 @@ export class Ledger {
     this.lastInstance.set(account.token, inst.id);
   }
 
-  private poolOf(instanceId: string): { items: Map<string, number>; gold: number } {
-    let pool = this.floorPools.get(instanceId);
+  // ── Loot ───────────────────────────────────────────────────────────────────
+
+  /** The instance's loot book, built from its seed on first use. */
+  private bookOf(inst: SeatedFloor): LootBook {
+    let book = this.books.get(inst.id);
+    if (!book) {
+      book = new LootBook(generateFloor(inst.seed, inst.floor), new Rng((this.random() * 0xffffffff) >>> 0));
+      this.books.set(inst.id, book);
+    }
+    return book;
+  }
+
+  /** A dev drop, when this ledger honors them: a real item, or some gold. */
+  private devDrop(raw: unknown): { itemId: string | null; gold: number } | null {
+    if (!this.devLoot) {
+      this.log("refused a dev loot report (devLoot is off)");
+      return null;
+    }
+    const d = raw as { itemId?: unknown; gold?: unknown };
+    if (typeof d.itemId === "string") {
+      try {
+        resolveItem(d.itemId);
+      } catch {
+        return null;
+      }
+      return { itemId: d.itemId, gold: 0 };
+    }
+    const gold = Math.floor(Number(d.gold));
+    return Number.isFinite(gold) && gold > 0 ? { itemId: null, gold: Math.min(gold, GOLD_RULES.perGrantCap) } : null;
+  }
+
+  private gravePoolOf(instanceId: string): { items: Map<string, number>; gold: number } {
+    let pool = this.gravePools.get(instanceId);
     if (!pool) {
       pool = { items: new Map(), gold: 0 };
-      this.floorPools.set(instanceId, pool);
+      this.gravePools.set(instanceId, pool);
     }
     return pool;
   }
+}
+
+/** An untrusted position, made finite (it only places the host's own orbs). */
+function finiteVec3(v: unknown): [number, number, number] {
+  const a = Array.isArray(v) ? v : [];
+  const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : 0);
+  return [n(a[0]), n(a[1]), n(a[2])];
 }

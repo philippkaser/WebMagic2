@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { FloorDirectory } from "../src/net/matchmaking";
-import { maxGoldDrop } from "../src/items/economy";
+import { treasureItem } from "../src/items/dropTables";
+import { generateFloor } from "../src/world/gen";
 import { entryFloorFor } from "../src/run/rules";
 import type { ServerMsg } from "../src/net/protocol";
 import { AccountStore, defaultWireInventory } from "./accounts";
@@ -45,6 +46,8 @@ beforeEach(() => {
   // descend 10 ms a floor — and has its own tests below.
   relay = new Relay(new FloorDirectory(4, () => 1234, () => now, () => 0), store, () => now, undefined, {
     pace: null,
+    devLoot: true, // giveOrb below; the real loot path has its own tests
+    random: () => 0.5,
   });
   a = makePeer("A");
   b = makePeer("B");
@@ -72,6 +75,15 @@ function join(peer: TestPeer, floor: number) {
   acc.runFloor = floor;
   acc.runFloors = Math.max(acc.runFloors, 1);
   relay.handle(peer.id, { t: "enterFloor", floor });
+}
+
+/** `host` has the floor's book issue a specific orb (this test relay honors
+ * dev loot) and claims it for `taker` — the pickup path, end to end. */
+function giveOrb(host: TestPeer, taker: TestPeer, itemId: string | null, gold = 0): void {
+  const seen = host.inbox.length;
+  relay.handle(host.id, { t: "loot", id: "dev", source: { kind: "dev", itemId, gold }, at: [0, 0, 0] });
+  const reply = host.inbox.slice(seen).find((m) => m.t === "lootRolled");
+  if (reply?.t === "lootRolled") relay.handle(host.id, { t: "claim", playerId: taker.id, orbId: reply.orbs[0].orbId });
 }
 
 /** Send a raw floor request, exactly as a client would. */
@@ -257,7 +269,7 @@ describe("run rules: the Weighing, continuing runs, reconnects", () => {
   test("a leap is not a descent: it forfeits the run and starts over at the Weighing", () => {
     enter(a, 1, true);
     enter(a, 2);
-    relay.handle(a.id, { t: "grant", playerId: a.id, itemId: "ember_staff" }); // a is host
+    giveOrb(a, a, "ember_staff"); // a is host
     expect(accountOf(a).runGrants).toEqual(["ember_staff"]);
     enter(a, 9);
     expect(lastOf(a, "floorAssigned")!.assignment.floor).toBe(1);
@@ -286,21 +298,26 @@ describe("run rules: the Weighing, continuing runs, reconnects", () => {
 });
 
 describe("accounts: grants and banking", () => {
-  test("only the instance host's attestation records a grant", () => {
+  test("only the instance host reports loot and claims orbs — each orb once", () => {
     const tokenB = lastOf(b, "loggedIn")!.token;
     join(a, 5); // host
     join(b, 5);
-    relay.handle(b.id, { t: "grant", playerId: b.id, itemId: "ember_staff" }); // self-vouch
+    relay.handle(b.id, { t: "loot", id: "e0", source: { kind: "enemy", enemy: "wisp", gen: 0 }, at: [0, 0, 0] });
+    expect(b.inbox.some((m) => m.t === "lootRolled")).toBe(false); // not b's to report
+    relay.handle(a.id, { t: "loot", id: "dev", source: { kind: "dev", itemId: "ember_staff", gold: 0 }, at: [0, 0, 0] });
+    const orb = lastOf(a, "lootRolled")!.orbs[0];
+    relay.handle(b.id, { t: "claim", playerId: b.id, orbId: orb.orbId }); // self-vouch
     expect(store.get(tokenB)!.runGrants).toEqual([]);
-    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "ember_staff" }); // host
+    relay.handle(a.id, { t: "claim", playerId: b.id, orbId: orb.orbId }); // host
+    relay.handle(a.id, { t: "claim", playerId: b.id, orbId: orb.orbId }); // …once
     expect(store.get(tokenB)!.runGrants).toEqual(["ember_staff"]);
   });
 
-  test("grants only apply to members of the host's instance", () => {
+  test("claims only apply to members of the host's instance", () => {
     const tokenC = lastOf(c, "loggedIn")!.token;
     join(a, 5);
     join(c, 9); // elsewhere
-    relay.handle(a.id, { t: "grant", playerId: c.id, itemId: "ember_staff" });
+    giveOrb(a, c, "ember_staff");
     expect(store.get(tokenC)!.runGrants).toEqual([]);
   });
 
@@ -312,7 +329,7 @@ describe("accounts: grants and banking", () => {
     expect(lastOf(b, "floorAssigned")!.assignment.instanceId).toBe(
       lastOf(a, "floorAssigned")!.assignment.instanceId,
     );
-    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "ember_staff" });
+    giveOrb(a, b, "ember_staff");
 
     relay.handle(b.id, {
       t: "bank",
@@ -332,7 +349,7 @@ describe("accounts: grants and banking", () => {
   test("the way home stays shut until five floors are played (answers with the unchanged save)", () => {
     enter(a, 1, true);
     for (let f = 2; f <= 4; f++) enter(a, f);
-    relay.handle(a.id, { t: "grant", playerId: a.id, itemId: "ember_staff" });
+    giveOrb(a, a, "ember_staff");
     relay.handle(a.id, {
       t: "bank",
       inventory: { ...defaultWireInventory(), equipment: { ...defaultWireInventory().equipment, staff: "ember_staff" } },
@@ -348,13 +365,13 @@ describe("accounts: grants and banking", () => {
     expect(lastOf(a, "saved")!.save.inventory.equipment.staff).toBe("ember_staff");
   });
 
-  test("gold grants are host-only, and stash/buy are refused mid-run", () => {
+  test("gold is an orb like any other, and stash/buy are refused mid-run", () => {
     const tokenB = lastOf(b, "loggedIn")!.token;
     join(a, 5); // a is host
     join(b, 5);
-    relay.handle(b.id, { t: "grantGold", playerId: b.id, amount: 12 }); // self-vouch
+    giveOrb(b, b, null, 12); // b isn't the host: no orb, no gold
     expect(store.get(tokenB)!.runGold).toBe(0);
-    relay.handle(a.id, { t: "grantGold", playerId: b.id, amount: 12 }); // host
+    giveOrb(a, b, null, 12);
     expect(store.get(tokenB)!.runGold).toBe(12);
     // Mid-run, village-only messages are dropped.
     b.inbox.length = 0;
@@ -374,7 +391,7 @@ describe("accounts: grants and banking", () => {
     const tokenB = lastOf(b, "loggedIn")!.token;
     join(a, 5);
     join(b, 5);
-    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "ember_staff" });
+    giveOrb(a, b, "ember_staff");
     relay.handle(b.id, { t: "died" });
     expect(store.get(tokenB)!.runGrants).toEqual([]);
     expect(store.get(tokenB)!.runFloor).toBe(0);
@@ -392,10 +409,8 @@ describe("graves: plunder is bounded by what the dead were granted", () => {
     expect(store.get(tokenC)!.runGrants).toEqual([]);
 
     // b legitimately picks up an amulet, then dies with others watching.
-    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "amulet_vigor@4" });
-    relay.handle(a.id, { t: "grantGold", playerId: b.id, amount: 10 });
-    relay.handle(a.id, { t: "grantGold", playerId: b.id, amount: 10 });
-    relay.handle(a.id, { t: "grantGold", playerId: b.id, amount: 10 });
+    giveOrb(a, b, "amulet_vigor@4");
+    giveOrb(a, b, null, 30);
     relay.handle(b.id, { t: "died" });
 
     // c plunders the grave: the amulet once, the gold up to what b carried.
@@ -410,7 +425,7 @@ describe("graves: plunder is bounded by what the dead were granted", () => {
   test("dying alone leaves nothing plunderable", () => {
     const tokenB = lastOf(b, "loggedIn")!.token;
     join(a, 6);
-    relay.handle(a.id, { t: "grant", playerId: a.id, itemId: "amulet_vigor" });
+    giveOrb(a, a, "amulet_vigor");
     relay.handle(a.id, { t: "died" }); // alone on the floor
     join(a, 6);
     join(b, 6);
@@ -426,15 +441,49 @@ describe("graves: plunder is bounded by what the dead were granted", () => {
   });
 });
 
-describe("a lone wizard is its own host — the floor still bounds what it finds", () => {
-  test("a self-attested find must be this floor's loot, its gold a floor's purse", () => {
-    enter(a, 1, true); // alone: A is the host of its own floor 1
-    relay.handle(a.id, { t: "grant", playerId: a.id, itemId: "void_staff+keen@120" });
-    relay.handle(a.id, { t: "grant", playerId: a.id, itemId: "totally_made_up_item" });
-    relay.handle(a.id, { t: "grant", playerId: a.id, itemId: "ember_staff@2" });
-    expect(accountOf(a).runGrants).toEqual(["ember_staff@2"]);
-    relay.handle(a.id, { t: "grantGold", playerId: a.id, amount: 500 });
-    expect(accountOf(a).runGold).toBe(maxGoldDrop(1));
+describe("loot: the floor's book decides what falls, not the host", () => {
+  const SEED = 4242;
+  let real: Relay;
+  let p: TestPeer;
+
+  beforeEach(() => {
+    // A relay as production runs it: no dev loot.
+    real = new Relay(new FloorDirectory(4, () => SEED, () => now, () => 0), store, () => now, undefined, {
+      pace: null,
+      random: () => 0.37,
+    });
+    p = makePeer("P");
+    real.connect(p);
+    real.handle(p.id, { t: "login", name: "P" });
+    real.handle(p.id, { t: "enterFloor", floor: 1, fresh: true }); // alone: P is its own host
+  });
+  const account = () => store.get(lastOf(p, "loggedIn")!.token)!;
+  const rolls = () => p.inbox.filter((m) => m.t === "lootRolled") as Extract<ServerMsg, { t: "lootRolled" }>[];
+
+  test("a lone host gets each real source's roll once, and nothing it invents", () => {
+    const layout = generateFloor(SEED, 1);
+    const wisp = { kind: "enemy", enemy: "wisp", gen: 0 } as const;
+    const ids = [...layout.enemies.map((_, i) => `e${i}`), ...layout.props.map((_, i) => `p${i}`)];
+    for (const id of ids) real.handle(p.id, { t: "loot", id, source: wisp, at: [0, 0, 0] });
+    const first = rolls().length;
+    expect(first).toBeGreaterThan(0);
+    // Again, an invented source, a boss on a floor without one, a dev drop.
+    for (const id of [...ids, "totally_made_up", "boss"]) real.handle(p.id, { t: "loot", id, source: wisp, at: [0, 0, 0] });
+    real.handle(p.id, { t: "loot", id: "dev", source: { kind: "dev", itemId: "void_staff+keen@120", gold: 0 }, at: [0, 0, 0] });
+    expect(rolls().length).toBe(first);
+
+    // Claiming every orb grants exactly what the book rolled — once.
+    const orbs = rolls().flatMap((r) => r.orbs);
+    for (const o of [...orbs, ...orbs]) real.handle(p.id, { t: "claim", playerId: p.id, orbId: o.orbId });
+    expect([...account().runGrants].sort()).toEqual(orbs.flatMap((o) => (o.itemId ? [o.itemId] : [])).sort());
+    expect(account().runGold).toBe(orbs.reduce((g, o) => g + o.gold, 0));
+  });
+
+  test("the floor treasure is the seed's roll, claimed once; a forged orb id grants nothing", () => {
+    real.handle(p.id, { t: "claim", playerId: p.id, orbId: "treasure" });
+    real.handle(p.id, { t: "claim", playerId: p.id, orbId: "treasure" });
+    real.handle(p.id, { t: "claim", playerId: p.id, orbId: "o9999" });
+    expect(account().runGrants).toEqual([treasureItem(SEED, 1)]);
   });
 });
 
@@ -444,29 +493,32 @@ describe("drops: what one wizard lets fall, another may take — nothing more", 
     join(b, 5);
     join(c, 5);
   });
+  const released = (peer: TestPeer) => lastOf(peer, "released")?.orb;
 
   test("a gift moves from the dropper to the taker, whatever its depth", () => {
     // B brought a deep amulet from home — deeper than floor 5's own loot.
     accountOf(b).inventory.bag[0] = { id: "amulet_vigor@30", qty: 1 };
     relay.handle(b.id, { t: "drop", itemId: "amulet_vigor@30", runLoot: false });
     expect(accountOf(b).inventory.bag[0]).toBeNull(); // given up
-    relay.handle(a.id, { t: "grant", playerId: c.id, itemId: "amulet_vigor@30", source: "drop" });
-    relay.handle(a.id, { t: "grant", playerId: c.id, itemId: "amulet_vigor@30", source: "drop" });
+    const orb = released(b)!;
+    expect(orb.orbId.startsWith("d")).toBe(true);
+    relay.handle(a.id, { t: "claim", playerId: c.id, orbId: orb.orbId });
+    relay.handle(a.id, { t: "claim", playerId: c.id, orbId: orb.orbId });
     expect(accountOf(c).runGrants).toEqual(["amulet_vigor@30"]); // once
   });
 
   test("a run find dropped comes out of the dropper's grants", () => {
-    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "ember_staff@5" });
+    giveOrb(a, b, "ember_staff@5");
     relay.handle(b.id, { t: "drop", itemId: "ember_staff@5", runLoot: true });
     expect(accountOf(b).runGrants).toEqual([]);
-    relay.handle(a.id, { t: "grant", playerId: c.id, itemId: "ember_staff@5", source: "drop" });
+    relay.handle(a.id, { t: "claim", playerId: c.id, orbId: released(b)!.orbId });
     expect(accountOf(c).runGrants).toEqual(["ember_staff@5"]);
   });
 
-  test("a drop of something never owned mints nothing — as a drop or as a find", () => {
+  test("a drop of something never owned releases nothing", () => {
     relay.handle(b.id, { t: "drop", itemId: "amulet_vigor@30", runLoot: false });
-    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "amulet_vigor@30", source: "drop" });
-    relay.handle(a.id, { t: "grant", playerId: b.id, itemId: "amulet_vigor@30" });
+    expect(released(b)).toBeUndefined();
+    relay.handle(a.id, { t: "claim", playerId: b.id, orbId: "d1" });
     expect(accountOf(b).runGrants).toEqual([]);
   });
 });

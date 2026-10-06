@@ -3,7 +3,7 @@ import { CuboidCollider, RigidBody, type RapierRigidBody } from "@react-three/ra
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, MeshStandardMaterial, Vector3 } from "three";
 import { playHit, playPortal, playSealBreak, playSealedTouch } from "../audio/sound";
-import { Rng, hashSeed } from "../core/rng";
+import { hashSeed } from "../core/rng";
 import { explode, sanitizeHit, type HitData } from "../weapons/damage";
 import {
   addLightSource,
@@ -19,10 +19,10 @@ import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { allocId, registerDynamicBody, registerHittable } from "../game/registry";
 import { wizardDistSqTo } from "../game/targets";
-import { GOLD_DROPS } from "../items/economy";
-import { rollDrop } from "../items/loot";
 import { resolveItem } from "../items/catalog";
-import { dropGold, dropLoot } from "../items/LootOrbs";
+import { treasureItem } from "../items/dropTables";
+import { reportLoot } from "../items/LootOrbs";
+import { TREASURE_ORB } from "../items/lootBook";
 import { hostCommand, hostEvent } from "../net/channels";
 import { registerSyncProvider } from "../net/entities";
 import { isHost, useNet } from "../net/netStore";
@@ -42,14 +42,13 @@ import type { PropKind, Vec3 } from "./types";
 interface PropSpec {
   hp: number;
   shards: string[];
-  lootChance: number;
   explodes: boolean;
 }
 
 const SPECS: Record<PropKind, PropSpec> = {
-  crate: { hp: 26, shards: ["#a8743c", "#6b4a24", "#8a5c2e"], lootChance: 0.08, explodes: false },
-  barrel: { hp: 42, shards: ["#8a5c2e", "#5a3a1c", "#6e6e74"], lootChance: 0.08, explodes: true },
-  pot: { hp: 6, shards: ["#c98d5f", "#8a5a3a", "#e0b48a"], lootChance: 0.12, explodes: false },
+  crate: { hp: 26, shards: ["#a8743c", "#6b4a24", "#8a5c2e"], explodes: false },
+  barrel: { hp: 42, shards: ["#8a5c2e", "#5a3a1c", "#6e6e74"], explodes: true },
+  pot: { hp: 6, shards: ["#c98d5f", "#8a5a3a", "#e0b48a"], explodes: false },
 };
 
 /** Debris amount per prop (a pot is a handful of sherds, a barrel a lot of
@@ -86,10 +85,8 @@ export function Breakable({
       if (!silent) {
         // Tumbling lit chunks that bounce and settle, and a puff of dust.
         shatterFx(t, spec.shards, SHATTER_SCALE[kind]);
-        if (!remote) {
-          dropLoot([t.x, Math.max(t.y, 0.5), t.z], floor, spec.lootChance);
-          dropGold([t.x, Math.max(t.y, 0.5), t.z], floor, GOLD_DROPS.propChance, "prop");
-        }
+        // What it hid is the loot book's roll; the authority reports the break.
+        if (!remote) reportLoot(entityId, { kind: "prop", prop: kind }, [t.x, Math.max(t.y, 0.5), t.z]);
         if (spec.explodes) {
           // Defer so the chain reaction never re-enters this hit handler. A
           // replicated break explodes cosmetically vs entities (the host's
@@ -481,7 +478,6 @@ const PORTAL_FX_RANGE_SQ = 20 * 20;
 let consumeTreasure: ((by: string, silent: boolean) => void) | null = null;
 let treasureTakenNow: (() => boolean) | null = null;
 let treasurePos: Vec3 | null = null;
-let treasureDefId: string | null = null;
 
 const treasureTaken = hostEvent<{ by: string }>("treasureTaken", (d) => {
   consumeTreasure?.(d.by, false);
@@ -496,8 +492,9 @@ const takeTreasure = hostCommand<Record<string, never>>("takeTreasure", (_d, met
   const p = treasurePos;
   if (!p || wizardDistSqTo(meta.from, p[0], p[1], p[2]) > TREASURE_RANGE_SQ) return;
   treasureTaken.announce({ by: meta.from });
-  // Host attestation makes the treasure bankable server-side for that player.
-  if (treasureDefId) session.attestGrant(meta.from, treasureDefId);
+  // The treasure is an orb in the floor's loot book from the start: the book
+  // grants it to whoever the host says took it, once.
+  session.claimOrb(meta.from, TREASURE_ORB);
 });
 
 /** Guaranteed floor treasure — the item is rolled deterministically from the
@@ -505,10 +502,7 @@ const takeTreasure = hostCommand<Record<string, never>>("takeTreasure", (_d, met
 export function TreasurePedestal({ position, floor, seed }: { position: Vec3; floor: number; seed: number }) {
   // Deterministic full roll (base + possible enchantment) from the floor
   // seed — everyone in the instance sees the same reward.
-  const item = useMemo(
-    () => resolveItem(rollDrop(new Rng((seed ^ 0x9c67f3a1) >>> 0), floor)),
-    [seed, floor],
-  );
+  const item = useMemo(() => resolveItem(treasureItem(seed, floor)), [seed, floor]);
   const def = item.def;
   const [taken, setTaken] = useState(false);
   const takenRef = useRef(false);
@@ -544,7 +538,6 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
     consumeTreasure = consume;
     treasureTakenNow = () => takenRef.current;
     treasurePos = position;
-    treasureDefId = item.itemId;
     const unregister = registerSyncProvider("treasure", {
       collect: () => takenRef.current,
       apply: (data) => {
@@ -555,7 +548,6 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
       consumeTreasure = null;
       treasureTakenNow = null;
       treasurePos = null;
-      treasureDefId = null;
       unregister();
     };
   }, [consume, position, item.itemId]);

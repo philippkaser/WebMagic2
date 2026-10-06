@@ -4,10 +4,11 @@
 // game through its dev-only window hooks (__game, __castAt, __pact, …).
 //
 // Needs a dev client and a game server with forced encounters, the pace
-// lifted (the script descends faster than any wizard could walk) and a known
-// data file (so the script can inspect server-side grants):
+// lifted (the script descends faster than any wizard could walk), dev loot
+// on (it hands a wizard a specific orb) and a known data file (so the script
+// can inspect server-side grants):
 //
-//   DATA_FILE=/tmp/wm-e2e.json ENCOUNTER_CHANCE=1 FLOOR_PACE_MS=0 bun server/server.ts &
+//   DATA_FILE=/tmp/wm-e2e.json ENCOUNTER_CHANCE=1 FLOOR_PACE_MS=0 DEV_LOOT=1 bun server/server.ts &
 //   bunx vite --port 3000 &
 //   DATA_FILE=/tmp/wm-e2e.json bun run e2e        (runs under node)
 //
@@ -68,6 +69,39 @@ async function waitPhase(w, phase, timeout = 30000) {
     });
     throw new Error(`waiting for phase "${phase}": ${JSON.stringify(where)}`, { cause: err });
   }
+}
+
+/** Stand next to the first orb of `defId` this wizard sees (waits for it). */
+async function walkToOrb(w, defId) {
+  const pos = await w.page
+    .waitForFunction((id) => window.__orbs?.().find((o) => o.defId === id)?.position, defId, {
+      timeout: 15000,
+      polling: 100,
+    })
+    .then((h) => h.jsonValue(), () => null);
+  if (pos) await w.page.evaluate(([x, y, z]) => window.__teleport(x + 0.8, y + 0.5, z), pos);
+  return pos;
+}
+
+/** Press E once the prompt that should take it is up (an early press goes
+ * to whatever is offered then — often the belt), and hold it until the
+ * prompt changes: a short tap can go down and expire between two frames of
+ * a slow, software-rendered page. A held key is still one press. */
+async function pressE(w, pattern) {
+  const promptIs = (src) => new RegExp(src).test(window.__game.getState().prompt ?? "");
+  const offered = await w.page
+    .waitForFunction(promptIs, pattern.source, { timeout: 15000, polling: 100 })
+    .then(() => true, () => false);
+  const prompt = await w.page.evaluate(() => window.__game.getState().prompt);
+  await w.page.keyboard.down("KeyE");
+  await w.page
+    .waitForFunction((src) => !new RegExp(src).test(window.__game.getState().prompt ?? ""), pattern.source, {
+      timeout: 3000,
+      polling: 50,
+    })
+    .catch(() => {});
+  await w.page.keyboard.up("KeyE");
+  return { offered, prompt };
 }
 
 // ── Solo run ────────────────────────────────────────────────────────────────
@@ -172,11 +206,8 @@ async function waitPhase(w, phase, timeout = 30000) {
   // A gift: Mira drops her boots, Oswin picks them up. The server must move
   // them from her account to his (a drop is given up, never duplicated).
   await b.page.evaluate(() => window.__game.getState().dropStack({ container: "equipment", slot: "boots" }));
-  await a.page.evaluate(([x, y, z]) => window.__teleport(x + 1, y + 0.5, z), at);
-  await sleep(1500);
-  await a.page.keyboard.down("KeyE");
-  await sleep(150);
-  await a.page.keyboard.up("KeyE");
+  await walkToOrb(a, "worn_boots");
+  await pressE(a, /Take/);
   await sleep(1200);
   const oswinBag = await a.page.evaluate(() => window.__game.getState().bag.map((s) => s?.defId ?? null));
   check("a dropped item is a gift: the floor-mate picks it up", oswinBag.includes("worn_boots"),
@@ -190,23 +221,23 @@ async function waitPhase(w, phase, timeout = 30000) {
       !!oswin?.runGrants.includes("worn_boots") && mira?.inventory.equipment.boots === null,
       JSON.stringify({ oswin: oswin?.runGrants, miraBoots: mira?.inventory.equipment.boots }));
   }
+  // Step back, so Mira's coins below are hers to walk over, not Oswin's.
+  await a.page.evaluate(([x, y, z]) => window.__teleport(x + 7, y + 0.5, z), at);
+  await sleep(600);
   // Mira picks up loot the honest way: the host drops real orbs at her feet,
   // she takes the item (E) and walks over the coins (auto) — host-granted.
-  // (Floor-1 sized: the server caps a find to what the floor could drop.)
   await a.page.evaluate(([x, y, z]) => {
     window.__spawnOrb("amulet_vigor@3", 0, [x + 0.4, Math.max(0.4, y - 0.5), z]);
     window.__spawnOrb(null, 6, [x - 0.3, Math.max(0.4, y - 0.5), z]);
   }, at);
-  await sleep(1500);
-  await b.page.keyboard.down("KeyE");
-  await sleep(150);
-  await b.page.keyboard.up("KeyE");
+  await walkToOrb(b, "amulet_vigor@3");
+  await pressE(b, /Take/);
   await sleep(1200);
   const mira = await game(b);
   check("the fallen-to-be picks up host-granted loot", mira.equipment.amulet?.defId === "amulet_vigor@3",
     JSON.stringify(mira.equipment.amulet));
   await b.page.evaluate((killer) => window.__game.getState().takeDamage(10_000, { kind: "wizard", id: killer }), idA);
-  await waitPhase(b, "dead", 20000); // the death dissolve plays first
+  await waitPhase(b, "dead", 60000); // the death dissolve plays first (slow under software GL)
   const death = (await game(b)).lastDeath;
   check("death names the killer and leaves a grave", death?.killer === "Oswin" && death?.grave === true,
     JSON.stringify(death));
@@ -217,12 +248,8 @@ async function waitPhase(w, phase, timeout = 30000) {
   if (graves.length === 1) {
     const [x, y, z] = graves[0].pos;
     await a.page.evaluate(([x, y, z]) => window.__teleport(x + 1, y + 1, z), [x, y, z]);
-    await sleep(1200);
-    const prompt = await a.page.evaluate(() => window.__game.getState().prompt);
-    check("the grave offers its plunder", /Plunder/.test(prompt ?? ""), prompt ?? "no prompt");
-    await a.page.keyboard.down("KeyE");
-    await sleep(120);
-    await a.page.keyboard.up("KeyE");
+    const { offered, prompt } = await pressE(a, /Plunder/);
+    check("the grave offers its plunder", offered, prompt ?? "no prompt");
     await sleep(1500);
     const after = await game(a);
     check("plunder: the killer takes the fallen wizard's amulet",

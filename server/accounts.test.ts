@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SAVE_FEATHER_ID } from "../src/items/catalog";
-import { maxGoldDrop, MERCHANT_STOCK } from "../src/items/economy";
+import { MERCHANT_STOCK } from "../src/items/economy";
 import type { WireInventory } from "../src/net/protocol";
 import { GAMBLE_PRICE, sellValue } from "../src/items/economy";
 import { AccountStore, defaultWireInventory, sanitizeInventory } from "./accounts";
@@ -361,22 +361,6 @@ describe("AccountStore: no item from nothing", () => {
     // Still implicit: a wizard who has none may bank one.
     acc.inventory.equipment.boots = null;
     expect(store.bank(acc, 5, inv()).inventory.equipment.boots).toBe("worn_boots");
-  });
-
-  test("a find must be something its floor could drop", () => {
-    const store = new AccountStore();
-    const acc = store.login(undefined, "Dana");
-    expect(store.grantFound(acc, "void_staff+keen@120", 1)).toBe(false);
-    expect(store.grantFound(acc, "totally_made_up_item", 1)).toBe(false);
-    expect(store.grantFound(acc, "ember_staff@4", 1)).toBe(true);
-    expect(acc.runGrants).toEqual(["ember_staff@4"]);
-  });
-
-  test("found gold is capped to the richest orb the floor can drop", () => {
-    const store = new AccountStore();
-    const acc = store.login(undefined, "Dana");
-    store.grantFoundGold(acc, 500, 1);
-    expect(acc.runGold).toBe(maxGoldDrop(1));
   });
 
   test("release takes the named copy off the account — or nothing", () => {

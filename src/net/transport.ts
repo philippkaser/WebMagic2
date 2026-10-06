@@ -1,4 +1,8 @@
 import { DUNGEON } from "../core/config";
+import { Rng } from "../core/rng";
+import { rollSourceLoot } from "../items/dropTables";
+import { DROPPED_ORB_PREFIX, LootBook, type IssuedOrb } from "../items/lootBook";
+import { generateFloor } from "../world/gen";
 import { FloorDirectory } from "./matchmaking";
 import type { ClientMsg, ServerMsg } from "./protocol";
 
@@ -115,14 +119,19 @@ function defaultWsUrl(): string {
 }
 
 /** Single-player loopback: a miniature in-process "server" that speaks the
- * real protocol and reuses the real matchmaking logic. Gameplay envelopes
- * have no other members to reach, so they vanish — the client-side authority
- * code path (always host offline) is exactly the single-player game. */
+ * real protocol and reuses the real matchmaking logic and the real loot book
+ * (items/lootBook.ts) — offline, loot is rolled and issued exactly as the
+ * server would. Gameplay envelopes have no other members to reach, so they
+ * vanish — the client-side authority code path (always host offline) is
+ * exactly the single-player game. */
 export class LocalTransport implements Transport {
   private listeners = new Set<(msg: ServerMsg) => void>();
   private directory = new FloorDirectory(DUNGEON.maxPlayersPerFloor);
   private playerId = "local_player";
   private name = "Wizard";
+  private books = new Map<string, LootBook>();
+  private rng = new Rng((Math.random() * 0xffffffff) >>> 0);
+  private villageOrbs = 1;
 
   async connect(): Promise<void> {
     this.deliver({ t: "welcome", playerId: this.playerId });
@@ -142,15 +151,36 @@ export class LocalTransport implements Transport {
       case "sell":
       case "gamble":
       case "died":
-      case "drop":
+      case "claim":
       case "grant":
       case "grantGold":
         // Offline progress is persisted client-side.
+        break;
+      case "loot": {
+        // The same book the server keeps. Away from a floor (the dev room's
+        // arena) there is no layout: roll what the report says it was.
+        const book = this.book();
+        let orbs: IssuedOrb[] | null;
+        if (msg.source.kind === "dev") {
+          orbs = [this.issue(msg.source.itemId, msg.source.gold)];
+        } else if (book) {
+          orbs = book.roll(msg.id, msg.source);
+        } else {
+          orbs = rollSourceLoot(this.rng, msg.source, 1, { lootChanceMult: 1, goldMult: 1 }).map((d) =>
+            this.issue(d.itemId, d.gold),
+          );
+        }
+        if (orbs && orbs.length > 0) this.deliver({ t: "lootRolled", id: msg.id, at: msg.at, orbs });
+        break;
+      }
+      case "drop":
+        this.deliver({ t: "released", orb: this.issue(msg.itemId, 0, DROPPED_ORB_PREFIX) });
         break;
       case "enterFloor": {
         // Offline the client is its own authority: it already applied the
         // run rules (run/rules.ts) before asking, so honor the floor as sent.
         const inst = this.directory.join(this.playerId, msg.floor);
+        for (const id of this.books.keys()) if (!this.directory.instanceById(id)) this.books.delete(id);
         this.deliver({
           t: "floorAssigned",
           assignment: {
@@ -188,6 +218,24 @@ export class LocalTransport implements Transport {
 
   close(): void {
     this.listeners.clear();
+  }
+
+  /** The current floor's loot book (made on first use), or null in the village. */
+  private book(): LootBook | null {
+    const inst = this.directory.instanceOf(this.playerId);
+    if (!inst) return null;
+    let book = this.books.get(inst.id);
+    if (!book) {
+      book = new LootBook(generateFloor(inst.seed, inst.floor), this.rng);
+      this.books.set(inst.id, book);
+    }
+    return book;
+  }
+
+  private issue(itemId: string | null, gold: number, prefix?: string): IssuedOrb {
+    const book = this.book();
+    if (book) return book.issue(itemId, gold, prefix);
+    return { orbId: `${prefix ?? "o"}v${this.villageOrbs++}`, itemId, gold };
   }
 
   private deliver(msg: ServerMsg): void {

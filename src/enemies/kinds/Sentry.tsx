@@ -13,7 +13,7 @@ import { aimDir, type Vec } from "../brains/common";
 import { createSentryBrain, createSentryTick, SENTRY, sentryLead, sentryYaw, tickSentry } from "../brains/sentry";
 import { bodyProps, SpecCollider } from "../../game/bodies";
 import { ENEMY_BODIES } from "../../sim/bodies";
-import { ENEMY_LOOT_CHANCE, useEnemy, type EnemyDeathFx, type EnemyDrops } from "../useEnemy";
+import { useEnemy, type EnemyDeathFx, type EnemyDrops } from "../useEnemy";
 
 const BOLT_COLOR = "#ff5136";
 const DEATH_FX: EnemyDeathFx = {
@@ -23,7 +23,7 @@ const DEATH_FX: EnemyDeathFx = {
   lift: 0.8,
   soul: "#ff9a5a",
 };
-const DROPS: EnemyDrops = { lootChance: ENEMY_LOOT_CHANCE, lift: 0.5 };
+const DROPS: EnemyDrops = { lift: 0.5 };
 
 /** Sentry — a fixed warding crystal that lobs slow, dodgeable fire bolts when
  * it has line of sight. The authority runs its reload clock and aim

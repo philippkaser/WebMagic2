@@ -1,6 +1,6 @@
 import type { Rng } from "../core/rng";
 import { allAffixDefs } from "./affixes";
-import { lootPool, resolveItem, type ResolvedItem } from "./catalog";
+import { lootPool } from "./catalog";
 import { makeItemId, MAX_ITEM_LEVEL } from "./itemId";
 import type { ItemDef, Slot } from "./types";
 
@@ -85,29 +85,4 @@ export function rollGamble(rng: Rng, deepest: number): string {
   const def = pickWeighted(rng, lootPool(slot, floor), floor);
   const affix = rng.next() < 0.45 ? rollAffixId(rng) : null;
   return makeItemId(def.id, affix, rollItemLevel(rng, floor));
-}
-
-// ── What a floor can give ────────────────────────────────────────────────────
-
-/** How far past its own depth a floor's loot reaches: drops roll at the floor
- * ±1 (rollItemLevel) and the Warden's at two floors deeper still
- * (enemies/kinds/Warden.tsx). */
-export const LOOT_REACH = 3;
-
-/** Could this exact id have dropped on `floor`: a real catalog item (base,
- * enchantment and level all valid) no deeper than the floor's loot reaches?
- * The server holds every host-attested pickup to it (server/accounts.ts), so
- * a hacked host can't mint a level-120 staff on floor 1, or an id that
- * doesn't exist. Items another wizard gave up (graves, drops) don't come
- * through here — the server matches those against what was given up. */
-export function couldDropOn(itemId: string, floor: number): boolean {
-  let item: ResolvedItem;
-  try {
-    item = resolveItem(itemId);
-  } catch {
-    return false;
-  }
-  if (item.def.slot === "consumable" && item.affix) return false; // never rolled
-  const reach = Math.max(1, floor) + LOOT_REACH;
-  return item.def.minFloor <= reach && item.level <= reach;
 }

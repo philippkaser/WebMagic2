@@ -4,12 +4,10 @@ import {
   GAMBLE_PRICE,
   GOLD_RULES,
   isSubMultiset,
-  maxGoldDrop,
   merchantPrice,
   multisetOf,
   sellValue,
 } from "../src/items/economy";
-import { couldDropOn } from "../src/items/loot";
 import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS } from "../src/items/inventory";
 import type { ServerSave, WireEquipment, WireInventory, WireStack } from "../src/net/protocol";
 
@@ -20,16 +18,15 @@ import type { ServerSave, WireEquipment, WireInventory, WireStack } from "../src
  * strings, keeping the server gameplay-blind):
  *
  *   an item may be banked ⇔ it was previously banked, is starter gear, or
- *   was GRANTED during the current run by the floor host's attestation.
+ *   was GRANTED during the current run.
  *   Gold follows the same rule with amounts (grantGold), under sanity caps.
  *
- * Hosts attest grants because loot is host-authoritative already (an orb can
- * only be taken once, and only the host announces pickups). But a wizard
- * alone on a floor IS its host, so an attestation alone proves little: what
- * was FOUND must also be something that floor could drop (grantFound — a
- * real item, no deeper than the floor reaches), and what another wizard
- * gave up (a grave, a drop — release) is matched by the relay against what
- * was actually given up. Death or quitting discards the run's grants.
+ * Grants come from the ledger (server/ledger.ts), never from a client's say-
+ * so: a pickup is an orb the floor's loot book issued — rolled by the server
+ * from what really died there, or a copy another wizard gave up (`release`)
+ * — claimed once; a grave's plunder is matched against what the dead were
+ * granted. The host only says WHO took an orb. Death or quitting discards
+ * the run's grants.
  *
  * The only item MEANING the server borrows from the shared pure catalog is
  * the same kind it always has (starter ids): merchant prices and the feather
@@ -159,19 +156,10 @@ export class AccountStore {
     return { deepest: account.deepest, inventory: cloneInventory(account.inventory) };
   }
 
-  /** Host attested that this account found `itemId` on `floor` (an orb, the
-   * floor's treasure). Recorded only if that floor could have dropped it — a
-   * lone wizard is its own host, so the attestation alone isn't enough.
-   * Returns whether it was recorded. */
-  grantFound(account: AccountRecord, itemId: string, floor: number): boolean {
-    if (!couldDropOn(itemId, floor)) return false;
-    return this.grant(account, itemId);
-  }
-
-  /** Record a grant without asking where it came from — for what another
-   * wizard gave up (graves, drops), which the relay has already matched
-   * against what was given up. Duplicates are counted — the grants are a
-   * multiset. Returns whether it was recorded. */
+  /** Record a grant for this run: an orb the floor's loot book issued and
+   * the host saw this wizard take, or a grave's plunder the ledger matched
+   * against what the dead were granted. Duplicates are counted — the grants
+   * are a multiset. Returns whether it was recorded. */
   grant(account: AccountRecord, itemId: string): boolean {
     if (!isItemId(itemId)) return false;
     if (account.runGrants.length >= MAX_RUN_GRANTS) return false;
@@ -180,15 +168,9 @@ export class AccountStore {
     return true;
   }
 
-  /** Host attested gold found on `floor` — capped to the richest orb that
-   * floor can drop (never trusted raw). */
-  grantFoundGold(account: AccountRecord, amount: number, floor: number): void {
-    this.grantGold(account, amount, Math.min(GOLD_RULES.perGrantCap, maxGoldDrop(floor)));
-  }
-
   /** Record gold for this run, at most `cap` of it (default: the absolute
-   * per-grant backstop; the relay lifts it for grave gold, which its pool
-   * already bounds). */
+   * per-grant backstop; the ledger lifts it for gold its book or a grave
+   * pool already bounds). */
   grantGold(account: AccountRecord, amount: number, cap: number = GOLD_RULES.perGrantCap): void {
     const n = clampGold(amount, cap);
     if (n <= 0) return;

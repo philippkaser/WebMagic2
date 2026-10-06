@@ -34,10 +34,11 @@ every same-floor entry meet whoever is already there.
 End-to-end smoke test (headless Chromium, two wizards: a full solo run, then
 PvP, a pact, a gift dropped and picked up, a death, a grave and its plunder —
 including the server honoring the gift and the plunder; `FLOOR_PACE_MS=0`
-lifts the deep's pace, which the script outruns):
+lifts the deep's pace, which the script outruns, and `DEV_LOOT=1` lets it
+hand a wizard a specific orb — never set either on a real server):
 
 ```sh
-DATA_FILE=/tmp/wm-e2e.json ENCOUNTER_CHANCE=1 FLOOR_PACE_MS=0 bun server/server.ts &
+DATA_FILE=/tmp/wm-e2e.json ENCOUNTER_CHANCE=1 FLOOR_PACE_MS=0 DEV_LOOT=1 bun server/server.ts &
 bunx vite --port 3000 &
 DATA_FILE=/tmp/wm-e2e.json bun run e2e   # CHROMIUM_PATH=… to pick a browser
 ```
@@ -169,9 +170,9 @@ whose enemies, props, boss, loot and graves are authoritative. Replicas
 predict and reconcile. Your own health is always decided locally — which is
 also how wizard-vs-wizard damage works: a stranger's spell hurts you on your
 own machine, and the last wizard who hurt you takes the kill credit. The
-server keeps the saves: anything banked must trace back to what your floor
-could drop or what another wizard gave up (a grave, a dropped gift), and new
-floors keep a human pace. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+server keeps the saves and rolls the loot: the host only reports what died,
+the server decides what it dropped and grants each orb once (a dropped gift
+moves between wizards, never doubles), and new floors keep a human pace. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 for the full design and its known limits.
 
 ## Project layout
@@ -222,8 +223,6 @@ Design rules that keep it future-proof:
 
 ## Roadmap
 
-- Server-rolled loot: the host reports kills, the server rolls and issues the
-  drops (closes self-attested finds)
 - Headless server-side floor hosts (full authority; closes the host-trust gap)
 - A unique boss per biome
 - More omens, carvings and enemy archetypes; biome-specific hazards

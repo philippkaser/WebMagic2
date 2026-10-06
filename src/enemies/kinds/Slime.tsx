@@ -9,7 +9,7 @@ import { createSlimeBrain, SLIME_MAX_GEN, slimeSquash, tickSlime } from "../brai
 import { spawnEnemy } from "../spawnedStore";
 import { bodyProps, SpecCollider } from "../../game/bodies";
 import { slimeBody } from "../../sim/bodies";
-import { ENEMY_LOOT_CHANCE, useContactDamage, useEnemy } from "../useEnemy";
+import { useContactDamage, useEnemy } from "../useEnemy";
 
 /** Slime — a gelatinous melee blob that hops toward its prey and, on death,
  * SPLITS into two smaller, faster copies (down to a terminal generation; see
@@ -52,7 +52,8 @@ export function Slime({
       scale: 0.45 + cfg.size * 0.45,
     },
     // The whole slime's loot lands when its LAST piece dies, not on every split.
-    drops: { lootChance: last ? ENEMY_LOOT_CHANCE : 0, minY: 0.4 },
+    generation: gen,
+    drops: { minY: 0.4 },
     onDeathFx: (t: Vec) => {
       if (last) return;
       // Split into two smaller, faster children (host decides; all render).

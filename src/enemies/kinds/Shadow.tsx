@@ -7,7 +7,6 @@ import type { Vec3 } from "../../world/types";
 import { createChaseInput, createSteering } from "../brains/common";
 import { createShadowBrain, tickShadow } from "../brains/shadow";
 import {
-  ENEMY_LOOT_CHANCE,
   useContactDamage,
   useEnemy,
   type EnemyDeathFx,
@@ -22,7 +21,7 @@ const DEATH_FX: EnemyDeathFx = {
   light: { color: "#6a3d9a", intensity: 18 },
   soul: "#9a6aff",
 };
-const DROPS: EnemyDrops = { lootChance: ENEMY_LOOT_CHANCE, minY: 0.6 };
+const DROPS: EnemyDrops = { minY: 0.6 };
 const BODY = ENEMY_BODIES.shadow;
 
 /** Shadow — a lurking stalker. Instead of the wisp's straight chase it plays

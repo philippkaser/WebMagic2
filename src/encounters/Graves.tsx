@@ -136,8 +136,8 @@ const lootGrave = hostCommand<GraveLootMsg>("lootGrave", (d, meta) => {
   // Plunder is a pickup like any other: bankable only by host attestation —
   // and the server honors grave grants only against what the dead were
   // actually granted in this instance (a forged grave mints nothing).
-  for (const t of taken) for (let n = 0; n < t.qty; n++) session.attestGrant(meta.from, t.id, "grave");
-  if (goldTaken > 0) session.attestGold(meta.from, goldTaken, "grave");
+  for (const t of taken) for (let n = 0; n < t.qty; n++) session.attestGrave(meta.from, t.id);
+  if (goldTaken > 0) session.attestGraveGold(meta.from, goldTaken);
 });
 
 function announceFall(g: LiveGrave): void {

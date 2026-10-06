@@ -1,7 +1,6 @@
 import type { Rng } from "../core/rng";
 import { BASIC_BOOTS_ID, BASIC_STAFF_ID, resolveItem, SAVE_FEATHER_ID } from "./catalog";
 import type { WireInventory, WireStack } from "../net/protocol";
-import { isBossFloor } from "../world/gen/pois";
 
 /** The economy balance sheet — every gold and price number lives here.
  *
@@ -93,32 +92,10 @@ export function bossGoldAmount(rng: Rng, floor: number): number {
   return Math.round(20 + floor * 2.2 + rng.next() * 14);
 }
 
-/** The richest omen's gold multiplier (world/omens.ts; economy.test.ts pins
- * that no omen pays more). */
-export const MAX_GOLD_MULT = 1.5;
-
-/** Every roll at its top — for reading off the drop formulas' ceilings. */
-const TOP_ROLL = { next: () => 1 } as unknown as Rng;
-
-/** The richest single gold orb `floor` can drop: its best source (the
- * Warden on boss floors, otherwise a monster) at the top of its roll, under
- * the richest omen. The server caps every host-attested gold pickup on that
- * floor to it. */
-export function maxGoldDrop(floor: number): number {
-  const f = Math.max(1, floor);
-  const best = Math.max(
-    enemyGoldAmount(TOP_ROLL, f),
-    propGoldAmount(TOP_ROLL, f),
-    isBossFloor(f) ? bossGoldAmount(TOP_ROLL, f) : 0,
-  );
-  return Math.ceil(best * MAX_GOLD_MULT);
-}
-
 // ── Server-side sanity caps (anti-cheat bounds, not balance) ────────────────
 
 export const GOLD_RULES = {
-  /** No single host-attested pickup exceeds this — far above any real drop
-   * (the floor's own bound, maxGoldDrop, is the tighter one). */
+  /** No single gold grant exceeds this — far above any real drop. */
   perGrantCap: 500,
   /** Ceiling on gold attested per run — bounds a cheating host's damage. */
   perRunCap: 10_000,

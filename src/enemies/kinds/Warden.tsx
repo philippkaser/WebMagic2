@@ -13,8 +13,7 @@ import {
 import { castFlareFx, chargeBurstFx, explosionFx, soulDissolveFx, telegraphFx } from "../../fx/effects";
 import { getFloorRules } from "../../game/floorRules";
 import { nearestWizardTo } from "../../game/targets";
-import { SAVE_FEATHER_ID } from "../../items/catalog";
-import { dropGold, dropItem, dropLoot } from "../../items/LootOrbs";
+import { reportLoot } from "../../items/LootOrbs";
 import { ENEMY_GLOW, WARDEN_COLOR, WardenModel } from "../../render/models/enemies";
 import { enemyBoom, enemyCast } from "../../weapons/hostileEffects";
 import type { Vec3 } from "../../world/types";
@@ -85,12 +84,8 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
       }
       flashLight([t.x, t.y, t.z], WARDEN_COLOR, 60);
       playBossRoar([t.x, t.y + 1.5, t.z]);
-      // Guaranteed rich drops for the whole party (host-rolled).
-      dropLoot([t.x - 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
-      dropLoot([t.x + 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
-      dropGold([t.x, Math.max(t.y, 0.8), t.z - 0.6], floor, 1, "boss");
-      // The Warden hoards escapes too — a feather drop is a real prize.
-      if (Math.random() < 0.35) dropItem(SAVE_FEATHER_ID, [t.x, Math.max(t.y, 0.8), t.z + 1.4]);
+      // Its hoard (items/dropTables.ts BOSS_LOOT) is the loot book's roll.
+      reportLoot("boss", { kind: "boss" }, [t.x, Math.max(t.y, 0.8), t.z]);
       gameEvents.emit("message", "The Warden falls. The seal breaks.");
       gameEvents.emit("shake", 0.8);
     },

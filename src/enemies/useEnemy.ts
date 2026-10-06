@@ -12,8 +12,7 @@ import { getFloorRules } from "../game/floorRules";
 import { getPlayerBody, playerPosition } from "../game/player-state";
 import { allocId, registerHittable } from "../game/registry";
 import { nearestWizardTo } from "../game/targets";
-import { GOLD_DROPS } from "../items/economy";
-import { dropGold, dropLoot } from "../items/LootOrbs";
+import { reportLoot } from "../items/LootOrbs";
 import { isHost } from "../net/netStore";
 import { useNetBody, type NetBody } from "../net/NetSystems";
 import { combatActive, getStats, useGame } from "../state/gameStore";
@@ -33,9 +32,6 @@ import { getEnemyStats, type EnemyId } from "./roster";
  * rules live in items/LootOrbs). That keeps omens out of every component —
  * but it does mean a floor's rules must be installed before its enemies
  * mount. */
-
-/** Base chance a regular enemy drops an item. */
-export const ENEMY_LOOT_CHANCE = 0.24;
 
 const ZERO: Readonly<Vec> = Object.freeze({ x: 0, y: 0, z: 0 });
 
@@ -60,11 +56,9 @@ export interface EnemyDeathFx {
   scale?: number;
 }
 
-/** The standard drops: gold at the enemy's usual odds, and maybe an item. */
+/** Where its drops land. WHAT drops is the floor's loot book's call
+ * (items/dropTables.ts): the authority only reports the death. */
 export interface EnemyDrops {
-  /** Base item chance (the floor's loot rule is applied inside dropLoot).
-   * 0 = gold only. */
-  lootChance: number;
   /** Drops land this far above the body origin… */
   lift?: number;
   /** …but never below this height (fliers can die skimming the floor). */
@@ -79,6 +73,9 @@ export interface UseEnemyOptions {
   floor: number;
   /** Multiplier on the roster's baseHealth (slime generations). */
   healthScale?: number;
+  /** A slime's split generation (0 for everything else) — what the loot
+   * report says it was. */
+  generation?: number;
   /** Omit for a fully custom death (the Warden's, via onDeathFx). */
   deathFx?: EnemyDeathFx;
   drops?: EnemyDrops;
@@ -166,11 +163,9 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
         flashLight(at, fx.light.color, fx.light.intensity);
       }
       const drops = o.drops;
-      if (drops) {
+      if (drops && o.kind !== "boss") {
         const at: Vec3 = [t.x, Math.max(t.y + (drops.lift ?? 0), drops.minY ?? -Infinity), t.z];
-        // Base odds only — LootOrbs applies the floor's loot/gold rules itself.
-        if (drops.lootChance > 0) dropLoot(at, o.floor, drops.lootChance);
-        dropGold(at, o.floor, GOLD_DROPS.enemyChance, "enemy");
+        reportLoot(o.entityId, { kind: "enemy", enemy: o.kind, gen: o.generation ?? 0 }, at);
       }
       o.onDeathFx?.(t);
       if (isEnemyVoice(o.kind)) playEnemyDeath(o.kind, [t.x, t.y, t.z]);

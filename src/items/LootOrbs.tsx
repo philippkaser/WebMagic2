@@ -12,17 +12,16 @@ import {
   Vector3,
 } from "three";
 import { gameEvents } from "../core/events";
-import { Rng } from "../core/rng";
 import {
   addLightSource,
   removeLightSource,
   type DynamicLightSource,
 } from "../fx/DynamicLights";
 import { spawnBurst } from "../fx/Particles";
-import { getFloorRules } from "../game/floorRules";
 import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { wizardDistSqTo } from "../game/targets";
+import { netBus } from "../net/bus";
 import { hostCommand, hostEvent } from "../net/channels";
 import { registerSyncProvider } from "../net/entities";
 import { isHost, useNet } from "../net/netStore";
@@ -30,50 +29,40 @@ import { session } from "../net/session";
 import { ItemModel } from "../ui3d/ItemModel";
 import { ENCHANT_COLOR } from "./affixes";
 import { getItemDef, resolveItem } from "./catalog";
-import { bossGoldAmount, enemyGoldAmount, propGoldAmount } from "./economy";
-import { rollDrop } from "./loot";
+import type { LootSource } from "./dropTables";
+import { DROPPED_ORB_PREFIX } from "./lootBook";
 import { useGame } from "../state/gameStore";
 import type { Slot } from "./types";
 import type { Vec3 } from "../world/types";
 
-/** Dropped-loot manager under host authority: the floor authority rolls
- * drops and announces spawns; pickups are granted by the authority so an orb
- * can never be taken twice. All of it is typed net messages — pickup code has
- * no host/replica branches, and offline the same requests dispatch locally.
+/** Loot on the floor, as orbs. The floor's LOOT BOOK (items/lootBook.ts —
+ * kept by the server's ledger online, by the offline loopback in
+ * single-player) is the authority over what falls: the host only reports
+ * what died or broke (`reportLoot`), the book rolls it and answers with the
+ * orbs, and the host spawns them for everyone. A pickup is arbitrated by the
+ * host (first come, first served, at arm's length) and CLAIMED from the book
+ * by orb id, which grants what the orb holds exactly once. Dropped copies
+ * and the floor treasure are book orbs too.
  *
  * Two orb families share the pipeline: ITEM orbs (E to take, routed into the
  * inventory) and GOLD orbs (vacuumed automatically by walking close). */
 
 interface Orb {
+  /** The book's orb id ("o12", or "d3" for a dropped copy). */
   id: string;
   /** Item orb when set; gold orb when null. */
   defId: string | null;
   gold: number;
   position: Vec3;
-  /** A wizard dropped it (vs the floor dropping it): its pickup is granted
-   * out of what that wizard gave up, not as a find (server/relay.ts). */
-  dropped?: boolean;
 }
 
-let orbCounter = 1;
 let pushOrb: ((orb: Orb) => void) | null = null;
 let takeOrbLocal: ((orbId: string, by: string) => void) | null = null;
 let liveOrbs: (() => Orb[]) | null = null;
 
-const orbSpawned = hostEvent<{
-  orbId: string;
-  defId: string | null;
-  gold: number;
-  pos: Vec3;
-  dropped?: boolean;
-}>("orbSpawned", (d) =>
-  pushOrb?.({
-    id: d.orbId,
-    defId: d.defId ?? null,
-    gold: d.gold ?? 0,
-    position: d.pos,
-    dropped: d.dropped === true,
-  }),
+const orbSpawned = hostEvent<{ orbId: string; defId: string | null; gold: number; pos: Vec3 }>(
+  "orbSpawned",
+  (d) => pushOrb?.({ id: d.orbId, defId: d.defId ?? null, gold: d.gold ?? 0, position: d.pos }),
 );
 
 const orbTaken = hostEvent<{ orbId: string; by: string }>("orbTaken", (d) =>
@@ -86,27 +75,24 @@ const orbTaken = hostEvent<{ orbId: string; by: string }>("orbTaken", (d) =>
 const TAKE_RANGE_SQ = 6 * 6;
 
 const takeOrb = hostCommand<{ orbId: string }>("takeOrb", (d, meta) => {
-  // First come, first served — grant only if the orb still exists and the
+  // First come, first served — only if the orb still exists and the
   // requesting wizard is actually standing at it.
   const orb = liveOrbs?.().find((o) => o.id === d.orbId);
   if (!orb) return;
   if (wizardDistSqTo(meta.from, orb.position[0], orb.position[1], orb.position[2]) > TAKE_RANGE_SQ)
     return;
   orbTaken.announce({ orbId: d.orbId, by: meta.from });
-  // Host attestation makes the pickup bankable server-side for that player —
-  // a dropped orb out of what its dropper gave up, anything else as a find
-  // the server checks against this floor's loot.
-  if (orb.defId) session.attestGrant(meta.from, orb.defId, orb.dropped ? "drop" : undefined);
-  else if (orb.gold > 0) session.attestGold(meta.from, orb.gold);
+  // The book grants what it put in this orb, once — whatever this host says.
+  session.claimOrb(meta.from, orb.id);
 });
 
-/** Player-dropped items become real orbs at the dropper's feet — anyone on
- * the floor can take them, which makes dropping double as gifting. The host
- * validates the position against the dropper like any pickup; the dropper
- * has already told the server (releaseItem), which is what makes the item
- * bankable for whoever takes it — so a dropOrb for an item nobody gave up
- * shows an orb, but grants nothing. */
-const dropOrb = hostCommand<{ defId: string; pos: Vec3 }>("dropOrb", (d, meta) => {
+/** A dropped copy becomes a real orb at the dropper's feet — anyone on the
+ * floor can take it, which makes dropping double as gifting. The dropper
+ * gave the copy up to the book first and spawns the orb id it got back; the
+ * host checks only that it IS a dropped copy's id and lies at the dropper's
+ * feet (the book still decides what claiming it grants). */
+const dropOrb = hostCommand<{ orbId: string; defId: string; pos: Vec3 }>("dropOrb", (d, meta) => {
+  if (typeof d.orbId !== "string" || !d.orbId.startsWith(DROPPED_ORB_PREFIX)) return;
   if (typeof d.defId !== "string" || !Array.isArray(d.pos)) return;
   try {
     resolveItem(d.defId); // validates base AND affix
@@ -114,21 +100,35 @@ const dropOrb = hostCommand<{ defId: string; pos: Vec3 }>("dropOrb", (d, meta) =
     return; // unknown id from a hacked/newer client — refuse to spawn it
   }
   if (wizardDistSqTo(meta.from, d.pos[0], d.pos[1], d.pos[2]) > TAKE_RANGE_SQ) return;
-  announceOrb(d.defId, 0, d.pos, true);
+  orbSpawned.announce({ orbId: d.orbId, defId: d.defId, gold: 0, pos: d.pos });
 });
 
-function announceOrb(defId: string | null, gold: number, pos: Vec3, dropped = false): void {
-  orbSpawned.announce({
-    orbId: `orb_${orbCounter++}_${Math.random().toString(36).slice(2, 6)}`,
-    defId,
-    gold,
-    pos,
-    dropped,
-  });
+/** Host only: `id` died or broke at `at` — the book rolls what it drops. */
+export function reportLoot(id: string, source: LootSource, at: Vec3): void {
+  if (!isHost()) return;
+  session.requestLoot(id, source, at);
 }
 
-// Dev-only hook for end-to-end scripts: the host drops a real orb (item or
-// gold) that goes through the normal granted pickup path.
+/** Where the i-th of n orbs from one source lands: the first on the spot,
+ * the rest in a small ring around it. */
+function spread(at: readonly number[], i: number, n: number): Vec3 {
+  if (i === 0 || n < 2) return [at[0], at[1], at[2]];
+  const a = (i / (n - 1)) * Math.PI * 2;
+  return [at[0] + Math.cos(a) * 0.7, at[1], at[2] + Math.sin(a) * 0.7];
+}
+
+// The book answered a report: spawn its orbs for the floor (host only — a
+// reply that arrives after a migration is the old host's to drop).
+netBus.on("lootRolled", ({ at, orbs }) => {
+  if (!isHost()) return;
+  orbs.forEach((o, i) =>
+    orbSpawned.announce({ orbId: o.orbId, defId: o.itemId, gold: o.gold, pos: spread(at, i, orbs.length) }),
+  );
+});
+
+// Dev-only hook for end-to-end scripts: the host asks the book for a
+// specific orb (item or gold). A real server honors it only when started
+// for testing (DEV_LOOT=1); the pickup is claimed like any other.
 if (typeof window !== "undefined" && import.meta.env?.DEV) {
   (window as unknown as Record<string, unknown>).__spawnOrb = (
     defId: string | null,
@@ -136,48 +136,11 @@ if (typeof window !== "undefined" && import.meta.env?.DEV) {
     pos: Vec3,
   ) => {
     if (!isHost()) return false;
-    announceOrb(defId, gold, pos);
+    session.requestLoot("dev", { kind: "dev", itemId: defId, gold }, pos);
     return true;
   };
-}
-
-/** Roll & drop loot at a position. Authority-only — replicas receive the
- * spawn event instead, so exactly one roll happens per kill/break. The
- * floor's omen scales the odds here, once, for every source (callers pass
- * their base chance). */
-export function dropLoot(position: Vec3, floor: number, chance = 1): void {
-  if (!isHost()) return;
-  if (Math.random() > chance * getFloorRules().lootChanceMult) return;
-  // Full item roll: base + possible enchantment (rarity scales with depth).
-  const itemId = rollDrop(new Rng((Math.random() * 0xffffffff) >>> 0), floor);
-  announceOrb(itemId, 0, position);
-}
-
-/** Drop one SPECIFIC item (boss feathers, scripted rewards) — no roll. */
-export function dropItem(defId: string, position: Vec3): void {
-  if (!isHost()) return;
-  announceOrb(defId, 0, position);
-}
-
-/** Scatter coins at a position. Amounts live in items/economy.ts — the one
- * balance sheet — scaled by who dropped them. Authority-only, like items. */
-export function dropGold(
-  position: Vec3,
-  floor: number,
-  chance: number,
-  source: "enemy" | "prop" | "boss",
-): void {
-  if (!isHost()) return;
-  if (Math.random() > chance) return;
-  const rng = new Rng((Math.random() * 0xffffffff) >>> 0);
-  const base =
-    source === "boss"
-      ? bossGoldAmount(rng, floor)
-      : source === "enemy"
-        ? enemyGoldAmount(rng, floor)
-        : propGoldAmount(rng, floor);
-  const amount = Math.round(base * getFloorRules().goldMult);
-  if (amount > 0) announceOrb(null, amount, position);
+  // The live orbs on this client (id, item or gold, where).
+  (window as unknown as Record<string, unknown>).__orbs = () => liveOrbs?.() ?? [];
 }
 
 export function LootOrbs() {
@@ -221,22 +184,23 @@ export function LootOrbs() {
         for (const orb of (data as Orb[]) ?? []) pushOrb?.(orb);
       },
     });
-    // Inventory drops: scatter the stack around the player's feet. Each copy
-    // is given up to the server first (same socket, so it lands before the
-    // host can grant anyone the orb).
+    // Inventory drops: each copy is given up to the book first; the orb it
+    // comes back as lands around the player's feet.
     const offDrop = gameEvents.on("dropItems", ({ defId, qty, runLoot }) => {
-      for (let i = 0; i < Math.min(qty, 8); i++) {
-        const a = Math.random() * Math.PI * 2;
-        session.releaseItem(defId, runLoot);
-        dropOrb.request({
-          defId,
-          pos: [
-            playerPosition.x + Math.cos(a) * (0.6 + Math.random() * 0.4),
-            Math.max(playerPosition.y - 0.5, 0.4),
-            playerPosition.z + Math.sin(a) * (0.6 + Math.random() * 0.4),
-          ],
-        });
-      }
+      for (let i = 0; i < Math.min(qty, 8); i++) session.releaseItem(defId, runLoot);
+    });
+    const offReleased = netBus.on("released", (orb) => {
+      if (!orb.itemId) return;
+      const a = Math.random() * Math.PI * 2;
+      dropOrb.request({
+        orbId: orb.orbId,
+        defId: orb.itemId,
+        pos: [
+          playerPosition.x + Math.cos(a) * (0.6 + Math.random() * 0.4),
+          Math.max(playerPosition.y - 0.5, 0.4),
+          playerPosition.z + Math.sin(a) * (0.6 + Math.random() * 0.4),
+        ],
+      });
     });
     return () => {
       pushOrb = null;
@@ -244,6 +208,7 @@ export function LootOrbs() {
       liveOrbs = null;
       unregister();
       offDrop();
+      offReleased();
     };
   }, []);
 

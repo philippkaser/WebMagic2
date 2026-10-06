@@ -7,7 +7,6 @@ import type { Vec3 } from "../../world/types";
 import { createChaseInput, createSteering } from "../brains/common";
 import { tickWisp } from "../brains/wisp";
 import {
-  ENEMY_LOOT_CHANCE,
   useContactDamage,
   useEnemy,
   type EnemyDeathFx,
@@ -22,7 +21,7 @@ const DEATH_FX: EnemyDeathFx = {
   light: { color: "#b46bff", intensity: 22 },
   soul: "#c89cff",
 };
-const DROPS: EnemyDrops = { lootChance: ENEMY_LOOT_CHANCE, minY: 0.6 };
+const DROPS: EnemyDrops = { minY: 0.6 };
 const BODY = ENEMY_BODIES.wisp;
 
 /** Wisp — a floating mote of hostile magic. Chases the nearest wizard and

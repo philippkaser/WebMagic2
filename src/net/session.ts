@@ -2,7 +2,8 @@ import { gameEvents } from "../core/events";
 import { netBus } from "./bus";
 import { netClock } from "./clock";
 import { useNet } from "./netStore";
-import type { FloorAssignment, ServerMsg, WireInventory } from "./protocol";
+import type { LootSource } from "../items/dropTables";
+import type { DevLoot, FloorAssignment, ServerMsg, WireInventory } from "./protocol";
 import { LocalTransport, WebSocketTransport, type Transport } from "./transport";
 
 const TOKEN_KEY = "webmagic.token.v1";
@@ -125,22 +126,33 @@ export class GameSession {
     this.transport?.send({ t: "died" });
   }
 
+  /** HOST: `id` died or broke at `at` — the server's loot book rolls what
+   * it dropped and answers with the orbs (netBus "lootRolled"). Offline the
+   * loopback keeps the same book. */
+  requestLoot(id: string, source: LootSource | DevLoot, at: [number, number, number]): void {
+    this.transport?.send({ t: "loot", id, source, at });
+  }
+
   /** We let one copy of an item fall to the floor — the server takes it off
-   * our account, so whoever picks it up can be granted it. */
+   * our account and answers with the orb it became (netBus "released"). */
   releaseItem(itemId: string, runLoot: boolean): void {
     this.transport?.send({ t: "drop", itemId, runLoot });
   }
 
-  /** HOST only (the server ignores anyone else): attest that a player
-   * legitimately picked up an item, making it bankable for them. `source`:
-   * plundered from a grave, or picked up after another wizard dropped it. */
-  attestGrant(playerId: string, itemId: string, source?: "grave" | "drop"): void {
-    this.transport?.send({ t: "grant", playerId, itemId, source });
+  /** HOST only (the server ignores anyone else): `playerId` took orb
+   * `orbId` — the server grants what the orb holds, once. */
+  claimOrb(playerId: string, orbId: string): void {
+    this.transport?.send({ t: "claim", playerId, orbId });
   }
 
-  /** HOST only: attest a gold pickup — gold's provenance path. */
-  attestGold(playerId: string, amount: number, source?: "grave"): void {
-    this.transport?.send({ t: "grantGold", playerId, amount, source });
+  /** HOST only: `playerId` plundered `itemId` from a grave. */
+  attestGrave(playerId: string, itemId: string): void {
+    this.transport?.send({ t: "grant", playerId, itemId, source: "grave" });
+  }
+
+  /** HOST only: `playerId` took a grave's gold. */
+  attestGraveGold(playerId: string, amount: number): void {
+    this.transport?.send({ t: "grantGold", playerId, amount, source: "grave" });
   }
 
   // ── Connection plumbing ────────────────────────────────────────────────────
@@ -268,6 +280,12 @@ export class GameSession {
         break;
       case "syncRequest":
         netBus.emit("syncRequest", { playerId: msg.playerId });
+        break;
+      case "lootRolled":
+        netBus.emit("lootRolled", { id: msg.id, at: msg.at, orbs: msg.orbs });
+        break;
+      case "released":
+        netBus.emit("released", msg.orb);
         break;
       case "msg":
         netBus.emit("envelope", {
