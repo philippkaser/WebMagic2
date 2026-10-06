@@ -200,7 +200,10 @@ src/
                HUD, menus and inventory as layers
   ui/          DOM leftovers: perf overlay, build stamp, dev room
   game/        cross-system seams: registries, hostility, floor rules, damage sources
-server/        Bun WebSocket server: relay, accounts & provenance
+  sim/         what a floor IS physically (the body table) and its headless
+               physics world — shared by the browser and a server
+server/        Bun WebSocket server: the router (relay.ts, gameplay-blind),
+               the ledger (ledger.ts: runs, pace, saves, grants), accounts
 ```
 
 Design rules that keep it future-proof:

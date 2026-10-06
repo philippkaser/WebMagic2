@@ -175,6 +175,15 @@ Nothing else changes.
 
 ### Accounts & server-side persistence (the anti-cheat foundation)
 
+The server is two halves that only meet through one small interface: the
+**router** (`server/relay.ts`: connections, instances, hosts, envelope
+routing — blind to gameplay) and the **ledger** (`server/ledger.ts`:
+identity, runs and their pace, saves, grants and pools — it knows the
+rules integrity needs). The ledger asks the router only for a seat on a
+floor and who is where (`LedgerWorld`), so either side can change — a
+database behind the account store, a server-side floor host behind the
+router — without touching the other.
+
 **Rarities ride inside item ids.** An enchanted item is `"defId+affixId"` —
 one opaque string. Because every server-side rule (grants, provenance
 multisets, banking, selling) already operates on opaque id strings, the whole
