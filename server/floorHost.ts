@@ -1,4 +1,5 @@
-import { sanitizeGraveContents, sanitizePicks, takeFromGrave } from "../src/encounters/graveRules";
+import { PactBook } from "../src/encounters/pactBook";
+import { sanitizeGraveContents, sanitizePicks, takeFromGrave, type GraveContents } from "../src/encounters/graveRules";
 import { robeColorOf } from "../src/game/wizardLook";
 import { PLAYER } from "../src/core/config";
 import { computeStats, resolveItem } from "../src/items/catalog";
@@ -9,8 +10,10 @@ import {
   FLOOR,
   GRAVE_LOOT_RANGE_SQ,
   GRAVE_RAISE_RANGE_SQ,
+  MAX_REWIND_MS,
   ORB_TAKE_RANGE_SQ,
   orbSpread,
+  RENDER_DELAY_MS,
   SYNC,
   TREASURE_RANGE_SQ,
   type CorrectMsg,
@@ -18,6 +21,9 @@ import {
   type DevOrbMsg,
   type DropOrbMsg,
   type EnemyCueMsg,
+  type PactMsg,
+  type WizardHitMsg,
+  type YouFellMsg,
   type GraveDropMsg,
   type GraveLootedMsg,
   type GraveLootMsg,
@@ -74,6 +80,8 @@ export interface FloorLedger {
   graveGold(instanceId: string, playerId: unknown, amount: unknown): boolean;
   /** What a wizard wears, checked against what it carries. */
   loadoutOf(instanceId: string, playerId: unknown): CheckedLoadout | null;
+  /** The host knows a wizard is dead: end their run; their grave's contents. */
+  forceDeath(instanceId: string, playerId: unknown): GraveContents | null;
 }
 
 export interface FloorHostIO {
@@ -112,6 +120,8 @@ interface WizardState {
   mana: number;
   /** Mana their carried draughts may still add. */
   reserve: number;
+  /** Health their carried draughts could restore (as the ledger counts it). */
+  healReserve: number;
   manaAt: number;
   /** Per spell: casts in hand (a token bucket) and when it last refilled. */
   casts: Map<string, { tokens: number; at: number }>;
@@ -163,6 +173,15 @@ export class FloorHost {
   private readonly snapS: number;
   private stepAcc = 0;
   private snapAcc = 0;
+  /** Pacts between the wizards here — whose spells may hurt whom. */
+  private readonly pacts = new PactBook();
+  /** Duel damage each wizard has taken on this floor (through their gear),
+   * and the healing their draughts could still do — kept across a
+   * reconnect, so leaving can't reset the count. */
+  private readonly duelTaken = new Map<string, number>();
+  private readonly healLeft = new Map<string, number>();
+  /** Wizards whose death this host decided. */
+  private readonly fallen = new Set<string>();
   /** Seconds this host has run, and when each wizard last sent a pose. */
   private clock = 0;
   private readonly lastPose = new Map<string, number>();
@@ -189,6 +208,7 @@ export class FloorHost {
     this.stepS = 1 / (opts.tickHz ?? 60);
     this.snapS = 1 / (opts.snapHz ?? 20);
     this.motion = new MotionGuard(R, this.sim.physics.world, layout.extent);
+    this.sim.setHostility((caster, wizard) => this.pacts.hostile(caster, wizard));
     this.trustMoves = opts.trustMoves === true;
   }
 
@@ -212,19 +232,24 @@ export class FloorHost {
     this.lastPos.delete(playerId);
     this.wizards.delete(playerId);
     this.motion.forget(playerId);
+    this.pacts.forget(playerId);
     this.sim.removeWizard(playerId);
   }
 
   /** A gameplay envelope from a member of the instance (`ch` with its
    * prefix): its poses, its commands for the host — and, while this is a
    * replica, the current host's authority traffic. */
-  receive(from: string, ch: string, data: unknown): void {
+  receive(from: string, ch: string, data: unknown, serverTime = 0): void {
     if (typeof ch !== "string") return;
     const prefix = ch.slice(0, 2);
     const name = ch.slice(2);
     if (prefix === CHANNEL_PEER) {
       if (name === FLOOR.pose) this.pose(from, data);
-      else if (name === FLOOR.cast && this.promoted) this.cast(from, data);
+      else if (name === FLOOR.cast && this.promoted) this.cast(from, data, serverTime);
+      else if (name === FLOOR.pact) {
+        const d = data as Partial<PactMsg> | null;
+        this.pacts.onMessage(from, d?.to, d?.kind, serverTime);
+      }
     } else if (prefix === CHANNEL_TO_HOST) {
       if (this.promoted) this.command(from, name, data);
     } else if (prefix === CHANNEL_AUTHORITY) {
@@ -330,6 +355,7 @@ export class FloorHost {
         checkedAt: this.clock,
         mana: PLAYER.maxMana,
         reserve: loadout.manaReserve,
+        healReserve: loadout.healReserve,
         manaAt: this.clock,
         casts: new Map(),
         correctedAt: -Infinity,
@@ -343,6 +369,7 @@ export class FloorHost {
     }
     // The reserve only shrinks: re-checking can't refill drunk draughts.
     w.reserve = Math.min(w.reserve, loadout.manaReserve);
+    w.healReserve = Math.min(w.healReserve, loadout.healReserve);
     w.checkedAt = this.clock;
     return w;
   }
@@ -352,7 +379,7 @@ export class FloorHost {
    * ledger believes they wield, keep to that spell's cooldown (with their
    * fire-rate gear) and be paid for in mana — then it is cast HERE, with the
    * server's idea of their stats, and its hits are the only ones that count. */
-  private cast(from: string, data: unknown): void {
+  private cast(from: string, data: unknown, serverTime: number): void {
     const msg = sanitizeCastMsg(data);
     const at = this.lastPos.get(from);
     const w = this.gear(from);
@@ -379,10 +406,15 @@ export class FloorHost {
     const fromPool = Math.min(w.mana, spell.mana);
     w.mana -= fromPool;
     w.reserve = Math.max(0, w.reserve - (spell.mana - fromPool));
+    // Judged as the caster saw the floor: the cast's trip here plus the
+    // render delay — never further back than MAX_REWIND_MS.
+    const trip = msg.t > 0 && serverTime > 0 ? Math.max(0, serverTime - msg.t) : 0;
+    const lag = Math.min(MAX_REWIND_MS, trip + RENDER_DELAY_MS) / 1000;
     this.sim.castSpell(
       from,
       { abilityId: msg.abilityId, origin: { x: ox, y: oy, z: oz }, dir: { x: msg.dir[0], y: msg.dir[1], z: msg.dir[2] }, seed: msg.seed },
       { damageMult: w.stats.damageMult, extraProjectiles: w.stats.extraProjectiles, homing: w.stats.homing },
+      lag,
     );
     this.announce();
   }
@@ -481,22 +513,58 @@ export class FloorHost {
 
   /** A wizard who just fell here raises a grave with what the death took. */
   private graveDrop(from: string, d: Partial<GraveDropMsg> | null): void {
+    // A wizard whose death this host decided already has their grave.
+    if (this.fallen.has(from)) return;
     const contents = sanitizeGraveContents(d);
     if (!contents || !d || !isVec3(d.pos)) return;
     if (this.distSq(from, d.pos) > GRAVE_RAISE_RANGE_SQ) return;
     const killerId = typeof d.killerId === "string" && this.members.has(d.killerId) ? d.killerId : null;
+    this.raiseGrave(from, killerId, d.pos, contents);
+  }
+
+  private raiseGrave(owner: string, killerId: string | null, pos: Vec3, contents: GraveContents): void {
     const grave: LiveGrave = {
       id: `grave_${this.graveCounter++}_${Math.random().toString(36).slice(2, 6)}`,
-      ownerId: from,
-      ownerName: this.io.nameOf(from),
+      ownerId: owner,
+      ownerName: this.io.nameOf(owner),
       killerId,
       killerName: killerId ? this.io.nameOf(killerId) : null,
-      pos: [d.pos[0], d.pos[1], d.pos[2]],
-      color: robeColorOf(from),
+      pos: [pos[0], pos[1], pos[2]],
+      color: robeColorOf(owner),
       ...contents,
     };
     this.graves.push(grave);
     this.io.send(FLOOR.graveSpawned, grave);
+  }
+
+  // ── Duels ──────────────────────────────────────────────────────────────────
+
+  /** A wizard's spell hurt `victim`. The victim's client applies it (their
+   * health is theirs to show and to heal) — but this host keeps count: the
+   * duel damage alone, through their gear, past their max health and every
+   * draught they carry is a death no client can talk its way out of. */
+  private duelHit(victim: string, by: string, damage: number, impulse: Vec3): void {
+    this.io.send(FLOOR.wizardHit, { by, damage, impulse } satisfies WizardHitMsg, victim);
+    const w = this.gear(victim);
+    if (!w || this.fallen.has(victim)) return;
+    const taken = (this.duelTaken.get(victim) ?? 0) + damage * w.stats.damageTakenMult;
+    this.duelTaken.set(victim, taken);
+    const heal = Math.min(this.healLeft.get(victim) ?? w.healReserve, w.healReserve);
+    this.healLeft.set(victim, heal);
+    if (taken > w.stats.maxHealth + heal) this.fall(victim, by);
+  }
+
+  /** `victim` is dead by this host's count: their run ends, their grave
+   * rises where they were, and they're told. */
+  private fall(victim: string, killer: string): void {
+    this.fallen.add(victim);
+    const contents = this.ledger.forceDeath(this.inst.id, victim);
+    const at = this.lastPos.get(victim);
+    const grave = contents && sanitizeGraveContents(contents);
+    if (grave && at && (grave.items.length > 0 || grave.gold > 0)) {
+      this.raiseGrave(victim, this.members.has(killer) ? killer : null, [at[0], Math.max(0, at[1] - 0.9), at[2]], grave);
+    }
+    this.io.send(FLOOR.youFell, { killer } satisfies YouFellMsg, victim);
   }
 
   /** Plunder: what the wizard picked and can carry, from a grave they stand
@@ -544,6 +612,9 @@ export class FloorHost {
           orbs?.forEach((o, i) => this.spawnOrb(o, orbSpread(a.at, i, orbs.length)));
           break;
         }
+        case "wizardHit":
+          this.duelHit(a.wizard, a.by, a.damage, a.impulse);
+          break;
       }
     }
   }

@@ -287,7 +287,7 @@ export class Relay {
       case CHANNEL_AUTHORITY: {
         if (sender.id !== hostId) return; // only the host may publish authority
         if (to === SERVER_HOST_ID) {
-          served?.receive(sender.id, ch, data); // the handover's world sync
+          served?.receive(sender.id, ch, data, relayed.serverTime); // the handover's world sync
           return;
         }
         if (to !== undefined) {
@@ -299,18 +299,18 @@ export class Relay {
           return;
         }
         for (const m of this.mates(sender.id)) m.send(relayed);
-        served?.receive(sender.id, ch, data); // a server host listening in
+        served?.receive(sender.id, ch, data, relayed.serverTime); // a server host listening in
         return;
       }
       case CHANNEL_TO_HOST: {
         if (sender.id === hostId) return; // host handles its own locally
-        if (hostId === SERVER_HOST_ID) served?.receive(sender.id, ch, data);
+        if (hostId === SERVER_HOST_ID) served?.receive(sender.id, ch, data, relayed.serverTime);
         else this.peers.get(hostId)?.send(relayed);
         return;
       }
       case CHANNEL_PEER: {
         for (const m of this.mates(sender.id)) m.send(relayed);
-        served?.receive(sender.id, ch, data);
+        served?.receive(sender.id, ch, data, relayed.serverTime);
         return;
       }
       default:

@@ -1,5 +1,5 @@
 import type RAPIER from "@dimforge/rapier3d-compat";
-import { PLAYER } from "../core/config";
+import { PLAYER, PVP } from "../core/config";
 import type { Vec } from "../enemies/brains/common";
 import { ENEMY_STATS, type EnemyId } from "../enemies/roster";
 import { NEUTRAL_FLOOR_RULES, type FloorRules } from "../game/floorRules";
@@ -7,12 +7,13 @@ import { q2, q3 } from "../net/snapshots";
 import { sanitizeHit } from "../weapons/hits";
 import { omenRules } from "../world/omens";
 import type { FloorLayout, PropKind, Vec3 } from "../world/types";
-import { enemyBody, WIZARD_GROUPS } from "./bodies";
+import { STRONG_PUSH } from "../weapons/allegiance";
+import { boundingCapsule, enemyBody, WIZARD_GROUPS, type BoundingCapsule } from "./bodies";
 import { createEnemy, enemyOptions, type EnemyController } from "./enemies/controllers";
 import type { EnemyCore } from "./enemies/core";
 import { buildFloorPhysics, type FloorPhysics, type Rapier } from "./floorPhysics";
 import { blastFalloff, PROP_LOOT_MIN_Y, PROP_RULES } from "./props";
-import { PlayerSpells, type Cast, type SpellStats } from "./spells";
+import { PlayerSpells, type Cast, type SpellStats, type SpellTarget } from "./spells";
 import { DartTrapController } from "./traps";
 import type { EntitySnap, SimAction, SimCue, SimTarget, SimWorld } from "./world";
 
@@ -80,7 +81,16 @@ interface Blast {
   impulse: number;
   /** Neutral blasts (barrels) hurt enemies too; the Warden's slam doesn't. */
   hurtsEnemies: boolean;
+  /** A wizard's spell: wizards it may hurt are hurt too (by the duel rules). */
+  caster?: string;
+  /** Judged as of this many seconds ago (its caster's view — lag compensation). */
+  lag?: number;
 }
+
+/** How much of the recent past the floor remembers, for lag compensation (s). */
+const HISTORY_S = 0.5;
+/** A wizard as a spell meets them: the player's capsule. */
+const WIZARD_CAPSULE: BoundingCapsule = { lift: 0, halfHeight: PLAYER.halfHeight, radius: PLAYER.radius };
 
 const ENEMY_KINDS: ReadonlySet<string> = new Set(ENEMY_STATS.map((e) => e.id));
 
@@ -130,6 +140,13 @@ export class FloorSim {
   private spawned = 0;
   private flushing = false;
   private readonly spells: PlayerSpells;
+  /** Recent positions of enemies and wizards, oldest first. */
+  private readonly history: { t: number; at: Map<string, Vec3> }[] = [];
+  private readonly shapes = new Map<string, BoundingCapsule>();
+  private readonly targetScratch: SpellTarget[] = [];
+  /** May `caster`'s magic hurt wizard `wizard`? (Pacts — the floor host's
+   * call.) None may, until told otherwise. */
+  private hostile: (caster: string, wizard: string) => boolean = () => false;
 
   /** What the sim asks of the world — answered from this floor alone. */
   readonly world: SimWorld;
@@ -173,21 +190,7 @@ export class FloorSim {
       R,
       world: this.physics.world,
       gravity: this.physics.world.gravity.y,
-      nearestEnemy: (pos, range) => {
-        let best: Vec | null = null;
-        let bestD2 = range * range;
-        for (const [id, e] of this.enemies) {
-          if (e.core.dead) continue;
-          const t = this.physics.bodies.get(id)?.translation();
-          if (!t) continue;
-          const d2 = (t.x - pos.x) ** 2 + (t.y - pos.y) ** 2 + (t.z - pos.z) ** 2;
-          if (d2 < bestD2) {
-            bestD2 = d2;
-            best = t;
-          }
-        }
-        return best;
-      },
+      targets: (caster, lag) => this.targetsAt(caster, lag),
       forEachTarget: (fn) => {
         for (const [id, body] of [...this.physics.bodies]) {
           if (!this.alive(id)) continue;
@@ -197,17 +200,46 @@ export class FloorSim {
       strike: (id, damage, impulse) => {
         if (this.alive(id)) this.strike(id, damage, impulse);
       },
-      explode: (at, radius, damage, impulse) =>
-        this.blasts.push({ at: { x: at.x, y: at.y, z: at.z }, radius, damage, impulse, hurtsEnemies: true }),
+      explode: (at, radius, damage, impulse, caster, lag) =>
+        this.blasts.push({ at: { x: at.x, y: at.y, z: at.z }, radius, damage, impulse, hurtsEnemies: true, caster, lag }),
     });
   }
 
   /** A wizard's cast, as this authority accepted it (the caller checked who
    * may cast what, from where, how often — server/floorHost.ts): from now
-   * on its bolts fly, its blasts land and its seeds wait here. */
-  castSpell(caster: string, cast: Cast, stats: SpellStats): void {
-    this.spells.cast(caster, cast, stats);
+   * on its bolts fly, its blasts land and its seeds wait here. `lag`: how
+   * far behind this sim the caster saw the floor (latency + render delay);
+   * the cast is judged against where things were then. */
+  castSpell(caster: string, cast: Cast, stats: SpellStats, lag = 0): void {
+    this.spells.cast(caster, cast, stats, Math.min(Math.max(0, lag), HISTORY_S));
     this.flush();
+  }
+
+  /** Who may hurt whom among the wizards here (the floor host's pacts). */
+  setHostility(fn: (caster: string, wizard: string) => boolean): void {
+    this.hostile = fn;
+  }
+
+  /** Where `id` (an enemy or a wizard) was `ago` seconds back — the recent
+   * history, interpolated; its position now when that's all there is. */
+  positionAgo(id: string, ago: number): Vec | null {
+    const now = this.currentPosition(id);
+    if (!now || ago <= 0 || this.history.length === 0) return now;
+    const t = this.time - ago;
+    const h = this.history;
+    if (t >= h[h.length - 1].t) return now;
+    for (let i = h.length - 1; i > 0; i--) {
+      const a = h[i - 1];
+      const b = h[i];
+      if (t < a.t) continue;
+      const pa = a.at.get(id);
+      const pb = b.at.get(id);
+      if (!pa || !pb) return pb ? { x: pb[0], y: pb[1], z: pb[2] } : now;
+      const f = (t - a.t) / (b.t - a.t || 1);
+      return { x: pa[0] + (pb[0] - pa[0]) * f, y: pa[1] + (pb[1] - pa[1]) * f, z: pa[2] + (pb[2] - pa[2]) * f };
+    }
+    const oldest = h[0].at.get(id);
+    return oldest ? { x: oldest[0], y: oldest[1], z: oldest[2] } : now;
   }
 
   /** Player projectiles and black holes in play (tests, counts). */
@@ -280,6 +312,7 @@ export class FloorSim {
     this.flush();
     this.physics.step(dt);
     this.time += dt;
+    this.record();
   }
 
   // ── Replica (before taking a floor over) ───────────────────────────────────
@@ -423,6 +456,46 @@ export class FloorSim {
       () => this.physics.bodies.get(id) ?? null,
     );
     this.enemies.set(id, { core, ctl, immobile: spec.type === "fixed" });
+    this.shapes.set(id, boundingCapsule(spec));
+  }
+
+  /** Remember where every enemy and wizard is, for lag compensation. */
+  private record(): void {
+    const at = new Map<string, Vec3>();
+    for (const id of this.enemies.keys()) {
+      const t = this.physics.bodies.get(id)?.translation();
+      if (t) at.set(id, [t.x, t.y, t.z]);
+    }
+    for (const [id, w] of this.wizards) at.set(id, [w.pos.x, w.pos.y, w.pos.z]);
+    this.history.push({ t: this.time, at });
+    while (this.history.length > 2 && this.history[0].t < this.time - HISTORY_S) this.history.shift();
+  }
+
+  private currentPosition(id: string): Vec | null {
+    const w = this.wizards.get(id);
+    if (w) return { x: w.pos.x, y: w.pos.y, z: w.pos.z };
+    const t = this.physics.bodies.get(id)?.translation();
+    return t ? { x: t.x, y: t.y, z: t.z } : null;
+  }
+
+  /** Living enemies, and wizards `caster` may hurt, as of `lag` s ago. */
+  private targetsAt(caster: string, lag: number): readonly SpellTarget[] {
+    const out = this.targetScratch;
+    out.length = 0;
+    for (const [id, e] of this.enemies) {
+      if (e.core.dead) continue;
+      const at = this.positionAgo(id, lag);
+      const shape = this.shapes.get(id);
+      if (!at || !shape) continue;
+      out.push({ id, wizard: false, center: { x: at.x, y: at.y + shape.lift, z: at.z }, halfHeight: shape.halfHeight, radius: shape.radius });
+    }
+    for (const id of this.wizards.keys()) {
+      if (id === caster || !this.hostile(caster, id)) continue;
+      const at = this.positionAgo(id, lag);
+      if (!at) continue;
+      out.push({ id, wizard: true, center: at, halfHeight: WIZARD_CAPSULE.halfHeight, radius: WIZARD_CAPSULE.radius });
+    }
+    return out;
   }
 
   /** Damage and a shove land on an enemy or a prop (already sanitized). */
@@ -462,12 +535,40 @@ export class FloorSim {
   private detonate(b: Blast): void {
     const radius = b.radius * this.rules.explosionRadiusMult;
     const shove = this.shove;
+    const lag = b.lag ?? 0;
     for (const [id, body] of [...this.physics.bodies]) {
       const enemy = this.enemies.has(id);
       if (enemy && !b.hurtsEnemies) continue;
       if (!enemy && !this.props.has(id)) continue;
-      const dealt = blastFalloff(b.at, body.translation(), radius, b.damage, b.impulse, shove);
+      // Enemies where the caster saw them; props where they are.
+      const at = enemy && lag > 0 ? this.positionAgo(id, lag) : body.translation();
+      if (!at) continue;
+      const dealt = blastFalloff(b.at, at, radius, b.damage, b.impulse, shove);
       if (dealt !== null && this.alive(id)) this.strike(id, dealt, { x: shove.x, y: shove.y, z: shove.z });
+    }
+    // A duel: wizards the caster may hurt take the blast as its victim's
+    // client would — the falloff, the duel's damage share, a strong shove.
+    const caster = b.caster;
+    if (!caster) return;
+    for (const id of this.wizards.keys()) {
+      if (id === caster || !this.hostile(caster, id)) continue;
+      const at = this.positionAgo(id, lag);
+      if (!at) continue;
+      const dx = at.x - b.at.x;
+      const dy = at.y - b.at.y;
+      const dz = at.z - b.at.z;
+      const dist = Math.hypot(dx, dy, dz);
+      if (dist >= radius) continue;
+      const falloff = 1 - dist / radius;
+      const push = b.impulse * falloff * STRONG_PUSH;
+      const k = dist > 0 ? push / dist : 0;
+      this.outbox.push({
+        type: "wizardHit",
+        wizard: id,
+        by: caster,
+        damage: b.damage * falloff * PVP.damageMult,
+        impulse: [dx * k, dy * k + push * 0.5, dz * k],
+      });
     }
   }
 

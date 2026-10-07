@@ -174,9 +174,12 @@ alone hosts their own floor; the moment a second wizard arrives the
 default — `always` hosts every floor server-side, `never` none). There
 the server also runs every wizard's spells itself, with the gear it knows
 they carry, and refuses impossible moves — a client can say what it cast
-and where it went, never what it hit. Replicas predict and reconcile. Your own health is always decided locally — which is
-also how wizard-vs-wizard damage works: a stranger's spell hurts you on your
-own machine, and the last wizard who hurt you takes the kill credit. The
+and where it went, never what it hit — each cast judged as its caster saw
+the floor (lag compensation). Replicas predict and reconcile. Your health
+is shown and applied on your own machine; a stranger's spell hurts you
+there — judged by the server on a shared floor, which can also prove a duel
+death your client won — and the last wizard who hurt you takes the kill
+credit. The
 server keeps the saves and rolls the loot: the host only reports what died,
 the server decides what it dropped and grants each orb once (a dropped gift
 moves between wizards, never doubles), and new floors keep a human pace. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
@@ -234,7 +237,7 @@ Design rules that keep it future-proof:
 
 ## Roadmap
 
-- Lag compensation for server-resolved spells (rewind enemies by the
-  caster's latency), and server-decided PvP for arenas
+- Server-owned wizard health (the dungeon's damage judged by the server too),
+  then PvP arenas the server runs end to end
 - A unique boss per biome
 - More omens, carvings and enemy archetypes; biome-specific hazards

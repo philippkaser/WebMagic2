@@ -9,6 +9,7 @@ import { isHostileWizard } from "../game/hostility";
 import { getPlayerBody, playerPosition } from "../game/player-state";
 import { forEachHittable } from "../game/registry";
 import { blastFalloff } from "../sim/props";
+import { isServerHosted } from "../net/netStore";
 import { useGame } from "../state/gameStore";
 import { localBlastEffect, type DamageTeam } from "./allegiance";
 import { localWizardId } from "./localWizard";
@@ -90,6 +91,9 @@ export function explode(opts: ExplosionOptions): void {
   if (playerDist < radius) {
     const falloff = 1 - playerDist / radius;
     const effect = localBlastEffect(team, opts.source, localWizardId(), isHostileWizard);
+    // On a server-hosted floor a hostile wizard's blast is the server's to
+    // judge (it sends the hit, damage and shove — weapons/hostileEffects).
+    if (effect.relation === "hostile" && isServerHosted()) return;
     if (effect.damageMult > 0) {
       useGame.getState().takeDamage(damage * falloff * effect.damageMult, effect.source);
     }

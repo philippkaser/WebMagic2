@@ -87,9 +87,9 @@ export const GROUPS = {
   HOSTILE_SPELL: 8,
 } as const;
 
-/** Wizard-vs-wizard tuning. Damage between hostile wizards is decided on the
- * VICTIM's machine (your health is always yours), scaled down so a duel is a
- * fight, not a one-shot. */
+/** Wizard-vs-wizard tuning, scaled down so a duel is a fight, not a
+ * one-shot. Applied by the victim's machine on a floor a wizard hosts, by
+ * the server's copy of the cast on one the server hosts (sim/floorSim.ts). */
 export const PVP = {
   damageMult: 0.55,
   /** A hostile hit within this window names the killer on death. */

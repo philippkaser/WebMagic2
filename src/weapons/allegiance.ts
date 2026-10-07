@@ -64,7 +64,8 @@ export const GENTLE_PUSH = 0.16;
 
 const BLAST_DAMAGE: Record<LocalRelation, number> = {
   dungeon: 1,
-  // Duels are fights, not one-shots — decided on the victim's machine.
+  // Duels are fights, not one-shots (on a server-hosted floor the server
+  // applies the same share — sim/floorSim.ts — and the victim's copy stays out).
   hostile: PVP.damageMult,
   own: 0,
   ally: 0,

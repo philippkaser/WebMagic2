@@ -9,6 +9,7 @@ import { getItemDef } from "../items/catalog";
 import type { ItemDef } from "../items/types";
 import { peerMessage } from "../net/channels";
 import { FLOOR } from "../net/floorProtocol";
+import { netClock } from "../net/clock";
 import { estimatePeer } from "../net/players";
 import { input } from "../player/input";
 import { getStats, useGame } from "../state/gameStore";
@@ -88,7 +89,7 @@ function castFromStaff(abilityId: string, staff: ItemDef, camera: Camera): numbe
   // runs its own copy); ours flies for the feel of it, the same volley.
   const seed = newCastSeed();
   ability.cast({ origin: muzzle, dir: aim, stats, staff, caster: localWizardId(), seed });
-  peerCast.send(encodeCastMsg(ability.id, muzzle, aim, staff.id, stats, seed));
+  peerCast.send(encodeCastMsg(ability.id, muzzle, aim, staff.id, stats, seed, netClock.serverNow()));
   // Muzzle flare: rides with our own velocity so a strafing cast doesn't
   // leave its flash hanging in the air behind the staff.
   castFlareFx(muzzle, aim, staff.color, playerVelocity);

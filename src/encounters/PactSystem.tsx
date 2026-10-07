@@ -6,6 +6,7 @@ import { playerPosition } from "../game/player-state";
 import { setRelationResolver } from "../game/hostility";
 import { netBus } from "../net/bus";
 import { peerMessage } from "../net/channels";
+import { FLOOR, type PactMsg } from "../net/floorProtocol";
 import { netClock } from "../net/clock";
 import { useNet } from "../net/netStore";
 import { estimatePeer, peerIds, peerName } from "../net/players";
@@ -20,7 +21,6 @@ import {
   pactStep,
   type PactEvent,
   type PactNotice,
-  type PactWire,
 } from "./pacts";
 
 /** Pacts, live: the network messages, the F key, and the hostility answer
@@ -35,12 +35,9 @@ import {
 /** How close you must stand to swear, accept or break a pact. */
 const PACT_RANGE = 4.5;
 
-interface PactMsg {
-  to: string;
-  kind: PactWire;
-}
-
-const pactMsg = peerMessage<PactMsg>("pact", (msg, meta) => {
+// The wire format is the floor's (net/floorProtocol.ts): a server host keeps
+// its own book of the same messages (encounters/pactBook.ts) to judge duels.
+const pactMsg = peerMessage<PactMsg>(FLOOR.pact, (msg, meta) => {
   if (!msg || msg.to !== selfId()) return;
   if (msg.kind !== "offer" && msg.kind !== "accept" && msg.kind !== "break") return;
   apply(meta.from, { kind: "received", msg: msg.kind });

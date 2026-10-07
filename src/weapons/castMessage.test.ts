@@ -17,6 +17,7 @@ const good = (): CastMsg => ({
   origin: [1, 2, 3],
   dir: [0, 0, -1],
   seed: 77,
+  t: 0,
   staffId: "splinter_staff",
   stats: { damageMult: 1.12, extraProjectiles: 1, homing: 0.3 },
 });
@@ -30,6 +31,7 @@ describe("encodeCastMsg → sanitizeCastMsg", () => {
       "ember_staff",
       { damageMult: 1.3, extraProjectiles: 2, homing: 0.5 },
       123456,
+      1_700_000_000_000,
     );
     expect(sanitizeCastMsg(msg)).toEqual(msg);
   });
@@ -107,7 +109,7 @@ describe("sanitizeCastMsg — degrades softer problems", () => {
 
   test("the output carries only known fields", () => {
     const out = sanitizeCastMsg({ ...good(), damage: 9999, stats: { ...good().stats, fireRateMult: 50 } })!;
-    expect(Object.keys(out).sort()).toEqual(["abilityId", "dir", "origin", "seed", "staffId", "stats"]);
+    expect(Object.keys(out).sort()).toEqual(["abilityId", "dir", "origin", "seed", "staffId", "stats", "t"]);
     expect(Object.keys(out.stats).sort()).toEqual(["damageMult", "extraProjectiles", "homing"]);
   });
 });

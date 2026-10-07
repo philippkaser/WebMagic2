@@ -2,7 +2,7 @@ import type { EntitySnap } from "../sim/world";
 import { netBus } from "./bus";
 import { hostCommand, onAuthority, sendAuthorityTo } from "./channels";
 import { netClock } from "./clock";
-import { FLOOR, type CmdMsg, type DespawnMsg, type SnapMsg, type WorldSyncMsg } from "./floorProtocol";
+import { FLOOR, RENDER_DELAY_MS, type CmdMsg, type DespawnMsg, type SnapMsg, type WorldSyncMsg } from "./floorProtocol";
 import { isHost, useNet } from "./netStore";
 import { CHANNEL_AUTHORITY } from "./protocol";
 import {
@@ -260,7 +260,7 @@ onAuthority<WorldSyncMsg>(FLOOR.worldSync, (msg, meta) => {
 export const SNAP_INTERVAL_S = 1 / 20;
 /** Target this far behind the shared timeline — ~2 snaps of jitter buffer.
  * Predicted replicas soften the cost: corrections are velocities, not warps. */
-export const INTERP_DELAY_MS = 90;
+export const INTERP_DELAY_MS = RENDER_DELAY_MS;
 /** Re-send an unchanged awake entity at least this often. */
 const KEEPALIVE_MS = 500;
 /** How long a predicted impulse keeps the steering leash soft (~1 RTT + one

@@ -282,14 +282,16 @@ with the gear it believes they carry, at that gear's pace and mana, and
 refuses moves no wizard could make. What remains client-reported even
 there: *aim* (a cast's direction — an aimbot still aims), movement within
 what's possible (a modest speed-hack inside the generous burst budget),
-the volley seed (a client could pick tight spreads), your own health and
-death, and so PvP, which still trusts the victim's machine; grave
-contents are declared by the dying wizard (bounded by the pool, so they
-can't mint); device tokens are bearer secrets in localStorage (fine for a
-foundation, replaced by real auth). Shots are judged against where the
-enemies are on the server when the cast arrives — there's no lag
-compensation (rewind) yet, so a fast enemy can dodge a bolt its caster saw
-land. Rate limiting and pickup sanitization run server-/authority-side.
+the volley seed (a client could pick tight spreads), the cast's timestamp
+(a client could claim up to the 300 ms rewind cap), and your own health:
+the server decides every duel hit and can PROVE a death from duel damage
+alone (see *Duels*), but the dungeon's damage to you — contact burns,
+enemy bolts, slams, traps — is still applied by your own client, so a
+god-mode client survives monsters (never a duel past the proof); grave
+contents a client declares are bounded by the pool (they can't mint);
+device tokens are bearer secrets in localStorage (fine for a foundation,
+replaced by real auth). Rate limiting and pickup sanitization run
+server-/authority-side.
 
 ### Physics budget (measured)
 
@@ -430,6 +432,31 @@ taken until the floor is gone; everyone else leaving doesn't hand it back.
   (`a:correct`). `DEV_MOVES=1` switches this off for the e2e test's
   teleports.
 
+**Lag compensation.** A caster aims at the floor their screen shows —
+behind the server by the cast's trip and the render delay (enemies and
+other wizards are drawn `RENDER_DELAY_MS` = 90 ms behind the shared
+clock). Every cast carries its server-clock time; the floor host judges it
+as of `trip + render delay`, capped at `MAX_REWIND_MS` (300 ms): `FloorSim`
+remembers half a second of every enemy's and wizard's positions, and a
+lagged spell's projectiles, homing and blasts meet them there
+(`sim/sweep.ts` sweeps the ball against their capsules; walls and props
+are judged now). So what a caster saw land is what lands, without letting
+anyone shoot further into the past than the cap.
+
+**Duels.** The floor host keeps its own book of pacts (`encounters/
+pactBook.ts`) from the same `p:pact` messages the wizards exchange: a pair
+is sworn once one offered and the other accepted, unsworn when either
+breaks it. The server's copy of every cast hits wizards its caster may
+hurt — lag-compensated like enemies — with the duel's rules
+(`PVP.damageMult`, `STRONG_PUSH`) and the server's stats, and sends the
+victim `a:wizardHit` (damage, shove, who); their client applies it, kill
+credit included, and no longer judges hostile replays itself. The host
+also keeps count: once a wizard's duel damage alone (through their gear)
+passes their max health plus every heal their carried draughts hold, they
+are dead whatever their client says — the ledger ends their run
+(`forceDeath`, the grave pool takes their finds), the host raises their
+grave and sends `a:youFell`.
+
 A wizard who stops sending poses (dead, frozen) stops being hunted after
 2 s; their last good position still counts for range checks (a fallen
 wizard's grave). The floors tick at ~60 Hz in `server/server.ts`
@@ -481,12 +508,15 @@ lands), so that source drops nothing.
   one-sided breaks mark an oathbreaker; offers lapse after 20 s.
   `PactSystem.tsx` sends `p:pact` messages addressed to one wizard and binds
   the F key.
-- **Victim-side damage**: a peer's cast replays on every machine
+- **Who decides a duel hit**: a peer's cast replays on every machine
   (`weapons/CastingSystem.tsx`, with the caster's staff and a sanitized stats
-  subset; the origin must be within 6 m of the caster's known pose). On the
-  victim's machine, `weapons/allegiance.ts#localBlastEffect` decides: hostile
-  wizard → damage × `PVP.damageMult` (0.55); own or allied magic → no damage.
-  Your health stays yours, like every other hit.
+  subset; the origin must be within 6 m of the caster's known pose). On a
+  floor a wizard hosts, the victim's machine decides
+  (`weapons/allegiance.ts#localBlastEffect`): hostile wizard → damage ×
+  `PVP.damageMult` (0.55); own or allied magic → no damage. On a floor the
+  server hosts, the server's copy of the cast decides — with the same rules
+  and numbers — and sends the victim the hit (see *Duels*); the replay only
+  shows it.
 - **Collision groups** (`core/config.ts GROUPS`): our capsule is
   PLAYER + LOCAL_PLAYER; a hostile peer's capsule adds PEER_HOSTILE and
   accepts FRIENDLY_PROJECTILE (our bolts burst on them visually); a hostile

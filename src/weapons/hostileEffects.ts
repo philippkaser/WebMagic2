@@ -1,6 +1,9 @@
-import { ENEMY_SOURCE, WORLD_SOURCE, type DamageSource } from "../game/damageSource";
-import { hostEvent } from "../net/channels";
-import { FLOOR } from "../net/floorProtocol";
+import { gameEvents } from "../core/events";
+import { ENEMY_SOURCE, WORLD_SOURCE, wizardSource, type DamageSource } from "../game/damageSource";
+import { getPlayerBody } from "../game/player-state";
+import { hostEvent, onAuthority } from "../net/channels";
+import { FLOOR, type WizardHitMsg, type YouFellMsg } from "../net/floorProtocol";
+import { useGame } from "../state/gameStore";
 import type { BoomData, CastData } from "../sim/world";
 import { explode } from "./explosions";
 import { fireProjectile } from "./projectiles";
@@ -41,6 +44,27 @@ export const enemyCast = hostEvent<EnemyCastData>(FLOOR.enemyCast, (d, meta) => 
 });
 
 export type { BoomData };
+
+// ── Duels a server host decides ───────────────────────────────────────────────
+
+/** Another wizard's spell hurt us — the server's copy of it, judged as its
+ * caster saw us (lag compensation). Our health is still ours to show: apply
+ * the damage (through our gear, credited to them) and the shove. */
+onAuthority<WizardHitMsg>(FLOOR.wizardHit, (d) => {
+  const i = d?.impulse;
+  if (typeof d?.by !== "string" || !(d.damage >= 0) || !Array.isArray(i) || !i.every(Number.isFinite)) return;
+  useGame.getState().takeDamage(d.damage, wizardSource(d.by));
+  getPlayerBody()?.applyImpulse({ x: i[0], y: i[1], z: i[2] }, true);
+  gameEvents.emit("shake", Math.min(Math.hypot(i[0], i[1], i[2]) / 12, 1));
+});
+
+/** The server knows we're dead: the duel damage alone passed all we could
+ * have healed. Fall, whatever our own count says. */
+onAuthority<YouFellMsg>(FLOOR.youFell, (d) => {
+  const s = useGame.getState();
+  if (s.phase !== "dungeon" || s.health <= 0) return;
+  s.takeDamage(Infinity, typeof d?.killer === "string" ? wizardSource(d.killer) : WORLD_SOURCE);
+});
 
 export const enemyBoom = hostEvent<BoomData>(FLOOR.enemyBoom, (d, meta) => {
   explode({

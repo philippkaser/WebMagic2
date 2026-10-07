@@ -256,20 +256,9 @@ export class Ledger {
       case "loadout":
         if (typeof msg.equipment === "object" && msg.equipment !== null) this.loadouts.set(peerId, msg.equipment);
         break;
-      case "died": {
-        const account = this.accountOf(peerId);
-        const inst = this.world.instanceOf(peerId);
-        // Died where others stood witness: what this run was granted may
-        // lie in a grave now, so it becomes plunderable — and nothing else.
-        if (inst && inst.players.size > 1) {
-          const pool = this.gravePoolOf(inst.id);
-          for (const id of account.runGrants) pool.items.set(id, (pool.items.get(id) ?? 0) + 1);
-          pool.gold += account.runGold;
-        }
-        this.accounts.endRun(account);
-        this.lastInstance.delete(account.token);
+      case "died":
+        this.endRunInDeath(peerId);
         break;
-      }
       case "loot": {
         // Only the floor's host reports deaths and breaks.
         const inst = this.hostedBy(peerId);
@@ -346,8 +335,45 @@ export class Ledger {
     const account = this.accountOf(playerId as string);
     const equipment = this.accounts.checkLoadout(account, this.loadouts.get(playerId as string) ?? account.inventory.equipment);
     let manaReserve = 0;
-    for (const [id, qty] of this.accounts.carried(account)) manaReserve += manaDraught(id) * qty;
-    return { equipment, manaReserve };
+    let healReserve = 0;
+    for (const [id, qty] of this.accounts.carried(account)) {
+      const effect = consumableEffect(id);
+      manaReserve += (effect?.mana ?? 0) * qty;
+      healReserve += (effect?.heal ?? 0) * qty;
+    }
+    return { equipment, manaReserve, healReserve };
+  }
+
+  /** The floor's host KNOWS `playerId` is dead (server/floorHost.ts — the
+   * duel damage alone passed all they could heal), whatever their client
+   * says: their run ends as if they had died — what it found becomes the
+   * grave pool's, and the grave's contents are returned for the host to
+   * raise. Null when their run is already over (they died on their own). */
+  forceDeath(instanceId: string, playerId: unknown): { items: { id: string; qty: number }[]; gold: number } | null {
+    const inst = this.memberFloor(instanceId, playerId);
+    if (!inst) return null;
+    const account = this.accountOf(playerId as string);
+    if (account.runFloor === 0) return null;
+    const counts = new Map<string, number>();
+    for (const id of account.runGrants) counts.set(id, (counts.get(id) ?? 0) + 1);
+    const contents = { items: [...counts].map(([id, qty]) => ({ id, qty })), gold: account.runGold };
+    this.endRunInDeath(playerId as string);
+    this.log(`${playerId} fell on ${inst.id} (the floor's host knows it)`);
+    return contents;
+  }
+
+  /** A run lost to death. Where others stood witness, what it was granted
+   * may lie in a grave now, so it becomes plunderable — and nothing else. */
+  private endRunInDeath(peerId: string): void {
+    const account = this.accountOf(peerId);
+    const inst = this.world.instanceOf(peerId);
+    if (inst && inst.players.size > 1) {
+      const pool = this.gravePoolOf(inst.id);
+      for (const id of account.runGrants) pool.items.set(id, (pool.items.get(id) ?? 0) + 1);
+      pool.gold += account.runGold;
+    }
+    this.accounts.endRun(account);
+    this.lastInstance.delete(account.token);
   }
 
   /** What orb `orbId` holds, if it's still on the floor (unclaimed). */
@@ -530,14 +556,17 @@ export interface CheckedLoadout {
   /** The mana its carried draughts restore, all told (what it may spend
    * beyond its pool on a floor). */
   manaReserve: number;
+  /** The health its carried draughts restore, all told (what it may survive
+   * beyond its max health). */
+  healReserve: number;
 }
 
-/** Mana a carried item restores when drunk (0 for anything else). */
-function manaDraught(itemId: string): number {
+/** What a carried item does when drunk (null for anything else). */
+function consumableEffect(itemId: string): { mana?: number; heal?: number } | null {
   try {
-    return resolveItem(itemId).def.consumable?.mana ?? 0;
+    return resolveItem(itemId).def.consumable ?? null;
   } catch {
-    return 0;
+    return null;
   }
 }
 

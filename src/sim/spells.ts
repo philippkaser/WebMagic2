@@ -5,6 +5,22 @@ import type { Vec } from "../enemies/brains/common";
 import { getSpellDef, type BoltSpell, type SpellDef } from "../weapons/spellCatalog";
 import { interactionGroups } from "./bodies";
 import type { Rapier } from "./floorPhysics";
+import { sweepBallCapsule, type Capsule } from "./sweep";
+
+/** The nearest enemy among `targets` within `range` of `pos` (homing). */
+function nearestEnemy(targets: readonly SpellTarget[], pos: Vec, range: number): SpellTarget | null {
+  let best: SpellTarget | null = null;
+  let bestD2 = range * range;
+  for (const t of targets) {
+    if (t.wizard) continue;
+    const d2 = (t.center.x - pos.x) ** 2 + (t.center.y - pos.y) ** 2 + (t.center.z - pos.z) ** 2;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = t;
+    }
+  }
+  return best;
+}
 
 /** Player spells, as the floor's authority runs them.
  *
@@ -95,20 +111,35 @@ export function steerHoming(pos: Vec, vel: Vec, target: Vec, homing: number, dt:
 
 // ── The authority's copy ─────────────────────────────────────────────────────
 
-/** What the spells need from the floor they're cast on (sim/floorSim.ts). */
+/** Something a spell can hit that moves: an enemy, or a wizard its caster
+ * may hurt — as a capsule where the caster saw it. */
+export interface SpellTarget extends Capsule {
+  id: string;
+  wizard: boolean;
+}
+
+/** What the spells need from the floor they're cast on (sim/floorSim.ts).
+ *
+ * Lag compensation: a caster aims at the world as their screen showed it —
+ * `lag` seconds behind the authority (their latency plus the render
+ * delay). The floor answers `targets` and `explode` as of that moment, so
+ * what the caster saw land is what lands. Walls and props are judged now:
+ * they barely move. */
 export interface SpellWorld {
   readonly R: Rapier;
   readonly world: RAPIER.World;
   /** World gravity (m/s², the floor's omen included). */
   readonly gravity: number;
-  /** The nearest living enemy to `pos` within `range` (homing), or null. */
-  nearestEnemy(pos: Vec, range: number): Vec | null;
-  /** Every living enemy and standing prop: id, where, which. */
+  /** Living enemies, and wizards `caster` may hurt, `lag` s ago (shared
+   * scratch — valid until the next call). */
+  targets(caster: string, lag: number): readonly SpellTarget[];
+  /** Every living enemy and standing prop, now: id, where, which. */
   forEachTarget(fn: (id: string, at: Vec, enemy: boolean) => void): void;
   /** Damage and a shove land on an enemy or prop. */
   strike(id: string, damage: number, impulse: Vec): void;
-  /** A player-team explosion: hurts enemies and props, by the shared falloff. */
-  explode(at: Vec, radius: number, damage: number, impulse: number): void;
+  /** `caster`'s explosion, judged `lag` s ago: hurts enemies and props by
+   * the shared falloff — and wizards the caster may hurt, by the duel rules. */
+  explode(at: Vec, radius: number, damage: number, impulse: number, caster: string, lag: number): void;
 }
 
 /** A cast as the authority accepted it (net-validated and sanitized). */
@@ -123,6 +154,8 @@ export interface Cast {
 
 interface Projectile {
   caster: string;
+  /** How far behind the authority its caster saw the floor (s). */
+  lag: number;
   pos: Vec;
   vel: Vec;
   size: number;
@@ -138,20 +171,24 @@ interface Projectile {
 }
 
 interface Hole {
+  caster: string;
+  lag: number;
   pos: Vec;
   damage: number;
   age: number;
   tug: number;
 }
 
-/** Player projectiles fly into walls, enemies and props — never wizards. */
-const PROJECTILE_FILTER = interactionGroups(GROUPS.FRIENDLY_PROJECTILE, [GROUPS.WORLD, GROUPS.ENEMY, GROUPS.PROP]);
+/** In the physics world a player projectile meets walls and props; enemies
+ * and wizards it meets as rewound capsules (SpellWorld.targets). */
+const PROJECTILE_FILTER = interactionGroups(GROUPS.FRIENDLY_PROJECTILE, [GROUPS.WORLD, GROUPS.PROP]);
 
 export class PlayerSpells {
   private projectiles: Projectile[] = [];
   private holes: Hole[] = [];
   private readonly shapes = new Map<number, RAPIER.Ball>();
   private readonly noRotation = { x: 0, y: 0, z: 0, w: 1 };
+  private readonly move: Vec = { x: 0, y: 0, z: 0 };
 
   constructor(private readonly w: SpellWorld) {}
 
@@ -160,14 +197,16 @@ export class PlayerSpells {
     return { projectiles: this.projectiles.length, holes: this.holes.length };
   }
 
-  /** `caster` casts: what the spell does starts now. */
-  cast(caster: string, c: Cast, stats: SpellStats): void {
+  /** `caster` casts, having seen the floor `lag` s ago: what the spell does
+   * starts now. */
+  cast(caster: string, c: Cast, stats: SpellStats, lag = 0): void {
     const def: Readonly<SpellDef> = getSpellDef(c.abilityId);
     switch (def.kind) {
       case "bolt":
         for (const d of boltVolley(def, c.dir, stats.extraProjectiles, c.seed)) {
           this.projectiles.push({
             caster,
+            lag,
             pos: { ...c.origin },
             vel: { x: d.x * def.speed, y: d.y * def.speed, z: d.z * def.speed },
             size: def.size,
@@ -184,15 +223,16 @@ export class PlayerSpells {
         return;
       case "blast": {
         const at = { x: c.origin.x + c.dir.x * def.reach, y: c.origin.y + c.dir.y * def.reach, z: c.origin.z + c.dir.z * def.reach };
-        this.w.explode(at, def.radius, def.damage * stats.damageMult, def.impulse);
+        this.w.explode(at, def.radius, def.damage * stats.damageMult, def.impulse, caster, lag);
         return;
       }
       case "shockwave":
-        this.w.explode(c.origin, def.radius, def.damage * stats.damageMult, def.impulse);
+        this.w.explode(c.origin, def.radius, def.damage * stats.damageMult, def.impulse, caster, lag);
         return;
       case "seed":
         this.projectiles.push({
           caster,
+          lag,
           pos: { ...c.origin },
           vel: { x: c.dir.x * def.speed, y: c.dir.y * def.speed, z: c.dir.z * def.speed },
           size: def.size,
@@ -210,7 +250,7 @@ export class PlayerSpells {
         // Every seed this caster has out becomes a black hole where it is.
         this.projectiles = this.projectiles.filter((p) => {
           if (!p.seed || p.caster !== caster) return true;
-          this.holes.push({ pos: { ...p.pos }, damage: p.damage, age: 0, tug: 0 });
+          this.holes.push({ caster, lag, pos: { ...p.pos }, damage: p.damage, age: 0, tug: 0 });
           return false;
         });
         return;
@@ -237,13 +277,15 @@ export class PlayerSpells {
       return false;
     }
     p.vel.y += this.w.gravity * p.gravityScale * dt;
+    const targets = this.w.targets(p.caster, p.lag);
     if (p.homing > 0) {
-      const target = this.w.nearestEnemy(p.pos, HOMING.range);
-      if (target) steerHoming(p.pos, p.vel, target, p.homing, dt);
+      const enemy = nearestEnemy(targets, p.pos, HOMING.range);
+      if (enemy) steerHoming(p.pos, p.vel, enemy.center, p.homing, dt);
     }
-    // Sweep the ball along this step's travel: the first wall, enemy or prop
-    // it touches stops it there (bolts pop, seeds plant).
-    const hit = this.w.world.castShape(
+    // Sweep the ball along this step's travel: the first wall or prop it
+    // touches (the physics world, now), or enemy or hostile wizard (as the
+    // caster saw them) stops it there — bolts pop, seeds plant.
+    const wall = this.w.world.castShape(
       p.pos,
       this.noRotation,
       p.vel,
@@ -254,7 +296,16 @@ export class PlayerSpells {
       undefined,
       PROJECTILE_FILTER,
     );
-    const toi = hit ? hit.time_of_impact : dt;
+    let toi = wall ? wall.time_of_impact : dt;
+    const move = this.move;
+    move.x = p.vel.x * dt;
+    move.y = p.vel.y * dt;
+    move.z = p.vel.z * dt;
+    for (const t of targets) {
+      const f = sweepBallCapsule(p.pos, move, p.size, t);
+      if (f !== null && f * dt < toi) toi = f * dt;
+    }
+    const hit = toi < dt || wall !== null;
     p.pos.x += p.vel.x * toi;
     p.pos.y += p.vel.y * toi;
     p.pos.z += p.vel.z * toi;
@@ -269,7 +320,7 @@ export class PlayerSpells {
   }
 
   private pop(p: Projectile): void {
-    this.w.explode(p.pos, p.blastRadius, p.damage, p.blastImpulse);
+    this.w.explode(p.pos, p.blastRadius, p.damage, p.blastImpulse, p.caster, p.lag);
   }
 
   /** One step of a black hole; false once it has imploded. */
@@ -290,7 +341,7 @@ export class PlayerSpells {
       });
     }
     if (h.age < BLACK_HOLE.duration) return true;
-    this.w.explode(h.pos, BLACK_HOLE.radius, h.damage, BLACK_HOLE.implodeImpulse);
+    this.w.explode(h.pos, BLACK_HOLE.radius, h.damage, BLACK_HOLE.implodeImpulse, h.caster, h.lag);
     return false;
   }
 

@@ -61,7 +61,10 @@ export type SimAction =
   /** The authority killed `id`: every machine removes it. */
   | { type: "died"; id: string }
   /** Something died or broke: the loot book rolls what it dropped. */
-  | { type: "loot"; id: string; source: LootSource; at: Vec3 };
+  | { type: "loot"; id: string; source: LootSource; at: Vec3 }
+  /** A wizard's spell hurt a wizard it may hurt (no pact between them):
+   * `damage` before the victim's own gear, and the shove. */
+  | { type: "wizardHit"; wizard: string; by: string; damage: number; impulse: Vec3 };
 
 export type SimCue =
   /** A sentry's muzzle flash. */

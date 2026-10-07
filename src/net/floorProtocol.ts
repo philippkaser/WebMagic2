@@ -1,5 +1,6 @@
 import type { GraveItem, GravePick, GraveRecord } from "../encounters/graveRules";
 import type { EnemyId } from "../enemies/roster";
+import type { PactWire } from "../encounters/pacts";
 import type { BoomData, CastData, EntitySnap, SimCue } from "../sim/world";
 import type { Vec3 } from "../world/types";
 
@@ -45,12 +46,21 @@ export const FLOOR = {
   /** To one wizard: the host refused where they said they moved — they are
    * back where it last believed them (CorrectMsg). */
   correct: "correct",
+  /** To one wizard: another wizard's spell hurt them (WizardHitMsg) — a
+   * server host decides duels; the victim applies it. */
+  wizardHit: "wizardHit",
+  /** To one wizard: the server knows they're dead — the duel damage alone
+   * passed everything they could have healed (YouFellMsg). */
+  youFell: "youFell",
   // ── Peer ("p:") ───────────────────────────────────────────────────────────
   /** A wizard's pose (PoseMsg), 20 Hz. */
   pose: "pose",
   /** A wizard's cast (weapons/castMessage.ts CastMsg) — replayed by every
    * floor-mate, and simulated for real by a server host. */
   cast: "cast",
+  /** A pact message to one wizard (PactMsg; encounters/PactSystem) — heard
+   * by a server host too, which keeps its own book (encounters/pactBook). */
+  pact: "pact",
 } as const;
 
 /** Late-join sync: the keys of WorldSyncMsg.custom. */
@@ -173,6 +183,24 @@ export interface CorrectMsg {
   p: Vec3;
 }
 
+export interface WizardHitMsg {
+  /** Who cast it. */
+  by: string;
+  /** Before the victim's own gear (damageTakenMult). */
+  damage: number;
+  impulse: Vec3;
+}
+
+export interface YouFellMsg {
+  /** Whose spell it was, if a wizard's. */
+  killer: string | null;
+}
+
+export interface PactMsg {
+  to: string;
+  kind: PactWire;
+}
+
 export interface PoseMsg {
   p: [number, number, number];
   v: [number, number, number];
@@ -182,6 +210,14 @@ export interface PoseMsg {
 }
 
 // ── Rules every host applies ─────────────────────────────────────────────────
+
+/** Clients draw enemies and other wizards this far behind the shared
+ * clock (interpolation). A server host judges a cast as its caster saw the
+ * floor: this plus the cast's trip to the server. */
+export const RENDER_DELAY_MS = 90;
+/** …but never more than this far back: a lagging (or lying) caster can't
+ * shoot where things were long ago. */
+export const MAX_REWIND_MS = 300;
 
 /** Orb pickups are offered within ~2.3 m; the slack covers the requester's
  * movement during one round trip. Anything farther is a client trying to

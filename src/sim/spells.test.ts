@@ -6,6 +6,11 @@ import { getSpellDef, type BoltSpell } from "../weapons/spellCatalog";
 import { generateFloor } from "../world/gen";
 import { FloorSim } from "./floorSim";
 import { BLACK_HOLE, boltVolley, SEED, steerHoming, type SpellStats } from "./spells";
+import { PVP } from "../core/config";
+import type { SimAction } from "./world";
+
+const layout1 = generateFloor(1, 1);
+const dist = (a: Vec, b: Vec) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 
 beforeAll(async () => {
   await RAPIER.init();
@@ -148,6 +153,93 @@ describe("the authority's copy of a wizard's spells", () => {
     s.castSpell("w1", { abilityId: "voidseed", origin: { x: at.x + 3, y: at.y, z: at.z }, dir: { x: 0, y: -1, z: 0 }, seed: 0 }, PLAIN);
     run(s, SEED.lifetime + 0.1);
     expect(s.spellsLive.projectiles).toBe(0);
+    s.free();
+  });
+});
+
+describe("lag compensation: a cast is judged as its caster saw the floor", () => {
+  /** A wisp sent darting away along open floor; where it started. */
+  function darting(s: FloorSim) {
+    const wisp = s.living()[0];
+    const at0 = where(s, wisp);
+    const body = s.physics.bodies.get(wisp)!;
+    let dir: Vec | null = null;
+    for (let i = 0; i < 16 && !dir; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const d = { x: Math.cos(a), y: 0, z: Math.sin(a) };
+      if (s.world.clearShot(at0, d, 9, body)) dir = d;
+    }
+    body.setLinvel({ x: dir!.x * 22, y: 0, z: dir!.z * 22 }, true);
+    run(s, 0.35); // nobody on the floor: no brain steers it, it just flies
+    body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    return { wisp, at0, dir: dir! };
+  }
+
+  test("a blast where the caster saw a fast enemy hits it — with their lag, not without", () => {
+    for (const [lag, hurt] of [[0.3, true], [0, false]] as const) {
+      const s = sim();
+      const { wisp, at0, dir } = darting(s);
+      expect(dist(where(s, wisp), at0)).toBeGreaterThan(5);
+      const hp = s.enemy(wisp)!.hp;
+      // Force Blast, centred on where it was.
+      const origin = { x: at0.x - dir.x * 1.5, y: at0.y, z: at0.z - dir.z * 1.5 };
+      s.castSpell("w1", { abilityId: "blast", origin, dir, seed: 0 }, PLAIN, lag);
+      expect((s.enemy(wisp)?.hp ?? 0) < hp).toBe(hurt);
+      s.free();
+    }
+  });
+
+  test("the floor remembers half a second, no more", () => {
+    const s = sim();
+    const { wisp, at0 } = darting(s);
+    expect(dist(s.positionAgo(wisp, 0.34)!, at0)).toBeLessThan(0.5);
+    run(s, 1);
+    // Long past: the oldest remembered position is where it stopped.
+    expect(dist(s.positionAgo(wisp, 5)!, where(s, wisp))).toBeLessThan(0.05);
+    s.free();
+  });
+});
+
+describe("duels: a wizard's spells hurt only wizards they may hurt", () => {
+  function duel(hostile: boolean) {
+    const s = sim();
+    s.setHostility(() => hostile);
+    const at = { x: layout1.spawn[0], y: 1.1, z: layout1.spawn[2] };
+    s.setWizard("w1", at, { x: 0, y: 0, z: 0 });
+    s.setWizard("w2", { x: at.x + 2, y: at.y, z: at.z }, { x: 0, y: 0, z: 0 });
+    s.step(DT);
+    s.drain();
+    return { s, at };
+  }
+
+  test("a shockwave hurts a hostile wizard by the duel rules, never its caster", () => {
+    const { s, at } = duel(true);
+    s.castSpell("w1", { abilityId: "shockwave", origin: at, dir: { x: 1, y: 0, z: 0 }, seed: 0 }, PLAIN);
+    const hits = s.drain().filter((a) => a.type === "wizardHit") as Extract<SimAction, { type: "wizardHit" }>[];
+    expect(hits.map((h) => [h.wizard, h.by])).toEqual([["w2", "w1"]]);
+    const sw = getSpellDef("shockwave") as { damage: number; radius: number };
+    expect(hits[0].damage).toBeCloseTo(sw.damage * (1 - 2 / sw.radius) * PVP.damageMult, 4);
+    expect(hits[0].impulse[0]).toBeGreaterThan(0); // thrown away from the caster
+    s.free();
+  });
+
+  test("a sworn ally takes nothing, and bolts pass through them", () => {
+    const { s, at } = duel(false);
+    s.castSpell("w1", { abilityId: "shockwave", origin: at, dir: { x: 1, y: 0, z: 0 }, seed: 0 }, PLAIN);
+    s.castSpell("w1", { abilityId: "bolt", origin: at, dir: { x: 1, y: 0, z: 0 }, seed: 0 }, PLAIN);
+    run(s, 0.5);
+    expect(s.drain().filter((a) => a.type === "wizardHit")).toEqual([]);
+    s.free();
+  });
+
+  test("a bolt stops on a hostile wizard and bursts there", () => {
+    const { s, at } = duel(true);
+    s.castSpell("w1", { abilityId: "bolt", origin: at, dir: { x: 1, y: 0, z: 0 }, seed: 0 }, PLAIN);
+    run(s, 0.3);
+    const hits = s.drain().filter((a) => a.type === "wizardHit") as Extract<SimAction, { type: "wizardHit" }>[];
+    expect(hits).toHaveLength(1);
+    // It burst at the near side of w2's capsule, not beyond it.
+    expect(hits[0].damage).toBeGreaterThan(16 * PVP.damageMult * 0.5);
     s.free();
   });
 });

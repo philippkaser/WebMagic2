@@ -25,6 +25,9 @@ export interface CastMsg {
   /** Seeds the volley's spread (sim/spells.ts boltVolley), so the caster,
    * every replay and a server host fire the same bolts. */
   seed: number;
+  /** When it was cast, on the shared server clock (ms; 0 = unknown): a
+   * server host judges the cast as the caster saw the floor then. */
+  t: number;
   /** Base staff def id (no affix) — its color tints the replayed spell. */
   staffId: string;
   stats: CastStats;
@@ -74,12 +77,14 @@ export function encodeCastMsg(
   staffId: string,
   stats: CastStats,
   seed: number,
+  t = 0,
 ): CastMsg {
   return {
     abilityId,
     origin: [origin.x, origin.y, origin.z],
     dir: [dir.x, dir.y, dir.z],
     seed,
+    t,
     staffId,
     stats: {
       damageMult: stats.damageMult,
@@ -108,6 +113,7 @@ export function sanitizeCastMsg(raw: unknown): CastMsg | null {
     origin,
     dir: [dir[0] / len, dir[1] / len, dir[2] / len],
     seed: typeof m.seed === "number" && Number.isFinite(m.seed) ? m.seed >>> 0 : 0,
+    t: typeof m.t === "number" && Number.isFinite(m.t) && m.t > 0 ? m.t : 0,
     staffId: staffIdOrDefault(m.staffId),
     stats: sanitizeCastStats(m.stats),
   };

@@ -97,6 +97,30 @@ export interface BodySpec {
   groups: number;
 }
 
+/** An upright capsule that holds a body's collider: its centre `lift`
+ * above the body's origin, its axis ±`halfHeight`, its `radius` — how a
+ * lag-compensated spell meets a body it judges as it was (sim/sweep.ts). */
+export interface BoundingCapsule {
+  lift: number;
+  halfHeight: number;
+  radius: number;
+}
+
+export function boundingCapsule(spec: BodySpec): BoundingCapsule {
+  const s = spec.shape;
+  switch (s.kind) {
+    case "ball":
+      return { lift: 0, halfHeight: 0, radius: s.radius };
+    case "cuboid": {
+      const radius = Math.max(s.half[0], s.half[2]);
+      return { lift: s.offset?.[1] ?? 0, halfHeight: Math.max(0, s.half[1] - radius), radius };
+    }
+    case "cylinder":
+    case "capsule":
+      return { lift: 0, halfHeight: s.halfHeight, radius: s.radius };
+  }
+}
+
 const PROP_BASE = {
   type: "dynamic",
   gravityScale: 1,

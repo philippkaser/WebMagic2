@@ -212,6 +212,57 @@ describe("what wizards say they do, on a server-hosted floor", () => {
     expect(hp - (host().sim.enemy("e1")?.hp ?? 0)).toBeLessThanOrEqual(2 * 16 + 1e-6);
   });
 
+  test("duels are the server's: a hostile wizard's spell reaches its victim from @host, a pact stops it", () => {
+    const here: Vec3 = [layout.spawn[0], 1.1, layout.spawn[2]];
+    pose(a, here);
+    pose(b, [here[0] + 2, here[1], here[2]]);
+    relay.tick(0.05);
+    // B, two metres off with a Void Lance staff, shoots A.
+    account(b).runGrants.push("void_staff");
+    relay.handle(b.id, { t: "loadout", equipment: { staff: "void_staff", amulet: null, cloak: null, boots: null } });
+    relay.tick(1.1);
+    send(b, "p:cast", castOf("lance", [here[0] + 2, here[1], here[2]], [-1, 0, 0]));
+    for (let i = 0; i < 6; i++) relay.tick(0.05);
+    const hits = envs(a, "a:wizardHit");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].from).toBe(SERVER_HOST_ID);
+    expect((hits[0].data as { by: string }).by).toBe("B");
+    expect(envs(b, "a:wizardHit")).toEqual([]); // only the victim hears it
+    // Sworn: B's next lance passes A by.
+    send(a, "p:pact", { to: "B", kind: "offer" });
+    send(b, "p:pact", { to: "A", kind: "accept" });
+    relay.tick(0.8);
+    send(b, "p:cast", castOf("lance", [here[0] + 2, here[1], here[2]], [-1, 0, 0]));
+    for (let i = 0; i < 6; i++) relay.tick(0.05);
+    expect(envs(a, "a:wizardHit")).toHaveLength(1);
+  });
+
+  test("a wizard the duel has killed, whatever their client says, falls: run over, grave raised", () => {
+    const here: Vec3 = [layout.spawn[0], 1.1, layout.spawn[2]];
+    pose(a, here);
+    pose(b, [here[0] + 2, here[1], here[2]]);
+    account(a).runGrants.push("amulet_vigor@3"); // something worth plundering
+    account(b).runGrants.push("void_staff");
+    relay.handle(b.id, { t: "loadout", equipment: { staff: "void_staff", amulet: null, cloak: null, boots: null } });
+    relay.tick(1.1);
+    // Lance after lance — A's client (pretending) never dies.
+    for (let i = 0; i < 40 && envs(a, "a:youFell").length === 0; i++) {
+      send(b, "p:cast", castOf("lance", [here[0] + 2, here[1], here[2]], [-1, 0, 0], i));
+      for (let t = 0; t < 16; t++) relay.tick(0.05);
+      pose(a, here);
+      pose(b, [here[0] + 2, here[1], here[2]]);
+    }
+    expect(envs(a, "a:youFell").map((m) => m.data)).toEqual([{ killer: "B" }]);
+    expect(account(a).runFloor).toBe(0); // the run is over on the server
+    const grave = envs(b, "a:graveSpawned").at(-1)!.data as { ownerId: string; killerId: string; items: { id: string }[] };
+    expect(grave.ownerId).toBe("A");
+    expect(grave.killerId).toBe("B");
+    expect(grave.items.map((i) => i.id)).toEqual(["amulet_vigor@3"]);
+    // Their own grave request, if it comes, raises no second one.
+    send(a, "h:graveDrop", { items: [{ id: "amulet_vigor@3", qty: 1 }], gold: 0, pos: here, killerId: "B" });
+    expect(envs(b, "a:graveSpawned")).toHaveLength(1);
+  });
+
   test("an impossible move is refused, and the wizard is put back", () => {
     const start: Vec3 = [layout.spawn[0], 1.1, layout.spawn[2]];
     pose(b, start);

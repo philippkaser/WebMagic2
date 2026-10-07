@@ -2,7 +2,8 @@ import type { DamageSource } from "../game/damageSource";
 
 /** Kill credit — who the floor will say killed you.
  *
- * Damage is decided on the victim's machine, so the victim also decides who
+ * Damage lands on the victim's machine (judged there, or by a server host
+ * and sent there), so the victim also decides who
  * dealt the killing blow: the last OTHER wizard whose magic hurt us within a
  * short window gets the credit ("Mira was slain by Oswin"), even if a wisp
  * finished the job — the dungeon only claims the kill when no wizard

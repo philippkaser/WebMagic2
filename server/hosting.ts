@@ -24,7 +24,7 @@ export interface HostedFloor {
   readonly isHost: boolean;
   /** A gameplay envelope from a member — its poses and commands, and while
    * still a replica, the current host's authority traffic. */
-  receive(from: string, ch: string, data: unknown): void;
+  receive(from: string, ch: string, data: unknown, serverTime: number): void;
   joined(playerId: string): void;
   left(playerId: string): void;
   /** A late joiner needs the floor's state. */

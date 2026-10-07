@@ -178,13 +178,19 @@ async function pressE(w, pattern) {
     }
   }
   const hpAfter = (await game(b)).health;
-  check("a stranger's bolts hurt (victim-side PvP damage)", hpAfter < hpBefore, `${hpBefore} → ${hpAfter}`);
+  check("a stranger's bolts hurt (the server decides the duel)", hpAfter < hpBefore, `${hpBefore} → ${hpAfter}`);
 
   // Pact: A offers, B accepts → magic passes harmlessly.
   await a.page.evaluate((id) => window.__pact(id), idB);
   await sleep(700);
   await b.page.evaluate((id) => window.__pact(id), idA);
-  await sleep(900);
+  // Each side learns of the pact from the other's message: give a slow
+  // (software-rendered) page a moment to take it in.
+  for (const [w, id] of [[a, idB], [b, idA]]) {
+    await w.page
+      .waitForFunction((peer) => window.__relations?.()[peer]?.state === "bound", id, { timeout: 5000, polling: 100 })
+      .catch(() => {});
+  }
   const relA = await a.page.evaluate((id) => window.__relations?.()[id]?.state, idB);
   const relB = await b.page.evaluate((id) => window.__relations?.()[id]?.state, idA);
   check("pact sworn on both sides", relA === "bound" && relB === "bound", `${relA}/${relB}`);
