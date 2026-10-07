@@ -18,7 +18,7 @@ import { kickDash, kickHurt, kickImpact, newFeel, stepFeel } from "./post/feel";
  *
  *  1. god rays where a scene has a source in its sky (the village's moon;
  *     ./godRays);
- *  2. the lens (post/LensEffect): pixel-art edges found in the depth, motion
+ *  2. the lens (post/LensEffect): pixel-art creases found in the depth, motion
  *     blur from the camera's own movement, the zoom rush of a blast or a
  *     dash, the lens's colour fringe, the forge's heat shimmer, the soft
  *     focus behind a menu;

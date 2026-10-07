@@ -6,14 +6,16 @@ import { POST_GLSL } from "./glsl";
  * (it reads the depth, so it needs its own pass; everything else in the
  * chain merges into the final one):
  *
- *  - **Pixel edges.** The look of hand-made 3D pixel art: a one-pixel dark
- *    line where something stands in front of something else, and a lit
- *    pixel on the near lip of every edge and corner — the outline a pixel
- *    artist would draw. Found in the depth alone: 1/depth is flat across any
- *    plane on screen, so its Laplacian is zero on the walls and floors and
- *    fires only at silhouettes and creases, its sign telling the far side
- *    (an outline, an inside corner) from the near (a lip that catches the
- *    light, an outside corner). Fades with distance, into the fog.
+ *  - **Pixel creases.** Where a surface folds — a wall meeting the floor,
+ *    the corner of a pillar, the rim of a barrel — the fold is shaded the
+ *    way a pixel artist would: an inside corner a shade darker, an outside
+ *    corner's lip a shade lighter. Found in the depth alone: 1/depth is flat
+ *    across any plane on screen, so its Laplacian is zero on the walls and
+ *    floors and fires only where the surface bends, its sign telling inside
+ *    from outside. Silhouettes — one thing standing in front of another, a
+ *    jump in depth rather than a bend — are left alone: shading them would
+ *    draw an outline round every object, loudest against a dark backdrop.
+ *    Fades with distance, into the fog.
  *  - **Motion blur** from the camera's own movement, by reprojection: every
  *    pixel's world point is found from its depth and carried back to where
  *    it was last frame, and the image is smeared along that path — a whipped
@@ -146,7 +148,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
     color = weight > 0.0 ? sum / weight : lensSample(at, split);
   }
 
-  // Pixel edges, from the Laplacian of 1/depth (flat on any plane).
+  // Pixel creases, from the Laplacian of 1/depth (flat on any plane).
   float edges = uEdges * (1.0 - uSoft);
   if (edges > 0.0 && !sky) {
     vec2 tx = texelSize;
@@ -156,13 +158,16 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
     float wd = 1.0 / viewDist(readDepth(uv - vec2(0.0, tx.y)));
     float wu = 1.0 / viewDist(readDepth(uv + vec2(0.0, tx.y)));
     float e = (wl + wr + wd + wu - 4.0 * w0) / w0;
-    float fade = 1.0 - smoothstep(10.0, 34.0, dist);
-    // e > 0: something nearer stands beside this pixel (an outline), or an
-    // inside corner; e < 0: the near lip of an edge, an outside corner.
-    float outline = smoothstep(0.1, 0.45, e) * fade;
-    float lip = smoothstep(0.05, 0.3, -e) * fade;
-    color *= 1.0 - outline * 0.6 * edges;
-    color *= 1.0 + lip * 0.85 * edges;
+    // A silhouette is a jump between neighbours, a crease only a bend: on
+    // one continuous surface no single step changes 1/depth by much.
+    float jump = max(max(abs(wl - w0), abs(wr - w0)), max(abs(wd - w0), abs(wu - w0))) / w0;
+    float fade = (1.0 - smoothstep(10.0, 34.0, dist)) * (1.0 - smoothstep(0.06, 0.12, jump));
+    // e > 0: an inside corner (the fold lies further away than its sides);
+    // e < 0: an outside corner's lip.
+    float inside = smoothstep(0.015, 0.06, e) * fade;
+    float lip = smoothstep(0.015, 0.06, -e) * fade;
+    color *= 1.0 - inside * 0.3 * edges;
+    color *= 1.0 + lip * 0.35 * edges;
   }
 
   outputColor = vec4(color, inputColor.a);

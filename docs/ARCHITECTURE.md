@@ -425,9 +425,10 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   passes at the world's low resolution:
   1. god rays (`render/godRays.ts`, see below);
   2. the lens (`post/LensEffect.ts`, one pass reading depth): **pixel
-     edges** from the Laplacian of 1/depth (flat on any plane, so it fires
-     only at silhouettes and creases — a dark outline on the far side, a lit
-     lip on the near side, fading into the fog); **camera motion blur** by
+     creases** from the Laplacian of 1/depth (flat on any plane, so it fires
+     only where a surface bends — an inside corner darker, an outside lip
+     lighter, fading into the fog); silhouettes (a jump in 1/depth between
+     neighbours, not a bend) are skipped, so objects never get outlines; **camera motion blur** by
      reprojection (depth → world → last frame's view-projection, as a fixed
      shutter, cuts detected and skipped, the held staff left sharp; a
      setting, `motionBlur`, key B); the **zoom rush** of a blast, a dash or

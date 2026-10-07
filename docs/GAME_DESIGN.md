@@ -116,8 +116,9 @@ The emotional loop we are chasing:
   the inventory comes out the same — in parchment on soot, arcane cyan for magic and the way onward,
   gold for home, blood for danger. New UI must follow this — if it could be
   a DOM panel, it's wrong.
-- **Post-processing chain:** pixel-art edges found in the depth (a dark
-  outline behind every silhouette, a lit lip on every near edge) → the
+- **Post-processing chain:** pixel-art creases found in the depth (an
+  inside corner a shade darker, an outside corner's lip a shade lighter;
+  silhouettes are left alone, so objects never get outlines) → the
   lens (motion blur from your own turns and dashes, a zoom rush on a blast
   or a rift's pull, colour fringing at the rim, the forge's heat shimmer,
   the world going soft behind a menu) → bloom (feeds the emissive specks
