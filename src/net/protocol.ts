@@ -136,6 +136,13 @@ export type ClientMsg =
    * and, on a floor it hosts, casts this wizard's spells with THESE stats
    * (computed server-side) — never the ones a cast message claims. */
   | { t: "loadout"; equipment: WireEquipment }
+  /** The wizard drank one draught (a healing or mana potion) from what they
+   * carry. The server takes it off the account — so it can be drunk once,
+   * and banked never — and counts its effect: on a floor the server hosts,
+   * the heal and the mana are applied there (that's the health that
+   * counts); anywhere, it raises the health the server will believe on the
+   * next floor it hosts. */
+  | { t: "drink"; itemId: string }
   /** HOST report: `id` died or broke at `at` (enemy "e3", prop "p12", the
    * "boss", or a runtime spawn described by `source`). The server rolls what
    * it drops from its own loot book (items/lootBook.ts) and answers the host

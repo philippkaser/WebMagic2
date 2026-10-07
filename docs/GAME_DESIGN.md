@@ -624,8 +624,11 @@ This is the most important networking decision, so it's worth stating plainly:
 - **Enemies threaten every wizard**, not just the host's — host-side AI targets
   the nearest player on the floor (local or peer), any damage aggros, and peer
   poses carry velocity so enemies lead their shots against everyone.
-- **Your own health is always local.** Contact damage and incoming blasts hurt
-  you on your own machine — survival never waits on a round trip. Damage to
+- **Your health is felt locally, counted by the floor's authority.** Contact
+  damage and incoming blasts play on your own machine at once — the hit never
+  waits on a round trip. Alone on your own floor that count is yours; on a
+  floor the server hosts (every shared floor) the server keeps it and your
+  bar shows its number, so a hacked client still dies. Damage to
   *entities* is shooter-favored: your shots apply where you saw them land, via
   hit-requests to the host; replayed explosions are cosmetic vs. entities so
   nothing is double-counted.

@@ -154,7 +154,10 @@ export class LocalTransport implements Transport {
       case "claim":
       case "grant":
       case "grantGold":
-        // Offline progress is persisted client-side.
+      case "loadout":
+      case "drink":
+        // Offline progress is persisted client-side (and the client is its
+        // own floor's host: its gear and its draughts are its own to apply).
         break;
       case "loot": {
         // The same book the server keeps. Away from a floor (the dev room's

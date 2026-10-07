@@ -11,7 +11,7 @@ import {
 } from "../useEnemy";
 import { bodyProps, SpecCollider } from "../../game/bodies";
 import { ENEMY_BODIES } from "../../sim/bodies";
-import { ShadowController } from "../../sim/enemies/controllers";
+import { contactOf, ShadowController } from "../../sim/enemies/controllers";
 
 const DEATH_FX: EnemyDeathFx = {
   // It unravels into the dark it came from: a slow bloom of shadow-smoke.
@@ -33,8 +33,7 @@ export function Shadow({ position, floor, entityId }: { position: Vec3; floor: n
   );
   // Contact strike — lands mostly on a lunge; local, like the wisp's burn.
   const touch = useContactDamage({
-    range: 1.5,
-    damage: 12,
+    ...contactOf("shadow")!,
     floor,
     push: { force: 5, planar: 0.3, lift: 1.5 },
     burst: ["#2a1a44", "#6a3d9a"],

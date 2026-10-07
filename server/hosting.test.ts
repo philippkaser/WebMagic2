@@ -5,7 +5,7 @@ import { SERVER_HOST_ID, type ServerMsg } from "../src/net/protocol";
 import { generateFloor } from "../src/world/gen";
 import type { Vec3 } from "../src/world/types";
 import { AccountStore } from "./accounts";
-import type { FloorHost } from "./floorHost";
+import type { FloorHost, FloorHostOptions } from "./floorHost";
 import { serverHosting, type HostingPolicy } from "./hosting";
 import { HANDOVER_TIMEOUT_MS, Relay, type RelayPeer } from "./relay";
 
@@ -42,14 +42,14 @@ let b: TestPeer;
 let c: TestPeer;
 let now = 50_000;
 
-function setup(policy: HostingPolicy) {
+function setup(policy: HostingPolicy, opts: FloorHostOptions = {}) {
   now = 50_000;
   store = new AccountStore();
   relay = new Relay(new FloorDirectory(4, () => SEED, () => now, () => 0), store, () => now, undefined, {
     pace: null,
     devLoot: true,
     random: () => 0.5,
-    hosting: serverHosting(RAPIER, policy, { random: () => 0.5 }),
+    hosting: serverHosting(RAPIER, policy, { random: () => 0.5, ...opts }),
   });
   a = makePeer("A");
   b = makePeer("B");
@@ -281,6 +281,74 @@ describe("what wizards say they do, on a server-hosted floor", () => {
     // Nor is standing outside the floor.
     pose(b, [start[0], -20, start[2]]);
     expect(host().refused.moves).toBe(2);
+  });
+});
+
+describe("health on a server-hosted floor is the server's", () => {
+  const vitals = (p: TestPeer) => envs(p, "a:vitals").map((m) => m.data as { hp: number; maxHp: number; mana: number });
+  /** Stand A on a wisp until it has burned them. */
+  function burn(p: TestPeer) {
+    const wisp = layout.enemies.findIndex((e) => e.kind === "wisp");
+    for (let i = 0; i < 60 && (vitals(p).at(-1)?.hp ?? 100) >= 100; i++) {
+      const t = host().sim.physics.bodies.get(`e${wisp}`)?.translation();
+      if (t) send(p, "p:pose", { p: [t.x, t.y, t.z], v: [0, 0, 0], a: [0, 0], staffId: "s", h: 100 });
+      relay.tick(0.05);
+    }
+  }
+
+  test("the dungeon's hurts land on the server's count; a draught heals once", () => {
+    setup("shared");
+    handOver();
+    burn(a);
+    const hurt = vitals(a).at(-1)!;
+    expect(hurt.hp).toBeLessThan(hurt.maxHp);
+    // A healing draught they carry: once.
+    account(a).inventory.belt[0] = { id: "potion_hp_weak", qty: 1 };
+    relay.handle(a.id, { t: "drink", itemId: "potion_hp_weak" });
+    const healed = vitals(a).at(-1)!.hp;
+    expect(healed).toBeGreaterThan(hurt.hp);
+    expect(account(a).inventory.belt[0]).toBeNull();
+    relay.handle(a.id, { t: "drink", itemId: "potion_hp_weak" }); // none left
+    relay.tick(0.05);
+    expect(vitals(a).at(-1)!.hp).toBeLessThanOrEqual(healed);
+  });
+
+  test("health follows a wizard down: hurt on one floor, hurt on the next — whatever they claim", () => {
+    setup("always");
+    join(a);
+    burn(a);
+    const left = vitals(a).at(-1)!.hp;
+    expect(left).toBeLessThan(100);
+    // Down a floor (a new server-hosted floor), claiming full health.
+    account(a).runFloor = FLOOR;
+    relay.handle(a.id, { t: "enterFloor", floor: FLOOR + 1 });
+    send(a, "p:pose", { p: [0, 1.1, 0], v: [0, 0, 0], a: [0, 0], staffId: "s", h: 100 });
+    relay.tick(0.05);
+    expect(vitals(a).at(-1)!.hp).toBeCloseTo(left, 4);
+  });
+
+  test("monsters kill a wizard whose client won't die: run over, told they fell", () => {
+    setup("shared");
+    handOver();
+    account(a).runGrants.push("amulet_vigor@3");
+    for (let i = 0; i < 400 && envs(a, "a:youFell").length === 0; i++) {
+      const wisp = layout.enemies.findIndex((e) => e.kind === "wisp");
+      const t = host().sim.physics.bodies.get(`e${wisp}`)?.translation();
+      if (t) send(a, "p:pose", { p: [t.x, t.y, t.z], v: [0, 0, 0], a: [0, 0], staffId: "s", h: 100 });
+      relay.tick(0.05);
+    }
+    expect(envs(a, "a:youFell").map((m) => m.data)).toEqual([{ killer: null }]);
+    expect(account(a).runFloor).toBe(0);
+    expect(envs(b, "a:graveSpawned").map((m) => (m.data as { ownerId: string }).ownerId)).toEqual(["A"]);
+  });
+
+  test("DEV_UNHURT (testing only): the dungeon spares everyone", () => {
+    setup("shared", { unhurt: true });
+    handOver();
+    burn(a);
+    expect(vitals(a).length).toBeGreaterThan(0);
+    expect(vitals(a).every((v) => v.hp === 100)).toBe(true);
+    expect(envs(a, "a:youFell")).toEqual([]);
   });
 });
 

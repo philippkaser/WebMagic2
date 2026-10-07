@@ -29,6 +29,8 @@ export interface HostedFloor {
   left(playerId: string): void;
   /** A late joiner needs the floor's state. */
   sync(playerId: string): void;
+  /** A wizard on this floor drank a draught (the ledger checked it). */
+  drank(playerId: string, effect: { heal?: number; mana?: number }): void;
   promote(): void;
   tick(dt: number): void;
   free(): void;

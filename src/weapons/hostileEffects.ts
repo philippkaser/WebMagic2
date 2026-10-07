@@ -2,7 +2,7 @@ import { gameEvents } from "../core/events";
 import { ENEMY_SOURCE, WORLD_SOURCE, wizardSource, type DamageSource } from "../game/damageSource";
 import { getPlayerBody } from "../game/player-state";
 import { hostEvent, onAuthority } from "../net/channels";
-import { FLOOR, type WizardHitMsg, type YouFellMsg } from "../net/floorProtocol";
+import { FLOOR, type VitalsMsg, type WizardHitMsg, type YouFellMsg } from "../net/floorProtocol";
 import { useGame } from "../state/gameStore";
 import type { BoomData, CastData } from "../sim/world";
 import { explode } from "./explosions";
@@ -48,8 +48,9 @@ export type { BoomData };
 // ── Duels a server host decides ───────────────────────────────────────────────
 
 /** Another wizard's spell hurt us — the server's copy of it, judged as its
- * caster saw us (lag compensation). Our health is still ours to show: apply
- * the damage (through our gear, credited to them) and the shove. */
+ * caster saw us (lag compensation). The hit's feel (sound, shake, who to
+ * credit) and the shove are ours; the health it cost comes with the
+ * server's vitals (takeDamage counts nothing on a floor the server hosts). */
 onAuthority<WizardHitMsg>(FLOOR.wizardHit, (d) => {
   const i = d?.impulse;
   if (typeof d?.by !== "string" || !(d.damage >= 0) || !Array.isArray(i) || !i.every(Number.isFinite)) return;
@@ -58,12 +59,17 @@ onAuthority<WizardHitMsg>(FLOOR.wizardHit, (d) => {
   gameEvents.emit("shake", Math.min(Math.hypot(i[0], i[1], i[2]) / 12, 1));
 });
 
-/** The server knows we're dead: the duel damage alone passed all we could
- * have healed. Fall, whatever our own count says. */
+/** Our health and mana as the server keeps them, on a floor it hosts:
+ * what our bar shows there. */
+onAuthority<VitalsMsg>(FLOOR.vitals, (d) => {
+  if (!Number.isFinite(d?.hp)) return;
+  useGame.getState().applyVitals({ hp: d.hp, mana: Number.isFinite(d.mana) ? d.mana : NaN });
+});
+
+/** The server's count of our health reached zero: fall — credited to the
+ * wizard who brought it there, or to the dungeon. */
 onAuthority<YouFellMsg>(FLOOR.youFell, (d) => {
-  const s = useGame.getState();
-  if (s.phase !== "dungeon" || s.health <= 0) return;
-  s.takeDamage(Infinity, typeof d?.killer === "string" ? wizardSource(d.killer) : WORLD_SOURCE);
+  useGame.getState().fallByServer(typeof d?.killer === "string" ? d.killer : null);
 });
 
 export const enemyBoom = hostEvent<BoomData>(FLOOR.enemyBoom, (d, meta) => {

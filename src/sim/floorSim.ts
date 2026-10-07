@@ -9,7 +9,8 @@ import { omenRules } from "../world/omens";
 import type { FloorLayout, PropKind, Vec3 } from "../world/types";
 import { STRONG_PUSH } from "../weapons/allegiance";
 import { boundingCapsule, enemyBody, WIZARD_GROUPS, type BoundingCapsule } from "./bodies";
-import { createEnemy, enemyOptions, type EnemyController } from "./enemies/controllers";
+import { contactOf, createEnemy, enemyOptions, type ContactSpec, type EnemyController } from "./enemies/controllers";
+import { HostileBolts, SpikeTraps, type HarmCause, type WizardAt } from "./hazards";
 import type { EnemyCore } from "./enemies/core";
 import { buildFloorPhysics, type FloorPhysics, type Rapier } from "./floorPhysics";
 import { blastFalloff, PROP_LOOT_MIN_Y, PROP_RULES } from "./props";
@@ -83,6 +84,9 @@ interface Blast {
   hurtsEnemies: boolean;
   /** A wizard's spell: wizards it may hurt are hurt too (by the duel rules). */
   caster?: string;
+  /** The dungeon's blast (a slam, a barrel, a bolt's burst): it hurts every
+   * wizard in reach, blamed on this. */
+  wizards?: HarmCause;
   /** Judged as of this many seconds ago (its caster's view — lag compensation). */
   lag?: number;
 }
@@ -144,6 +148,13 @@ export class FloorSim {
   private readonly history: { t: number; at: Map<string, Vec3> }[] = [];
   private readonly shapes = new Map<string, BoundingCapsule>();
   private readonly targetScratch: SpellTarget[] = [];
+  private readonly hostileBolts: HostileBolts;
+  private readonly spikes: SpikeTraps;
+  /** Each enemy's contact burn, and "enemy|wizard" → seconds until it can
+   * burn that wizard again. */
+  private readonly contacts = new Map<string, ContactSpec>();
+  private readonly burnClock = new Map<string, number>();
+  private readonly wizardScratch: WizardAt[] = [];
   /** May `caster`'s magic hurt wizard `wizard`? (Pacts — the floor host's
    * call.) None may, until told otherwise. */
   private hostile: (caster: string, wizard: string) => boolean = () => false;
@@ -186,6 +197,10 @@ export class FloorSim {
     this.darts = layout.traps
       .filter((t) => t.kind === "dart")
       .map((t) => new DartTrapController(this.world, t.pos, floor));
+    this.hostileBolts = new HostileBolts(R, this.physics.world, (at, radius, damage, impulse, cause) =>
+      this.blasts.push({ at: { x: at.x, y: at.y, z: at.z }, radius, damage, impulse, hurtsEnemies: false, wizards: cause }),
+    );
+    this.spikes = new SpikeTraps(layout.traps, floor);
     this.spells = new PlayerSpells({
       R,
       world: this.physics.world,
@@ -307,8 +322,11 @@ export class FloorSim {
         if (b) e.ctl.think(b, dt, this.time);
       }
       for (const dart of this.darts) dart.think(dt);
+      this.burn(dt);
+      this.spikes.step(dt, this.wizardsNow(), (wizard, damage) => this.hurt(wizard, damage, "world"));
     }
     this.spells.step(dt);
+    this.hostileBolts.step(dt, this.wizardsNow());
     this.flush();
     this.physics.step(dt);
     this.time += dt;
@@ -457,6 +475,42 @@ export class FloorSim {
     );
     this.enemies.set(id, { core, ctl, immobile: spec.type === "fixed" });
     this.shapes.set(id, boundingCapsule(spec));
+    const contact = contactOf(kind, generation);
+    if (contact) this.contacts.set(id, contact);
+  }
+
+  /** The wizards on the floor, where they are now (shared scratch). */
+  private wizardsNow(): readonly WizardAt[] {
+    const out = this.wizardScratch;
+    out.length = 0;
+    for (const [id, w] of this.wizards) out.push({ id, pos: w.pos });
+    return out;
+  }
+
+  private hurt(wizard: string, damage: number, cause: "enemy" | "world"): void {
+    if (damage > 0) this.outbox.push({ type: "wizardHurt", wizard, damage, cause, by: null, impulse: null });
+  }
+
+  /** Contact burns: every enemy touching a wizard burns them, once per its
+   * cooldown (per wizard, as each wizard's own client would time it). */
+  private burn(dt: number): void {
+    for (const [key, left] of this.burnClock) {
+      if (left - dt <= 0) this.burnClock.delete(key);
+      else this.burnClock.set(key, left - dt);
+    }
+    for (const [id, e] of this.enemies) {
+      const c = this.contacts.get(id);
+      if (!c || e.core.dead || (c.whenAwake && !e.core.aggro)) continue;
+      const t = this.physics.bodies.get(id)?.translation();
+      if (!t) continue;
+      for (const [wid, w] of this.wizards) {
+        const d = Math.hypot(w.pos.x - t.x, w.pos.y + c.playerLift - t.y, w.pos.z - t.z);
+        const key = `${id}|${wid}`;
+        if (d >= c.range || this.burnClock.has(key)) continue;
+        this.burnClock.set(key, c.cooldown);
+        this.hurt(wid, e.core.damage(c.damage), "enemy");
+      }
+    }
   }
 
   /** Remember where every enemy and wizard is, for lag compensation. */
@@ -518,7 +572,7 @@ export class FloorSim {
     this.outbox.push({ type: "died", id });
     this.outbox.push({ type: "loot", id, source: { kind: "prop", prop: prop.kind }, at: [t.x, Math.max(t.y, PROP_LOOT_MIN_Y), t.z] });
     const blast = PROP_RULES[prop.kind].blast;
-    if (blast) this.blasts.push({ at: { x: t.x, y: t.y, z: t.z }, ...blast, hurtsEnemies: true });
+    if (blast) this.blasts.push({ at: { x: t.x, y: t.y, z: t.z }, ...blast, hurtsEnemies: true, wizards: "world" });
   }
 
   /** Detonate queued blasts — and whatever they set off — in order. */
@@ -546,6 +600,15 @@ export class FloorSim {
       const dealt = blastFalloff(b.at, at, radius, b.damage, b.impulse, shove);
       if (dealt !== null && this.alive(id)) this.strike(id, dealt, { x: shove.x, y: shove.y, z: shove.z });
     }
+    // The dungeon's blast hurts every wizard in reach, as each one's own
+    // client would judge it (the falloff, the full damage; they shove
+    // themselves).
+    if (b.wizards) {
+      for (const [id, w] of this.wizards) {
+        const dist = Math.hypot(w.pos.x - b.at.x, w.pos.y - b.at.y, w.pos.z - b.at.z);
+        if (dist < radius) this.hurt(id, b.damage * (1 - dist / radius), b.wizards);
+      }
+    }
     // A duel: wizards the caster may hurt take the blast as its victim's
     // client would — the falloff, the duel's damage share, a strong shove.
     const caster = b.caster;
@@ -563,10 +626,11 @@ export class FloorSim {
       const push = b.impulse * falloff * STRONG_PUSH;
       const k = dist > 0 ? push / dist : 0;
       this.outbox.push({
-        type: "wizardHit",
+        type: "wizardHurt",
         wizard: id,
-        by: caster,
         damage: b.damage * falloff * PVP.damageMult,
+        cause: "wizard",
+        by: caster,
         impulse: [dx * k, dy * k + push * 0.5, dz * k],
       });
     }
@@ -604,7 +668,13 @@ export class FloorSim {
           damage: a.data.damage,
           impulse: a.data.impulse,
           hurtsEnemies: false,
+          wizards: a.data.source === "world" ? "world" : "enemy",
         });
+        break;
+      case "cast":
+        // Every client flies its copy of the bolt; this one is the one
+        // that hurts.
+        this.hostileBolts.fire(a.data);
         break;
     }
     this.outbox.push(a);

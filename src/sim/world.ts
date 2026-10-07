@@ -62,9 +62,17 @@ export type SimAction =
   | { type: "died"; id: string }
   /** Something died or broke: the loot book rolls what it dropped. */
   | { type: "loot"; id: string; source: LootSource; at: Vec3 }
-  /** A wizard's spell hurt a wizard it may hurt (no pact between them):
-   * `damage` before the victim's own gear, and the shove. */
-  | { type: "wizardHit"; wizard: string; by: string; damage: number; impulse: Vec3 };
+  /** Something hurt a wizard — the dungeon (`cause` "enemy": a monster's
+   * touch, bolt or slam; "world": a trap, a barrel) or another wizard's
+   * spell (`by`, with the shove). `damage` is before the victim's own gear. */
+  | {
+      type: "wizardHurt";
+      wizard: string;
+      damage: number;
+      cause: "enemy" | "world" | "wizard";
+      by: string | null;
+      impulse: Vec3 | null;
+    };
 
 export type SimCue =
   /** A sentry's muzzle flash. */

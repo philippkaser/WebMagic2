@@ -129,6 +129,9 @@ export function publishLocalPose(
   yaw: number,
   pitch: number,
   staffId: string,
+  /** Our health — a floor the server hosts takes it as where we start
+   * there (no higher than the run's own record of it), then keeps it. */
+  health: number,
 ): void {
   publishClock -= dt;
   if (publishClock > 0) return;
@@ -139,5 +142,6 @@ export function publishLocalPose(
     v: [q2(v.x), q2(v.y), q2(v.z)],
     a: [q3(yaw), q3(pitch)],
     staffId,
+    h: Math.round(health * 10) / 10,
   });
 }

@@ -37,7 +37,9 @@ PvP, a pact, a gift dropped and picked up, a death, a grave and its plunder —
 including the server honoring the gift and the plunder; `FLOOR_PACE_MS=0`
 lifts the deep's pace, which the script outruns, `DEV_LOOT=1` lets it hand
 a wizard a specific orb, and `DEV_MOVES=1` lets its wizards teleport on a
-server-hosted floor — never set any of them on a real server):
+server-hosted floor — never set any of them on a real server; nor
+`DEV_UNHURT=1`, which has server-hosted floors spare wizards the dungeon's
+harm, for probes that stand in front of the Warden):
 
 ```sh
 DATA_FILE=/tmp/wm-e2e.json ENCOUNTER_CHANCE=1 FLOOR_PACE_MS=0 DEV_LOOT=1 DEV_MOVES=1 bun server/server.ts &
@@ -175,11 +177,13 @@ default — `always` hosts every floor server-side, `never` none). There
 the server also runs every wizard's spells itself, with the gear it knows
 they carry, and refuses impossible moves — a client can say what it cast
 and where it went, never what it hit — each cast judged as its caster saw
-the floor (lag compensation). Replicas predict and reconcile. Your health
-is shown and applied on your own machine; a stranger's spell hurts you
-there — judged by the server on a shared floor, which can also prove a duel
-death your client won — and the last wizard who hurt you takes the kill
-credit. The
+the floor (lag compensation). Replicas predict and reconcile. On a floor
+the server hosts your health is the server's too: it judges every monster's
+touch, bolt, slam and trap, every stranger's spell and every draught you
+drink, and your bar shows its count (your machine only plays the hit's
+feel) — when it reaches zero you fall, whatever your client would rather;
+the last wizard who hurt you takes the kill credit. Alone on a floor you
+host, your health is your own machine's to keep. The
 server keeps the saves and rolls the loot: the host only reports what died,
 the server decides what it dropped and grants each orb once (a dropped gift
 moves between wizards, never doubles), and new floors keep a human pace. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
@@ -237,7 +241,7 @@ Design rules that keep it future-proof:
 
 ## Roadmap
 
-- Server-owned wizard health (the dungeon's damage judged by the server too),
-  then PvP arenas the server runs end to end
+- PvP arenas the server runs end to end (`SERVER_HOSTS=always` already
+  hosts any floor fully server-side)
 - A unique boss per biome
 - More omens, carvings and enemy archetypes; biome-specific hazards

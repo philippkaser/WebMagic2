@@ -1,6 +1,6 @@
 import { DUNGEON } from "../src/core/config";
 import { Rng } from "../src/core/rng";
-import { resolveItem } from "../src/items/catalog";
+import { computeStats, resolveItem } from "../src/items/catalog";
 import { GOLD_RULES } from "../src/items/economy";
 import { rollGamble } from "../src/items/loot";
 import type { LootDrop, LootSource } from "../src/items/dropTables";
@@ -74,6 +74,15 @@ export interface LedgerWorld {
   send(peerId: string, msg: ServerMsg): void;
   /** Seat a connection on a floor (out of its current one) and announce it. */
   seat(peerId: string, entry: FloorEntry): SeatedFloor;
+  /** A wizard drank a draught (already taken off their account): the floor
+   * they're on, if the server hosts it, applies it. */
+  drank(peerId: string, effect: DraughtEffect): void;
+}
+
+/** What a draught does. */
+export interface DraughtEffect {
+  heal?: number;
+  mana?: number;
 }
 
 export interface LedgerOptions {
@@ -256,6 +265,22 @@ export class Ledger {
       case "loadout":
         if (typeof msg.equipment === "object" && msg.equipment !== null) this.loadouts.set(peerId, msg.equipment);
         break;
+      case "drink": {
+        // Only a draught they carry, once; a heal raises the health the
+        // server will believe on the next floor it hosts.
+        const account = this.accountOf(peerId);
+        const effect = typeof msg.itemId === "string" ? consumableEffect(msg.itemId) : null;
+        if (!effect || !(effect.heal || effect.mana)) return;
+        if (!this.accounts.consume(account, msg.itemId)) {
+          this.log(`${peerId} drank ${String(msg.itemId).slice(0, 40)} it doesn't carry`);
+          return;
+        }
+        if (effect.heal && account.runHealth !== undefined) {
+          this.accounts.setRunHealth(account, Math.min(account.runHealth + effect.heal, this.maxHealthOf(peerId, account)));
+        }
+        this.world.drank(peerId, { heal: effect.heal, mana: effect.mana });
+        break;
+      }
       case "died":
         this.endRunInDeath(peerId);
         break;
@@ -327,26 +352,43 @@ export class Ledger {
 
   /** What `playerId` wears on this floor, as far as the server believes it:
    * its last loadout checked against what it carries (by default the gear
-   * it banked), and the mana its draughts hold. Null for anyone who
+   * it banked). Null for anyone who
    * isn't a connected wizard on the instance. */
   loadoutOf(instanceId: string, playerId: unknown): CheckedLoadout | null {
     const inst = this.memberFloor(instanceId, playerId);
     if (!inst) return null;
     const account = this.accountOf(playerId as string);
     const equipment = this.accounts.checkLoadout(account, this.loadouts.get(playerId as string) ?? account.inventory.equipment);
-    let manaReserve = 0;
-    let healReserve = 0;
-    for (const [id, qty] of this.accounts.carried(account)) {
-      const effect = consumableEffect(id);
-      manaReserve += (effect?.mana ?? 0) * qty;
-      healReserve += (effect?.heal ?? 0) * qty;
-    }
-    return { equipment, manaReserve, healReserve };
+    return { equipment };
   }
 
-  /** The floor's host KNOWS `playerId` is dead (server/floorHost.ts — the
-   * duel damage alone passed all they could heal), whatever their client
-   * says: their run ends as if they had died — what it found becomes the
+  /** The most health `playerId` can have as they arrive on a floor the
+   * server hosts: what the server last knew (full at a run's start, raised
+   * by every draught), capped by what their gear allows. */
+  healthBound(instanceId: string, playerId: unknown): number | null {
+    if (!this.memberFloor(instanceId, playerId)) return null;
+    const account = this.accountOf(playerId as string);
+    const max = this.maxHealthOf(playerId as string, account);
+    return Math.min(account.runHealth ?? max, max);
+  }
+
+  /** A server host knows `playerId`'s health exactly (they're leaving its
+   * floor, or it checked): the bound for the next floor. */
+  noteHealth(playerId: string, hp: number): void {
+    const token = this.tokens.get(playerId);
+    const account = token ? this.accounts.get(token) : null;
+    if (account && account.runFloor > 0) this.accounts.setRunHealth(account, hp);
+  }
+
+  private maxHealthOf(peerId: string, account: AccountRecord): number {
+    const e = this.accounts.checkLoadout(account, this.loadouts.get(peerId) ?? account.inventory.equipment);
+    const inst = (id: string | null) => (id ? { defId: id, runLoot: false } : null);
+    return computeStats({ staff: { defId: e.staff, runLoot: false }, amulet: inst(e.amulet), cloak: inst(e.cloak), boots: inst(e.boots) })
+      .maxHealth;
+  }
+
+  /** The floor's host KNOWS `playerId` is dead (server/floorHost.ts — its
+   * count of their health reached zero), whatever their client says: their run ends as if they had died — what it found becomes the
    * grave pool's, and the grave's contents are returned for the host to
    * raise. Null when their run is already over (they died on their own). */
   forceDeath(instanceId: string, playerId: unknown): { items: { id: string; qty: number }[]; gold: number } | null {
@@ -553,12 +595,6 @@ export class Ledger {
 /** A loadout as the server believes it. */
 export interface CheckedLoadout {
   equipment: WireEquipment;
-  /** The mana its carried draughts restore, all told (what it may spend
-   * beyond its pool on a floor). */
-  manaReserve: number;
-  /** The health its carried draughts restore, all told (what it may survive
-   * beyond its max health). */
-  healReserve: number;
 }
 
 /** What a carried item does when drunk (null for anything else). */

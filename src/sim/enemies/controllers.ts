@@ -19,6 +19,7 @@ import {
 } from "../../enemies/brains/warden";
 import { tickWisp } from "../../enemies/brains/wisp";
 import type { EnemyId } from "../../enemies/roster";
+import { PLAYER } from "../../core/config";
 import type { Vec3 } from "../../world/types";
 import { EnemyCore, type EnemyCoreOptions } from "./core";
 import type { SimWorld } from "../world";
@@ -301,6 +302,41 @@ export function enemyOptions(id: string, kind: EnemyId, floor: number, position:
       // The Warden leaves its hoard itself (WardenController) and shrugs off
       // most of a shove.
       return { ...base, knockbackScale: 0.25, flashDecay: 4 };
+  }
+}
+
+/** A kind's contact burn — what touching it costs a wizard (before the
+ * floor's damage scaling; its view adds the shove and the sparks). Judged
+ * by the floor's authority on a server-hosted floor (sim/floorSim.ts), by
+ * each wizard's own client otherwise (enemies/useEnemy.ts). */
+export interface ContactSpec {
+  /** Touch radius around the enemy's origin, to the wizard's centre. */
+  range: number;
+  damage: number;
+  /** Seconds between burns on the same wizard. */
+  cooldown: number;
+  /** Measure to this height above the wizard's centre (the Warden aims at
+   * the chest). */
+  playerLift: number;
+  /** Only once it's awake (the Warden sleeps harmlessly). */
+  whenAwake: boolean;
+}
+
+export function contactOf(kind: EnemyId, generation = 0): ContactSpec | null {
+  const base = { cooldown: PLAYER.contactDamageCooldown, playerLift: 0, whenAwake: false };
+  switch (kind) {
+    case "wisp":
+      return { ...base, range: 1.45, damage: 9 };
+    case "shadow":
+      return { ...base, range: 1.5, damage: 12 };
+    case "slime": {
+      const cfg = slimeGeneration(generation);
+      return { ...base, range: 0.5 * cfg.size + 0.8, damage: cfg.contact };
+    }
+    case "sentry":
+      return null;
+    case "boss":
+      return { range: 2.3, damage: 16, cooldown: 0.9, playerLift: WARDEN.aimLift, whenAwake: true };
   }
 }
 

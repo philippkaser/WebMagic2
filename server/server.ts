@@ -102,16 +102,20 @@ const hostingPolicy = parseHostingPolicy(process.env.SERVER_HOSTS);
 // e2e smoke test teleports its wizards around). A cheat by definition: never
 // set it on a real server.
 const trustMoves = process.env.DEV_MOVES === "1";
+// DEV_UNHURT=1 has server-hosted floors spare wizards the dungeon's harm
+// (monsters, traps); duels still hurt. Also a cheat: testing only.
+const unhurt = process.env.DEV_UNHURT === "1";
 await RAPIER.init();
 const relay = new Relay(
   new FloorDirectory(MAX_PLAYERS_PER_FLOOR, undefined, undefined, undefined, encounterTuning),
   accounts,
   () => Date.now(),
   log,
-  { pace, devLoot, hosting: serverHosting(RAPIER, hostingPolicy, { trustMoves }) },
+  { pace, devLoot, hosting: serverHosting(RAPIER, hostingPolicy, { trustMoves, unhurt }) },
 );
 log(`floors hosted server-side: ${hostingPolicy}`);
 if (trustMoves) log("DEV_MOVES is on — server hosts believe every position. Testing only!");
+if (unhurt) log("DEV_UNHURT is on — the dungeon hurts no wizard on server-hosted floors. Testing only!");
 // The server-hosted floors' clock: ~60 Hz, real elapsed time (the hosts
 // step in fixed steps of their own).
 let lastTick = performance.now();

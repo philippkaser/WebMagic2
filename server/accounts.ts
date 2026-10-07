@@ -58,6 +58,11 @@ export interface AccountRecord {
   /** Floors entered during the current run, counting the one it's on. The
    * way home only opens at RUN.floorsBeforeExit (the Tithe of Five). */
   runFloors: number;
+  /** The most health this wizard can have right now, as the server knows
+   * it: unset (full) at a run's start, set by every server-hosted floor
+   * they leave, raised by every draught they drink. A floor the server
+   * hosts starts them at no more than this. */
+  runHealth?: number;
 }
 
 /** Everyone owns starter gear implicitly. */
@@ -112,6 +117,9 @@ export class AccountStore {
               runGold: clampGold(raw.runGold, GOLD_RULES.perRunCap),
               runFloor: clampFloor(raw.runFloor),
               runFloors: clampFloor(raw.runFloors),
+              ...(typeof raw.runHealth === "number" && Number.isFinite(raw.runHealth) && raw.runHealth >= 0
+                ? { runHealth: raw.runHealth }
+                : {}),
             });
           }
         }
@@ -196,11 +204,31 @@ export class AccountStore {
     return true;
   }
 
+  /** The wizard drank one copy of `itemId` — a find from this run if they
+   * have one, else one they brought. False (nothing changes) when they
+   * carry none. */
+  consume(account: AccountRecord, itemId: string): boolean {
+    if (!isItemId(itemId)) return false;
+    const i = account.runGrants.indexOf(itemId);
+    if (i !== -1) account.runGrants.splice(i, 1);
+    else if (!takeOne({ ...account.inventory, chest: [] }, itemId)) return false;
+    this.flush();
+    return true;
+  }
+
+  /** Record what a server host knows of a wizard's health (see runHealth). */
+  setRunHealth(account: AccountRecord, hp: number | undefined): void {
+    if (hp === undefined) delete account.runHealth;
+    else account.runHealth = Math.max(0, hp);
+    this.flush();
+  }
+
   /** A fresh run begins on `floor` (the Weighing already decided which).
    * Any unfinished previous run is forfeited first — walking away from a run
    * costs exactly what dying would. */
   startRun(account: AccountRecord, floor: number): void {
     this.endRun(account);
+    delete account.runHealth; // a fresh run starts whole
     account.runFloor = floor;
     account.runFloors = 1;
     this.flush();
@@ -311,6 +339,7 @@ export class AccountStore {
   // ── Internals ──────────────────────────────────────────────────────────────
 
   private clearRun(account: AccountRecord): void {
+    delete account.runHealth;
     account.runGrants = [];
     account.runGold = 0;
     account.runFloor = 0;

@@ -215,11 +215,11 @@ describe("duels: a wizard's spells hurt only wizards they may hurt", () => {
   test("a shockwave hurts a hostile wizard by the duel rules, never its caster", () => {
     const { s, at } = duel(true);
     s.castSpell("w1", { abilityId: "shockwave", origin: at, dir: { x: 1, y: 0, z: 0 }, seed: 0 }, PLAIN);
-    const hits = s.drain().filter((a) => a.type === "wizardHit") as Extract<SimAction, { type: "wizardHit" }>[];
+    const hits = s.drain().filter((a) => a.type === "wizardHurt" && a.cause === "wizard") as Extract<SimAction, { type: "wizardHurt" }>[];
     expect(hits.map((h) => [h.wizard, h.by])).toEqual([["w2", "w1"]]);
     const sw = getSpellDef("shockwave") as { damage: number; radius: number };
     expect(hits[0].damage).toBeCloseTo(sw.damage * (1 - 2 / sw.radius) * PVP.damageMult, 4);
-    expect(hits[0].impulse[0]).toBeGreaterThan(0); // thrown away from the caster
+    expect(hits[0].impulse![0]).toBeGreaterThan(0); // thrown away from the caster
     s.free();
   });
 
@@ -228,7 +228,7 @@ describe("duels: a wizard's spells hurt only wizards they may hurt", () => {
     s.castSpell("w1", { abilityId: "shockwave", origin: at, dir: { x: 1, y: 0, z: 0 }, seed: 0 }, PLAIN);
     s.castSpell("w1", { abilityId: "bolt", origin: at, dir: { x: 1, y: 0, z: 0 }, seed: 0 }, PLAIN);
     run(s, 0.5);
-    expect(s.drain().filter((a) => a.type === "wizardHit")).toEqual([]);
+    expect(s.drain().filter((a) => a.type === "wizardHurt" && a.cause === "wizard")).toEqual([]);
     s.free();
   });
 
@@ -236,7 +236,7 @@ describe("duels: a wizard's spells hurt only wizards they may hurt", () => {
     const { s, at } = duel(true);
     s.castSpell("w1", { abilityId: "bolt", origin: at, dir: { x: 1, y: 0, z: 0 }, seed: 0 }, PLAIN);
     run(s, 0.3);
-    const hits = s.drain().filter((a) => a.type === "wizardHit") as Extract<SimAction, { type: "wizardHit" }>[];
+    const hits = s.drain().filter((a) => a.type === "wizardHurt" && a.cause === "wizard") as Extract<SimAction, { type: "wizardHurt" }>[];
     expect(hits).toHaveLength(1);
     // It burst at the near side of w2's capsule, not beyond it.
     expect(hits[0].damage).toBeGreaterThan(16 * PVP.damageMult * 0.5);

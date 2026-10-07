@@ -5,7 +5,7 @@ import { DUNGEON, PLAYER, PVP } from "../core/config";
 import { gameEvents } from "../core/events";
 import { Rng } from "../core/rng";
 import { KillCredit } from "../encounters/killCredit";
-import type { DamageSource } from "../game/damageSource";
+import { wizardSource, type DamageSource } from "../game/damageSource";
 import { getFloorRules } from "../game/floorRules";
 import { computeStats, getItemDef, resolveItem } from "../items/catalog";
 import { GAMBLE_PRICE, merchantPrice, multisetOf, sellValue } from "../items/economy";
@@ -23,7 +23,7 @@ import {
 import { rollGamble } from "../items/loot";
 import type { DerivedStats, Equipment } from "../items/types";
 import { netBus } from "../net/bus";
-import { useNet } from "../net/netStore";
+import { isServerHosted, useNet } from "../net/netStore";
 import { session } from "../net/session";
 import type { WireEquipment } from "../net/protocol";
 import { bankKit, settleDeath, type LostStack } from "../run/outcomes";
@@ -147,6 +147,11 @@ export interface GameState {
   /** Hurt the local wizard. `source` attributes the hit (kill credit, grave
    * chests); omitted = the dungeon itself. */
   takeDamage(amount: number, source?: DamageSource): void;
+  /** On a floor the server hosts: our health and mana as it keeps them. */
+  applyVitals(vitals: { hp: number; mana: number }): void;
+  /** On a floor the server hosts: our health reached zero there — fall,
+   * credited to `killerId` (a wizard) or the dungeon. */
+  fallByServer(killerId: string | null): void;
   heal(amount: number): void;
   spendMana(cost: number): boolean;
   regenMana(dt: number): void;
@@ -482,7 +487,11 @@ export const useGame = create<GameState>((set, get) => ({
       return;
     }
     set({ belt: takeOneAt(state.belt, index) });
-    if (effect.heal) get().heal(effect.heal);
+    // The server takes the draught off our account (once) and counts its
+    // heal — on a floor it hosts, that's the heal that counts (its vitals
+    // bring it); elsewhere we heal ourselves too.
+    if (useNet.getState().mode === "online") session.sendDrink(stack.defId);
+    if (effect.heal && !(state.phase === "dungeon" && isServerHosted())) get().heal(effect.heal);
     if (effect.mana) set({ mana: Math.min(PLAYER.maxMana, get().mana + effect.mana) });
     playPickup();
     gameEvents.emit("message", `${def.name} used`);
@@ -532,6 +541,10 @@ export const useGame = create<GameState>((set, get) => ({
     playHurt();
     gameEvents.emit("playerHurt", { amount: dealt });
     gameEvents.emit("shake", Math.min(dealt / 40, 1));
+    // On a floor the server hosts, our health is its to keep: what we judge
+    // here is the feel of the hit (and who to credit); the number, and the
+    // fall, come from the server (applyVitals, fallByServer).
+    if (state.phase === "dungeon" && isServerHosted()) return;
     if (health <= 0) {
       // "loading" at once so nothing can hurt (or move, or cast for) the
       // falling wizard while the world burns away; the death itself — losses,
@@ -542,6 +555,24 @@ export const useGame = create<GameState>((set, get) => ({
     } else {
       set({ health });
     }
+  },
+
+  applyVitals: ({ hp, mana }) => {
+    const state = get();
+    if (state.phase !== "dungeon" || !Number.isFinite(hp)) return;
+    const patch: Partial<GameState> = { health: Math.max(0, Math.min(hp, getStats().maxHealth)) };
+    // Our own count of mana runs ahead of the server's (a cast spends here
+    // first); only a server count well below ours means ours is wrong.
+    if (Number.isFinite(mana) && mana < state.mana - 3) patch.mana = Math.max(0, mana);
+    set(patch);
+  },
+
+  fallByServer: (killerId) => {
+    const state = get();
+    if (state.phase !== "dungeon") return;
+    if (killerId) killCredit.record(wizardSource(killerId), performance.now(), useNet.getState().playerId || "self");
+    set({ health: 0, phase: "loading", prompt: null, overlay: "none" });
+    void travel("death", () => die(set, get));
   },
 
   heal: (amount) => {

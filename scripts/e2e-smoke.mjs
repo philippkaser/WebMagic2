@@ -243,7 +243,25 @@ async function pressE(w, pattern) {
   const mira = await game(b);
   check("the fallen-to-be picks up host-granted loot", mira.equipment.amulet?.defId === "amulet_vigor@3",
     JSON.stringify(mira.equipment.amulet));
-  await b.page.evaluate((killer) => window.__game.getState().takeDamage(10_000, { kind: "wizard", id: killer }), idA);
+  // Oswin kills her — the server's count of her health, not her own page's
+  // (on a floor the server hosts, a client can't keep itself alive). Shoot
+  // from whichever side has a clear line until she falls.
+  const duelEnd = Date.now() + 60000;
+  let side = 0;
+  while (Date.now() < duelEnd && (await game(b)).phase === "dungeon") {
+    const pos = await b.page.evaluate(() => window.__playerPos?.());
+    if (!pos) break;
+    const [dx, dz] = [[4, 0], [-4, 0], [0, 4], [0, -4]][side++ % 4];
+    await a.page.evaluate(([x, y, z]) => window.__teleport(x, y + 0.5, z), [pos[0] + dx, pos[1], pos[2] + dz]);
+    await sleep(500);
+    const hp = (await game(b)).health;
+    for (let i = 0; i < 6; i++) {
+      await a.page.evaluate(([x, y, z]) => window.__castAt(x, y, z), pos);
+      await sleep(350);
+    }
+    await sleep(800);
+    if ((await game(b)).health < hp) side--; // this side lands: stay on it
+  }
   await waitPhase(b, "dead", 60000); // the death dissolve plays first (slow under software GL)
   const death = (await game(b)).lastDeath;
   check("death names the killer and leaves a grave", death?.killer === "Oswin" && death?.grave === true,

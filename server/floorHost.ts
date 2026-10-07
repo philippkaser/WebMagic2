@@ -1,7 +1,7 @@
 import { PactBook } from "../src/encounters/pactBook";
 import { sanitizeGraveContents, sanitizePicks, takeFromGrave, type GraveContents } from "../src/encounters/graveRules";
 import { robeColorOf } from "../src/game/wizardLook";
-import { PLAYER } from "../src/core/config";
+import { PLAYER, PVP } from "../src/core/config";
 import { computeStats, resolveItem } from "../src/items/catalog";
 import type { DerivedStats, Equipment, ItemDef } from "../src/items/types";
 import type { LootDrop } from "../src/items/dropTables";
@@ -22,6 +22,7 @@ import {
   type DropOrbMsg,
   type EnemyCueMsg,
   type PactMsg,
+  type VitalsMsg,
   type WizardHitMsg,
   type YouFellMsg,
   type GraveDropMsg,
@@ -82,6 +83,10 @@ export interface FloorLedger {
   loadoutOf(instanceId: string, playerId: unknown): CheckedLoadout | null;
   /** The host knows a wizard is dead: end their run; their grave's contents. */
   forceDeath(instanceId: string, playerId: unknown): GraveContents | null;
+  /** The most health a wizard can arrive with (see AccountRecord.runHealth). */
+  healthBound(instanceId: string, playerId: unknown): number | null;
+  /** What this host knows of a wizard's health as they leave. */
+  noteHealth(playerId: string, hp: number): void;
 }
 
 export interface FloorHostIO {
@@ -106,6 +111,10 @@ export interface FloorHostOptions {
   /** Believe every reported pose (the e2e smoke test teleports wizards
    * around). A cheat by definition: never on a real server. */
   trustMoves?: boolean;
+  /** The dungeon (monsters, traps, barrels) hurts no wizard here; duels
+   * still do (browser probes that stand in front of the Warden). A cheat by
+   * definition: never on a real server. */
+  unhurt?: boolean;
 }
 
 /** A wizard as the floor's authority knows them: what they wear (and so
@@ -117,12 +126,15 @@ interface WizardState {
   staff: ItemDef;
   /** When the ledger was last asked (s, this host's clock). */
   checkedAt: number;
+  /** Their health — this host's to keep from their first pose here (null
+   * until then, and again once they've left). */
+  hp: number | null;
   mana: number;
-  /** Mana their carried draughts may still add. */
-  reserve: number;
-  /** Health their carried draughts could restore (as the ledger counts it). */
-  healReserve: number;
   manaAt: number;
+  /** What they were last told (a:vitals), and when. */
+  told: { hp: number; mana: number; at: number };
+  /** The last wizard whose spell hurt them, and when (kill credit). */
+  credit: { by: string; at: number } | null;
   /** Per spell: casts in hand (a token bucket) and when it last refilled. */
   casts: Map<string, { tokens: number; at: number }>;
   /** When they were last put back after an impossible move. */
@@ -154,6 +166,11 @@ const MANA_SLACK = 5;
 const GEAR_REFRESH_S = 1;
 /** A wizard put back after an impossible move isn't told again sooner. */
 const CORRECT_EVERY_S = 0.5;
+/** A wizard is told their mana when it differs this much from what they
+ * were last told (their own client counts it too; this keeps them honest)… */
+const MANA_TELL_STEP = 4;
+/** …and their vitals at least this often anyway (s). */
+const VITALS_EVERY_S = 2;
 /** A pose's claimed velocity (it only aims the enemies' shots) is capped. */
 const MAX_POSE_SPEED = 40;
 /** A refusal of the same kind for the same wizard is logged at most this
@@ -175,11 +192,6 @@ export class FloorHost {
   private snapAcc = 0;
   /** Pacts between the wizards here — whose spells may hurt whom. */
   private readonly pacts = new PactBook();
-  /** Duel damage each wizard has taken on this floor (through their gear),
-   * and the healing their draughts could still do — kept across a
-   * reconnect, so leaving can't reset the count. */
-  private readonly duelTaken = new Map<string, number>();
-  private readonly healLeft = new Map<string, number>();
   /** Wizards whose death this host decided. */
   private readonly fallen = new Set<string>();
   /** Seconds this host has run, and when each wizard last sent a pose. */
@@ -190,6 +202,7 @@ export class FloorHost {
   private readonly wizards = new Map<string, WizardState>();
   private readonly motion: MotionGuard;
   private readonly trustMoves: boolean;
+  private readonly unhurt: boolean;
   /** What this host refused, by kind (tests, logs). */
   readonly refused = { casts: 0, moves: 0 };
   /** wizard + reason → when last logged, and how many since. */
@@ -210,6 +223,7 @@ export class FloorHost {
     this.motion = new MotionGuard(R, this.sim.physics.world, layout.extent);
     this.sim.setHostility((caster, wizard) => this.pacts.hostile(caster, wizard));
     this.trustMoves = opts.trustMoves === true;
+    this.unhurt = opts.unhurt === true;
   }
 
   /** Is it the floor's authority yet (or still a replica)? */
@@ -227,10 +241,15 @@ export class FloorHost {
   }
 
   left(playerId: string): void {
+    // What we know of their health goes with them: the next floor the
+    // server hosts starts them at no more. (Their mana and casting clocks
+    // stay here — leaving and coming back refills neither.)
+    const w = this.wizards.get(playerId);
+    if (w && w.hp !== null && !this.fallen.has(playerId)) this.ledger.noteHealth(playerId, w.hp);
+    if (w) w.hp = null;
     this.members.delete(playerId);
     this.lastPose.delete(playerId);
     this.lastPos.delete(playerId);
-    this.wizards.delete(playerId);
     this.motion.forget(playerId);
     this.pacts.forget(playerId);
     this.sim.removeWizard(playerId);
@@ -294,6 +313,18 @@ export class FloorHost {
       const ents = this.sim.snapshot();
       if (ents.length > 0) this.io.send(FLOOR.snap, { ents } satisfies SnapMsg);
     }
+    this.tellVitals();
+  }
+
+  /** A wizard drank a draught the ledger took off them: its heal and its
+   * mana are theirs now. */
+  drank(playerId: string, effect: { heal?: number; mana?: number }): void {
+    const w = this.gear(playerId);
+    if (!w) return;
+    if (effect.heal && w.hp !== null) w.hp = Math.min(w.stats.maxHealth, w.hp + effect.heal);
+    if (effect.mana) w.mana = Math.min(PLAYER.maxMana, this.manaNow(w) + effect.mana);
+    w.manaAt = this.clock;
+    this.tellVitals(playerId);
   }
 
   free(): void {
@@ -324,6 +355,15 @@ export class FloorHost {
     this.sim.setWizard(from, { x: p[0], y: p[1], z: p[2] }, vel);
     this.lastPose.set(from, this.clock);
     this.lastPos.set(from, [p[0], p[1], p[2]]);
+    // Their health is ours from their first pose here: what they say, but
+    // never more than the server already knows them to have.
+    const w = this.gear(from);
+    if (w && w.hp === null && !this.fallen.has(from)) {
+      const bound = this.ledger.healthBound(this.inst.id, from) ?? w.stats.maxHealth;
+      const said = typeof d?.h === "number" && Number.isFinite(d.h) ? d.h : bound;
+      w.hp = Math.max(1, Math.min(said, bound, w.stats.maxHealth));
+      w.told.at = -Infinity;
+    }
   }
 
   /** An impossible move: ignored (the wizard stays where this host last
@@ -353,10 +393,11 @@ export class FloorHost {
         stats: computeStats(equipmentOf(loadout.equipment)),
         staff: resolveItem(loadout.equipment.staff).def,
         checkedAt: this.clock,
+        hp: null,
         mana: PLAYER.maxMana,
-        reserve: loadout.manaReserve,
-        healReserve: loadout.healReserve,
         manaAt: this.clock,
+        told: { hp: -1, mana: -1, at: -Infinity },
+        credit: null,
         casts: new Map(),
         correctedAt: -Infinity,
       };
@@ -367,9 +408,8 @@ export class FloorHost {
       w.stats = computeStats(equipmentOf(loadout.equipment));
       w.staff = resolveItem(loadout.equipment.staff).def;
     }
-    // The reserve only shrinks: re-checking can't refill drunk draughts.
-    w.reserve = Math.min(w.reserve, loadout.manaReserve);
-    w.healReserve = Math.min(w.healReserve, loadout.healReserve);
+    // Gear that gives less health than they have caps it (none heals).
+    if (w.hp !== null) w.hp = Math.min(w.hp, w.stats.maxHealth);
     w.checkedAt = this.clock;
     return w;
   }
@@ -398,14 +438,14 @@ export class FloorHost {
     w.casts.set(spell.id, clock);
     if (clock.tokens < 1) return this.refuseCast(from, "too fast");
     // Mana: the pool regenerates as the caster's does; draughts top it up.
-    const regen = PLAYER.manaRegen * w.stats.manaRegenMult * this.sim.rules.manaRegenMult;
-    w.mana = Math.min(PLAYER.maxMana, w.mana + (this.clock - w.manaAt) * regen);
+    w.mana = this.manaNow(w);
     w.manaAt = this.clock;
-    if (w.mana + w.reserve + MANA_SLACK < spell.mana) return this.refuseCast(from, "out of mana");
+    if (w.mana + MANA_SLACK < spell.mana) {
+      this.tellVitals(from); // their own count is off: set it straight
+      return this.refuseCast(from, "out of mana");
+    }
     clock.tokens -= 1;
-    const fromPool = Math.min(w.mana, spell.mana);
-    w.mana -= fromPool;
-    w.reserve = Math.max(0, w.reserve - (spell.mana - fromPool));
+    w.mana = Math.max(0, w.mana - spell.mana);
     // Judged as the caster saw the floor: the cast's trip here plus the
     // render delay — never further back than MAX_REWIND_MS.
     const trip = msg.t > 0 && serverTime > 0 ? Math.max(0, serverTime - msg.t) : 0;
@@ -537,32 +577,54 @@ export class FloorHost {
     this.io.send(FLOOR.graveSpawned, grave);
   }
 
-  // ── Duels ──────────────────────────────────────────────────────────────────
+  // ── Health ─────────────────────────────────────────────────────────────────
 
-  /** A wizard's spell hurt `victim`. The victim's client applies it (their
-   * health is theirs to show and to heal) — but this host keeps count: the
-   * duel damage alone, through their gear, past their max health and every
-   * draught they carry is a death no client can talk its way out of. */
-  private duelHit(victim: string, by: string, damage: number, impulse: Vec3): void {
-    this.io.send(FLOOR.wizardHit, { by, damage, impulse } satisfies WizardHitMsg, victim);
+  /** Something hurt `victim` (sim/floorSim.ts judged it): through their
+   * gear, off the health this host keeps. Another wizard's spell is also
+   * sent to the victim (their client shows it and takes the shove — the
+   * dungeon's hurts their client judges for itself, for the feel of it).
+   * At zero they fall, credited to the last wizard who hurt them lately. */
+  private hurt(victim: string, damage: number, by: string | null, impulse: Vec3 | null): void {
+    if (by) this.io.send(FLOOR.wizardHit, { by, damage, impulse: impulse ?? [0, 0, 0] } satisfies WizardHitMsg, victim);
     const w = this.gear(victim);
-    if (!w || this.fallen.has(victim)) return;
-    const taken = (this.duelTaken.get(victim) ?? 0) + damage * w.stats.damageTakenMult;
-    this.duelTaken.set(victim, taken);
-    const heal = Math.min(this.healLeft.get(victim) ?? w.healReserve, w.healReserve);
-    this.healLeft.set(victim, heal);
-    if (taken > w.stats.maxHealth + heal) this.fall(victim, by);
+    if (!w || w.hp === null || this.fallen.has(victim) || (this.unhurt && !by)) return;
+    w.hp -= damage * w.stats.damageTakenMult;
+    if (by) w.credit = { by, at: this.clock };
+    if (w.hp > 0) return;
+    w.hp = 0;
+    const credited = w.credit && this.clock - w.credit.at <= PVP.killCreditSeconds ? w.credit.by : null;
+    this.fall(victim, credited);
+  }
+
+  private manaNow(w: WizardState): number {
+    const regen = PLAYER.manaRegen * w.stats.manaRegenMult * this.sim.rules.manaRegenMult;
+    return Math.min(PLAYER.maxMana, w.mana + (this.clock - w.manaAt) * regen);
+  }
+
+  /** Tell wizards their health and mana when they changed (or one wizard,
+   * now). Their client shows what it's told; its own count of their health
+   * is feedback only on a floor the server hosts. */
+  private tellVitals(only?: string): void {
+    for (const [id, w] of this.wizards) {
+      if ((only && id !== only) || w.hp === null || this.fallen.has(id)) continue;
+      const mana = this.manaNow(w);
+      const changed =
+        Math.abs(w.hp - w.told.hp) > 0.01 || Math.abs(mana - w.told.mana) >= MANA_TELL_STEP || this.clock - w.told.at >= VITALS_EVERY_S;
+      if (!changed && !only) continue;
+      w.told = { hp: w.hp, mana, at: this.clock };
+      this.io.send(FLOOR.vitals, { hp: w.hp, maxHp: w.stats.maxHealth, mana } satisfies VitalsMsg, id);
+    }
   }
 
   /** `victim` is dead by this host's count: their run ends, their grave
    * rises where they were, and they're told. */
-  private fall(victim: string, killer: string): void {
+  private fall(victim: string, killer: string | null): void {
     this.fallen.add(victim);
     const contents = this.ledger.forceDeath(this.inst.id, victim);
     const at = this.lastPos.get(victim);
     const grave = contents && sanitizeGraveContents(contents);
     if (grave && at && (grave.items.length > 0 || grave.gold > 0)) {
-      this.raiseGrave(victim, this.members.has(killer) ? killer : null, [at[0], Math.max(0, at[1] - 0.9), at[2]], grave);
+      this.raiseGrave(victim, killer && this.members.has(killer) ? killer : null, [at[0], Math.max(0, at[1] - 0.9), at[2]], grave);
     }
     this.io.send(FLOOR.youFell, { killer } satisfies YouFellMsg, victim);
   }
@@ -612,8 +674,8 @@ export class FloorHost {
           orbs?.forEach((o, i) => this.spawnOrb(o, orbSpread(a.at, i, orbs.length)));
           break;
         }
-        case "wizardHit":
-          this.duelHit(a.wizard, a.by, a.damage, a.impulse);
+        case "wizardHurt":
+          this.hurt(a.wizard, a.damage, a.by, a.impulse);
           break;
       }
     }

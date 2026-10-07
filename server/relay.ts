@@ -89,6 +89,11 @@ export class Relay {
         },
         send: (id, msg) => this.peers.get(id)?.send(msg),
         seat: (id, entry) => this.seat(this.peers.get(id)!, entry),
+        drank: (id, effect) => {
+          const inst = this.directory.instanceOf(id);
+          const served = inst ? this.hosted.get(inst.id)?.host : undefined;
+          if (served?.isHost) served.drank(id, effect);
+        },
       },
       now,
       log,

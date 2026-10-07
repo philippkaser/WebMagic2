@@ -148,9 +148,12 @@ host's. On a floor a wizard hosts, a replica's own shots apply damage via a
 floor the server hosts, nobody's claim counts: the server runs its own copy
 of every cast (see *Who hosts a floor*) and only that copy deals damage.
 Every *replayed* explosion is `remote: true` and skips entity damage
-entirely. Your own health is always
-local: contact burns and incoming blasts hurt each player on their own
-machine, so your survival never waits on a round trip.
+entirely. On a floor a wizard hosts, your own health is local: contact
+burns and incoming blasts hurt each player on their own machine, so
+survival never waits on a round trip. On a floor the server hosts, the
+server keeps every wizard's health (see *Health and mana*): the local
+hit still plays at once (sound, shake, shove), the number comes from the
+server.
 
 **Enemies threaten everyone:** host-side AI (wisp aggro/chase, sentry
 targeting, boss aim and wake) picks the **nearest wizard on the floor**
@@ -282,12 +285,14 @@ with the gear it believes they carry, at that gear's pace and mana, and
 refuses moves no wizard could make. What remains client-reported even
 there: *aim* (a cast's direction — an aimbot still aims), movement within
 what's possible (a modest speed-hack inside the generous burst budget),
-the volley seed (a client could pick tight spreads), the cast's timestamp
-(a client could claim up to the 300 ms rewind cap), and your own health:
-the server decides every duel hit and can PROVE a death from duel damage
-alone (see *Duels*), but the dungeon's damage to you — contact burns,
-enemy bolts, slams, traps — is still applied by your own client, so a
-god-mode client survives monsters (never a duel past the proof); grave
+the volley seed (a client could pick tight spreads) and the cast's
+timestamp (a client could claim up to the 300 ms rewind cap). Health is
+not among them: the server keeps every wizard's health and mana there,
+judges every monster, trap and spell that hurts them, and ends the run of
+anyone whose count reaches zero — a god-mode client still dies (see
+*Health and mana*). On a floor a wizard hosts alone, their health is their
+own client's; it can't carry a lie onto a floor the server hosts (the run's
+health record caps what they bring). Grave
 contents a client declares are bounded by the pool (they can't mint);
 device tokens are bearer secrets in localStorage (fine for a foundation,
 replaced by real auth). Rate limiting and pickup sanitization run
@@ -416,8 +421,8 @@ taken until the floor is gone; everyone else leaving doesn't hand it back.
   the staff the ledger believes the wizard wields, leave from within 4 m of
   where they stand, keep to the spell's cooldown under their fire-rate gear
   (a bucket of two, 15 % slack for jitter) and be paid for in mana (the
-  server keeps each wizard's pool, regenerating as theirs does, plus what
-  their carried mana draughts hold). The damage, multishot and homing come
+  server keeps each wizard's pool, regenerating as theirs does, filled by
+  each mana draught the ledger lets them drink). The damage, multishot and homing come
   from the server's `computeStats` of that gear — the stats a cast message
   claims are only for its cosmetic replays. Hit commands are ignored.
 - **Gear** (`loadout`, a ledger message sent on entering a floor and on
@@ -431,6 +436,35 @@ taken until the floor is gone; everyone else leaving doesn't hand it back.
   teleport doesn't). A refused pose is ignored and the wizard is sent back
   (`a:correct`). `DEV_MOVES=1` switches this off for the e2e test's
   teleports.
+
+Draughts are the fourth claim, and a ledger message: `drink` names the
+item, and the ledger takes it off the account (a run find first, then the
+pack) or refuses — so a heal is never a client's say-so.
+
+**Health and mana.** The floor host keeps each wizard's health and mana
+(`WizardState.hp`, `.mana`). Health starts, on their first pose there, at
+the lowest of what they report (`h`), the run's health record
+(`AccountRecord.runHealth`: cleared at the start of a run, lowered to what
+a server host last counted when they left its floor, raised by each
+draught the ledger lets them drink) and their max health — so a wizard
+can't arrive healthier than the run says they are. The dungeon's harm is
+judged by `FloorSim` against every wizard's capsule: contact burns
+(`contactOf` per kind — range, damage, cooldown, the Warden only awake),
+enemy and trap bolts flown server-side (`sim/hazards.ts` `HostileBolts`,
+bursting on walls, props and wizards), slams and barrel blasts, and spike
+plates (`SpikeTraps`, re-armed per wizard). Each hurt is a `wizardHurt`
+action (`cause`: enemy, world or wizard); the host applies it through the
+wizard's `damageTakenMult`, sends `a:vitals` ({hp, maxHp, mana}) when it
+changes — and every 2 s regardless, so a page that edits its own bar is
+set straight — and at zero ends the run: the ledger's `forceDeath` (the
+grave pool takes their finds), their grave, `a:youFell` naming the last
+wizard who hurt them within the kill-credit window. The client's
+`takeDamage` there plays the hit and records the credit but changes no
+number; `applyVitals` and `fallByServer` (`state/gameStore.ts`) are the
+only way its health moves. Mana: the client's own count runs ahead (a cast
+spends it there first) and adopts the server's only when that is well
+below. `DEV_UNHURT=1` spares wizards the dungeon's harm on server-hosted
+floors (browser probes); duels still hurt.
 
 **Lag compensation.** A caster aims at the floor their screen shows —
 behind the server by the cast's trip and the render delay (enemies and
@@ -449,22 +483,24 @@ is sworn once one offered and the other accepted, unsworn when either
 breaks it. The server's copy of every cast hits wizards its caster may
 hurt — lag-compensated like enemies — with the duel's rules
 (`PVP.damageMult`, `STRONG_PUSH`) and the server's stats, and sends the
-victim `a:wizardHit` (damage, shove, who); their client applies it, kill
-credit included, and no longer judges hostile replays itself. The host
-also keeps count: once a wizard's duel damage alone (through their gear)
-passes their max health plus every heal their carried draughts hold, they
-are dead whatever their client says — the ledger ends their run
-(`forceDeath`, the grave pool takes their finds), the host raises their
-grave and sends `a:youFell`.
+victim `a:wizardHit` (damage, shove, who): their client plays the hit and
+the shove and records the kill credit, and no longer judges hostile
+replays itself. The damage lands on the server's count of their health
+(*Health and mana*), like the dungeon's.
 
 A wizard who stops sending poses (dead, frozen) stops being hunted after
 2 s; their last good position still counts for range checks (a fallen
 wizard's grave). The floors tick at ~60 Hz in `server/server.ts`
 (`Relay.tick`).
 
-One race is known and small: a loot report a wizard host sends in the last
-moment before the handover is refused (it is no longer the host when it
-lands), so that source drops nothing.
+Two races are known and small: a loot report a wizard host sends in the
+last moment before the handover is refused (it is no longer the host when
+it lands), so that source drops nothing; and a wizard whose health the
+server counts out in the instant they step through a portal misses the
+`a:youFell` (their client is already in the rift) — their run is over all
+the same, so the next floor they ask for starts a fresh run from their
+banked gear, and what their client still shows of the old run's finds is
+never honored at the bank.
 
 ### Scaling plan (server-side, future work)
 

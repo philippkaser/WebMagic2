@@ -11,7 +11,7 @@ import {
 } from "../useEnemy";
 import { bodyProps, SpecCollider } from "../../game/bodies";
 import { ENEMY_BODIES } from "../../sim/bodies";
-import { WispController } from "../../sim/enemies/controllers";
+import { contactOf, WispController } from "../../sim/enemies/controllers";
 
 const DEATH_FX: EnemyDeathFx = {
   // It comes apart as light: sparks flung wide, then the soul rises.
@@ -31,8 +31,7 @@ export function Wisp({ position, floor, entityId }: { position: Vec3; floor: num
     (core) => new WispController(core),
   );
   const touch = useContactDamage({
-    range: 1.45,
-    damage: 9,
+    ...contactOf("wisp")!,
     floor,
     push: { force: 5, planar: 0.35, lift: 2 },
     burst: ["#ff5d5d", "#b46bff"],

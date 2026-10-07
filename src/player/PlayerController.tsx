@@ -244,6 +244,7 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
         Math.atan2(fwd.x, fwd.z),
         Math.asin(Math.max(-1, Math.min(1, fwd.y))),
         state.equipment.staff.defId,
+        state.health,
       );
     }
 

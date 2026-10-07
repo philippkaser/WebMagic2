@@ -132,6 +132,12 @@ export class GameSession {
     this.transport?.send({ t: "loadout", equipment });
   }
 
+  /** We drank `itemId` from our belt: the server takes it off our account
+   * (it must be there) and, on a floor it hosts, heals us by it. */
+  sendDrink(itemId: string): void {
+    this.transport?.send({ t: "drink", itemId });
+  }
+
   /** HOST: `id` died or broke at `at` — the server's loot book rolls what
    * it dropped and answers with the orbs (netBus "lootRolled"). Offline the
    * loopback keeps the same book. */

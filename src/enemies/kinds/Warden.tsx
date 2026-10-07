@@ -14,10 +14,9 @@ import { castFlareFx, chargeBurstFx, explosionFx, soulDissolveFx, telegraphFx } 
 import { bodyProps, SpecCollider } from "../../game/bodies";
 import { ENEMY_GLOW, WARDEN_COLOR, WardenModel } from "../../render/models/enemies";
 import { ENEMY_BODIES } from "../../sim/bodies";
-import { WardenController } from "../../sim/enemies/controllers";
+import { contactOf, WardenController } from "../../sim/enemies/controllers";
 import type { SimCue } from "../../sim/world";
 import type { Vec3 } from "../../world/types";
-import { WARDEN } from "../brains/warden";
 import { useContactDamage, useEnemy } from "../useEnemy";
 
 /** The boss is a singleton: its net id and HUD bar are fixed. */
@@ -107,7 +106,7 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
     (core) => new WardenController(core),
   );
   // Its bulk burns anyone pressed against it once it's awake (to OUR player).
-  const touch = useContactDamage({ range: 2.3, damage: 16, floor, cooldown: 0.9, playerLift: WARDEN.aimLift });
+  const touch = useContactDamage({ ...contactOf("boss")!, floor });
 
   useEffect(() => {
     const src = addLightSource({ position, color: WARDEN_COLOR, intensity: 8, distance: 13, priority: 2 });

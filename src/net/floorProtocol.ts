@@ -49,9 +49,11 @@ export const FLOOR = {
   /** To one wizard: another wizard's spell hurt them (WizardHitMsg) — a
    * server host decides duels; the victim applies it. */
   wizardHit: "wizardHit",
-  /** To one wizard: the server knows they're dead — the duel damage alone
-   * passed everything they could have healed (YouFellMsg). */
+  /** To one wizard: their health reached zero on the server (YouFellMsg). */
   youFell: "youFell",
+  /** To one wizard: their health and mana as the server keeps them
+   * (VitalsMsg) — on a floor the server hosts, that's what they have. */
+  vitals: "vitals",
   // ── Peer ("p:") ───────────────────────────────────────────────────────────
   /** A wizard's pose (PoseMsg), 20 Hz. */
   pose: "pose",
@@ -191,6 +193,12 @@ export interface WizardHitMsg {
   impulse: Vec3;
 }
 
+export interface VitalsMsg {
+  hp: number;
+  maxHp: number;
+  mana: number;
+}
+
 export interface YouFellMsg {
   /** Whose spell it was, if a wizard's. */
   killer: string | null;
@@ -207,6 +215,9 @@ export interface PoseMsg {
   /** yaw, pitch */
   a: [number, number];
   staffId: string;
+  /** Their health by their own count — read by a server host only when they
+   * arrive (and then never above what the server already knows). */
+  h?: number;
 }
 
 // ── Rules every host applies ─────────────────────────────────────────────────

@@ -7,7 +7,7 @@ import type { Vec3 } from "../../world/types";
 import { SLIME_MAX_GEN, slimeGeneration, slimeSquash } from "../brains/slime";
 import { bodyProps, SpecCollider } from "../../game/bodies";
 import { slimeBody } from "../../sim/bodies";
-import { SlimeController } from "../../sim/enemies/controllers";
+import { contactOf, SlimeController } from "../../sim/enemies/controllers";
 import { useContactDamage, useEnemy } from "../useEnemy";
 
 /** Slime — a gelatinous melee blob that hops toward its prey and, on death,
@@ -31,7 +31,6 @@ export function Slime({
   const gen = Math.min(generation, SLIME_MAX_GEN);
   const cfg = slimeGeneration(gen);
   const body = useMemo(() => slimeBody(gen), [gen]);
-  const radius = 0.5 * cfg.size;
   const mesh = useRef<Mesh>(null);
   const mat = useRef<MeshStandardMaterial>(null);
 
@@ -57,8 +56,7 @@ export function Slime({
     (core) => new SlimeController(core, gen),
   );
   const touch = useContactDamage({
-    range: radius + 0.8,
-    damage: cfg.contact,
+    ...contactOf("slime", gen)!,
     floor,
     push: { force: 4, planar: 0.3, lift: 1.5 },
   });
