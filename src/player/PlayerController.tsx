@@ -185,6 +185,7 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
       vy = Math.max(vy, 1.6);
       dashCooldown.current = PLAYER.dashCooldown;
       playDash();
+      gameEvents.emit("dash", undefined);
       trauma.current = Math.min(1, trauma.current + 0.14);
       // Speed lines pouring past the eyes + an afterimage where we stood.
       fxAt.set(t.x, t.y + EYE_HEIGHT, t.z);

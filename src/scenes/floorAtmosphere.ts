@@ -53,7 +53,7 @@ export function useFloorAtmosphere(layout: FloorLayout): void {
     setFloorTint(tint);
     const envBefore = scene.environmentIntensity;
     scene.environmentIntensity = biome.envIntensity;
-    setGrade(biome.grade);
+    setGrade(biome.grade, biome.air);
     startAmbient("dungeon", BIOME_MOODS[layout.biome]);
 
     let omenTimer: ReturnType<typeof setTimeout> | null = null;

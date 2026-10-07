@@ -58,6 +58,9 @@ export function HUD() {
       } else if (e.code === "KeyO" || e.code === "F4") {
         e.preventDefault();
         useGame.getState().toggleShadows();
+      } else if (e.code === "KeyB") {
+        e.preventDefault();
+        useGame.getState().toggleMotionBlur();
       } else if (e.code === "KeyC") {
         const state = useGame.getState();
         if (state.phase !== "village" && state.phase !== "dungeon") return;

@@ -116,8 +116,19 @@ The emotional loop we are chasing:
   the inventory comes out the same — in parchment on soot, arcane cyan for magic and the way onward,
   gold for home, blood for danger. New UI must follow this — if it could be
   a DOM panel, it's wrong.
-- **Post-processing chain:** bloom (feeds the emissive specks and magic) →
-  split-tone colour grade (per biome) → film grain → heavy vignette. The pixelation itself is *free*: the
+- **Post-processing chain:** pixel-art edges found in the depth (a dark
+  outline behind every silhouette, a lit lip on every near edge) → the
+  lens (motion blur from your own turns and dashes, a zoom rush on a blast
+  or a rift's pull, colour fringing at the rim, the forge's heat shimmer,
+  the world going soft behind a menu) → bloom (feeds the emissive specks
+  and magic) → an eye that adapts (step out of a black corridor and the
+  hall opens up) → split-tone colour grade (per biome) with a filmic
+  shoulder so flames and blasts keep their shape → film grain on the pixel
+  grid → ordered dither → a heavy vignette tinted with each place's darks.
+  The body is in the image too: a blow drains the colour, a blast punches,
+  near death the world greys and the rim of sight closes with your pulse.
+  Each biome has its own air (the Hollow's dark breathes, the Crystal Deep
+  splits light like a prism, the Drowned Halls breathe faintly with the tide). The pixelation itself is *free*: the
   world renders at ~1/3 resolution and the browser upscales it with
   `image-rendering: pixelated` (the UI canvas above it renders at full
   resolution so the pixel font stays crisp).
