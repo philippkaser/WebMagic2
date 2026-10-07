@@ -116,27 +116,27 @@ The emotional loop we are chasing:
   the inventory comes out the same — in parchment on soot, arcane cyan for magic and the way onward,
   gold for home, blood for danger. New UI must follow this — if it could be
   a DOM panel, it's wrong.
-- **Post-processing chain:** an old dungeon crawler's pixels and colour,
-  with modern light. Light wraps: bright things bleed glow around their
-  edges and over what stands in front of them, laid down like the god rays
-  in dithered steps — a torch's halo is rings of dithered pixels, not an
-  airbrush. The eye focuses on what you look at and the rest goes soft;
-  lights out of focus open into round discs of bokeh, and behind a menu the
-  whole world drops out of focus. The eye adapts (step out of a black
-  corridor and the hall opens up), each biome has its split-tone grade
-  with a filmic shoulder so flames and blasts keep their shape, a heavy
-  vignette is tinted with each place's darks, and the whole image is brought
-  down to 15-bit colour through the same 4×4 ordered dither the god rays and
-  particles use — the look of the first 3D dungeon crawlers. The body is in
-  the image too: a blow drains the colour, a blast flashes, near death the
-  world greys and the rim of sight closes with your pulse. Each biome has
-  its own air (the forge shimmers, the Hollow's dark breathes, the Drowned
-  Halls breathe faintly with the tide). The pixelation itself is *free*: the
-  world renders at about 340 lines, scaled up by a whole number of screen
-  pixels so every pixel is the same size and every monitor sees about the
-  same chunkiness, and the browser upscales it with
-  `image-rendering: pixelated` (the UI canvas above it renders at full
-  resolution so the pixel font stays crisp).
+- **Post-processing chain: crisp pixel art seen through a perfect modern
+  lens.** The contrast is the point: the world is chunky pixels, and the
+  light is better than a AAA game's. The world renders at about 340 lines,
+  each pixel drawn as an exact block of screen pixels (a whole number of
+  them, so every pixel is the same size and every monitor sees about the
+  same chunkiness), while everything that is light or blur lies over it
+  smooth at the screen's full resolution: glow that wraps round pillars and
+  over the staff, god rays through the camp, anamorphic streaks through a
+  torch down the hall or a blast, lens dirt that catches the light when you
+  face the moon or a fireball. The eye focuses on what you look at — the
+  rest goes soft and lights out of focus open into round discs of bokeh —
+  and behind a menu the whole world drops out of focus. The eye adapts
+  (step out of a black corridor and the hall opens up), each biome has its
+  split-tone grade with a filmic shoulder so flames and blasts keep their
+  shape, a heavy vignette is tinted with each place's darks, and a fine
+  film grain sits over it all. The body is in the image too: a blow drains
+  the colour, a blast flashes, near death the world greys and the rim of
+  sight closes with your pulse. Each biome has its own air (the forge
+  shimmers, the Hollow's dark breathes, the Drowned Halls breathe faintly
+  with the tide). The UI canvas above renders at full resolution so the
+  pixel font stays crisp.
 
 ### Hard constraint: **zero binary assets**
 

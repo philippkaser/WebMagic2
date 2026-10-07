@@ -10,11 +10,12 @@ import { type Camera, Color, Uniform, Vector2, Vector3, type WebGLRenderer, type
  * SKY lights the air — pixels with no depth (the backdrop writes none, see
  * village/Sky) that are bright (the moon, its glow) — so the dark ranges
  * and every tree and tent are holes in the light, and the shafts fan out
- * between them. The gathered light is stepped and dithered like the rest of
- * the world's pixels. One pass at the world's low resolution: cheap.
+ * between them. One pass at the world's low resolution, writing the light
+ * alone: the composite (render/post/Composite) lays it over the world
+ * upsampled smooth, so the shafts are soft light over crisp pixels.
  *
  * A scene turns it on with `setGodRays` (the village) and off with
- * `clearGodRays`; with no source the pass returns its input untouched. */
+ * `clearGodRays`; with no source the pipeline skips the pass. */
 
 interface Source {
   dir: Vector3;
@@ -31,6 +32,11 @@ export function setGodRays(dir: Vector3, color: string, strength = 1, distance =
   source = { dir: dir.clone().normalize(), distance, color: new Color(color), strength };
 }
 
+/** Whether any scene has a source in its sky right now. */
+export function hasGodRays(): boolean {
+  return source !== null;
+}
+
 export function clearGodRays(): void {
   source = null;
 }
@@ -41,11 +47,10 @@ uniform float uStrength;
 uniform vec3 uColor;
 #define SAMPLES 48
 
-float bayer4(vec2 c) {
-  vec2 m = mod(floor(c), 4.0);
-  int i = int(m.x) + int(m.y) * 4;
-  float b[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
-  return (b[i] + 0.5) / 16.0;
+// Interleaved gradient noise (Jimenez): a march offset per pixel with no
+// visible pattern once the light is upsampled smoothly.
+float ign(vec2 c) {
+  return fract(52.9829189 * fract(dot(c, vec2(0.06711056, 0.00583715))));
 }
 
 // How much light the air at uv takes from the sky behind it.
@@ -61,12 +66,13 @@ float skyLight(vec2 p) {
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   if (uStrength <= 0.0) {
-    outputColor = inputColor;
+    outputColor = vec4(0.0, 0.0, 0.0, 1.0);
     return;
   }
   vec2 delta = (uv - uSun) * (1.0 / float(SAMPLES));
-  // Start each march a dither-step in, so the shafts don't band.
-  float dith = bayer4(gl_FragCoord.xy);
+  // Start each march a little way in, differently per pixel, so the shafts
+  // don't band.
+  float dith = ign(gl_FragCoord.xy);
   vec2 p = uv - delta * dith;
   float illum = 1.0;
   float acc = 0.0;
@@ -76,13 +82,9 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
     p -= delta;
   }
   acc *= 1.5 / float(SAMPLES);
-  // Fainter the further from the source; stepped like everything else
-  // (fine steps, and nothing at all in the faintest air, so the sky
-  // doesn't fill with lone dithered pixels).
+  // Fainter the further from the source.
   float far = length((uv - uSun) * vec2(aspect, 1.0));
   acc *= 1.0 / (1.0 + far * 1.8);
-  acc = max(acc - 0.015, 0.0);
-  acc = floor(acc * 24.0 + dith) / 24.0;
   // The source itself is already bright: light the air, not the moon (its
   // dark seas included — a lower threshold than the light it gives).
   float self = 0.0;
@@ -91,7 +93,8 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
     vec2 off = (uv - uSun) * vec2(aspect, 1.0);
     self = smoothstep(0.18, 0.4, l) * exp(-dot(off, off) * 10.0);
   }
-  outputColor = vec4(inputColor.rgb + uColor * acc * uStrength * (1.0 - 0.95 * self), inputColor.a);
+  // The light alone: the composite lays it over the world, upsampled smooth.
+  outputColor = vec4(uColor * acc * uStrength * (1.0 - 0.95 * self), 1.0);
 }
 `;
 

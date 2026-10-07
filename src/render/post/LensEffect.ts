@@ -14,17 +14,20 @@ import {
 } from "three";
 import { POST_GLSL } from "./glsl";
 
-/** The lens, in one pass over the world's low-resolution image (it reads
- * the depth, so it needs its own pass; everything else in the chain merges
- * into the final one):
+/** Depth of field with bokeh, gathered over the world's low-resolution image
+ * into a layer of its own: the blurred colour, and in alpha how blurred each
+ * pixel is (its circle of confusion / COC_RANGE). The composite
+ * (post/Composite) upsamples that layer smoothly and blends it in where the
+ * blur is real — so out-of-focus light is soft and round at full screen
+ * resolution while what's in focus stays crisp pixel art.
  *
- *  - **Depth of field with bokeh.** The eye focuses on what you look at —
+ *  - **The focus.** The eye focuses on what you look at —
  *    the middle of the view, metered every frame on the GPU and racked over
  *    a few tenths of a second — and the world nearer and further goes soft
  *    in proportion to how far out of focus it is (circle of confusion ∝
  *    |1/focus − 1/distance|, like a real lens). Bright things out of focus
- *    open into round discs: a torch down the hall becomes a disc of light,
- *    drawn on the pixel grid. Behind a tablet (the title, the Weighing, the
+ *    open into round discs: a torch down the hall becomes a soft disc of
+ *    light. Behind a tablet (the title, the Weighing, the
  *    inventory and its kin, the codex, death) the whole world drops out of
  *    focus. The staff in your hand stays sharp — it's yours, not the
  *    world's.
@@ -32,9 +35,7 @@ import { POST_GLSL } from "./glsl";
  *    angle spiral whose samples count only if their own blur reaches this
  *    pixel, so sharp things in front never smear and blurred things
  *    behind never bleed over them). The spiral only runs as far as the
- *    largest blur on screen, so an ordinary view costs a handful of taps.
- *  - **Heat shimmer**: the air over the Ember Forge's magma wavers, more
- *    the further you look through it. */
+ *    largest blur on screen, so an ordinary view costs a handful of taps. */
 
 const fragment = /* glsl */ `
 ${POST_GLSL}
@@ -42,8 +43,6 @@ uniform sampler2D uFocus;
 uniform float uAperture;
 uniform float uMaxCoc;
 uniform float uSoft;
-uniform float uHaze;
-uniform float uTime;
 
 // Nearer than this is the staff in your hand (it rides with the camera).
 #define HELD 0.75
@@ -52,6 +51,8 @@ uniform float uTime;
 #define GOLDEN 2.39996
 // Spiral step: the radius grows so taps stay ~evenly spread over the disc.
 #define RAD_SCALE 0.55
+// Blur radius stored in alpha as coc / COC_RANGE.
+#define COC_RANGE 16.0
 
 float viewDist(float depth) { return -getViewZ(depth); }
 
@@ -63,39 +64,18 @@ float cocOf(float d) {
   return c + uSoft * SOFT_COC;
 }
 
-float hazeNoise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  float a = postHash(vec3(i, 7.0));
-  float b = postHash(vec3(i + vec2(1.0, 0.0), 7.0));
-  float c = postHash(vec3(i + vec2(0.0, 1.0), 7.0));
-  float d = postHash(vec3(i + vec2(1.0, 1.0), 7.0));
-  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   float dist = viewDist(readDepth(uv));
-  bool held = dist < HELD;
   vec2 at = uv;
-
-  // Heat shimmer: the air between you and what you see wavers, more the
-  // further you look through it (the staff is left alone).
-  if (uHaze > 0.0 && !held) {
-    float through = smoothstep(1.5, 14.0, min(dist, 30.0));
-    vec2 q = uv * vec2(aspect, 1.0) * vec2(9.0, 5.0) + vec2(0.0, -uTime * 1.3);
-    vec2 w = vec2(hazeNoise(q), hazeNoise(q + 17.3)) - 0.5;
-    at += w * vec2(0.6, 1.0) * uHaze * 0.0045 * through;
-  }
-
   vec3 color = texture2D(inputBuffer, at).rgb;
   float reach = uMaxCoc + uSoft * SOFT_COC;
+  float size = 0.0;
   if (reach >= 0.5) {
     focusDiopters = texture2D(uFocus, vec2(0.5)).r;
-    float size = cocOf(dist);
+    size = cocOf(dist);
     float total = 1.0;
     float radius = RAD_SCALE;
-    float angle = postBayer(gl_FragCoord.xy) * 6.2832;
+    float angle = postNoise(gl_FragCoord.xy) * 6.2832;
     for (int i = 0; i < 96; i++) {
       if (radius >= reach) break;
       vec2 p = at + vec2(cos(angle), sin(angle)) * texelSize * radius;
@@ -113,7 +93,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
     }
     color /= total;
   }
-  outputColor = vec4(color, inputColor.a);
+  outputColor = vec4(color, clamp(size / COC_RANGE, 0.0, 1.0));
 }
 `;
 
@@ -177,8 +157,6 @@ export class LensEffect extends Effect {
         ["uAperture", new Uniform(2.6)],
         ["uMaxCoc", new Uniform(0)],
         ["uSoft", new Uniform(0)],
-        ["uHaze", new Uniform(0)],
-        ["uTime", new Uniform(0)],
       ]),
     });
     const one = () =>
@@ -199,9 +177,6 @@ export class LensEffect extends Effect {
   set soft(v: number) {
     this.uniforms.get("uSoft")!.value = v;
   }
-  set haze(v: number) {
-    this.uniforms.get("uHaze")!.value = v;
-  }
 
   override setDepthTexture(depthTexture: Texture, depthPacking: DepthPackingStrategies = BasicDepthPacking): void {
     super.setDepthTexture(depthTexture, depthPacking);
@@ -210,7 +185,6 @@ export class LensEffect extends Effect {
 
   override update(renderer: WebGLRenderer, _input: WebGLRenderTarget, dt = 1 / 60): void {
     const u = this.uniforms;
-    u.get("uTime")!.value = (u.get("uTime")!.value + dt) % 1000;
     if (!this.depth) return;
     const cam = this.camera as PerspectiveCamera;
     const m = this.focusPass.fullscreenMaterial as ShaderMaterial;
@@ -235,3 +209,5 @@ export class LensEffect extends Effect {
 
 /** The world's largest blur at full depth of field (render px radius). */
 const MAX_COC = 4;
+/** Alpha holds coc / COC_RANGE (keep in step with the shader). */
+export const COC_RANGE = 16;

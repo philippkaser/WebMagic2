@@ -1,11 +1,12 @@
 /** The world's pixel grid: how big one world pixel is on screen.
  *
- * The world renders at low resolution and the browser upscales it with
- * image-rendering: pixelated. For that to look clean, every world pixel must
- * cover the same whole number of DEVICE pixels — at a fractional scale (the
- * old fixed dpr 0.35 gave 2.86 screen pixels per world pixel) most columns
- * come out 3 wide and every few 2, and those thin columns crawl across the
- * image as you turn.
+ * The world renders at low resolution and the final composite
+ * (render/post/Composite) draws each world pixel as a block of screen
+ * pixels, with the light and blur smooth over it at full resolution. For the
+ * blocks to look clean, every world pixel must cover the same whole number of
+ * DEVICE pixels — at a fractional scale (the old fixed dpr 0.35 gave 2.86
+ * screen pixels per world pixel) most columns come out 3 wide and every few
+ * 2, and those thin columns crawl across the image as you turn.
  *
  * So the scale is a whole number, picked per display so the world lands near
  * TARGET_LINES lines tall: players on different monitors see nearly the
@@ -31,8 +32,9 @@ export interface PixelGrid {
    * snapped to whole device pixels). */
   cssLeft: number;
   cssTop: number;
-  /** The renderer's pixel ratio (world pixels per CSS px). */
-  dpr: number;
+  /** The display's device pixels per CSS px: the canvas renders at this
+   * (full resolution), exactly `width × scale` device pixels wide. */
+  ratio: number;
 }
 
 /** The grid for a viewport of `cssW × cssH` CSS px at `deviceRatio` device
@@ -62,6 +64,17 @@ export function pixelGrid(cssW: number, cssH: number, deviceRatio: number, targe
     cssHeight: boxH / ratio,
     cssLeft: -Math.floor((width * scale - devW) / 2) / ratio,
     cssTop: -Math.floor((height * scale - devH) / 2) / ratio,
-    dpr: ratio / scale,
+    ratio,
   };
+}
+
+let current: PixelGrid = pixelGrid(1280, 720, 1);
+
+/** The grid the world is drawn on right now (GameScene keeps it). */
+export function worldGrid(): PixelGrid {
+  return current;
+}
+
+export function setWorldGrid(grid: PixelGrid): void {
+  current = grid;
 }

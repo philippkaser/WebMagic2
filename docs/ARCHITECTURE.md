@@ -395,10 +395,11 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   count and zero mid-game shader recompiles. The only real lights outside
   the pool are the player's shadow-casting staff light and the village moon.
 - **Resolution IS the pixelation**: the world renders at about 340 lines
-  and the browser upscales it with `image-rendering: pixelated`. That one
-  decision cut measured frame time ~5× — every light, normal map and post
-  pass pays ~1/8th the fragments — and replaced the pixelation post-pass
-  outright. The scale is a whole number of device pixels per world pixel
+  into an offscreen target, and the full-resolution canvas gets a composite
+  that draws each world pixel as an exact block (`render/Effects.tsx`, see
+  the post chain). That one decision cut measured frame time ~5× — every
+  light, normal map and low-res post pass pays ~1/8th the fragments — and
+  replaced any pixelation pass outright. The scale is a whole number of device pixels per world pixel
   (`render/pixelGrid.ts`), picked per display so the line count stays in a
   narrow band (≈320–380 on common screens, every player about the same
   chunkiness); a fractional scale (the old dpr 0.35 gave 2.86) made most
@@ -428,40 +429,50 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   `AmbientParticles.tsx` — single pixels animated entirely on the GPU in a
   box that follows the camera (dust, spores and drips, embers and ash,
   glints, village fireflies; the Weightless Hour makes it all float up).
-- **Post chain** (`render/Effects.tsx`, effects in `render/post/`): an old
-  dungeon crawler's pixels and colour with modern light. Three passes at the
-  world's low resolution:
-  1. god rays (`render/godRays.ts`, see below): marched light, stepped and
-     dithered;
-  2. the lens (`post/LensEffect.ts`, one pass reading depth): **depth of
-     field with bokeh** — the focus is metered at the middle of the view on
-     the GPU (a cross of depth taps, the staff and sky ignored, 1×1
-     ping-pong racked over ~0.2 s), the circle of confusion is
-     |1/focus − 1/distance| × aperture (capped at 4 render px; the held staff
-     always sharp), gathered in one pass with Dennis Gustafsson's
-     golden-angle spiral (a sample counts only if its own blur reaches
-     this pixel), so bright things out of focus open into round discs; the
+- **Post chain** (`render/Effects.tsx` runs it, at `useFrame` priority 1 —
+  it takes the frame over from R3F; effects in `render/post/`): crisp pixel
+  art seen through a perfect modern lens. The world renders into a
+  low-resolution HDR target (with a depth texture); everything that is
+  light or blur is worked out at that resolution too, and one composite at
+  the canvas's full resolution lays it over the pixels smoothly:
+  1. **god rays** (`render/godRays.ts`, only while a scene has a source):
+     the light alone, into its own layer;
+  2. **depth of field with bokeh** (`post/LensEffect.ts`): the focus is
+     metered at the middle of the view on the GPU (a cross of depth taps,
+     staff and sky ignored, 1×1 ping-pong racked over ~0.2 s), the circle
+     of confusion is |1/focus − 1/distance| × aperture (≤ 4 world px; the
+     held staff always sharp), gathered in one pass with Gustafsson's
+     golden-angle spiral (a sample counts only if its own blur reaches this
+     pixel); the blurred colour goes to a layer with coc/16 in alpha; the
      whole world drops out of focus behind a tablet (title, Weighing,
-     inventory family, codex, death); a setting, `depthOfField`, key B —
-     and the forge's **heat shimmer**;
-  3. one merged pass: `post/GradeEffect.ts` owns the bloom (mipmap blur)
-     and lays the glow down like the god rays — the light wrap in a few
-     perceptual (√) steps with the 4×4 Bayer dither between, nothing in the
-     faintest air — then eye adaptation (centre-weighted log-luminance
-     meter, 32² mip chain → 1×1 ping-pong, fast toward light and slow into
-     dark, half-way and within ±½ EV of the place's `air.eye`), the
-     split-tone grade, a per-channel filmic shoulder instead of the hard
-     clip, colour drained by a blow or near death → `post/FilmEffect.ts`: an
-     oval vignette tinted with the place's darks (breathing in the Hollow,
-     closing with the heartbeat near death) and **15-bit colour through the
-     4×4 ordered dither**, in display space on the pixel grid, fading to
-     plain rounding at black so the deep dark stays ink.
-  One dither runs through all of it: the god rays, the glow, the colour and
-  the dithered particles share the same Bayer matrix. Each biome sets its
-  `grade` and `air` (shimmer, breath, vignette, eye) on arrival
-  (`setGrade`) and they ease in over a second; the village has its own
-  (`VILLAGE_GRADE`, `VILLAGE_AIR`). The body's kicks — `shake` and
+     inventory family, codex, death); a setting, `depthOfField`, key B;
+  3. **bloom** (postprocessing's `BloomEffect`, its mipmap blur used
+     directly): the light wrap;
+  4. **anamorphic streaks** (`post/Streaks.ts`): the bloom's bright pass,
+     minus anything nearer than arm's length (the staff would pin a flare
+     across the screen), blurred horizontally three times at quarter
+     resolution, each pass reaching 4× further;
+  5. **the eye** (`post/Eye.ts`): centre-weighted log-luminance meter, 32²
+     mip chain → 1×1 ping-pong, fast toward light, slow into dark;
+  6. **the composite** (`post/Composite.ts`, full resolution): the world
+     pixel by `texelFetch` (an exact block; in the forge the lookup
+     shimmers through the heat), the DoF layer blended in where coc > ~1,
+     bloom, streaks and rays added — all four layers upsampled with a
+     4-tap bicubic B-spline, so light and blur are continuous over the
+     crisp pixels — procedural lens dirt (`post/lensDirt.ts`, painted once)
+     lit by the bloom and streaks, exposure half-way toward the place's
+     `air.eye` within ±½ EV, the split-tone grade, a per-channel filmic
+     shoulder instead of the hard clip, colour drained by a blow or near
+     death, a smooth oval vignette tinted with the place's darks (breathing
+     in the Hollow, closing with the heartbeat near death), fine grain in
+     the mid-tones at screen resolution, and a sub-step of output noise
+     against banding.
+  Each biome sets its `grade` and `air` (shimmer, breath, vignette, eye) on
+  arrival (`setGrade`) and they ease in over a second; the village has its
+  own (`VILLAGE_GRADE`, `VILLAGE_AIR`). The body's kicks — `shake` and
   `playerHurt` events, health — are kept by `post/feel.ts` (pure, tested).
+  The fx particles snap to the world's grid (`worldGrid()`), not the
+  canvas's.
 - **Shadows are a quality toggle** (F4 / main menu, persisted, default off):
   a shadow-casting point light re-renders the scene six times per frame,
   measured at roughly +50% frame time even at low resolution.
@@ -506,8 +517,8 @@ gear changes the entry floor).
   pass at the world's resolution. Each pixel marches toward the moon's place
   on screen gathering *sky* light — pixels with no depth (the backdrop) that
   are bright (the moon and its glow) — so the ranges, the forest and the camp
-  cut the light into shafts; stepped and dithered like everything else, and
-  kept off the moon's own face. A scene turns it on with `setGodRays` (the
+  cut the light into shafts, kept off the moon's own face. It writes the
+  light alone; the composite lays it over the world upsampled smooth. A scene turns it on with `setGodRays` (the
   camp) and off with `clearGodRays`. From the side, long additive moonbeams
   (`MoonShafts.tsx`) slant down from the moon's direction across the camp.
 

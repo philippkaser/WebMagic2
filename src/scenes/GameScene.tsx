@@ -20,7 +20,7 @@ import { PeerBodies } from "../net/PeerBodies";
 import { RemoteWizards } from "../net/RemoteWizards";
 import { StaffView } from "../player/StaffView";
 import { Effects } from "../render/Effects";
-import { pixelGrid, type PixelGrid } from "../render/pixelGrid";
+import { pixelGrid, setWorldGrid, type PixelGrid } from "../render/pixelGrid";
 import { TransitionSystem } from "../transition/TransitionSystem";
 import { useGame } from "../state/gameStore";
 import { WorldCameraBridge } from "../ui3d/bridge";
@@ -57,14 +57,14 @@ export function GameScene() {
   // The Weightless Hour (and any future omen) bends the world's gravity.
   const gravityMult = (layout && omenRules(layout.omen).gravityMult) ?? 1;
 
-  // The game IS pixelated, so rendering at native resolution would be pure
-  // waste: the world renders at ~340 lines and the browser upscales it with
-  // image-rendering: pixelated, which doubles as the pixel-art look (no
-  // pixelation post-pass needed). The scale is a whole number of device
-  // pixels per world pixel, so every pixel is the same size
-  // (render/pixelGrid.ts); the box may overhang the window by under one
-  // world pixel, cropped evenly.
+  // The game IS pixelated, so rendering the world at native resolution
+  // would be pure waste: it renders at ~340 lines into an offscreen target
+  // (render/Effects), and the canvas — at full device resolution — gets the
+  // final composite: each world pixel a block of exactly `scale` screen
+  // pixels (render/pixelGrid.ts), the light and blur smooth over them. The
+  // box may overhang the window by under one world pixel, cropped evenly.
   const grid = usePixelGrid();
+  setWorldGrid(grid);
   return (
     <div
       style={{
@@ -78,7 +78,7 @@ export function GameScene() {
       <Canvas
         id="wm-world"
         shadows
-        dpr={grid.dpr}
+        dpr={grid.ratio}
         gl={{ antialias: false, powerPreference: "high-performance" }}
         camera={{ fov: 78, near: 0.08, far: 140 }}
       >
@@ -132,7 +132,7 @@ export function GameScene() {
               <meshBasicMaterial color="#12324a" />
             </mesh>
           </Environment>
-          <Effects />
+          <Effects grid={grid} />
         </Suspense>
         {/* The selector is load-bearing: without it drei binds its click-to-
             lock handler to the whole DOCUMENT, so clicking a menu button would

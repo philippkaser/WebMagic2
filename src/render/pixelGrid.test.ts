@@ -26,9 +26,10 @@ describe("pixel grid", () => {
       // (within the quarter-pixel slack across the whole box).
       expect(Math.abs(g.cssWidth * r - g.width * g.scale)).toBeLessThan(0.5);
       expect(Math.abs(g.cssHeight * r - g.height * g.scale)).toBeLessThan(0.5);
-      // What the renderer will allocate: floor(css × dpr) is exactly the grid.
-      expect(Math.floor(g.cssWidth * g.dpr)).toBe(g.width);
-      expect(Math.floor(g.cssHeight * g.dpr)).toBe(g.height);
+      // What the renderer will allocate at full resolution: floor(css ×
+      // ratio) is exactly the grid's blocks.
+      expect(Math.floor(g.cssWidth * g.ratio)).toBe(g.width * g.scale);
+      expect(Math.floor(g.cssHeight * g.ratio)).toBe(g.height * g.scale);
     }
   });
 

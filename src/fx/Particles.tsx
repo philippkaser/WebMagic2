@@ -1,4 +1,5 @@
-import { useFrame, useThree } from "@react-three/fiber";
+import { worldGrid } from "../render/pixelGrid";
+import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { Color, Mesh, Vector3 } from "three";
 import { clamp01, randomInCone, randomUnit, type MutVec3 } from "./curves";
@@ -296,7 +297,6 @@ const stats = { peak: 0, stepMs: 0 };
 /** Mounted once in GameScene: the particle mesh and the torch flames. */
 export function FxSystems() {
   const mesh = useRef<Mesh>(null);
-  const gl = useThree((s) => s.gl);
   const parts = useMemo(() => createParticleGeometry(arrays), []);
   const material = useMemo(() => createParticleMaterial(), []);
 
@@ -330,8 +330,10 @@ export function FxSystems() {
     const dt = Math.min(rawDt, 1 / 20) * timeScale;
     // Wrapped so shader noise keeps float precision on long sessions.
     fxUniforms.uTime.value = state.clock.elapsedTime % 3600;
-    // The pixel grid every sprite snaps to (glsl.ts#PIXEL_GLSL).
-    gl.getDrawingBufferSize(fxUniforms.uViewport.value);
+    // The pixel grid every sprite snaps to (glsl.ts#PIXEL_GLSL): the world's
+    // own render size, not the full-resolution canvas it's composited onto.
+    const grid = worldGrid();
+    fxUniforms.uViewport.value.set(grid.width, grid.height);
 
     const t0 = import.meta.env.DEV ? performance.now() : 0;
     const count = sim.step(dt, arrays);
