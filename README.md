@@ -35,11 +35,12 @@ has the server host even a solo floor (to play against a server host alone).
 End-to-end smoke test (headless Chromium, two wizards: a full solo run, then
 PvP, a pact, a gift dropped and picked up, a death, a grave and its plunder —
 including the server honoring the gift and the plunder; `FLOOR_PACE_MS=0`
-lifts the deep's pace, which the script outruns, and `DEV_LOOT=1` lets it
-hand a wizard a specific orb — never set either on a real server):
+lifts the deep's pace, which the script outruns, `DEV_LOOT=1` lets it hand
+a wizard a specific orb, and `DEV_MOVES=1` lets its wizards teleport on a
+server-hosted floor — never set any of them on a real server):
 
 ```sh
-DATA_FILE=/tmp/wm-e2e.json ENCOUNTER_CHANCE=1 FLOOR_PACE_MS=0 DEV_LOOT=1 bun server/server.ts &
+DATA_FILE=/tmp/wm-e2e.json ENCOUNTER_CHANCE=1 FLOOR_PACE_MS=0 DEV_LOOT=1 DEV_MOVES=1 bun server/server.ts &
 bunx vite --port 3000 &
 DATA_FILE=/tmp/wm-e2e.json bun run e2e   # CHROMIUM_PATH=… to pick a browser
 ```
@@ -170,8 +171,10 @@ Shared floors are truly shared: each instance has a **simulation host**
 whose enemies, props, boss, loot and graves are authoritative. A wizard
 alone hosts their own floor; the moment a second wizard arrives the
 **server takes the floor over** and hosts it (`SERVER_HOSTS=shared`, the
-default — `always` hosts every floor server-side, `never` none). Replicas
-predict and reconcile. Your own health is always decided locally — which is
+default — `always` hosts every floor server-side, `never` none). There
+the server also runs every wizard's spells itself, with the gear it knows
+they carry, and refuses impossible moves — a client can say what it cast
+and where it went, never what it hit. Replicas predict and reconcile. Your own health is always decided locally — which is
 also how wizard-vs-wizard damage works: a stranger's spell hurts you on your
 own machine, and the last wizard who hurt you takes the kill credit. The
 server keeps the saves and rolls the loot: the host only reports what died,
@@ -231,7 +234,7 @@ Design rules that keep it future-proof:
 
 ## Roadmap
 
-- Server-side checks on wizards' own hits and movement (a server copy of
-  their spells), so shared floors trust no client at all
+- Lag compensation for server-resolved spells (rewind enemies by the
+  caster's latency), and server-decided PvP for arenas
 - A unique boss per biome
 - More omens, carvings and enemy archetypes; biome-specific hazards

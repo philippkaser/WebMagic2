@@ -22,9 +22,25 @@ export interface CastMsg {
   origin: Vec3Tuple;
   /** Unit aim direction. */
   dir: Vec3Tuple;
+  /** Seeds the volley's spread (sim/spells.ts boltVolley), so the caster,
+   * every replay and a server host fire the same bolts. */
+  seed: number;
   /** Base staff def id (no affix) — its color tints the replayed spell. */
   staffId: string;
   stats: CastStats;
+}
+
+/** Fire-rate floor: no debuff can stretch a cooldown past 4×. */
+export const MIN_FIRE_RATE = 0.25;
+
+/** Seconds between casts of a spell with `cooldown`, at a fire-rate mult. */
+export function castInterval(cooldown: number, fireRateMult: number): number {
+  return cooldown / Math.max(MIN_FIRE_RATE, fireRateMult);
+}
+
+/** A fresh volley seed for one of our casts. */
+export function newCastSeed(): number {
+  return (Math.random() * 0x100000000) >>> 0;
 }
 
 /** Plausible ranges for replayed gear stats. Generous against legit gear
@@ -57,11 +73,13 @@ export function encodeCastMsg(
   dir: XYZ,
   staffId: string,
   stats: CastStats,
+  seed: number,
 ): CastMsg {
   return {
     abilityId,
     origin: [origin.x, origin.y, origin.z],
     dir: [dir.x, dir.y, dir.z],
+    seed,
     staffId,
     stats: {
       damageMult: stats.damageMult,
@@ -89,6 +107,7 @@ export function sanitizeCastMsg(raw: unknown): CastMsg | null {
     abilityId: m.abilityId,
     origin,
     dir: [dir[0] / len, dir[1] / len, dir[2] / len],
+    seed: typeof m.seed === "number" && Number.isFinite(m.seed) ? m.seed >>> 0 : 0,
     staffId: staffIdOrDefault(m.staffId),
     stats: sanitizeCastStats(m.stats),
   };

@@ -136,8 +136,10 @@ export class Relay {
       this.pruneGone(); // floors whose instance lingered out
     }
     for (const [instId, h] of this.hosted) {
-      if (h.host.isHost) h.host.tick(dt);
-      else if (this.now() - h.since >= HANDOVER_TIMEOUT_MS) this.promote(instId, "the wizard host never synced");
+      h.host.tick(dt);
+      if (!h.host.isHost && this.now() - h.since >= HANDOVER_TIMEOUT_MS) {
+        this.promote(instId, "the wizard host never synced");
+      }
     }
   }
 
@@ -205,6 +207,7 @@ export class Relay {
       send: (name, data, to) => this.fromServerHost(instId, CHANNEL_AUTHORITY + name, data, to),
       nameOf: (id) => this.peers.get(id)?.name ?? "Wizard",
       ready: () => this.promote(instId, "synced"),
+      log: this.log,
     });
     for (const id of inst.players) host.joined(id);
     this.hosted.set(instId, { host, since: this.now() });
@@ -212,7 +215,9 @@ export class Relay {
     // over. Otherwise the wizard who has been hosting hands its floor over.
     const previous = this.peers.get(wizardHost);
     if (inst.players.size === 1 || !previous || wizardHost === joiner) {
-      this.promote(instId, "fresh floor");
+      // Nobody to migrate from: the joiner's assignment names this host.
+      host.promote();
+      this.log(`server hosts ${instId} (fresh floor)`);
     } else {
       previous.send({ t: "syncRequest", playerId: SERVER_HOST_ID });
       this.log(`server taking over ${instId} from ${wizardHost}`);

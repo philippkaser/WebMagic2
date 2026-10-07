@@ -25,6 +25,7 @@ import type { DerivedStats, Equipment } from "../items/types";
 import { netBus } from "../net/bus";
 import { useNet } from "../net/netStore";
 import { session } from "../net/session";
+import type { WireEquipment } from "../net/protocol";
 import { bankKit, settleDeath, type LostStack } from "../run/outcomes";
 import { canLeave, entryFloorFor, floorsUntilExit, gearLevel } from "../run/rules";
 import { isTraveling, travel } from "../transition/travel";
@@ -799,6 +800,27 @@ setHeadphones(useGame.getState().headphones);
 if (typeof window !== "undefined" && import.meta.env?.DEV) {
   (window as unknown as Record<string, unknown>).__game = useGame;
 }
+
+// The server casts our spells on the floors it hosts with the gear it
+// believes we wear (checked against what we carry): tell it whenever that
+// changes, and again on every floor (a reconnect forgets it).
+let sentLoadout = "";
+function syncLoadout(equipment: Equipment, force = false): void {
+  const wire: WireEquipment = {
+    staff: equipment.staff.defId,
+    amulet: equipment.amulet?.defId ?? null,
+    cloak: equipment.cloak?.defId ?? null,
+    boots: equipment.boots?.defId ?? null,
+  };
+  const key = JSON.stringify(wire);
+  if (key === sentLoadout && !force) return;
+  sentLoadout = key;
+  session.sendLoadout(wire);
+}
+useGame.subscribe((s, prev) => {
+  if (s.equipment !== prev.equipment) syncLoadout(s.equipment);
+});
+netBus.on("assigned", () => syncLoadout(useGame.getState().equipment, true));
 
 /** Current derived stats — cheap enough to compute on demand. */
 export function getStats(): DerivedStats {

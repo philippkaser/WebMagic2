@@ -13,7 +13,7 @@ import { ENEMY_SOURCE } from "../game/damageSource";
 import { getFloorRules } from "../game/floorRules";
 import { getPlayerBody, playerPosition } from "../game/player-state";
 import { allocId, registerHittable } from "../game/registry";
-import { isHost } from "../net/netStore";
+import { isHost, reportsOwnHits } from "../net/netStore";
 import { useNetBody, type NetBody } from "../net/NetSystems";
 import { enemyOptions, type EnemyController } from "../sim/enemies/controllers";
 import { EnemyCore, enemyDamage as simEnemyDamage } from "../sim/enemies/core";
@@ -327,10 +327,12 @@ function useEnemyNet(opts: {
         // on the authority, via a command to it otherwise (with the physical
         // knockback predicted immediately, so the reaction never waits on
         // the round trip).
+        // On a server-hosted floor the server's copy of the cast decides
+        // the damage (net/netStore.ts reportsOwnHits): we only show it.
         if (isHost()) {
           core.hit(damage, impulse);
         } else {
-          netRef.current?.command("hit", { damage, impulse } satisfies HitData);
+          if (reportsOwnHits()) netRef.current?.command("hit", { damage, impulse } satisfies HitData);
           netRef.current?.predictImpulse(impulse, knockbackScale);
         }
       },

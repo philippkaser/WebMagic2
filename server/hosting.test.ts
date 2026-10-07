@@ -5,6 +5,7 @@ import { SERVER_HOST_ID, type ServerMsg } from "../src/net/protocol";
 import { generateFloor } from "../src/world/gen";
 import type { Vec3 } from "../src/world/types";
 import { AccountStore } from "./accounts";
+import type { FloorHost } from "./floorHost";
 import { serverHosting, type HostingPolicy } from "./hosting";
 import { HANDOVER_TIMEOUT_MS, Relay, type RelayPeer } from "./relay";
 
@@ -72,6 +73,33 @@ function join(p: TestPeer) {
 const send = (p: TestPeer, ch: string, data: unknown, to?: string) => relay.handle(p.id, { t: "msg", ch, data, to });
 const pose = (p: TestPeer, at: Vec3) => send(p, "p:pose", { p: at, v: [0, 0, 0], a: [0, 0], staffId: "s" });
 const instId = (p: TestPeer) => lastOf(p, "floorAssigned")!.assignment.instanceId;
+
+/** The server's host of A's floor (white-box: its sim and its refusals). */
+function host(): FloorHost {
+  const hosted = (relay as unknown as { hosted: Map<string, { host: FloorHost }> }).hosted;
+  return hosted.get(instId(a))!.host;
+}
+
+/** A spot `range` m from enemy `i` in the open, and the aim back at it. */
+function standoff(i: number, range: number): { spot: Vec3; aim: Vec3 } {
+  const sim = host().sim;
+  const id = `e${i}`;
+  const t = sim.physics.bodies.get(id)!.translation();
+  const body = sim.physics.bodies.get(id)!;
+  for (let k = 0; k < 16; k++) {
+    const ang = (k / 16) * Math.PI * 2;
+    const d = { x: Math.cos(ang), y: 0, z: Math.sin(ang) };
+    if (sim.world.clearShot(t, d, range + 1, body)) {
+      return { spot: [t.x + d.x * range, t.y, t.z + d.z * range], aim: [-d.x, 0, -d.z] };
+    }
+  }
+  throw new Error("no open spot");
+}
+
+/** A cast message, as a client sends it (claimed stats included). */
+function castOf(abilityId: string, from: Vec3, dir: Vec3, seed = 1, stats = { damageMult: 1, extraProjectiles: 0, homing: 0 }) {
+  return { abilityId, origin: from, dir, seed, staffId: "apprentice_staff", stats };
+}
 
 /** A takes the floor alone, B arrives, and A hands the floor over with the
  * world sync the server asked for. */
@@ -145,6 +173,66 @@ describe("hosting policy", () => {
   });
 });
 
+describe("what wizards say they do, on a server-hosted floor", () => {
+  beforeEach(() => {
+    setup("shared");
+    handOver();
+  });
+
+  test("a cast must be a spell of the staff the ledger believes, cast from where the wizard stands", () => {
+    const { spot, aim } = standoff(1, 3);
+    pose(b, spot);
+    send(b, "p:cast", castOf("lance", spot, aim)); // not the apprentice staff's
+    send(b, "p:cast", castOf("bolt", [spot[0] + 30, spot[1], spot[2]], aim)); // from across the room
+    expect(host().refused.casts).toBe(2);
+    expect(host().sim.spellsLive.projectiles).toBe(0);
+    // A loadout claiming a staff B doesn't carry changes nothing…
+    relay.handle(b.id, { t: "loadout", equipment: { staff: "void_staff", amulet: null, cloak: null, boots: null } });
+    relay.tick(1.1); // the host re-asks the ledger at most once a second
+    send(b, "p:cast", castOf("lance", spot, aim));
+    expect(host().refused.casts).toBe(3);
+    // …one it carries does.
+    account(b).runGrants.push("void_staff");
+    relay.tick(1.1);
+    send(b, "p:cast", castOf("lance", spot, aim));
+    expect(host().refused.casts).toBe(3);
+    expect(host().sim.spellsLive.projectiles).toBe(1);
+  });
+
+  test("casting faster than the staff allows is refused; claimed stats are ignored", () => {
+    const { spot, aim } = standoff(1, 3);
+    pose(b, spot);
+    const hp = host().sim.enemy("e1")!.hp;
+    // Ten bolts at once, each claiming the strongest gear there is.
+    for (let i = 0; i < 10; i++) send(b, "p:cast", castOf("bolt", spot, aim, i, { damageMult: 16, extraProjectiles: 4, homing: 2 }));
+    expect(host().refused.casts).toBe(8); // two in hand, no more
+    expect(host().sim.spellsLive.projectiles).toBe(2); // one bolt each: no claimed multishot
+    for (let t = 0; t < 10; t++) relay.tick(0.05);
+    // Two apprentice bolts' worth, at most — not two of a 16× staff.
+    expect(hp - (host().sim.enemy("e1")?.hp ?? 0)).toBeLessThanOrEqual(2 * 16 + 1e-6);
+  });
+
+  test("an impossible move is refused, and the wizard is put back", () => {
+    const start: Vec3 = [layout.spawn[0], 1.1, layout.spawn[2]];
+    pose(b, start);
+    relay.tick(0.05);
+    // Walking is fine.
+    pose(b, [start[0] + 0.4, 1.1, start[2]]);
+    relay.tick(0.05);
+    expect(host().refused.moves).toBe(0);
+    // A leap across the floor (to the treasure, say) is not.
+    const t = layout.treasure;
+    pose(b, [t[0], 1.1, t[2]]);
+    expect(host().refused.moves).toBe(1);
+    expect(envs(b, "a:correct").map((m) => m.data)).toEqual([{ p: [start[0] + 0.4, 1.1, start[2]] }]);
+    send(b, "h:takeTreasure", {});
+    expect(envs(a, "a:treasureTaken")).toEqual([]); // it never got there
+    // Nor is standing outside the floor.
+    pose(b, [start[0], -20, start[2]]);
+    expect(host().refused.moves).toBe(2);
+  });
+});
+
 describe("a server-hosted floor", () => {
   beforeEach(() => {
     setup("shared");
@@ -186,16 +274,19 @@ describe("a server-hosted floor", () => {
     expect(served()).toBe(0);
   });
 
-  test("a wizard's hit kills on the server: the floor learns, the loot book rolls", () => {
-    pose(b, layout.enemies[1].pos);
+  test("a claimed hit counts for nothing; the server's own copy of a cast kills", () => {
+    const { spot, aim } = standoff(1, 3);
+    pose(b, spot);
     send(b, "h:entityCmd", { id: "e1", cmd: "hit", data: { damage: 1e6, impulse: { x: 0, y: 0, z: 0 } } });
-    for (const p of [a, b]) {
-      expect(envs(p, "a:despawn").map((m) => m.data)).toEqual([{ id: "e1" }]);
+    relay.tick(0.1);
+    expect(envs(a, "a:despawn")).toEqual([]);
+    // Bolts, cast the honest way — at the staff's pace, until it falls.
+    for (let i = 0; i < 30 && envs(a, "a:despawn").length === 0; i++) {
+      send(b, "p:cast", castOf("bolt", spot, aim, i));
+      for (let t = 0; t < 6; t++) relay.tick(0.05);
     }
-    // A forged hit — NaN, or on nothing — changes nothing.
-    send(b, "h:entityCmd", { id: "e2", cmd: "hit", data: { damage: NaN, impulse: { x: 0, y: 0, z: 0 } } });
-    send(b, "h:entityCmd", { id: "e999", cmd: "hit", data: { damage: 1, impulse: { x: 0, y: 0, z: 0 } } });
-    expect(envs(a, "a:despawn")).toHaveLength(1);
+    for (const p of [a, b]) expect(envs(p, "a:despawn").map((m) => m.data)).toEqual([{ id: "e1" }]);
+    expect(host().refused.casts).toBe(0);
   });
 
   test("orbs: the server spawns them, the wizard at one takes it, the ledger grants it once", () => {

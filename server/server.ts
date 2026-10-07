@@ -98,15 +98,20 @@ const devLoot = process.env.DEV_LOOT === "1";
 // "always" hosts every floor here, "never" leaves every floor to its
 // wizards' browsers.
 const hostingPolicy = parseHostingPolicy(process.env.SERVER_HOSTS);
+// DEV_MOVES=1 has server-hosted floors believe every reported position (the
+// e2e smoke test teleports its wizards around). A cheat by definition: never
+// set it on a real server.
+const trustMoves = process.env.DEV_MOVES === "1";
 await RAPIER.init();
 const relay = new Relay(
   new FloorDirectory(MAX_PLAYERS_PER_FLOOR, undefined, undefined, undefined, encounterTuning),
   accounts,
   () => Date.now(),
   log,
-  { pace, devLoot, hosting: serverHosting(RAPIER, hostingPolicy) },
+  { pace, devLoot, hosting: serverHosting(RAPIER, hostingPolicy, { trustMoves }) },
 );
 log(`floors hosted server-side: ${hostingPolicy}`);
+if (trustMoves) log("DEV_MOVES is on — server hosts believe every position. Testing only!");
 // The server-hosted floors' clock: ~60 Hz, real elapsed time (the hosts
 // step in fixed steps of their own).
 let lastTick = performance.now();

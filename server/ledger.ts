@@ -5,7 +5,7 @@ import { GOLD_RULES } from "../src/items/economy";
 import { rollGamble } from "../src/items/loot";
 import type { LootDrop, LootSource } from "../src/items/dropTables";
 import { DROPPED_ORB_PREFIX, LootBook, type IssuedOrb } from "../src/items/lootBook";
-import type { ClientMsg, DevLoot, ServerMsg } from "../src/net/protocol";
+import type { ClientMsg, DevLoot, ServerMsg, WireEquipment } from "../src/net/protocol";
 import {
   canLeave,
   entryFloorForGear,
@@ -122,6 +122,8 @@ export class Ledger {
   private books = new Map<string, LootBook>();
   /** account token → its pace tokens (run/rules.ts). */
   private paces = new Map<string, PaceState>();
+  /** peerId → the gear it last said it wears (checked on every read). */
+  private loadouts = new Map<string, unknown>();
   /** peerId → the ticket of its floor request being held for the pace. */
   private heldEntries = new Map<string, number>();
   private nextTicket = 1;
@@ -148,6 +150,7 @@ export class Ledger {
   disconnect(peerId: string): void {
     this.tokens.delete(peerId);
     this.heldEntries.delete(peerId);
+    this.loadouts.delete(peerId);
   }
 
   /** Drop bookkeeping for instances that no longer exist. */
@@ -250,6 +253,9 @@ export class Ledger {
         if (save) this.log(`${peerId} gambled and drew ${rolled}`);
         break;
       }
+      case "loadout":
+        if (typeof msg.equipment === "object" && msg.equipment !== null) this.loadouts.set(peerId, msg.equipment);
+        break;
       case "died": {
         const account = this.accountOf(peerId);
         const inst = this.world.instanceOf(peerId);
@@ -328,6 +334,20 @@ export class Ledger {
     const orbs = book.roll(id, s);
     if (!orbs) this.log(`refused loot for ${id.slice(0, 40)} in ${inst.id} (not this floor's, or already rolled)`);
     return orbs;
+  }
+
+  /** What `playerId` wears on this floor, as far as the server believes it:
+   * its last loadout checked against what it carries (by default the gear
+   * it banked), and the mana its draughts hold. Null for anyone who
+   * isn't a connected wizard on the instance. */
+  loadoutOf(instanceId: string, playerId: unknown): CheckedLoadout | null {
+    const inst = this.memberFloor(instanceId, playerId);
+    if (!inst) return null;
+    const account = this.accountOf(playerId as string);
+    const equipment = this.accounts.checkLoadout(account, this.loadouts.get(playerId as string) ?? account.inventory.equipment);
+    let manaReserve = 0;
+    for (const [id, qty] of this.accounts.carried(account)) manaReserve += manaDraught(id) * qty;
+    return { equipment, manaReserve };
   }
 
   /** What orb `orbId` holds, if it's still on the floor (unclaimed). */
@@ -501,6 +521,23 @@ export class Ledger {
       this.gravePools.set(instanceId, pool);
     }
     return pool;
+  }
+}
+
+/** A loadout as the server believes it. */
+export interface CheckedLoadout {
+  equipment: WireEquipment;
+  /** The mana its carried draughts restore, all told (what it may spend
+   * beyond its pool on a floor). */
+  manaReserve: number;
+}
+
+/** Mana a carried item restores when drunk (0 for anything else). */
+function manaDraught(itemId: string): number {
+  try {
+    return resolveItem(itemId).def.consumable?.mana ?? 0;
+  } catch {
+    return 0;
   }
 }
 

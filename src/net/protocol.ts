@@ -131,6 +131,11 @@ export type ClientMsg =
   | { t: "gamble" }
   /** The run is lost — the server discards this run's grants. */
   | { t: "died" }
+  /** The gear this wizard is wearing now (sent on entering a floor and on
+   * every change). The server checks it against what the account carries
+   * and, on a floor it hosts, casts this wizard's spells with THESE stats
+   * (computed server-side) — never the ones a cast message claims. */
+  | { t: "loadout"; equipment: WireEquipment }
   /** HOST report: `id` died or broke at `at` (enemy "e3", prop "p12", the
    * "boss", or a runtime spawn described by `source`). The server rolls what
    * it drops from its own loot book (items/lootBook.ts) and answers the host

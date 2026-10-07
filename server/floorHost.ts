@@ -1,6 +1,8 @@
 import { sanitizeGraveContents, sanitizePicks, takeFromGrave } from "../src/encounters/graveRules";
 import { robeColorOf } from "../src/game/wizardLook";
-import { resolveItem } from "../src/items/catalog";
+import { PLAYER } from "../src/core/config";
+import { computeStats, resolveItem } from "../src/items/catalog";
+import type { DerivedStats, Equipment, ItemDef } from "../src/items/types";
 import type { LootDrop } from "../src/items/dropTables";
 import { DROPPED_ORB_PREFIX, TREASURE_ORB, type IssuedOrb } from "../src/items/lootBook";
 import {
@@ -11,7 +13,7 @@ import {
   orbSpread,
   SYNC,
   TREASURE_RANGE_SQ,
-  type CmdMsg,
+  type CorrectMsg,
   type DespawnMsg,
   type DevOrbMsg,
   type DropOrbMsg,
@@ -33,7 +35,12 @@ import {
 import { CHANNEL_AUTHORITY, CHANNEL_PEER, CHANNEL_TO_HOST } from "../src/net/protocol";
 import type { Rapier } from "../src/sim/floorPhysics";
 import type { EntitySnap } from "../src/sim/world";
+import type { WireEquipment } from "../src/net/protocol";
+import type { CheckedLoadout } from "./ledger";
 import { FloorSim } from "../src/sim/floorSim";
+import { MotionGuard } from "../src/sim/motion";
+import { castInterval, sanitizeCastMsg } from "../src/weapons/castMessage";
+import { getSpellDef } from "../src/weapons/spellCatalog";
 import { generateFloor } from "../src/world/gen";
 import type { Vec3 } from "../src/world/types";
 
@@ -65,6 +72,8 @@ export interface FloorLedger {
   claimOrb(instanceId: string, playerId: unknown, orbId: unknown): boolean;
   graveGrant(instanceId: string, playerId: unknown, itemId: unknown): boolean;
   graveGold(instanceId: string, playerId: unknown, amount: unknown): boolean;
+  /** What a wizard wears, checked against what it carries. */
+  loadoutOf(instanceId: string, playerId: unknown): CheckedLoadout | null;
 }
 
 export interface FloorHostIO {
@@ -75,6 +84,8 @@ export interface FloorHostIO {
   nameOf(playerId: string): string;
   /** The replica has the floor's state and can take it over. */
   ready(): void;
+  /** Operational notes (refusals, rate-limited). */
+  log?(text: string): void;
 }
 
 export interface FloorHostOptions {
@@ -84,6 +95,28 @@ export interface FloorHostOptions {
   tickHz?: number;
   /** Snapshot rate. Default 20 Hz (net/entities.ts SNAP_INTERVAL_S). */
   snapHz?: number;
+  /** Believe every reported pose (the e2e smoke test teleports wizards
+   * around). A cheat by definition: never on a real server. */
+  trustMoves?: boolean;
+}
+
+/** A wizard as the floor's authority knows them: what they wear (and so
+ * what their spells do), their mana, their casting clocks. */
+interface WizardState {
+  /** The loadout the stats below were computed from. */
+  key: string;
+  stats: DerivedStats;
+  staff: ItemDef;
+  /** When the ledger was last asked (s, this host's clock). */
+  checkedAt: number;
+  mana: number;
+  /** Mana their carried draughts may still add. */
+  reserve: number;
+  manaAt: number;
+  /** Per spell: casts in hand (a token bucket) and when it last refilled. */
+  casts: Map<string, { tokens: number; at: number }>;
+  /** When they were last put back after an impossible move. */
+  correctedAt: number;
 }
 
 export interface FloorInstance {
@@ -98,6 +131,24 @@ const MAX_STEPS_PER_TICK = 5;
 /** A wizard silent this long (s) — dead, frozen, gone — is no longer hunted
  * (where they were still counts: a fallen wizard raises their grave there). */
 const POSE_STALE_S = 2;
+/** A cast leaves the staff tip, ~1 m from the body; the slack covers a
+ * pose's worth of movement (dashes, blasts) and the jitter between them. */
+const CAST_REACH_SQ = 4 * 4;
+/** Casts in hand per spell: the network bunches casts sent on cooldown. */
+const CAST_BURST = 2;
+/** Casting may run this much faster than the gear allows (clock jitter). */
+const CAST_RATE_SLACK = 1.15;
+/** Mana the server's pool may lag the caster's by (regen timing). */
+const MANA_SLACK = 5;
+/** The ledger is asked about a wizard's gear at most this often (s). */
+const GEAR_REFRESH_S = 1;
+/** A wizard put back after an impossible move isn't told again sooner. */
+const CORRECT_EVERY_S = 0.5;
+/** A pose's claimed velocity (it only aims the enemies' shots) is capped. */
+const MAX_POSE_SPEED = 40;
+/** A refusal of the same kind for the same wizard is logged at most this
+ * often (s) — with how many happened meanwhile. */
+const REFUSAL_LOG_EVERY_S = 10;
 
 export class FloorHost {
   readonly sim: FloorSim;
@@ -117,6 +168,13 @@ export class FloorHost {
   private readonly lastPose = new Map<string, number>();
   /** Where each wizard on the floor last said they were — range checks. */
   private readonly lastPos = new Map<string, Vec3>();
+  private readonly wizards = new Map<string, WizardState>();
+  private readonly motion: MotionGuard;
+  private readonly trustMoves: boolean;
+  /** What this host refused, by kind (tests, logs). */
+  readonly refused = { casts: 0, moves: 0 };
+  /** wizard + reason → when last logged, and how many since. */
+  private readonly refusalLog = new Map<string, { at: number; count: number }>();
 
   constructor(
     R: Rapier,
@@ -130,6 +188,8 @@ export class FloorHost {
     this.treasurePos = layout.treasure;
     this.stepS = 1 / (opts.tickHz ?? 60);
     this.snapS = 1 / (opts.snapHz ?? 20);
+    this.motion = new MotionGuard(R, this.sim.physics.world, layout.extent);
+    this.trustMoves = opts.trustMoves === true;
   }
 
   /** Is it the floor's authority yet (or still a replica)? */
@@ -150,6 +210,8 @@ export class FloorHost {
     this.members.delete(playerId);
     this.lastPose.delete(playerId);
     this.lastPos.delete(playerId);
+    this.wizards.delete(playerId);
+    this.motion.forget(playerId);
     this.sim.removeWizard(playerId);
   }
 
@@ -162,6 +224,7 @@ export class FloorHost {
     const name = ch.slice(2);
     if (prefix === CHANNEL_PEER) {
       if (name === FLOOR.pose) this.pose(from, data);
+      else if (name === FLOOR.cast && this.promoted) this.cast(from, data);
     } else if (prefix === CHANNEL_TO_HOST) {
       if (this.promoted) this.command(from, name, data);
     } else if (prefix === CHANNEL_AUTHORITY) {
@@ -187,8 +250,8 @@ export class FloorHost {
   /** Advance the floor by `dt` seconds (fixed steps), announcing what it
    * decided and, at the snapshot rate, where everything is. */
   tick(dt: number): void {
-    if (!this.promoted) return;
     this.clock += dt;
+    if (!this.promoted) return;
     for (const [id, at] of this.lastPose) {
       if (this.clock - at < POSE_STALE_S) continue;
       this.lastPose.delete(id);
@@ -219,10 +282,125 @@ export class FloorHost {
     const p = d?.p;
     const v = d?.v;
     if (!isVec3(p)) return;
+    if (!this.trustMoves) {
+      const verdict = this.motion.judge(from, p, this.clock, this.gear(from)?.stats.speedMult ?? 1);
+      if (verdict !== "ok") {
+        this.refuseMove(from, verdict);
+        return;
+      }
+    }
     const vel = isVec3(v) ? { x: v[0], y: v[1], z: v[2] } : { x: 0, y: 0, z: 0 };
+    const speed = Math.hypot(vel.x, vel.y, vel.z);
+    if (speed > MAX_POSE_SPEED) {
+      vel.x *= MAX_POSE_SPEED / speed;
+      vel.y *= MAX_POSE_SPEED / speed;
+      vel.z *= MAX_POSE_SPEED / speed;
+    }
     this.sim.setWizard(from, { x: p[0], y: p[1], z: p[2] }, vel);
     this.lastPose.set(from, this.clock);
     this.lastPos.set(from, [p[0], p[1], p[2]]);
+  }
+
+  /** An impossible move: ignored (the wizard stays where this host last
+   * believed them), and — once this is the floor's host — the wizard is
+   * put back there. */
+  private refuseMove(from: string, why: string): void {
+    this.refused.moves++;
+    this.noteRefusal(from, `move (${why})`);
+    const back = this.motion.lastGood(from);
+    const w = this.wizards.get(from);
+    if (!this.promoted || !back || (w && this.clock - w.correctedAt < CORRECT_EVERY_S)) return;
+    if (w) w.correctedAt = this.clock;
+    this.io.send(FLOOR.correct, { p: [back[0], back[1], back[2]] } satisfies CorrectMsg, from);
+  }
+
+  /** What a wizard wears and can do, as the ledger believes it — asked at
+   * most once a second; null for anyone the ledger doesn't place here. */
+  private gear(from: string): WizardState | null {
+    let w = this.wizards.get(from);
+    if (w && this.clock - w.checkedAt < GEAR_REFRESH_S) return w;
+    const loadout = this.ledger.loadoutOf(this.inst.id, from);
+    if (!loadout) return null;
+    const key = JSON.stringify(loadout.equipment);
+    if (!w) {
+      w = {
+        key: "",
+        stats: computeStats(equipmentOf(loadout.equipment)),
+        staff: resolveItem(loadout.equipment.staff).def,
+        checkedAt: this.clock,
+        mana: PLAYER.maxMana,
+        reserve: loadout.manaReserve,
+        manaAt: this.clock,
+        casts: new Map(),
+        correctedAt: -Infinity,
+      };
+      this.wizards.set(from, w);
+    }
+    if (w.key !== key) {
+      w.key = key;
+      w.stats = computeStats(equipmentOf(loadout.equipment));
+      w.staff = resolveItem(loadout.equipment.staff).def;
+    }
+    // The reserve only shrinks: re-checking can't refill drunk draughts.
+    w.reserve = Math.min(w.reserve, loadout.manaReserve);
+    w.checkedAt = this.clock;
+    return w;
+  }
+
+  /** A wizard casts. On a floor whose spells this host decides, the cast
+   * must come from where the wizard stands, be a spell of the staff the
+   * ledger believes they wield, keep to that spell's cooldown (with their
+   * fire-rate gear) and be paid for in mana — then it is cast HERE, with the
+   * server's idea of their stats, and its hits are the only ones that count. */
+  private cast(from: string, data: unknown): void {
+    const msg = sanitizeCastMsg(data);
+    const at = this.lastPos.get(from);
+    const w = this.gear(from);
+    if (!msg || !at || !w) return this.refuseCast(from, !msg ? "malformed" : !at ? "no pose yet" : "no loadout");
+    const [ox, oy, oz] = msg.origin;
+    if ((ox - at[0]) ** 2 + (oy - at[1]) ** 2 + (oz - at[2]) ** 2 > CAST_REACH_SQ) return this.refuseCast(from, "far from the caster");
+    if (w.staff.primary !== msg.abilityId && w.staff.secondary !== msg.abilityId) {
+      return this.refuseCast(from, `${msg.abilityId.slice(0, 20)} isn't the staff's`);
+    }
+    const spell = getSpellDef(msg.abilityId);
+    // The cooldown, as a bucket: a cast in hand per interval, two at most.
+    const interval = castInterval(spell.cooldown, w.stats.fireRateMult) / CAST_RATE_SLACK;
+    const clock = w.casts.get(spell.id) ?? { tokens: CAST_BURST, at: this.clock };
+    clock.tokens = Math.min(CAST_BURST, clock.tokens + (this.clock - clock.at) / interval);
+    clock.at = this.clock;
+    w.casts.set(spell.id, clock);
+    if (clock.tokens < 1) return this.refuseCast(from, "too fast");
+    // Mana: the pool regenerates as the caster's does; draughts top it up.
+    const regen = PLAYER.manaRegen * w.stats.manaRegenMult * this.sim.rules.manaRegenMult;
+    w.mana = Math.min(PLAYER.maxMana, w.mana + (this.clock - w.manaAt) * regen);
+    w.manaAt = this.clock;
+    if (w.mana + w.reserve + MANA_SLACK < spell.mana) return this.refuseCast(from, "out of mana");
+    clock.tokens -= 1;
+    const fromPool = Math.min(w.mana, spell.mana);
+    w.mana -= fromPool;
+    w.reserve = Math.max(0, w.reserve - (spell.mana - fromPool));
+    this.sim.castSpell(
+      from,
+      { abilityId: msg.abilityId, origin: { x: ox, y: oy, z: oz }, dir: { x: msg.dir[0], y: msg.dir[1], z: msg.dir[2] }, seed: msg.seed },
+      { damageMult: w.stats.damageMult, extraProjectiles: w.stats.extraProjectiles, homing: w.stats.homing },
+    );
+    this.announce();
+  }
+
+  private refuseCast(from: string, why: string): void {
+    this.refused.casts++;
+    this.noteRefusal(from, `cast (${why})`);
+  }
+
+  private noteRefusal(from: string, what: string): void {
+    const key = `${from} ${what}`;
+    const seen = this.refusalLog.get(key) ?? { at: -Infinity, count: 0 };
+    seen.count++;
+    this.refusalLog.set(key, seen);
+    if (this.clock - seen.at < REFUSAL_LOG_EVERY_S) return;
+    this.io.log?.(`${this.inst.id}: refused ${from}'s ${what}${seen.count > 1 ? ` ×${seen.count}` : ""}`);
+    seen.at = this.clock;
+    seen.count = 0;
   }
 
   /** Squared distance from a wizard to a point — Infinity for a wizard the
@@ -237,11 +415,11 @@ export class FloorHost {
 
   private command(from: string, name: string, data: unknown): void {
     switch (name) {
-      case FLOOR.entityCmd: {
-        const d = data as Partial<CmdMsg> | null;
-        if (d?.cmd === "hit" && typeof d.id === "string") this.sim.hit(d.id, d.data);
+      case FLOOR.entityCmd:
+        // "hit": a wizard's word for its own hits counts for nothing here —
+        // this host runs every cast itself (see cast()). Clients on a
+        // server-hosted floor don't send them (net/netStore.ts reportsOwnHits).
         break;
-      }
       case FLOOR.takeOrb:
         this.takeOrb(from, data as Partial<TakeOrbMsg> | null);
         break;
@@ -440,6 +618,12 @@ export class FloorHost {
       if (typeof grave?.id === "string" && !this.graves.some((x) => x.id === grave.id)) this.graves.push(grave);
     }
   }
+}
+
+/** Wire equipment (checked ids) as the stats code reads it. */
+function equipmentOf(e: WireEquipment): Equipment {
+  const inst = (id: string | null) => (id ? { defId: id, runLoot: false } : null);
+  return { staff: { defId: e.staff, runLoot: false }, amulet: inst(e.amulet), cloak: inst(e.cloak), boots: inst(e.boots) };
 }
 
 function isVec3(v: unknown): v is Vec3 {

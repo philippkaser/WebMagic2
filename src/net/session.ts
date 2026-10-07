@@ -3,7 +3,7 @@ import { netBus } from "./bus";
 import { netClock } from "./clock";
 import { useNet } from "./netStore";
 import type { LootSource } from "../items/dropTables";
-import type { DevLoot, FloorAssignment, ServerMsg, WireInventory } from "./protocol";
+import type { DevLoot, FloorAssignment, ServerMsg, WireEquipment, WireInventory } from "./protocol";
 import { LocalTransport, WebSocketTransport, type Transport } from "./transport";
 
 const TOKEN_KEY = "webmagic.token.v1";
@@ -124,6 +124,12 @@ export class GameSession {
   /** The run is lost — the server discards its grants. */
   sendDied(): void {
     this.transport?.send({ t: "died" });
+  }
+
+  /** The gear we wear now: on a floor the server hosts, our spells are cast
+   * with what it believes we wear (checked against what we carry). */
+  sendLoadout(equipment: WireEquipment): void {
+    this.transport?.send({ t: "loadout", equipment });
   }
 
   /** HOST: `id` died or broke at `at` — the server's loot book rolls what

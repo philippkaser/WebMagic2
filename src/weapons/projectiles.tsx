@@ -23,6 +23,7 @@ import {
   type DamageTeam,
   type LocalRelation,
 } from "./allegiance";
+import { BOLT_LIFETIME_S, HOMING, steerHoming } from "../sim/spells";
 import { explode } from "./explosions";
 import { localWizardId } from "./localWizard";
 import { SingularitySeed } from "./singularity";
@@ -215,7 +216,7 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
       priority: 3,
     });
     light.current = src;
-    const timeout = setTimeout(detonate, 3200);
+    const timeout = setTimeout(detonate, BOLT_LIFETIME_S * 1000);
     return () => {
       clearTimeout(timeout);
       removeLightSource(src);
@@ -232,25 +233,14 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
 
     // Homing: gently curve our own bolts toward the nearest enemy ahead,
     // preserving speed. Player-only and skipped on cosmetic peer replays.
+    // (sim/spells.ts steerHoming — a server host curves its copy the same.)
     if (spec.homing > 0 && spec.team === "player" && !spec.cosmetic) {
-      const v = b.linvel();
-      const speed = Math.hypot(v.x, v.y, v.z);
-      const target = speed > 0.1 ? nearestHittable("enemy", pos.x, pos.y, pos.z, 16) : null;
+      const target = nearestHittable("enemy", pos.x, pos.y, pos.z, HOMING.range);
       if (target) {
-        const tp = target.getPosition();
-        const tx = tp.x - pos.x;
-        const ty = tp.y - pos.y;
-        const tz = tp.z - pos.z;
-        const td = Math.hypot(tx, ty, tz) || 1;
-        // Only steer toward targets roughly ahead — no U-turns.
-        if ((v.x * tx + v.y * ty + v.z * tz) / (speed * td) > 0.15) {
-          const turn = Math.min(1, spec.homing * dt * 6);
-          const nx = v.x / speed + (tx / td - v.x / speed) * turn;
-          const ny = v.y / speed + (ty / td - v.y / speed) * turn;
-          const nz = v.z / speed + (tz / td - v.z / speed) * turn;
-          const nl = Math.hypot(nx, ny, nz) || 1;
-          b.setLinvel({ x: (nx / nl) * speed, y: (ny / nl) * speed, z: (nz / nl) * speed }, true);
-        }
+        const v = b.linvel();
+        const vel = { x: v.x, y: v.y, z: v.z };
+        steerHoming(pos, vel, target.getPosition(), spec.homing, dt);
+        b.setLinvel(vel, true);
       }
     }
 

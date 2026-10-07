@@ -42,9 +42,15 @@ export const FLOOR = {
   lootGrave: "lootGrave",
   /** Dev builds: ask for a specific orb (honored only by a test server). */
   devOrb: "devOrb",
+  /** To one wizard: the host refused where they said they moved — they are
+   * back where it last believed them (CorrectMsg). */
+  correct: "correct",
   // ── Peer ("p:") ───────────────────────────────────────────────────────────
   /** A wizard's pose (PoseMsg), 20 Hz. */
   pose: "pose",
+  /** A wizard's cast (weapons/castMessage.ts CastMsg) — replayed by every
+   * floor-mate, and simulated for real by a server host. */
+  cast: "cast",
 } as const;
 
 /** Late-join sync: the keys of WorldSyncMsg.custom. */
@@ -161,6 +167,10 @@ export interface DevOrbMsg {
   defId: string | null;
   gold: number;
   pos: Vec3;
+}
+
+export interface CorrectMsg {
+  p: Vec3;
 }
 
 export interface PoseMsg {

@@ -16,6 +16,7 @@ const good = (): CastMsg => ({
   abilityId: "bolt",
   origin: [1, 2, 3],
   dir: [0, 0, -1],
+  seed: 77,
   staffId: "splinter_staff",
   stats: { damageMult: 1.12, extraProjectiles: 1, homing: 0.3 },
 });
@@ -28,8 +29,16 @@ describe("encodeCastMsg → sanitizeCastMsg", () => {
       { x: 0, y: 0, z: 1 },
       "ember_staff",
       { damageMult: 1.3, extraProjectiles: 2, homing: 0.5 },
+      123456,
     );
     expect(sanitizeCastMsg(msg)).toEqual(msg);
+  });
+
+  test("the volley seed survives as a uint32; a missing or garbled one is 0", () => {
+    expect(sanitizeCastMsg({ ...good(), seed: 2 ** 32 + 5 })!.seed).toBe(5);
+    expect(sanitizeCastMsg({ ...good(), seed: "x" })!.seed).toBe(0);
+    const { seed: _, ...rest } = good();
+    expect(sanitizeCastMsg(rest)!.seed).toBe(0);
   });
 
   test("encoding copies only the cast-shaping stats (not the whole DerivedStats)", () => {
@@ -39,7 +48,7 @@ describe("encodeCastMsg → sanitizeCastMsg", () => {
       homing: 0,
       fireRateMult: 2,
       maxHealth: 500,
-    } as never);
+    } as never, 1);
     expect(Object.keys(msg.stats).sort()).toEqual(["damageMult", "extraProjectiles", "homing"]);
   });
 });
@@ -98,7 +107,7 @@ describe("sanitizeCastMsg — degrades softer problems", () => {
 
   test("the output carries only known fields", () => {
     const out = sanitizeCastMsg({ ...good(), damage: 9999, stats: { ...good().stats, fireRateMult: 50 } })!;
-    expect(Object.keys(out).sort()).toEqual(["abilityId", "dir", "origin", "staffId", "stats"]);
+    expect(Object.keys(out).sort()).toEqual(["abilityId", "dir", "origin", "seed", "staffId", "stats"]);
     expect(Object.keys(out.stats).sort()).toEqual(["damageMult", "extraProjectiles", "homing"]);
   });
 });

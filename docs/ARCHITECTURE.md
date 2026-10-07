@@ -143,9 +143,12 @@ sites have **no host/replica branches at all**.
 | Loot drops & pickups, floor treasure | host-granted `hostCommand`/`hostEvent` — an orb can never be taken twice |
 
 **Damage authority rule:** exactly one simulation may damage an entity — the
-host's. A replica's own shots apply damage via a `hit` command to the
-authority (shooter-favored, like most netcode); every *replayed* explosion is
-`remote: true` and skips entity damage entirely. Your own health is always
+host's. On a floor a wizard hosts, a replica's own shots apply damage via a
+`hit` command to the authority (shooter-favored, like most netcode). On a
+floor the server hosts, nobody's claim counts: the server runs its own copy
+of every cast (see *Who hosts a floor*) and only that copy deals damage.
+Every *replayed* explosion is `remote: true` and skips entity damage
+entirely. Your own health is always
 local: contact burns and incoming blasts hurt each player on their own
 machine, so your survival never waits on a round trip.
 
@@ -273,15 +276,20 @@ That gets it exactly the luck of that floor, rolled by the server, no
 faster than the deep's pace lets it go: farming without fighting, not
 minting — and nobody else is there to be cheated. On every floor two
 wizards share, the server hosts: no wizard decides what died or who took
-what. What remains client-reported even there: a wizard's hits on
-enemies (capped per hit by depth, `weapons/hits.ts`, but not yet checked
-against a server-side copy of their spells), positions (so movement and
-pickup range trust the client's pose), your own health and death, and
-spell casts, so PvP still trusts the victim's machine; item *stats* are
-client-computed; grave contents are declared by the dying wizard
-(bounded by the pool, so they can't mint); device tokens are bearer
-secrets in localStorage (fine for a foundation, replaced by real auth).
-Rate limiting and hit/pickup sanitization run server-/authority-side.
+what. There a wizard's client can only say what it
+cast, from where, and where it walked: the server runs the spells itself
+with the gear it believes they carry, at that gear's pace and mana, and
+refuses moves no wizard could make. What remains client-reported even
+there: *aim* (a cast's direction — an aimbot still aims), movement within
+what's possible (a modest speed-hack inside the generous burst budget),
+the volley seed (a client could pick tight spreads), your own health and
+death, and so PvP, which still trusts the victim's machine; grave
+contents are declared by the dying wizard (bounded by the pool, so they
+can't mint); device tokens are bearer secrets in localStorage (fine for a
+foundation, replaced by real auth). Shots are judged against where the
+enemies are on the server when the cast arrives — there's no lag
+compensation (rewind) yet, so a fast enemy can dodge a bolt its caster saw
+land. Rate limiting and pickup sanitization run server-/authority-side.
 
 ### Physics budget (measured)
 
@@ -353,7 +361,8 @@ server:
 
 `bun run physics-bench` ends with the whole floor host fighting — real
 brains and physics, wizards circling enemies and landing a hit every half
-second: about **0.05 ms per tick (0.15–0.25 % of a core at 30–60 Hz)** and
+second: about **0.05–0.1 ms per tick (0.15–0.5 % of a core at 30–60 Hz,
+depending on the machine's load)** and
 **~12 KiB/s to each player (~5 KiB/s deflated)**, snapshots and actions
 together. A core hosts hundreds of fighting floors; the bandwidth rule
 above still decides what can be added.
@@ -362,9 +371,13 @@ Props break there too (`sim/props.ts`: health, the barrel's blast, chain
 reactions, the Warden's slam), dart launchers fire (`sim/traps.ts`), and a
 sim can start as a **replica** of a floor someone else is hosting
 (`mirror`, `mirrorDespawn`, `mirrorSpawn`) and take it over — host
-migration with a headless host on the receiving end. Not simulated there:
-enemy bolts in flight (every client flies its own copy and its burst hurts
-that client's wizard) and wizards' spells, whose hits arrive as commands.
+migration with a headless host on the receiving end. Wizards' spells run
+there too (`sim/spells.ts`: bolt volleys swept through the world with
+gravity and homing, blasts, shockwaves, void seeds that plant and collapse
+into black holes that pull and implode) — the browser's casts share its
+numbers and its seeded volley spread, so what a caster sees is what the
+server resolves. Not simulated there: enemy bolts in flight (every client
+flies its own copy and its burst hurts that client's wizard).
 
 ### Who hosts a floor (`server/hosting.ts`, `server/floorHost.ts`)
 
@@ -394,12 +407,32 @@ leaves — the router promotes it: epoch + 1, `hostChanged` to everyone, and
 every wizard is a replica from then on. The server keeps a floor it has
 taken until the floor is gone; everyone else leaving doesn't hand it back.
 
-On a server-hosted floor the two spell effects that used to be the host's
-(the singularity's pull and implosion) are applied by their **caster**, as
-commands, like every other spell's hits (`net/netStore.ts
-appliesSpellEffects`). A wizard who stops sending poses (dead, frozen) stops
-being hunted after 2 s; their last position still counts for range checks
-(a fallen wizard's grave). The floors tick at ~60 Hz in `server/server.ts`
+**What a wizard may claim on a server-hosted floor.** Three things:
+
+- **Casts** (`p:cast`). The floor host checks each one and then casts it
+  itself (`FloorSim.castSpell` → `sim/spells.ts`): the spell must be one of
+  the staff the ledger believes the wizard wields, leave from within 4 m of
+  where they stand, keep to the spell's cooldown under their fire-rate gear
+  (a bucket of two, 15 % slack for jitter) and be paid for in mana (the
+  server keeps each wizard's pool, regenerating as theirs does, plus what
+  their carried mana draughts hold). The damage, multishot and homing come
+  from the server's `computeStats` of that gear — the stats a cast message
+  claims are only for its cosmetic replays. Hit commands are ignored.
+- **Gear** (`loadout`, a ledger message sent on entering a floor and on
+  every change). The ledger checks it against what the account carries —
+  the gear and pack it banked (not the village chest), starter gear and this
+  run's grants, one copy per slot — and falls back to the banked staff.
+- **Poses** (`p:pose`). `sim/motion.ts` refuses a pose outside the floor,
+  inside a wall, through a wall since the last good one (more than a
+  corner's clip), or beyond a movement budget (a 24 m burst refilling at
+  twice the wizard's run speed — dashes, blast-jumps and barrels fit, a
+  teleport doesn't). A refused pose is ignored and the wizard is sent back
+  (`a:correct`). `DEV_MOVES=1` switches this off for the e2e test's
+  teleports.
+
+A wizard who stops sending poses (dead, frozen) stops being hunted after
+2 s; their last good position still counts for range checks (a fallen
+wizard's grave). The floors tick at ~60 Hz in `server/server.ts`
 (`Relay.tick`).
 
 One race is known and small: a loot report a wizard host sends in the last
@@ -960,7 +993,7 @@ and the way onward, gold for home, blood for danger.
 | Run rules (entry depth, floors before exit) | `run/rules.ts` (shared client + server) |
 | Encounter frequency | `core/config.ts#ENCOUNTERS` |
 | Economy tuning (prices, gold drops) | `items/economy.ts` (the one balance sheet, shared client + server) |
-| New spell | a row in `weapons/spellCatalog.ts` (+ a kind in `weapons/castKinds.ts` if it's a new shape); reference it from a staff |
+| New spell | a row in `weapons/spellCatalog.ts` (+ a kind in `weapons/castKinds.ts` and its server copy in `sim/spells.ts` if it's a new shape); reference it from a staff |
 | New enemy | row in `enemies/roster.ts`, body in `sim/bodies.ts`, brain in `enemies/brains/`, controller + `enemyOptions` case in `sim/enemies/controllers.ts`, model in `render/models/enemies.tsx`, view in `enemies/kinds/`, renderer in `enemies/registry.tsx`, spawn weight in `world/gen/population.ts` |
 | New prop | `world/props.tsx` spec + `render/models/PropModels.tsx` + generator prop table |
 | New biome | row in `world/biomes.ts` + surfaces in `render/textures/painters/` (`kinds.ts`) + a drone in `scenes/floorAtmosphere.ts` |

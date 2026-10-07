@@ -8,18 +8,17 @@ import { playerVelocity } from "../game/player-state";
 import { getItemDef } from "../items/catalog";
 import type { ItemDef } from "../items/types";
 import { peerMessage } from "../net/channels";
+import { FLOOR } from "../net/floorProtocol";
 import { estimatePeer } from "../net/players";
 import { input } from "../player/input";
 import { getStats, useGame } from "../state/gameStore";
-import { encodeCastMsg, sanitizeCastMsg, type CastMsg } from "./castMessage";
+import { castInterval, encodeCastMsg, newCastSeed, sanitizeCastMsg, type CastMsg } from "./castMessage";
 import { localWizardId } from "./localWizard";
 import { getAbility } from "./spells";
 
 /** With too little mana, a held button re-tries this often (seconds) instead
  * of every frame. */
 const DRY_FIRE_THROTTLE = 0.2;
-/** Fire-rate floor: no debuff can stretch a cooldown past 4×. */
-const MIN_FIRE_RATE = 0.25;
 /** The staff tip relative to the camera — ahead, to the right, a bit low —
  * so spells leave the staff in view, not the middle of the screen. */
 const MUZZLE = { forward: 0.62, right: 0.24, down: 0.16 };
@@ -40,7 +39,7 @@ const MAX_CAST_OFFSET_SQ = 6 * 6;
  * remote so entity damage isn't double-counted (their own client requests
  * it), and attributed to the caster so the allegiance rules decide what it
  * may do to us. The payload is untrusted: sanitize before anything else. */
-const peerCast = peerMessage<CastMsg>("cast", (raw, meta) => {
+const peerCast = peerMessage<CastMsg>(FLOOR.cast, (raw, meta) => {
   const msg = sanitizeCastMsg(raw);
   if (!msg) return; // malformed, or a spell from a newer client
   // A spell must leave from where its caster actually stands — otherwise a
@@ -61,6 +60,7 @@ const peerCast = peerMessage<CastMsg>("cast", (raw, meta) => {
     staff,
     caster: meta.from,
     remote: true,
+    seed: msg.seed,
   });
   // Their staff flares too (we don't know their velocity; a peer's flare is
   // seen from a distance, where the lag doesn't show) — and is heard from
@@ -84,8 +84,11 @@ function castFromStaff(abilityId: string, staff: ItemDef, camera: Camera): numbe
     .addScaledVector(side, MUZZLE.right)
     .addScaledVector(UP, -MUZZLE.down);
 
-  ability.cast({ origin: muzzle, dir: aim, stats, staff, caster: localWizardId() });
-  peerCast.send(encodeCastMsg(ability.id, muzzle, aim, staff.id, stats));
+  // On a floor the server hosts, this cast is the server's to resolve (it
+  // runs its own copy); ours flies for the feel of it, the same volley.
+  const seed = newCastSeed();
+  ability.cast({ origin: muzzle, dir: aim, stats, staff, caster: localWizardId(), seed });
+  peerCast.send(encodeCastMsg(ability.id, muzzle, aim, staff.id, stats, seed));
   // Muzzle flare: rides with our own velocity so a strafing cast doesn't
   // leave its flash hanging in the air behind the staff.
   castFlareFx(muzzle, aim, staff.color, playerVelocity);
@@ -94,7 +97,7 @@ function castFromStaff(abilityId: string, staff: ItemDef, camera: Camera): numbe
   gameEvents.emit("staffKick", 0.9);
   gameEvents.emit("shake", 0.05);
   // Fire-rate gear shortens the cooldown (higher mult = faster).
-  return ability.cooldown / Math.max(MIN_FIRE_RATE, stats.fireRateMult);
+  return castInterval(ability.cooldown, stats.fireRateMult);
 }
 
 /** Reads mouse buttons and casts the equipped staff's abilities. Holding a

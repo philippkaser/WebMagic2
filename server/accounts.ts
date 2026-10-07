@@ -317,6 +317,36 @@ export class AccountStore {
     account.runFloors = 0;
   }
 
+  /** What a wizard on a run can have about them: the gear and pack they set
+   * out with (the village chest stays home), starter gear, and this run's
+   * grants — as a multiset. */
+  carried(account: AccountRecord): Map<string, number> {
+    const counts = multisetOf({ ...account.inventory, chest: [] });
+    for (const id of DEFAULT_ITEMS) counts.set(id, Math.max(counts.get(id) ?? 0, 1));
+    for (const id of account.runGrants) counts.set(id, (counts.get(id) ?? 0) + 1);
+    return counts;
+  }
+
+  /** The gear a wizard says they're wearing, checked against what they
+   * carry: each slot must be a carried copy (one copy can't fill two
+   * slots). A staff that doesn't check out is the one they set out with, or
+   * failing that the starter staff; any other slot that doesn't is empty. */
+  checkLoadout(account: AccountRecord, raw: unknown): WireEquipment {
+    const claimed = sanitizeInventory({ equipment: raw }).equipment;
+    const budget = this.carried(account);
+    const take = (id: string | null): string | null => {
+      if (!id || (budget.get(id) ?? 0) < 1) return null;
+      budget.set(id, budget.get(id)! - 1);
+      return id;
+    };
+    return {
+      staff: take(claimed.staff) ?? take(account.inventory.equipment.staff) ?? BASIC_STAFF_ID,
+      amulet: take(claimed.amulet),
+      cloak: take(claimed.cloak),
+      boots: take(claimed.boots),
+    };
+  }
+
   /** Everything this account may legitimately bank right now. Starter gear
    * is owned implicitly — at least one copy, never one more per bank. */
   private ownedMultiset(account: AccountRecord): Map<string, number> {

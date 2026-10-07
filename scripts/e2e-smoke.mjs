@@ -5,10 +5,11 @@
 //
 // Needs a dev client and a game server with forced encounters, the pace
 // lifted (the script descends faster than any wizard could walk), dev loot
-// on (it hands a wizard a specific orb) and a known data file (so the script
-// can inspect server-side grants):
+// on (it hands a wizard a specific orb), moves trusted (it teleports its
+// wizards; the shared floor is server-hosted) and a known data file (so the
+// script can inspect server-side grants):
 //
-//   DATA_FILE=/tmp/wm-e2e.json ENCOUNTER_CHANCE=1 FLOOR_PACE_MS=0 DEV_LOOT=1 bun server/server.ts &
+//   DATA_FILE=/tmp/wm-e2e.json ENCOUNTER_CHANCE=1 FLOOR_PACE_MS=0 DEV_LOOT=1 DEV_MOVES=1 bun server/server.ts &
 //   bunx vite --port 3000 &
 //   DATA_FILE=/tmp/wm-e2e.json bun run e2e        (runs under node)
 //

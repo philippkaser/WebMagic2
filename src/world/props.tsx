@@ -26,7 +26,7 @@ import { TREASURE_ORB } from "../items/lootBook";
 import { hostCommand, hostEvent } from "../net/channels";
 import { FLOOR, SYNC, TREASURE_RANGE_SQ, type TreasureTakenMsg } from "../net/floorProtocol";
 import { registerSyncProvider } from "../net/entities";
-import { isHost, useNet } from "../net/netStore";
+import { isHost, reportsOwnHits, useNet } from "../net/netStore";
 import { session } from "../net/session";
 import { useNetBody } from "../net/NetSystems";
 import { PROP_BODIES, RIFT_STONES, WORLD_GROUPS } from "../sim/bodies";
@@ -160,7 +160,7 @@ export function Breakable({
         if (isHost()) {
           applyDamageRef.current(damage, impulse);
         } else {
-          netRef.current.command("hit", { damage, impulse } satisfies HitData);
+          if (reportsOwnHits()) netRef.current.command("hit", { damage, impulse } satisfies HitData);
           // Predicted shove — the crate reacts the instant you hit it.
           netRef.current.predictImpulse(impulse);
         }

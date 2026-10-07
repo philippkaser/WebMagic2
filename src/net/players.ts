@@ -1,7 +1,8 @@
 import { netBus } from "./bus";
-import { peerMessage } from "./channels";
+import { getPlayerBody, playerPosition } from "../game/player-state";
+import { onAuthority, peerMessage } from "./channels";
 import { netClock } from "./clock";
-import { FLOOR, type PoseMsg } from "./floorProtocol";
+import { FLOOR, type CorrectMsg, type PoseMsg } from "./floorProtocol";
 import { useNet } from "./netStore";
 import {
   makeSampledPose,
@@ -33,6 +34,20 @@ export interface PeerWizard {
 }
 
 const peers = new Map<string, PeerWizard>();
+
+// The floor's host refused where we said we moved (a server host checks
+// every pose — sim/motion.ts): we're back where it last believed us.
+onAuthority<CorrectMsg>(FLOOR.correct, (msg) => {
+  const p = msg?.p;
+  if (!Array.isArray(p) || p.length !== 3 || !p.every((n) => typeof n === "number" && Number.isFinite(n))) return;
+  const body = getPlayerBody() as unknown as {
+    setTranslation(v: { x: number; y: number; z: number }, wake: boolean): void;
+    setLinvel(v: { x: number; y: number; z: number }, wake: boolean): void;
+  } | null;
+  body?.setTranslation({ x: p[0], y: p[1], z: p[2] }, true);
+  body?.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  playerPosition.set(p[0], p[1], p[2]);
+});
 
 const pose = peerMessage<PoseMsg>(FLOOR.pose, (msg, meta) => {
   let peer = peers.get(meta.from);

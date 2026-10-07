@@ -8,7 +8,8 @@ import type { DamageSource } from "../game/damageSource";
 import { isHostileWizard } from "../game/hostility";
 import { getPlayerBody, playerPosition } from "../game/player-state";
 import { forEachDynamicBody, forEachHittable } from "../game/registry";
-import { appliesSpellEffects, isHost } from "../net/netStore";
+import { appliesSpellEffects } from "../net/netStore";
+import { BLACK_HOLE, SEED } from "../sim/spells";
 import { holePullsLocal, type DamageTeam } from "./allegiance";
 import { explode } from "./explosions";
 import { localWizardId } from "./localWizard";
@@ -23,9 +24,9 @@ import type { ProjectileSpec } from "./projectiles";
  * them (cosmetic); the Collapse cast is peer-replayed, so every client
  * collapses its copies of THAT caster's seeds and spawns matching black holes.
  * The pull on enemies/props and the implosion's entity damage are applied
- * once: by the floor's host on a wizard-hosted floor, by the caster on a
- * server-hosted one (its hits travel as commands, like any spell's —
- * net/netStore.ts appliesSpellEffects). The local wizard is pulled locally by
+ * once: by the floor's host on a wizard-hosted floor, by the server's own
+ * copy of the cast on a server-hosted one (sim/spells.ts — the same
+ * numbers; net/netStore.ts appliesSpellEffects). The local wizard is pulled locally by
  * its own and hostile wizards' holes, and hurt only by hostile ones
  * (allegiance.ts — the same rule as every blast). */
 
@@ -159,7 +160,7 @@ export function SingularitySeed({
     const expire = setTimeout(() => {
       unregisterSeed(owner, spec.id);
       remove(spec.id);
-    }, 6000);
+    }, SEED.lifetime * 1000);
     return () => {
       clearTimeout(expire);
       removeLightSource(src);
@@ -189,7 +190,7 @@ export function SingularitySeed({
       gravityScale={spec.gravityScale}
       ccd
       colliders={false}
-      linearDamping={2.4}
+      linearDamping={SEED.linearDamping}
       onCollisionEnter={() => body.current?.setLinvel({ x: 0, y: 0, z: 0 }, true)}
     >
       <BallCollider args={[spec.size]} collisionGroups={spec.collisionGroups} mass={0.05} />
@@ -211,9 +212,10 @@ export function SingularitySeed({
 
 // ── The black hole ───────────────────────────────────────────────────────────
 
-const BH_RADIUS = 4.5;
-const BH_DURATION = 1.3;
-const BH_PULL = 11;
+// The hole's numbers are shared with a server host's copy (sim/spells.ts).
+const BH_RADIUS = BLACK_HOLE.radius;
+const BH_DURATION = BLACK_HOLE.duration;
+const BH_PULL = BLACK_HOLE.pull;
 
 /** Seconds between event-horizon rings contracting into the core. */
 const BH_RING_EVERY = 0.16;
@@ -252,7 +254,7 @@ function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void 
       position: hole.pos,
       radius: BH_RADIUS,
       damage: hole.damage,
-      impulse: 15,
+      impulse: BLACK_HOLE.implodeImpulse,
       team: hole.team,
       source: hole.source,
       color: "#b06bff",
@@ -272,26 +274,10 @@ function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void 
 
     tug.current -= dt;
     const doTug = tug.current <= 0;
-    if (doTug) tug.current = 0.1;
+    if (doTug) tug.current = BLACK_HOLE.tugEvery;
 
     // Enemies and props are the authority's to move.
-    if (authority.current && !isHost()) {
-      // A caster on a server-hosted floor: the pull travels as hits (no
-      // damage on props), ten tugs a second — the host moves the bodies.
-      if (doTug) {
-        forEachHittable((h) => {
-          const p = h.getPosition();
-          const dx = cx - p.x;
-          const dy = cy - p.y;
-          const dz = cz - p.z;
-          const dist = Math.hypot(dx, dy, dz);
-          if (dist > BH_RADIUS || dist < 0.2) return;
-          const enemy = h.team === "enemy";
-          const inv = (BH_PULL * (1 - dist / BH_RADIUS) * (enemy ? 1 : 0.3)) / dist;
-          h.hit(enemy ? 1.5 : 0, { x: dx * inv, y: dy * inv + (enemy ? 1 : 0), z: dz * inv });
-        });
-      }
-    } else if (authority.current) {
+    if (authority.current) {
       if (doTug) {
         forEachHittable((h) => {
           if (h.team !== "enemy") return; // props are pulled as bodies below
@@ -304,7 +290,7 @@ function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void 
           const inv = (BH_PULL * (1 - dist / BH_RADIUS)) / dist;
           // Tiny tick damage + inward impulse: the hit also refreshes the
           // enemy's knockback timer, which suppresses its AI so the pull sticks.
-          h.hit(1.5, { x: dx * inv, y: dy * inv + 1, z: dz * inv });
+          h.hit(BLACK_HOLE.tugDamage, { x: dx * inv, y: dy * inv + BLACK_HOLE.tugLift, z: dz * inv });
         });
       }
       forEachDynamicBody((b) => {

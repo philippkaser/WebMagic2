@@ -12,6 +12,7 @@ import { createEnemy, enemyOptions, type EnemyController } from "./enemies/contr
 import type { EnemyCore } from "./enemies/core";
 import { buildFloorPhysics, type FloorPhysics, type Rapier } from "./floorPhysics";
 import { blastFalloff, PROP_LOOT_MIN_Y, PROP_RULES } from "./props";
+import { PlayerSpells, type Cast, type SpellStats } from "./spells";
 import { DartTrapController } from "./traps";
 import type { EntitySnap, SimAction, SimCue, SimTarget, SimWorld } from "./world";
 
@@ -37,9 +38,11 @@ import type { EntitySnap, SimAction, SimCue, SimTarget, SimWorld } from "./world
  * mirrorSpawn — the same facts a browser replica applies) and take over from
  * there: host migration, with a headless host on the receiving end.
  *
- * Not simulated here: enemy bolts in flight (every client flies its own
- * copy; their bursts hurt wizards client-side and leave props be), and the
- * wizards' own spells, whose hits arrive as commands from their casters. */
+ * Wizards' spells run here too when this sim is the authority over them
+ * (castSpell — sim/spells.ts): their bolts, blasts and black holes deal the
+ * damage, not the casters' claims. Not simulated: enemy bolts in flight
+ * (every client flies its own copy; their bursts hurt wizards client-side
+ * and leave props be). */
 
 export interface FloorSimOptions {
   /** The sim's dice (brains, splits, trap clocks). Defaults to Math.random. */
@@ -126,6 +129,7 @@ export class FloorSim {
   private readonly shove: Vec = { x: 0, y: 0, z: 0 };
   private spawned = 0;
   private flushing = false;
+  private readonly spells: PlayerSpells;
 
   /** What the sim asks of the world — answered from this floor alone. */
   readonly world: SimWorld;
@@ -165,6 +169,50 @@ export class FloorSim {
     this.darts = layout.traps
       .filter((t) => t.kind === "dart")
       .map((t) => new DartTrapController(this.world, t.pos, floor));
+    this.spells = new PlayerSpells({
+      R,
+      world: this.physics.world,
+      gravity: this.physics.world.gravity.y,
+      nearestEnemy: (pos, range) => {
+        let best: Vec | null = null;
+        let bestD2 = range * range;
+        for (const [id, e] of this.enemies) {
+          if (e.core.dead) continue;
+          const t = this.physics.bodies.get(id)?.translation();
+          if (!t) continue;
+          const d2 = (t.x - pos.x) ** 2 + (t.y - pos.y) ** 2 + (t.z - pos.z) ** 2;
+          if (d2 < bestD2) {
+            bestD2 = d2;
+            best = t;
+          }
+        }
+        return best;
+      },
+      forEachTarget: (fn) => {
+        for (const [id, body] of [...this.physics.bodies]) {
+          if (!this.alive(id)) continue;
+          fn(id, body.translation(), this.enemies.has(id));
+        }
+      },
+      strike: (id, damage, impulse) => {
+        if (this.alive(id)) this.strike(id, damage, impulse);
+      },
+      explode: (at, radius, damage, impulse) =>
+        this.blasts.push({ at: { x: at.x, y: at.y, z: at.z }, radius, damage, impulse, hurtsEnemies: true }),
+    });
+  }
+
+  /** A wizard's cast, as this authority accepted it (the caller checked who
+   * may cast what, from where, how often — server/floorHost.ts): from now
+   * on its bolts fly, its blasts land and its seeds wait here. */
+  castSpell(caster: string, cast: Cast, stats: SpellStats): void {
+    this.spells.cast(caster, cast, stats);
+    this.flush();
+  }
+
+  /** Player projectiles and black holes in play (tests, counts). */
+  get spellsLive(): { projectiles: number; holes: number } {
+    return this.spells.live;
   }
 
   // ── In ─────────────────────────────────────────────────────────────────────
@@ -227,8 +275,9 @@ export class FloorSim {
         if (b) e.ctl.think(b, dt, this.time);
       }
       for (const dart of this.darts) dart.think(dt);
-      this.flush();
     }
+    this.spells.step(dt);
+    this.flush();
     this.physics.step(dt);
     this.time += dt;
   }

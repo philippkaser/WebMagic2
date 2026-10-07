@@ -42,11 +42,20 @@ export function isServerHosted(): boolean {
 }
 
 /** Does this machine apply the entity effects of a spell cast by `casterId`
- * (its pull, its blast)? The floor's host does on a wizard-hosted floor —
- * it sees every hole — but on a server-hosted floor the caster does, and its
- * hits travel as commands like every other spell's. */
-export function appliesSpellEffects(casterId: string, localId: string): boolean {
-  return isServerHosted() ? casterId === localId : isHost();
+ * (a black hole's pull and implosion)? The floor's host does on a
+ * wizard-hosted floor — it sees every hole. On a server-hosted floor no
+ * browser does: the server runs its own copy of every cast
+ * (src/sim/spells.ts), and only its copy deals damage. */
+export function appliesSpellEffects(_casterId: string, _localId: string): boolean {
+  return isServerHosted() ? false : isHost();
+}
+
+/** Do this machine's own spells report their hits to the floor's host?
+ * Yes on a floor a wizard hosts (shooter-favored: our shots land where we
+ * saw them). No on one the server hosts — it decides what our casts hit;
+ * ours only show it (and predict the shove). */
+export function reportsOwnHits(): boolean {
+  return !isServerHosted();
 }
 
 /** Reactive variant for components that must re-render on host migration. */

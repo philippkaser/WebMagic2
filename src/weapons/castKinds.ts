@@ -5,6 +5,7 @@ import type { ItemDef } from "../items/types";
 import type { CastStats } from "./castMessage";
 import { explode } from "./explosions";
 import { fireProjectile } from "./projectiles";
+import { boltVolley } from "../sim/spells";
 import { activateSingularities } from "./singularity";
 import type {
   BlastSpell,
@@ -37,6 +38,9 @@ export interface AbilityContext {
   caster: string;
   /** True when replaying a floor-mate's cast — skip caster-only effects. */
   remote?: boolean;
+  /** The volley's spread seed (the cast message carries it): the caster,
+   * every replay and a server host fire the same bolts. */
+  seed: number;
 }
 
 export function castSpell(def: Readonly<SpellDef>, ctx: AbilityContext): void {
@@ -61,25 +65,12 @@ export function castSpell(def: Readonly<SpellDef>, ctx: AbilityContext): void {
 // Scratch vectors: casts are synchronous and fireProjectile/explode copy what
 // they need, so one set serves every cast.
 const aim = new Vector3();
-const jitter = new Vector3();
 const at = new Vector3();
-
-/** When multishot widens a volley, spread it at least this much so stacked
- * bolts don't fly as one indistinguishable line. */
-const MULTISHOT_MIN_SPREAD = 0.06;
 
 function castBolt(def: Readonly<BoltSpell>, ctx: AbilityContext): void {
   const source = wizardSource(ctx.caster);
-  const extra = Math.max(0, Math.round(ctx.stats.extraProjectiles ?? 0));
-  const total = def.count + extra;
-  const spread = total > 1 ? Math.max(def.spread, MULTISHOT_MIN_SPREAD) : def.spread;
-  for (let i = 0; i < total; i++) {
-    jitter.set(
-      (Math.random() - 0.5) * spread,
-      (Math.random() - 0.5) * spread,
-      (Math.random() - 0.5) * spread,
-    );
-    aim.copy(ctx.dir).add(jitter).normalize().multiplyScalar(def.speed);
+  for (const d of boltVolley(def, ctx.dir, ctx.stats.extraProjectiles ?? 0, ctx.seed)) {
+    aim.set(d.x, d.y, d.z).multiplyScalar(def.speed);
     fireProjectile({
       team: "player",
       source,
