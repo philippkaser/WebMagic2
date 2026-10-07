@@ -1,7 +1,7 @@
-/** GLSL shared by the post effects. The world renders at dpr 0.35 and is
+/** GLSL shared by the post effects. The world renders at low resolution and is
  * upscaled without filtering, so one render-target pixel (gl_FragCoord) is a
- * ~3-px block on screen: the post chain works on that grid — its dither, its
- * grain and its outlines are pixel art, not screen-resolution fuzz. */
+ * whole-number block on screen (render/pixelGrid): the post chain works on that grid — its dither,
+ * its stepped glow and its bokeh are pixel art, not screen-resolution fuzz. */
 export const POST_GLSL = /* glsl */ `
 float postLuma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 

@@ -1,4 +1,4 @@
-import { Effect, ShaderPass } from "postprocessing";
+import { BloomEffect, Effect, ShaderPass } from "postprocessing";
 import {
   Color,
   DataUtils,
@@ -9,13 +9,19 @@ import {
   ShaderMaterial,
   Uniform,
   WebGLRenderTarget,
+  type TextureDataType,
   type WebGLRenderer,
 } from "three";
 import type { Grade } from "../../world/biomes";
 import { POST_GLSL } from "./glsl";
 
-/** The colour of a place, and the eye that looks at it.
+/** The light and colour of a place, and the eye that looks at it.
  *
+ *  - **Light wrap, in pixels.** Bright things bleed light around their edges
+ *    and over whatever stands in front of them (a mipmap bloom), and the
+ *    glow is laid down the way the god rays are: in a few perceptual steps,
+ *    the 4×4 Bayer dither between them, nothing at all in the faintest air.
+ *    A torch's halo is rings of dithered pixels, not a smooth airbrush.
  *  - **Eye adaptation.** The view is metered every frame (a log average,
  *    weighted to the middle — what you look at counts most) and the eye
  *    follows it slowly: step out of a black corridor and the hall opens up
@@ -91,6 +97,9 @@ const adaptMaterial = (meter: WebGLRenderTarget) =>
 const fragment = /* glsl */ `
 ${POST_GLSL}
 uniform sampler2D uAdapted;
+uniform sampler2D uGlow;
+uniform float uGlowStrength;
+uniform float uGlowSteps;
 uniform float uKey;
 uniform float uAdapt;
 uniform vec2 uEvRange;
@@ -115,6 +124,15 @@ vec3 shoulder(vec3 c) {
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   vec3 c = max(inputColor.rgb, 0.0);
+  // The glow, stepped and dithered like the god rays (hue kept: the steps
+  // are taken on its brightest channel, in perceptual — square-root — light).
+  vec3 g = texture2D(uGlow, uv).rgb * uGlowStrength;
+  float gm = max(g.r, max(g.g, g.b));
+  if (gm > 1e-4) {
+    float q = sqrt(max(gm - 0.004, 0.0));
+    q = floor(q * uGlowSteps + postBayer(gl_FragCoord.xy)) / uGlowSteps;
+    c += g * (q * q / gm);
+  }
   // The eye: half-way toward the key, within a narrow range.
   float avg = texture2D(uAdapted, vec2(0.5)).r;
   float ev = clamp((uKey - avg) * uAdapt, uEvRange.x, uEvRange.y);
@@ -146,11 +164,21 @@ export class GradeEffect extends Effect {
   private meterPass: ShaderPass;
   private adaptPass: ShaderPass;
   private reset = true;
+  private bloom = new BloomEffect({
+    mipmapBlur: true,
+    luminanceThreshold: 0.55,
+    luminanceSmoothing: 0.3,
+    radius: 0.78,
+    levels: 6,
+  });
 
   constructor(start: Grade) {
     super("GradeEffect", fragment, {
       uniforms: new Map<string, Uniform>([
         ["uAdapted", new Uniform(null)],
+        ["uGlow", new Uniform(null)],
+        ["uGlowStrength", new Uniform(1.15)],
+        ["uGlowSteps", new Uniform(7)],
         ["uKey", new Uniform(-4.6)],
         ["uAdapt", new Uniform(0.5)],
         ["uEvRange", new Uniform([-0.45, 0.5])],
@@ -178,6 +206,18 @@ export class GradeEffect extends Effect {
     this.meterPass = new ShaderPass(meterMaterial());
     this.adaptPass = new ShaderPass(adaptMaterial(this.meter));
     this.uniforms.get("uAdapted")!.value = this.adapted[0].texture;
+    this.uniforms.get("uGlow")!.value = this.bloom.texture;
+  }
+
+  override initialize(renderer: WebGLRenderer, alpha: boolean, frameBufferType: TextureDataType): void {
+    super.initialize(renderer, alpha, frameBufferType);
+    this.bloom.initialize(renderer, alpha, frameBufferType);
+  }
+
+  override setSize(width: number, height: number): void {
+    super.setSize(width, height);
+    this.bloom.setSize(width, height);
+    this.uniforms.get("uGlow")!.value = this.bloom.texture;
   }
 
   /** Ease the grade toward `g` by the fraction `k` (0…1). */
@@ -196,6 +236,10 @@ export class GradeEffect extends Effect {
 
   set exposure(v: number) {
     this.uniforms.get("uExposure")!.value = v;
+  }
+  /** How many perceptual steps the glow is laid down in. */
+  set glowSteps(v: number) {
+    this.uniforms.get("uGlowSteps")!.value = v;
   }
   set drain(v: number) {
     this.uniforms.get("uDrain")!.value = v;
@@ -219,6 +263,7 @@ export class GradeEffect extends Effect {
   }
 
   override update(renderer: WebGLRenderer, input: WebGLRenderTarget, dt = 1 / 60): void {
+    this.bloom.update(renderer, input, dt);
     this.meterPass.render(renderer, input, this.meter);
     const [from, to] = this.adapted;
     const m = this.adaptPass.fullscreenMaterial as ShaderMaterial;
@@ -235,6 +280,7 @@ export class GradeEffect extends Effect {
     this.meter.dispose();
     for (const t of this.adapted) t.dispose();
     this.meterPass.dispose();
+    this.bloom.dispose();
     this.adaptPass.dispose();
   }
 }

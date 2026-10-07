@@ -65,7 +65,7 @@ export const CONTROLS: readonly { keys: readonly string[]; action: string }[] = 
   { keys: ["C"], action: "codex" },
   { keys: ["P"], action: "fps" },
   { keys: ["O"], action: "shadows" },
-  { keys: ["B"], action: "blur" },
+  { keys: ["B"], action: "focus" },
 ];
 
 /** Greedy row wrap for things laid side by side (key-cap legends, card

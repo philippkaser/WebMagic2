@@ -50,12 +50,8 @@ export interface Grade {
 export interface Air {
   /** Heat shimmer: the air wavers, more the further you look (0 = still). */
   haze: number;
-  /** The lens's colour fringe toward the rim, at rest (1 = the usual). */
-  dispersion: number;
   /** How much the rim of sight slowly breathes (0 = steady). */
   breath: number;
-  /** Film grain (1 = the usual). */
-  grain: number;
   /** Vignette strength (0 = none, 1 = heavy). */
   vignette: number;
   /** The light the eye is used to here: the log2 luminance of a typical
@@ -108,7 +104,7 @@ export interface BiomeDef {
   glow: { intensity: number; pulse: number };
   /** The band's colour grade (render/Effects.tsx eases into it on arrival). */
   grade: Grade;
-  /** The band's air: shimmer, lens, breath, grain, vignette. */
+  /** The band's air: shimmer, breath, vignette, the eye's key. */
   air: Air;
   /** Glow colour of the band's sigils — the arrival rune circle. */
   accent: string;
@@ -141,7 +137,7 @@ export const BIOME_DEFS: readonly BiomeDef[] = [
     surfaces: { wall: "catacombs-wall", floor: "catacombs-floor", ceiling: "catacombs-ceiling" },
     glow: { intensity: 1.2, pulse: 0 },
     grade: { shadows: "#1c1030", highlights: "#ffd49a", saturation: 0.85, contrast: 1.08 },
-    air: { haze: 0, dispersion: 0.5, breath: 0, grain: 1, vignette: 0.95, eye: -7.2 },
+    air: { haze: 0, breath: 0, vignette: 0.95, eye: -7.2 },
     accent: "#e0b060",
     look: {
       reflection: { strength: 0.75, blur: 1.2 },
@@ -168,7 +164,7 @@ export const BIOME_DEFS: readonly BiomeDef[] = [
     glow: { intensity: 1.6, pulse: 0.2 },
     grade: { shadows: "#002a2c", highlights: "#c0ffe8", saturation: 0.82, contrast: 1.05 },
     // Damp air: the rim of sight breathes faintly, like a tide.
-    air: { haze: 0, dispersion: 0.6, breath: 0.35, grain: 0.85, vignette: 0.95, eye: -7.7 },
+    air: { haze: 0, breath: 0.35, vignette: 0.95, eye: -7.7 },
     accent: "#5cffd8",
     look: {
       reflection: { strength: 1.1, blur: 1.4 },
@@ -194,7 +190,7 @@ export const BIOME_DEFS: readonly BiomeDef[] = [
     glow: { intensity: 1.5, pulse: 0.25 },
     grade: { shadows: "#240a04", highlights: "#ffc07a", saturation: 1.05, contrast: 1.12 },
     // The air over the magma shimmers.
-    air: { haze: 1, dispersion: 0.5, breath: 0, grain: 1.1, vignette: 0.9, eye: -7.4 },
+    air: { haze: 1, breath: 0, vignette: 0.9, eye: -7.4 },
     accent: "#ff7a1a",
     look: {
       reflection: { strength: 0.95, blur: 1 },
@@ -219,8 +215,7 @@ export const BIOME_DEFS: readonly BiomeDef[] = [
     surfaces: { wall: "crystal-wall", floor: "crystal-floor", ceiling: "crystal-ceiling" },
     glow: { intensity: 0.75, pulse: 0.15 },
     grade: { shadows: "#0c0634", highlights: "#d8f4ff", saturation: 1.1, contrast: 1.06 },
-    // The cavern's light splits like it passed through a prism.
-    air: { haze: 0, dispersion: 1, breath: 0, grain: 0.8, vignette: 0.9, eye: -7.0 },
+    air: { haze: 0, breath: 0, vignette: 0.9, eye: -7.0 },
     accent: "#7ad8ff",
     look: {
       reflection: { strength: 1.15, blur: 0.8 },
@@ -246,8 +241,8 @@ export const BIOME_DEFS: readonly BiomeDef[] = [
     surfaces: { wall: "abyss-wall", floor: "abyss-floor", ceiling: "abyss-ceiling" },
     glow: { intensity: 1.6, pulse: 0.4 },
     grade: { shadows: "#1c0008", highlights: "#ffb4a0", saturation: 0.92, contrast: 1.15 },
-    // The dark at the edge of sight breathes; the grain is heavier.
-    air: { haze: 0, dispersion: 0.6, breath: 1, grain: 1.3, vignette: 1, eye: -7.9 },
+    // The dark at the edge of sight breathes.
+    air: { haze: 0, breath: 1, vignette: 1, eye: -7.9 },
     accent: "#ff2a44",
     look: {
       reflection: null,

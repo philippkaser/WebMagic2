@@ -428,35 +428,40 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   `AmbientParticles.tsx` — single pixels animated entirely on the GPU in a
   box that follows the camera (dust, spores and drips, embers and ash,
   glints, village fireflies; the Weightless Hour makes it all float up).
-- **Post chain** (`render/Effects.tsx`, effects in `render/post/`), three
-  passes at the world's low resolution:
-  1. god rays (`render/godRays.ts`, see below);
-  2. the lens (`post/LensEffect.ts`, one pass reading depth): **pixel
-     creases** from the Laplacian of 1/depth (flat on any plane, so it fires
-     only where a surface bends — an inside corner darker, an outside lip
-     lighter, fading into the fog); silhouettes (a jump in 1/depth between
-     neighbours, not a bend) are skipped, so objects never get outlines; **camera motion blur** by
-     reprojection (depth → world → last frame's view-projection, as a fixed
-     shutter, cuts detected and skipped, the held staff left sharp; a
-     setting, `motionBlur`, key B); the **zoom rush** of a blast, a dash or
-     a rift; rim-only **chromatic dispersion**; the forge's **heat shimmer**;
-     and the **focus pull** that softens the world behind a tablet (title,
-     Weighing, inventory family, codex, death);
-  3. one merged pass: bloom → `post/GradeEffect.ts` (eye adaptation from a
-     centre-weighted log-luminance meter, 32² mip chain → 1×1 ping-pong,
-     fast toward light and slow into dark, half-way and within ±½ EV of the
-     place's `air.eye`; the split-tone grade; a per-channel filmic shoulder
-     instead of the hard clip; colour drained by a blow or near death) →
-     `post/FilmEffect.ts` (an oval vignette tinted with the place's darks,
-     breathing in the Hollow and closing with the heartbeat near death; a
-     luminance-weighted Gaussian grain on the pixel grid; ordered Bayer
-     dither in display space against banding).
-  Each biome sets its `grade` and `air` (shimmer, dispersion, breath, grain,
-  vignette, eye) on arrival (`setGrade`) and they ease in over a second, so
-  arriving reads as the air changing; the village has its own
-  (`VILLAGE_GRADE`, `VILLAGE_AIR`). The body's kicks — `shake`,
-  `playerHurt` and `dash` events, health, the travel stage — are kept by
-  `post/feel.ts` (pure, tested) and decay on their own.
+- **Post chain** (`render/Effects.tsx`, effects in `render/post/`): an old
+  dungeon crawler's pixels and colour with modern light. Three passes at the
+  world's low resolution:
+  1. god rays (`render/godRays.ts`, see below): marched light, stepped and
+     dithered;
+  2. the lens (`post/LensEffect.ts`, one pass reading depth): **depth of
+     field with bokeh** — the focus is metered at the middle of the view on
+     the GPU (a cross of depth taps, the staff and sky ignored, 1×1
+     ping-pong racked over ~0.2 s), the circle of confusion is
+     |1/focus − 1/distance| × aperture (capped at 4 render px; the held staff
+     always sharp), gathered in one pass with Dennis Gustafsson's
+     golden-angle spiral (a sample counts only if its own blur reaches
+     this pixel), so bright things out of focus open into round discs; the
+     whole world drops out of focus behind a tablet (title, Weighing,
+     inventory family, codex, death); a setting, `depthOfField`, key B —
+     and the forge's **heat shimmer**;
+  3. one merged pass: `post/GradeEffect.ts` owns the bloom (mipmap blur)
+     and lays the glow down like the god rays — the light wrap in a few
+     perceptual (√) steps with the 4×4 Bayer dither between, nothing in the
+     faintest air — then eye adaptation (centre-weighted log-luminance
+     meter, 32² mip chain → 1×1 ping-pong, fast toward light and slow into
+     dark, half-way and within ±½ EV of the place's `air.eye`), the
+     split-tone grade, a per-channel filmic shoulder instead of the hard
+     clip, colour drained by a blow or near death → `post/FilmEffect.ts`: an
+     oval vignette tinted with the place's darks (breathing in the Hollow,
+     closing with the heartbeat near death) and **15-bit colour through the
+     4×4 ordered dither**, in display space on the pixel grid, fading to
+     plain rounding at black so the deep dark stays ink.
+  One dither runs through all of it: the god rays, the glow, the colour and
+  the dithered particles share the same Bayer matrix. Each biome sets its
+  `grade` and `air` (shimmer, breath, vignette, eye) on arrival
+  (`setGrade`) and they ease in over a second; the village has its own
+  (`VILLAGE_GRADE`, `VILLAGE_AIR`). The body's kicks — `shake` and
+  `playerHurt` events, health — are kept by `post/feel.ts` (pure, tested).
 - **Shadows are a quality toggle** (F4 / main menu, persisted, default off):
   a shadow-casting point light re-renders the scene six times per frame,
   measured at roughly +50% frame time even at low resolution.

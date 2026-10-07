@@ -116,20 +116,22 @@ The emotional loop we are chasing:
   the inventory comes out the same — in parchment on soot, arcane cyan for magic and the way onward,
   gold for home, blood for danger. New UI must follow this — if it could be
   a DOM panel, it's wrong.
-- **Post-processing chain:** pixel-art creases found in the depth (an
-  inside corner a shade darker, an outside corner's lip a shade lighter;
-  silhouettes are left alone, so objects never get outlines) → the
-  lens (motion blur from your own turns and dashes, a zoom rush on a blast
-  or a rift's pull, colour fringing at the rim, the forge's heat shimmer,
-  the world going soft behind a menu) → bloom (feeds the emissive specks
-  and magic) → an eye that adapts (step out of a black corridor and the
-  hall opens up) → split-tone colour grade (per biome) with a filmic
-  shoulder so flames and blasts keep their shape → film grain on the pixel
-  grid → ordered dither → a heavy vignette tinted with each place's darks.
-  The body is in the image too: a blow drains the colour, a blast punches,
-  near death the world greys and the rim of sight closes with your pulse.
-  Each biome has its own air (the Hollow's dark breathes, the Crystal Deep
-  splits light like a prism, the Drowned Halls breathe faintly with the tide). The pixelation itself is *free*: the
+- **Post-processing chain:** an old dungeon crawler's pixels and colour,
+  with modern light. Light wraps: bright things bleed glow around their
+  edges and over what stands in front of them, laid down like the god rays
+  in dithered steps — a torch's halo is rings of dithered pixels, not an
+  airbrush. The eye focuses on what you look at and the rest goes soft;
+  lights out of focus open into round discs of bokeh, and behind a menu the
+  whole world drops out of focus. The eye adapts (step out of a black
+  corridor and the hall opens up), each biome has its split-tone grade
+  with a filmic shoulder so flames and blasts keep their shape, a heavy
+  vignette is tinted with each place's darks, and the whole image is brought
+  down to 15-bit colour through the same 4×4 ordered dither the god rays and
+  particles use — the look of the first 3D dungeon crawlers. The body is in
+  the image too: a blow drains the colour, a blast flashes, near death the
+  world greys and the rim of sight closes with your pulse. Each biome has
+  its own air (the forge shimmers, the Hollow's dark breathes, the Drowned
+  Halls breathe faintly with the tide). The pixelation itself is *free*: the
   world renders at about 340 lines, scaled up by a whole number of screen
   pixels so every pixel is the same size and every monitor sees about the
   same chunkiness, and the browser upscales it with

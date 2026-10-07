@@ -104,10 +104,10 @@ export interface GameState {
    * head, its shadow — sounds outside your head, all round you) or for
    * speakers (a pan). Headphones by default; persisted. */
   headphones: boolean;
-  /** Motion blur from the camera's own movement (render/post/LensEffect):
-   * on by default — it's a shutter, not a smear — but some eyes dislike it
-   * in a first-person game, so it's a setting; persisted. */
-  motionBlur: boolean;
+  /** Depth of field (render/post/LensEffect): the eye focuses on what you
+   * look at and the rest goes soft. On by default; some players prefer
+   * everything sharp, so it's a setting; persisted. */
+  depthOfField: boolean;
   /** Display name shown to floor-mates. */
   playerName: string;
 
@@ -159,14 +159,14 @@ export interface GameState {
   toggleShadows(): void;
   toggleReflections(): void;
   toggleHeadphones(): void;
-  toggleMotionBlur(): void;
+  toggleDepthOfField(): void;
   setPlayerName(name: string): void;
 }
 
 const SHADOWS_KEY = "webmagic.shadows.v1";
 const REFLECTIONS_KEY = "webmagic.reflections.v1";
 const HEADPHONES_KEY = "webmagic.headphones.v1";
-const MOTION_BLUR_KEY = "webmagic.motionblur.v1";
+const DEPTH_OF_FIELD_KEY = "webmagic.depthoffield.v1";
 const NAME_KEY = "webmagic.name.v1";
 
 function loadShadowSetting(): boolean {
@@ -196,9 +196,9 @@ function loadReflectionSetting(): boolean {
   }
 }
 
-function loadMotionBlurSetting(): boolean {
+function loadDepthOfFieldSetting(): boolean {
   try {
-    return localStorage.getItem(MOTION_BLUR_KEY) !== "0";
+    return localStorage.getItem(DEPTH_OF_FIELD_KEY) !== "0";
   } catch {
     return true;
   }
@@ -251,7 +251,7 @@ export const useGame = create<GameState>((set, get) => ({
   shadows: loadShadowSetting(),
   reflections: loadReflectionSetting(),
   headphones: loadHeadphoneSetting(),
-  motionBlur: loadMotionBlurSetting(),
+  depthOfField: loadDepthOfFieldSetting(),
   playerName: loadPlayerName(),
 
   startGame: () => set({ phase: "village" }),
@@ -648,15 +648,15 @@ export const useGame = create<GameState>((set, get) => ({
     gameEvents.emit("message", `Reflections ${reflections ? "on" : "off"}`);
   },
 
-  toggleMotionBlur: () => {
-    const motionBlur = !get().motionBlur;
-    set({ motionBlur });
+  toggleDepthOfField: () => {
+    const depthOfField = !get().depthOfField;
+    set({ depthOfField });
     try {
-      localStorage.setItem(MOTION_BLUR_KEY, motionBlur ? "1" : "0");
+      localStorage.setItem(DEPTH_OF_FIELD_KEY, depthOfField ? "1" : "0");
     } catch {
       // Setting is session-only without storage.
     }
-    gameEvents.emit("message", `Motion blur ${motionBlur ? "on" : "off"}`);
+    gameEvents.emit("message", `Depth of field ${depthOfField ? "on" : "off"}`);
   },
 
   setPlayerName: (name) => {

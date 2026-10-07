@@ -67,7 +67,7 @@ bun run audio-lab            # or name scenes: bun run audio-lab walk imp-room
 | M | Cast the map — a miniature of the village or the explored floor, laid on the ground a step ahead; floor-mates see it too |
 | P (or F3) | FPS / frame-time overlay |
 | O (or F4) | Toggle shadows (quality option, off by default) |
-| B | Toggle motion blur (on by default) |
+| B | Toggle depth of field — the focus blur (on by default) |
 
 Reflections (floor mirrors, on by default) and shadows can also be toggled on
 the title screen's left tablet, as can Headphones (on: binaural 3D sound; off:

@@ -1,70 +1,66 @@
-import { Effect, EffectAttribute } from "postprocessing";
-import { type Camera, Matrix4, Uniform, Vector3, type WebGLRenderer, type WebGLRenderTarget } from "three";
+import { Effect, EffectAttribute, ShaderPass } from "postprocessing";
+import {
+  BasicDepthPacking,
+  type Camera,
+  HalfFloatType,
+  NearestFilter,
+  type PerspectiveCamera,
+  ShaderMaterial,
+  type Texture,
+  Uniform,
+  WebGLRenderTarget,
+  type DepthPackingStrategies,
+  type WebGLRenderer,
+} from "three";
 import { POST_GLSL } from "./glsl";
 
-/** The eye and the lens, in one pass over the world's low-resolution image
- * (it reads the depth, so it needs its own pass; everything else in the
- * chain merges into the final one):
+/** The lens, in one pass over the world's low-resolution image (it reads
+ * the depth, so it needs its own pass; everything else in the chain merges
+ * into the final one):
  *
- *  - **Pixel creases.** Where a surface folds — a wall meeting the floor,
- *    the corner of a pillar, the rim of a barrel — the fold is shaded the
- *    way a pixel artist would: an inside corner a shade darker, an outside
- *    corner's lip a shade lighter. Found in the depth alone: 1/depth is flat
- *    across any plane on screen, so its Laplacian is zero on the walls and
- *    floors and fires only where the surface bends, its sign telling inside
- *    from outside. Silhouettes — one thing standing in front of another, a
- *    jump in depth rather than a bend — are left alone: shading them would
- *    draw an outline round every object, loudest against a dark backdrop.
- *    Fades with distance, into the fog.
- *  - **Motion blur** from the camera's own movement, by reprojection: every
- *    pixel's world point is found from its depth and carried back to where
- *    it was last frame, and the image is smeared along that path — a whipped
- *    turn streaks, a blink-dash pulls the hall past you. Measured as a
- *    shutter (a fixed exposure time), so it doesn't grow with a slow frame.
- *    The staff in your hand rides with the camera and is left sharp.
- *  - **Zoom blur**: a radial rush from the middle of the view — a blast's
- *    punch, a dash, the pull of a rift.
- *  - **Chromatic dispersion**: the colours of the lens part toward its rim
- *    — a whisper at rest (more in the Crystal Deep), a split on a hit.
+ *  - **Depth of field with bokeh.** The eye focuses on what you look at —
+ *    the middle of the view, metered every frame on the GPU and racked over
+ *    a few tenths of a second — and the world nearer and further goes soft
+ *    in proportion to how far out of focus it is (circle of confusion ∝
+ *    |1/focus − 1/distance|, like a real lens). Bright things out of focus
+ *    open into round discs: a torch down the hall becomes a disc of light,
+ *    drawn on the pixel grid. Behind a tablet (the title, the Weighing, the
+ *    inventory and its kin, the codex, death) the whole world drops out of
+ *    focus. The staff in your hand stays sharp — it's yours, not the
+ *    world's.
+ *    Gathered in one pass (Dennis Gustafsson's single-pass bokeh: a golden-
+ *    angle spiral whose samples count only if their own blur reaches this
+ *    pixel, so sharp things in front never smear and blurred things
+ *    behind never bleed over them). The spiral only runs as far as the
+ *    largest blur on screen, so an ordinary view costs a handful of taps.
  *  - **Heat shimmer**: the air over the Ember Forge's magma wavers, more
- *    the further you look through it.
- *  - **Focus pull**: with a tablet up in front of you (the title, the
- *    Weighing, the inventory and its kin, the codex, death) the world
- *    behind it goes soft, so the stone and runes in front stand clear.
- *
- * Every part has its own strength uniform; at rest (no motion, no kick) the
- * blur takes one sample, so the pass costs about a copy plus five depth
- * reads per pixel — at dpr 0.35, nearly nothing. */
+ *    the further you look through it. */
 
 const fragment = /* glsl */ `
 ${POST_GLSL}
-uniform mat4 uReproject;
-uniform float uShutter;
-uniform float uZoom;
-uniform float uDispersion;
-uniform float uHaze;
-uniform float uEdges;
+uniform sampler2D uFocus;
+uniform float uAperture;
+uniform float uMaxCoc;
 uniform float uSoft;
+uniform float uHaze;
 uniform float uTime;
 
-#define TAPS 8
 // Nearer than this is the staff in your hand (it rides with the camera).
 #define HELD 0.75
-// Blur no further than this (in screen heights), however fast the turn.
-#define MAX_BLUR 0.045
-// The menu's focus pull: taps, and radius in render pixels.
-#define SOFT_TAPS 12
-#define SOFT_RADIUS 3.5
+// A tablet in front: how far out of focus the whole world goes (render px).
+#define SOFT_COC 5.0
+#define GOLDEN 2.39996
+// Spiral step: the radius grows so taps stay ~evenly spread over the disc.
+#define RAD_SCALE 0.55
 
 float viewDist(float depth) { return -getViewZ(depth); }
 
-// Where this pixel's world point stood on screen last frame, minus where it
-// stands now: the camera's motion, seen at this pixel.
-vec2 cameraMotion(vec2 uv, float depth) {
-  vec4 clip = vec4(vec3(uv, depth) * 2.0 - 1.0, 1.0);
-  vec4 prev = uReproject * clip;
-  vec2 was = prev.xy / max(prev.w, 1e-4) * 0.5 + 0.5;
-  return uv - was;
+float focusDiopters;
+
+// Circle of confusion (radius, render px) of a point at distance d.
+float cocOf(float d) {
+  float c = d < HELD ? 0.0 : min(abs(1.0 / d - focusDiopters) * uAperture, uMaxCoc);
+  return c + uSoft * SOFT_COC;
 }
 
 float hazeNoise(vec2 p) {
@@ -78,23 +74,13 @@ float hazeNoise(vec2 p) {
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
-vec3 lensSample(vec2 uv, vec2 split) {
-  return vec3(
-    texture2D(inputBuffer, uv + split).r,
-    texture2D(inputBuffer, uv).g,
-    texture2D(inputBuffer, uv - split).b
-  );
-}
-
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-  float depth = readDepth(uv);
-  bool sky = depth >= 0.99999;
-  float dist = sky ? 1e4 : viewDist(depth);
+  float dist = viewDist(readDepth(uv));
   bool held = dist < HELD;
   vec2 at = uv;
 
   // Heat shimmer: the air between you and what you see wavers, more the
-  // further you look through it (the staff and the sky are left alone).
+  // further you look through it (the staff is left alone).
   if (uHaze > 0.0 && !held) {
     float through = smoothstep(1.5, 14.0, min(dist, 30.0));
     vec2 q = uv * vec2(aspect, 1.0) * vec2(9.0, 5.0) + vec2(0.0, -uTime * 1.3);
@@ -102,120 +88,109 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
     at += w * vec2(0.6, 1.0) * uHaze * 0.0045 * through;
   }
 
-  // The colours of the lens part toward its rim (none in the middle).
-  vec2 fromMid = (uv - 0.5) * vec2(aspect, 1.0);
-  float rim = dot(fromMid, fromMid);
-  vec2 split = (uv - 0.5) * uDispersion * rim * 0.012;
-
-  // Blur along the camera's motion, plus the radial rush of a kick.
-  vec2 blur = (uv - 0.5) * uZoom * 0.11;
-  if (!held && uShutter > 0.0) {
-    vec2 m = cameraMotion(uv, sky ? 1.0 : depth) * uShutter;
-    blur += m;
-  }
-  float len = length(blur * vec2(aspect, 1.0));
-  if (len > MAX_BLUR) blur *= MAX_BLUR / len;
-  float px = length(blur * resolution);
-
-  vec3 color;
-  if (uSoft > 0.01) {
-    // Focus pulled to the tablet in front of you: a soft disc (golden-angle
-    // taps, turned per pixel by the dither so the blur has no pattern).
-    color = lensSample(at, split);
-    float a0 = postBayer(gl_FragCoord.xy) * 6.2832;
-    for (int i = 0; i < SOFT_TAPS; i++) {
-      float r = sqrt((float(i) + 0.5) / float(SOFT_TAPS)) * uSoft * SOFT_RADIUS;
-      float a = float(i) * 2.39996 + a0;
-      color += lensSample(at + vec2(cos(a), sin(a)) * r * texelSize, split);
+  vec3 color = texture2D(inputBuffer, at).rgb;
+  float reach = uMaxCoc + uSoft * SOFT_COC;
+  if (reach >= 0.5) {
+    focusDiopters = texture2D(uFocus, vec2(0.5)).r;
+    float size = cocOf(dist);
+    float total = 1.0;
+    float radius = RAD_SCALE;
+    float angle = postBayer(gl_FragCoord.xy) * 6.2832;
+    for (int i = 0; i < 96; i++) {
+      if (radius >= reach) break;
+      vec2 p = at + vec2(cos(angle), sin(angle)) * texelSize * radius;
+      vec3 c = texture2D(inputBuffer, p).rgb;
+      float d = viewDist(readDepth(p));
+      float s = cocOf(d);
+      // Something behind can't spread over this pixel further than this
+      // pixel's own blur allows (no halo of background over a sharp edge).
+      if (d > dist) s = clamp(s, 0.0, size * 2.0);
+      float m = smoothstep(radius - 0.5, radius + 0.5, s);
+      color += mix(color / total, c, m);
+      total += 1.0;
+      radius += RAD_SCALE / radius;
+      angle += GOLDEN;
     }
-    color /= float(SOFT_TAPS + 1);
-  } else if (px < 0.75) {
-    color = lensSample(at, split);
-  } else {
-    // Centred on the pixel, each tap a dither-step along, so the streak
-    // is grain rather than bands.
-    float j = postBayer(gl_FragCoord.xy) - 0.5;
-    vec3 sum = vec3(0.0);
-    float weight = 0.0;
-    for (int i = 0; i < TAPS; i++) {
-      float t = (float(i) + 0.5 + j) / float(TAPS) - 0.5;
-      vec2 p = at + blur * t;
-      // Never smear the staff you hold into the world behind it.
-      if (!held && viewDist(readDepth(p)) < HELD) continue;
-      sum += lensSample(p, split);
-      weight += 1.0;
-    }
-    color = weight > 0.0 ? sum / weight : lensSample(at, split);
+    color /= total;
   }
-
-  // Pixel creases, from the Laplacian of 1/depth (flat on any plane).
-  float edges = uEdges * (1.0 - uSoft);
-  if (edges > 0.0 && !sky) {
-    vec2 tx = texelSize;
-    float w0 = 1.0 / dist;
-    float wl = 1.0 / viewDist(readDepth(uv - vec2(tx.x, 0.0)));
-    float wr = 1.0 / viewDist(readDepth(uv + vec2(tx.x, 0.0)));
-    float wd = 1.0 / viewDist(readDepth(uv - vec2(0.0, tx.y)));
-    float wu = 1.0 / viewDist(readDepth(uv + vec2(0.0, tx.y)));
-    float e = (wl + wr + wd + wu - 4.0 * w0) / w0;
-    // A silhouette is a jump between neighbours, a crease only a bend: on
-    // one continuous surface no single step changes 1/depth by much.
-    float jump = max(max(abs(wl - w0), abs(wr - w0)), max(abs(wd - w0), abs(wu - w0))) / w0;
-    float fade = (1.0 - smoothstep(10.0, 34.0, dist)) * (1.0 - smoothstep(0.06, 0.12, jump));
-    // e > 0: an inside corner (the fold lies further away than its sides);
-    // e < 0: an outside corner's lip.
-    float inside = smoothstep(0.015, 0.06, e) * fade;
-    float lip = smoothstep(0.015, 0.06, -e) * fade;
-    color *= 1.0 - inside * 0.3 * edges;
-    color *= 1.0 + lip * 0.35 * edges;
-  }
-
   outputColor = vec4(color, inputColor.a);
 }
 `;
 
-/** A camera step faster than this (m/s) is a cut — a teleport, a portal,
- * a respawn — not motion: that frame is left unblurred. */
-const CUT_SPEED = 45;
-
-const vp = new Matrix4();
-const inv = new Matrix4();
-const was = new Vector3();
+/** Where the eye focuses: the middle of the view (a small cross of depth
+ * taps, the staff and sky ignored), in diopters (1 / metres), racked toward
+ * over time. One pixel, ping-ponged. */
+const focusMaterial = () =>
+  new ShaderMaterial({
+    uniforms: {
+      inputBuffer: new Uniform(null),
+      uDepth: new Uniform(null),
+      uNear: new Uniform(0.1),
+      uFar: new Uniform(100),
+      uDt: new Uniform(0),
+      uReset: new Uniform(1),
+    },
+    vertexShader: /* glsl */ `void main() { gl_Position = vec4(position.xy, 1.0, 1.0); }`,
+    fragmentShader: /* glsl */ `
+      #include <packing>
+      uniform sampler2D inputBuffer;
+      uniform sampler2D uDepth;
+      uniform float uNear;
+      uniform float uFar;
+      uniform float uDt;
+      uniform float uReset;
+      float diopters(vec2 p) {
+        float d = -perspectiveDepthToViewZ(texture2D(uDepth, p).r, uNear, uFar);
+        // The staff isn't what you're looking at; nor is the sky (infinity).
+        if (d < 0.75) return -1.0;
+        return 1.0 / max(d, 0.5);
+      }
+      void main() {
+        float sum = 0.0;
+        float n = 0.0;
+        vec2 o[5] = vec2[5](vec2(0.0), vec2(0.03, 0.0), vec2(-0.03, 0.0), vec2(0.0, 0.04), vec2(0.0, -0.04));
+        for (int i = 0; i < 5; i++) {
+          float w = i == 0 ? 2.0 : 1.0;
+          float v = diopters(vec2(0.5) + o[i]);
+          if (v >= 0.0) { sum += v * w; n += w; }
+        }
+        float was = texture2D(inputBuffer, vec2(0.5)).r;
+        float now = n > 0.0 ? sum / n : was;
+        float k = uReset > 0.5 ? 1.0 : 1.0 - exp(-uDt * 5.0);
+        gl_FragColor = vec4(mix(was, now, k), 0.0, 0.0, 1.0);
+      }`,
+    depthTest: false,
+    depthWrite: false,
+  });
 
 export class LensEffect extends Effect {
-  /** Camera blur's exposure time, seconds (0 = off). */
-  shutter = 1 / 90;
-  private prevVP = new Matrix4();
-  private prevPos = new Vector3();
-  private primed = false;
+  private focus: [WebGLRenderTarget, WebGLRenderTarget];
+  private focusPass: ShaderPass;
+  private depth: Texture | null = null;
+  private reset = true;
 
   constructor(private readonly camera: Camera) {
     super("LensEffect", fragment, {
       attributes: EffectAttribute.CONVOLUTION | EffectAttribute.DEPTH,
       uniforms: new Map<string, Uniform>([
-        ["uReproject", new Uniform(new Matrix4())],
-        ["uShutter", new Uniform(0)],
-        ["uZoom", new Uniform(0)],
-        ["uDispersion", new Uniform(0.5)],
-        ["uHaze", new Uniform(0)],
-        ["uEdges", new Uniform(1)],
+        ["uFocus", new Uniform(null)],
+        ["uAperture", new Uniform(2.6)],
+        ["uMaxCoc", new Uniform(0)],
         ["uSoft", new Uniform(0)],
+        ["uHaze", new Uniform(0)],
         ["uTime", new Uniform(0)],
       ]),
     });
+    const one = () =>
+      new WebGLRenderTarget(1, 1, { type: HalfFloatType, minFilter: NearestFilter, magFilter: NearestFilter, depthBuffer: false });
+    this.focus = [one(), one()];
+    this.focusPass = new ShaderPass(focusMaterial());
+    this.uniforms.get("uFocus")!.value = this.focus[0].texture;
   }
 
-  set zoom(v: number) {
-    this.uniforms.get("uZoom")!.value = v;
-  }
-  set dispersion(v: number) {
-    this.uniforms.get("uDispersion")!.value = v;
-  }
-  set haze(v: number) {
-    this.uniforms.get("uHaze")!.value = v;
-  }
-  set edges(v: number) {
-    this.uniforms.get("uEdges")!.value = v;
+  /** How strong the world's depth of field is (0 = everything sharp). */
+  set depthOfField(v: number) {
+    this.uniforms.get("uMaxCoc")!.value = v * MAX_COC;
   }
   /** The focus pulled off the world (0 = sharp, 1 = soft behind a menu). */
   get soft(): number {
@@ -224,28 +199,39 @@ export class LensEffect extends Effect {
   set soft(v: number) {
     this.uniforms.get("uSoft")!.value = v;
   }
+  set haze(v: number) {
+    this.uniforms.get("uHaze")!.value = v;
+  }
 
-  override update(_renderer: WebGLRenderer, _input: WebGLRenderTarget, dt = 1 / 60): void {
+  override setDepthTexture(depthTexture: Texture, depthPacking: DepthPackingStrategies = BasicDepthPacking): void {
+    super.setDepthTexture(depthTexture, depthPacking);
+    this.depth = depthTexture;
+  }
+
+  override update(renderer: WebGLRenderer, _input: WebGLRenderTarget, dt = 1 / 60): void {
     const u = this.uniforms;
     u.get("uTime")!.value = (u.get("uTime")!.value + dt) % 1000;
-    const cam = this.camera;
-    cam.updateMatrixWorld();
-    vp.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
-    was.copy(this.prevPos);
-    cam.getWorldPosition(this.prevPos);
-    const moved = was.distanceTo(this.prevPos);
-    const cut = !this.primed || dt <= 0 || moved / Math.max(dt, 1e-3) > CUT_SPEED || dt > 0.25;
-    if (cut || this.shutter <= 0) {
-      u.get("uShutter")!.value = 0;
-    } else {
-      // Clip now → world → clip last frame, in one matrix.
-      inv.copy(vp).invert();
-      (u.get("uReproject")!.value as Matrix4).multiplyMatrices(this.prevVP, inv);
-      // The fraction of this frame's motion the shutter saw (never more
-      // than the whole frame, however slow it ran).
-      u.get("uShutter")!.value = Math.min(1, this.shutter / dt);
-    }
-    this.prevVP.copy(vp);
-    this.primed = true;
+    if (!this.depth) return;
+    const cam = this.camera as PerspectiveCamera;
+    const m = this.focusPass.fullscreenMaterial as ShaderMaterial;
+    m.uniforms.uDepth.value = this.depth;
+    m.uniforms.uNear.value = cam.near;
+    m.uniforms.uFar.value = cam.far;
+    m.uniforms.uDt.value = Math.min(dt, 0.1);
+    m.uniforms.uReset.value = this.reset ? 1 : 0;
+    const [from, to] = this.focus;
+    this.focusPass.render(renderer, from, to);
+    this.focus = [to, from];
+    u.get("uFocus")!.value = to.texture;
+    this.reset = false;
+  }
+
+  override dispose(): void {
+    super.dispose();
+    for (const t of this.focus) t.dispose();
+    this.focusPass.dispose();
   }
 }
+
+/** The world's largest blur at full depth of field (render px radius). */
+const MAX_COC = 4;

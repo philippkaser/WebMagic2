@@ -156,8 +156,8 @@ function TheWayIn() {
   const toggleReflections = useGame((s) => s.toggleReflections);
   const headphones = useGame((s) => s.headphones);
   const toggleHeadphones = useGame((s) => s.toggleHeadphones);
-  const motionBlur = useGame((s) => s.motionBlur);
-  const toggleMotionBlur = useGame((s) => s.toggleMotionBlur);
+  const depthOfField = useGame((s) => s.depthOfField);
+  const toggleDepthOfField = useGame((s) => s.toggleDepthOfField);
   const deepest = useGame((s) => s.deepest);
   const [editing, setEditing] = useState(false);
   const toggle = (label: string, on: boolean) => [
@@ -209,9 +209,9 @@ function TheWayIn() {
           delay={0.2}
         />
         <RuneButton
-          label={toggle("Motion blur", motionBlur)}
+          label={toggle("Focus blur", depthOfField)}
           variant="ghost"
-          onPress={toggleMotionBlur}
+          onPress={toggleDepthOfField}
           px={tp(STEP.text)}
           width={0.15 * U}
           color={ink.parchmentDim}

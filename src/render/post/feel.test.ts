@@ -1,19 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { heartbeat, kickDash, kickHurt, kickImpact, lowOf, newFeel, stepFeel } from "./feel";
+import { heartbeat, kickHurt, kickImpact, lowOf, newFeel, stepFeel } from "./feel";
 
 describe("post feel", () => {
   test("kicks land and fall away to nothing", () => {
     const f = newFeel();
     kickImpact(f, 0.7);
     kickHurt(f, 20);
-    kickDash(f);
     expect(f.impact).toBeGreaterThan(0.7);
     expect(f.hurt).toBeGreaterThan(0.5);
-    expect(f.dash).toBe(1);
     for (let i = 0; i < 300; i++) stepFeel(f, 1 / 60, 1);
     expect(f.impact).toBe(0);
     expect(f.hurt).toBe(0);
-    expect(f.dash).toBe(0);
   });
 
   test("stacked kicks never pass the top", () => {

@@ -29,8 +29,6 @@ export interface GameEvents extends Record<string, unknown> {
   playerHurt: { amount: number };
   /** Camera shake request, strength 0..1. */
   shake: number;
-  /** The local wizard blink-dashed (the post chain's rush). */
-  dash: undefined;
   /** Staff viewmodel recoil, strength 0..1. */
   staffKick: number;
   /** Boss health fraction 0..1 for the HUD bar, or null to hide it. */
