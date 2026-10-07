@@ -394,10 +394,17 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   naive approach could afford, with a *lower* and perfectly stable light
   count and zero mid-game shader recompiles. The only real lights outside
   the pool are the player's shadow-casting staff light and the village moon.
-- **Resolution IS the pixelation**: the canvas renders at dpr 0.35 and the
-  browser upscales it with `image-rendering: pixelated`. That one decision
-  cut measured frame time ~5× — every light, normal map and post pass pays
-  ~1/8th the fragments — and replaced the pixelation post-pass outright.
+- **Resolution IS the pixelation**: the world renders at about 340 lines
+  and the browser upscales it with `image-rendering: pixelated`. That one
+  decision cut measured frame time ~5× — every light, normal map and post
+  pass pays ~1/8th the fragments — and replaced the pixelation post-pass
+  outright. The scale is a whole number of device pixels per world pixel
+  (`render/pixelGrid.ts`), picked per display so the line count stays in a
+  narrow band (≈320–380 on common screens, every player about the same
+  chunkiness); a fractional scale (the old dpr 0.35 gave 2.86) made most
+  columns 3 px and some 2, which crawled as you turned. The canvas box is
+  sized to exactly width × scale device pixels, overhanging the window by
+  under one world pixel, cropped evenly.
 - **Particles** (`fx/`): one CPU simulation (`particleSim.ts`, pure and
   unit-tested: a dense struct-of-floats pool of 8192, swap-remove, zero
   per-frame allocation) streams four instanced attributes into ONE draw call
@@ -691,7 +698,7 @@ burn away into embers; items are small 3D objects. Colour is an accent
 warming the stone, never a border: parchment text, arcane cyan for magic
 and the way onward, gold for home, blood for danger.
 
-- **Two canvases.** The world renders at dpr 0.35 (the pixel look); a pixel
+- **Two canvases.** The world renders at ~340 lines (the pixel look); a pixel
   font rendered there would be mush. So a second, transparent,
   full-resolution canvas (`UiCanvas.tsx`) sits on top and copies the world
   camera every frame (`bridge.tsx` — R3F runs all roots in one loop in

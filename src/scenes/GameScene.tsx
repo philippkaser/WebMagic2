@@ -1,7 +1,7 @@
 import { Environment, PointerLockControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
-import { Suspense, useMemo } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { AudioWorld } from "../audio/AudioWorld";
 import { BlackHoles } from "../weapons/singularity";
 import { CastingSystem } from "../weapons/CastingSystem";
@@ -20,6 +20,7 @@ import { PeerBodies } from "../net/PeerBodies";
 import { RemoteWizards } from "../net/RemoteWizards";
 import { StaffView } from "../player/StaffView";
 import { Effects } from "../render/Effects";
+import { pixelGrid, type PixelGrid } from "../render/pixelGrid";
 import { TransitionSystem } from "../transition/TransitionSystem";
 import { useGame } from "../state/gameStore";
 import { WorldCameraBridge } from "../ui3d/bridge";
@@ -56,76 +57,118 @@ export function GameScene() {
   // The Weightless Hour (and any future omen) bends the world's gravity.
   const gravityMult = (layout && omenRules(layout.omen).gravityMult) ?? 1;
 
-  // dpr 0.35: the game IS pixelated, so rendering at native resolution was
-  // pure waste — this one number cut measured frame time ~5x. The browser
-  // upscales the canvas with image-rendering: pixelated, which doubles as
-  // the pixel-art look (no pixelation post-pass needed).
+  // The game IS pixelated, so rendering at native resolution would be pure
+  // waste: the world renders at ~340 lines and the browser upscales it with
+  // image-rendering: pixelated, which doubles as the pixel-art look (no
+  // pixelation post-pass needed). The scale is a whole number of device
+  // pixels per world pixel, so every pixel is the same size
+  // (render/pixelGrid.ts); the box may overhang the window by under one
+  // world pixel, cropped evenly.
+  const grid = usePixelGrid();
   return (
-    <Canvas
-      id="wm-world"
-      shadows
-      dpr={0.35}
-      gl={{ antialias: false, powerPreference: "high-performance" }}
-      camera={{ fov: 78, near: 0.08, far: 140 }}
+    <div
+      style={{
+        position: "fixed",
+        left: grid.cssLeft,
+        top: grid.cssTop,
+        width: grid.cssWidth,
+        height: grid.cssHeight,
+      }}
     >
-      <Suspense fallback={null}>
-        {/* Fixed timestep: one 1/60 step per frame. NEVER use timeStep="vary"
-            here — a long frame (floor load, shader compile) integrates gravity
-            over the whole gap in one step and props tunnel through the floor. */}
-        <Physics gravity={[0, GRAVITY * gravityMult, 0]}>
-          {inDungeon && layout ? (
-            <DungeonFloor key={`${instanceId}:${floor}`} layout={layout} />
-          ) : (
-            <Village />
-          )}
-          <Projectiles />
-          <BlackHoles />
-          <LootOrbs />
-          <PeerBodies />
-        </Physics>
-        <RemoteWizards />
-        {/* The ears: raytraced room acoustics, placed sounds, the world's
-            own voices (audio/). */}
-        <AudioWorld layout={inDungeon ? layout : null} />
-        <Graves />
-        <FloorMaps />
-        <PactSystem />
-        <PresenceSystem />
-        <NetSystems />
-        <FxSystems />
-        <DynamicLights />
-        <StaffView />
-        <CastingSystem />
-        <InteractionSystem />
-        <ConsumableSystem />
-        <WorldCameraBridge />
-        {/* Portal journeys: camera pull/FOV/roll and the vortex tunnel that
-            covers every scene switch (transition/). */}
-        <TransitionSystem />
-        {/* Tiny procedural environment map: gives the wet slabs and metal
-            trims something interesting to reflect without external assets. */}
-        <Environment resolution={64} frames={1}>
-          <mesh position={[0, 12, -14]} scale={[26, 7, 1]}>
-            <planeGeometry />
-            <meshBasicMaterial color="#2a1a3e" />
-          </mesh>
-          <mesh position={[10, 4, 12]} rotation={[0, Math.PI, 0]} scale={[16, 4, 1]}>
-            <planeGeometry />
-            <meshBasicMaterial color="#4a2c14" />
-          </mesh>
-          <mesh position={[-12, 6, 8]} rotation={[0, Math.PI / 2, 0]} scale={[10, 3, 1]}>
-            <planeGeometry />
-            <meshBasicMaterial color="#12324a" />
-          </mesh>
-        </Environment>
-        <Effects />
-      </Suspense>
-      {/* The selector is load-bearing: without it drei binds its click-to-
-          lock handler to the whole DOCUMENT, so clicking a menu button would
-          instantly re-lock the pointer. Scoped to the WORLD canvas (not the
-          in-world UI canvas stacked above it, which only takes clicks while
-          a menu is up), menu clicks can never lock. */}
-      {controlsEnabled && <PointerLockControls makeDefault selector="#wm-world canvas" />}
-    </Canvas>
+      <Canvas
+        id="wm-world"
+        shadows
+        dpr={grid.dpr}
+        gl={{ antialias: false, powerPreference: "high-performance" }}
+        camera={{ fov: 78, near: 0.08, far: 140 }}
+      >
+        <Suspense fallback={null}>
+          {/* Fixed timestep: one 1/60 step per frame. NEVER use timeStep="vary"
+              here — a long frame (floor load, shader compile) integrates gravity
+              over the whole gap in one step and props tunnel through the floor. */}
+          <Physics gravity={[0, GRAVITY * gravityMult, 0]}>
+            {inDungeon && layout ? (
+              <DungeonFloor key={`${instanceId}:${floor}`} layout={layout} />
+            ) : (
+              <Village />
+            )}
+            <Projectiles />
+            <BlackHoles />
+            <LootOrbs />
+            <PeerBodies />
+          </Physics>
+          <RemoteWizards />
+          {/* The ears: raytraced room acoustics, placed sounds, the world's
+              own voices (audio/). */}
+          <AudioWorld layout={inDungeon ? layout : null} />
+          <Graves />
+          <FloorMaps />
+          <PactSystem />
+          <PresenceSystem />
+          <NetSystems />
+          <FxSystems />
+          <DynamicLights />
+          <StaffView />
+          <CastingSystem />
+          <InteractionSystem />
+          <ConsumableSystem />
+          <WorldCameraBridge />
+          {/* Portal journeys: camera pull/FOV/roll and the vortex tunnel that
+              covers every scene switch (transition/). */}
+          <TransitionSystem />
+          {/* Tiny procedural environment map: gives the wet slabs and metal
+              trims something interesting to reflect without external assets. */}
+          <Environment resolution={64} frames={1}>
+            <mesh position={[0, 12, -14]} scale={[26, 7, 1]}>
+              <planeGeometry />
+              <meshBasicMaterial color="#2a1a3e" />
+            </mesh>
+            <mesh position={[10, 4, 12]} rotation={[0, Math.PI, 0]} scale={[16, 4, 1]}>
+              <planeGeometry />
+              <meshBasicMaterial color="#4a2c14" />
+            </mesh>
+            <mesh position={[-12, 6, 8]} rotation={[0, Math.PI / 2, 0]} scale={[10, 3, 1]}>
+              <planeGeometry />
+              <meshBasicMaterial color="#12324a" />
+            </mesh>
+          </Environment>
+          <Effects />
+        </Suspense>
+        {/* The selector is load-bearing: without it drei binds its click-to-
+            lock handler to the whole DOCUMENT, so clicking a menu button would
+            instantly re-lock the pointer. Scoped to the WORLD canvas (not the
+            in-world UI canvas stacked above it, which only takes clicks while
+            a menu is up), menu clicks can never lock. */}
+        {controlsEnabled && <PointerLockControls makeDefault selector="#wm-world canvas" />}
+      </Canvas>
+    </div>
   );
+}
+
+/** The world's pixel grid for the current window, kept up to date as the
+ * window resizes or moves to a screen with another pixel density. */
+function usePixelGrid(): PixelGrid {
+  const measure = () => pixelGrid(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1);
+  const [grid, setGrid] = useState(measure);
+  useEffect(() => {
+    let media: MediaQueryList | null = null;
+    const update = () => {
+      setGrid((prev) => {
+        const next = measure();
+        return next.width === prev.width && next.height === prev.height && next.scale === prev.scale && next.cssLeft === prev.cssLeft && next.cssTop === prev.cssTop ? prev : next;
+      });
+      // A density change (dragged to another monitor, browser zoom) fires
+      // only on a query for the CURRENT density: re-arm it each time.
+      media?.removeEventListener("change", update);
+      media = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+      media.addEventListener("change", update);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      media?.removeEventListener("change", update);
+    };
+  }, []);
+  return grid;
 }

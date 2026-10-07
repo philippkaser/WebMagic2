@@ -130,7 +130,9 @@ The emotional loop we are chasing:
   near death the world greys and the rim of sight closes with your pulse.
   Each biome has its own air (the Hollow's dark breathes, the Crystal Deep
   splits light like a prism, the Drowned Halls breathe faintly with the tide). The pixelation itself is *free*: the
-  world renders at ~1/3 resolution and the browser upscales it with
+  world renders at about 340 lines, scaled up by a whole number of screen
+  pixels so every pixel is the same size and every monitor sees about the
+  same chunkiness, and the browser upscales it with
   `image-rendering: pixelated` (the UI canvas above it renders at full
   resolution so the pixel font stays crisp).
 
@@ -567,7 +569,7 @@ The whole codebase is organized around a few deliberate bets:
    colliders); pooled particles (one instanced draw call), pooled projectiles,
    and a **fixed dynamic light pool** (14 point lights reassigned each frame to
    the most important nearby sources, so the light *count* never changes and
-   shaders never recompile mid-combat); render at 1/3 resolution because the
+   shaders never recompile mid-combat); render at ~340 lines (a whole-number upscale) because the
    game is pixelated anyway.
 
 ### Tech architecture (systems map)

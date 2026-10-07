@@ -207,7 +207,7 @@ Design rules that keep it future-proof:
   table.
 - **Performance by construction** — one-mesh stonework, greedy-merged
   colliders, one draw call for all particles, pooled projectiles/lights,
-  the world rendered at 1/3 resolution (the UI canvas above it at full).
+  the world rendered at ~340 lines, upscaled by a whole number (the UI canvas above it at full).
 
 ## Roadmap
 
