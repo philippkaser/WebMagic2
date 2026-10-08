@@ -20,6 +20,7 @@ import { Air as AirPass } from "./post/Air";
 import { Composite } from "./post/Composite";
 import { Eye } from "./post/Eye";
 import { LensEffect } from "./post/LensEffect";
+import { Occlusion } from "./post/Occlusion";
 import { makeLensDirt } from "./post/lensDirt";
 import { kickHurt, kickImpact, newFeel, stepFeel } from "./post/feel";
 
@@ -40,6 +41,7 @@ import { kickHurt, kickImpact, newFeel, stepFeel } from "./post/feel";
  *  - the lens's glare (a thresholdless mipmap bloom: every light spreads a
  *    little of itself, so what is truly bright wraps its light round edges
  *    and over what stands in front of it),
+ *  - ambient occlusion, one value per world pixel (post/Occlusion),
  *  - the eye's meter (post/Eye),
  *
  * — and the canvas, at the screen's full resolution, gets one composite
@@ -87,6 +89,7 @@ export function Effects({ grid }: { grid: PixelGrid }) {
       rays: layer(),
       air: layer(),
       haze: new AirPass(),
+      ao: new Occlusion(),
       lens,
       lensPass,
       raysPass,
@@ -102,6 +105,7 @@ export function Effects({ grid }: { grid: PixelGrid }) {
     () => () => {
       for (const t of [chain.scene, chain.dof, chain.rays, chain.air]) t.dispose();
       chain.haze.dispose();
+      chain.ao.dispose();
       chain.depth.dispose();
       chain.lensPass.dispose();
       chain.raysPass.dispose();
@@ -137,6 +141,8 @@ export function Effects({ grid }: { grid: PixelGrid }) {
       air,
       chain,
       uniforms: chain.composite.uniforms,
+      ao: chain.ao.uniforms,
+      gl,
     };
   }, [gl, chain, feel, air]);
 
@@ -154,6 +160,7 @@ export function Effects({ grid }: { grid: PixelGrid }) {
       c.lensPass.setSize(grid.width, grid.height);
       c.raysPass.setSize(grid.width, grid.height);
       c.bloom.setSize(grid.width, grid.height);
+      c.ao.setSize(grid.width, grid.height);
     }
 
     // The place: grade and air ease toward the target over ~a second.
@@ -192,6 +199,7 @@ export function Effects({ grid }: { grid: PixelGrid }) {
     const rays = hasGodRays();
     if (rays) c.raysPass.render(gl, c.scene, c.rays, dt);
     if (depthOfField || clock.soft > 0) c.lensPass.render(gl, c.scene, c.dof, dt);
+    c.ao.render(gl, camera, c.depth, grid.width, grid.height);
     c.haze.render(gl, camera, c.depth, c.air, dt);
     c.bloom.update(gl, c.scene, dt);
     c.eye.update(gl, c.scene, dt);
@@ -205,6 +213,7 @@ export function Effects({ grid }: { grid: PixelGrid }) {
         bloom: c.bloom.texture,
         rays: rays ? c.rays.texture : null,
         air: c.air.texture,
+        ao: c.ao.texture,
         eye: c.eye.texture,
         dirt: c.dirt,
       },
@@ -231,7 +240,7 @@ export const VILLAGE_GRADE: Grade = { shadows: "#0c1438", highlights: "#ffe0b0",
 /** The village's air: clear and still. */
 export const VILLAGE_AIR: Air = { haze: 0, breath: 0, mist: 0.2, vignette: 0.9, eye: -5.2 };
 /** Scattering density of "the usual dungeon air" (a biome's mist 1). */
-const MIST = 0.05;
+const MIST = 0.03;
 const AIR_KEYS = Object.keys(VILLAGE_AIR) as (keyof Air)[];
 
 let target: { grade: Grade; air: Air } = { grade: VILLAGE_GRADE, air: VILLAGE_AIR };

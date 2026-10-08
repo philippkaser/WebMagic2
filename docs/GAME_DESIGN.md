@@ -125,7 +125,9 @@ The emotional loop we are chasing:
   at the screen's full resolution. The air is never empty: every torch,
   spell and blast hangs in a glow of haze — thick in the Drowned Halls'
   damp, smoky in the forge, thin in the camp's night air — and the moon
-  throws shafts through the camp. Light spreads in the lens the way it does
+  throws shafts through the camp. Creases and contact darken with ambient
+  occlusion — the seam of wall and floor, the ground under a barrel — so
+  the geometry sits in its space. Light spreads in the lens the way it does
   in a camera (no threshold glow — only what is truly bright blooms), with
   faint dirt on the glass. The eye focuses on what you look at — the rest
   goes soft and lights out of focus open into round discs of bokeh — and

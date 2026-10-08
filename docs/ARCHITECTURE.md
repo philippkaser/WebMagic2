@@ -456,6 +456,12 @@ limiting and hit/pickup sanitization already run server-/authority-side.
      setting, `depthOfField`, key B;
   4. **glare** (postprocessing's `BloomEffect`, its mipmap blur used
      directly, no threshold);
+  4½. **ambient occlusion** (`post/Occlusion.ts`): view position and normal
+     rebuilt from depth (the normal from the smaller neighbour difference
+     each way, so silhouettes don't bend it), 12 golden-angle taps on a
+     0.7 m world-radius disc (SAO's estimator, fading with distance), a
+     depth-aware 4×4 blur; one value per world pixel, multiplied into the
+     pixel art in the composite — staff and sky left open;
   5. **the eye** (`post/Eye.ts`): centre-weighted log-luminance meter, 32²
      mip chain → 1×1 ping-pong, fast toward light, slow into dark;
   6. **the composite** (`post/Composite.ts`, full resolution): the world

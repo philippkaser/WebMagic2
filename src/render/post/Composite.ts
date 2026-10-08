@@ -7,7 +7,9 @@ import { POST_GLSL } from "./glsl";
  * art seen through a camera.
  *
  *  - **The world's pixels**, fetched exactly — each world pixel is a block
- *    of exactly `scale` screen pixels (render/pixelGrid), never filtered.
+ *    of exactly `scale` screen pixels (render/pixelGrid), never filtered —
+ *    darkened by their ambient occlusion (post/Occlusion) where surfaces
+ *    crowd each other.
  *    In the Ember Forge the air over the magma shimmers: the lookup wavers,
  *    more the further you look through it, so the pixels themselves swim.
  *  - **Everything that is light or blur is smooth.** The out-of-focus layer
@@ -39,6 +41,8 @@ uniform sampler2D uDof;
 uniform sampler2D uBloom;
 uniform sampler2D uRays;
 uniform sampler2D uAir;
+uniform sampler2D uAo;
+uniform float uAoStrength;
 uniform sampler2D uDirt;
 uniform sampler2D uEye;
 uniform vec2 uLow;
@@ -109,6 +113,8 @@ void main() {
   // The world's pixel, exactly.
   ivec2 px = clamp(ivec2(floor(low)), ivec2(0), ivec2(uLow) - 1);
   vec3 c = texelFetch(inputBuffer, px, 0).rgb;
+  // Ambient occlusion, per world pixel: creases and contact darken.
+  c *= mix(1.0, texelFetch(uAo, px, 0).r, uAoStrength);
 
   // Out of focus: the smooth layer, where the blur is real.
   if (uDofOn > 0.5) {
@@ -181,6 +187,7 @@ export interface CompositeInputs {
   bloom: Texture;
   rays: Texture | null;
   air: Texture;
+  ao: Texture;
   eye: Texture;
   dirt: Texture;
 }
@@ -201,6 +208,8 @@ export class Composite {
           uBloom: new Uniform(null),
           uRays: new Uniform(null),
           uAir: new Uniform(null),
+          uAo: new Uniform(null),
+          uAoStrength: new Uniform(1),
           uDirt: new Uniform(null),
           uEye: new Uniform(null),
           uLow: new Uniform(new Vector2(1, 1)),
@@ -272,6 +281,7 @@ export class Composite {
     u.uRays.value = inputs.rays;
     u.uRaysOn.value = inputs.rays ? 1 : 0;
     u.uAir.value = inputs.air;
+    u.uAo.value = inputs.ao;
     u.uDirt.value = inputs.dirt;
     u.uEye.value = inputs.eye;
     (u.uLow.value as Vector2).set(img.width, img.height);
