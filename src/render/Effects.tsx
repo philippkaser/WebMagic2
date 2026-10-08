@@ -16,14 +16,14 @@ import { getStats, useGame, type Overlay, type Phase } from "../state/gameStore"
 import type { Air, Grade } from "../world/biomes";
 import { GodRaysEffect, hasGodRays } from "./godRays";
 import type { PixelGrid } from "./pixelGrid";
+import { Air as AirPass } from "./post/Air";
 import { Composite } from "./post/Composite";
 import { Eye } from "./post/Eye";
 import { LensEffect } from "./post/LensEffect";
 import { makeLensDirt } from "./post/lensDirt";
-import { Streaks } from "./post/Streaks";
 import { kickHurt, kickImpact, newFeel, stepFeel } from "./post/feel";
 
-/** The render pipeline: crisp pixel art seen through a perfect modern lens.
+/** The render pipeline: crisp pixel art seen through a camera.
  *
  * The world renders at ~340 lines into an offscreen target (the pixel art,
  * and the reason the game is cheap: every light, normal map and pass pays a
@@ -34,18 +34,21 @@ import { kickHurt, kickImpact, newFeel, stepFeel } from "./post/feel";
  *  - depth of field with bokeh (post/LensEffect: the eye focuses on what you
  *    look at, out-of-focus lights open into round discs, the whole world
  *    drops out of focus behind a tablet),
- *  - bloom (a mipmap blur: bright things wrap their light round edges and
- *    over what stands in front of them),
- *  - anamorphic streaks through the brightest lights (post/Streaks),
+ *  - light hanging in the air round every torch, spell and blast
+ *    (post/Air: each pooled light's glow integrated in closed form along
+ *    every view ray),
+ *  - the lens's glare (a thresholdless mipmap bloom: every light spreads a
+ *    little of itself, so what is truly bright wraps its light round edges
+ *    and over what stands in front of it),
  *  - the eye's meter (post/Eye),
  *
  * — and the canvas, at the screen's full resolution, gets one composite
  * (post/Composite): each world pixel drawn as an exact block, and the light
- * and blur upsampled bicubically over it, so the glow, the shafts, the
- * streaks and the bokeh are smooth and continuous while the world stays
- * pixel-sharp. Then lens dirt where light falls through the glass, the eye
- * and the place's grade with a filmic shoulder, a heavy smooth vignette and
- * fine grain.
+ * and blur upsampled bicubically over it, so the glare, the haze, the
+ * shafts and the bokeh are smooth and continuous while the world stays
+ * pixel-sharp. Then faint lens dirt in the glare, the eye and the place's
+ * grade through ACES (film's tone curve), a heavy smooth vignette
+ * and fine grain.
  *
  * Runs at useFrame priority 1, which takes the frame over from R3F's own
  * render. Each place sets its grade and its air (setGrade); the body's
@@ -69,7 +72,9 @@ export function Effects({ grid }: { grid: PixelGrid }) {
     const rays = new GodRaysEffect(camera);
     const lensPass = new EffectPass(camera, lens);
     const raysPass = new EffectPass(camera, rays);
-    const bloom = new BloomEffect({ mipmapBlur: true, luminanceThreshold: 0.6, luminanceSmoothing: 0.3, radius: 0.82, levels: 7 });
+    // Thresholdless: the glare is a blur of everything, blended in a little
+    // (the composite's uBloomMix), so brightness alone decides what glows.
+    const bloom = new BloomEffect({ mipmapBlur: true, luminanceThreshold: 0, luminanceSmoothing: 0, radius: 0.85, levels: 8 });
     for (const pass of [lensPass, raysPass]) {
       pass.initialize(gl, false, HalfFloatType);
       pass.setDepthTexture(depth, BasicDepthPacking);
@@ -80,11 +85,12 @@ export function Effects({ grid }: { grid: PixelGrid }) {
       depth,
       dof: layer(),
       rays: layer(),
+      air: layer(),
+      haze: new AirPass(),
       lens,
       lensPass,
       raysPass,
       bloom,
-      streaks: new Streaks(),
       eye: new Eye(),
       composite: new Composite(VILLAGE_GRADE),
       dirt: makeLensDirt(),
@@ -94,12 +100,12 @@ export function Effects({ grid }: { grid: PixelGrid }) {
 
   useEffect(
     () => () => {
-      for (const t of [chain.scene, chain.dof, chain.rays]) t.dispose();
+      for (const t of [chain.scene, chain.dof, chain.rays, chain.air]) t.dispose();
+      chain.haze.dispose();
       chain.depth.dispose();
       chain.lensPass.dispose();
       chain.raysPass.dispose();
       chain.bloom.dispose();
-      chain.streaks.dispose();
       chain.eye.dispose();
       chain.composite.dispose();
       chain.dirt.dispose();
@@ -144,11 +150,10 @@ export function Effects({ grid }: { grid: PixelGrid }) {
     if (c.size.w !== grid.width || c.size.h !== grid.height) {
       c.size.w = grid.width;
       c.size.h = grid.height;
-      for (const t of [c.scene, c.dof, c.rays]) t.setSize(grid.width, grid.height);
+      for (const t of [c.scene, c.dof, c.rays, c.air]) t.setSize(grid.width, grid.height);
       c.lensPass.setSize(grid.width, grid.height);
       c.raysPass.setSize(grid.width, grid.height);
       c.bloom.setSize(grid.width, grid.height);
-      c.streaks.setSize(grid.width, grid.height);
     }
 
     // The place: grade and air ease toward the target over ~a second.
@@ -167,6 +172,7 @@ export function Effects({ grid }: { grid: PixelGrid }) {
     const u = c.composite.uniforms;
     u.uKey.value = air.eye;
     u.uHaze.value = air.haze;
+    c.haze.mist = air.mist * MIST;
     u.uExposure.value = (1 + Math.max(0, feel.impact - 0.2) * 0.45) * (1 - clock.soft * 0.2);
     u.uDrain.value = Math.min(0.85, feel.hurt * 0.4 + feel.low * 0.6);
     u.uVignette.value = air.vignette;
@@ -186,8 +192,8 @@ export function Effects({ grid }: { grid: PixelGrid }) {
     const rays = hasGodRays();
     if (rays) c.raysPass.render(gl, c.scene, c.rays, dt);
     if (depthOfField || clock.soft > 0) c.lensPass.render(gl, c.scene, c.dof, dt);
+    c.haze.render(gl, camera, c.depth, c.air, dt);
     c.bloom.update(gl, c.scene, dt);
-    c.streaks.render(gl, c.bloom.luminancePass.texture, c.depth, cam.near, cam.far);
     c.eye.update(gl, c.scene, dt);
     // 3. The picture, at full resolution.
     c.composite.render(
@@ -198,8 +204,7 @@ export function Effects({ grid }: { grid: PixelGrid }) {
         dof: c.dof.texture,
         bloom: c.bloom.texture,
         rays: rays ? c.rays.texture : null,
-        streak: c.streaks.texture,
-        streakSize: c.streaks.textureSize,
+        air: c.air.texture,
         eye: c.eye.texture,
         dirt: c.dirt,
       },
@@ -224,7 +229,9 @@ function wantsFocus(phase: Phase, overlay: Overlay): boolean {
  * above, and the grade the game starts in. */
 export const VILLAGE_GRADE: Grade = { shadows: "#0c1438", highlights: "#ffe0b0", saturation: 0.9, contrast: 1.06 };
 /** The village's air: clear and still. */
-export const VILLAGE_AIR: Air = { haze: 0, breath: 0, vignette: 0.9, eye: -5.2 };
+export const VILLAGE_AIR: Air = { haze: 0, breath: 0, mist: 0.2, vignette: 0.9, eye: -5.2 };
+/** Scattering density of "the usual dungeon air" (a biome's mist 1). */
+const MIST = 0.05;
 const AIR_KEYS = Object.keys(VILLAGE_AIR) as (keyof Air)[];
 
 let target: { grade: Grade; air: Air } = { grade: VILLAGE_GRADE, air: VILLAGE_AIR };

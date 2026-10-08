@@ -431,48 +431,53 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   glints, village fireflies; the Weightless Hour makes it all float up).
 - **Post chain** (`render/Effects.tsx` runs it, at `useFrame` priority 1 —
   it takes the frame over from R3F; effects in `render/post/`): crisp pixel
-  art seen through a perfect modern lens. The world renders into a
-  low-resolution HDR target (with a depth texture); everything that is
-  light or blur is worked out at that resolution too, and one composite at
-  the canvas's full resolution lays it over the pixels smoothly:
+  art seen through a camera. The world renders into a low-resolution HDR
+  target (with a depth texture); everything that is light or blur is worked
+  out at that resolution too, and one composite at the canvas's full
+  resolution lays it over the pixels smoothly:
   1. **god rays** (`render/godRays.ts`, only while a scene has a source):
      the light alone, into its own layer;
-  2. **depth of field with bokeh** (`post/LensEffect.ts`): the focus is
+  2. **light in the air** (`post/Air.ts`): every pooled light (the 14 of
+     `fx/DynamicLights`, read from `fxUniforms`) lights the haze round it —
+     the inverse-square in-scatter integrated in closed form along each view
+     ray (Quílez's fog-glow integral: (atan((t₁−b)/h) − atan((t₀−b)/h))/h),
+     over the stretch inside the light's range and in front of the surface
+     the ray hits, a Henyey–Greenstein phase (g 0.35), drifting noise for
+     body; a light behind the surface fades out (no glow through walls);
+     the staff's lantern is left out; density per biome (`air.mist`);
+  3. **depth of field with bokeh** (`post/LensEffect.ts`): the focus is
      metered at the middle of the view on the GPU (a cross of depth taps,
-     staff and sky ignored, 1×1 ping-pong racked over ~0.2 s), the circle
-     of confusion is |1/focus − 1/distance| × aperture (≤ 4 world px; the
-     held staff always sharp), gathered in one pass with Gustafsson's
-     golden-angle spiral (a sample counts only if its own blur reaches this
-     pixel); the blurred colour goes to a layer with coc/16 in alpha; the
-     whole world drops out of focus behind a tablet (title, Weighing,
-     inventory family, codex, death); a setting, `depthOfField`, key B;
-  3. **bloom** (postprocessing's `BloomEffect`, its mipmap blur used
-     directly): the light wrap;
-  4. **anamorphic streaks** (`post/Streaks.ts`): the bloom's bright pass,
-     minus anything nearer than arm's length (the staff would pin a flare
-     across the screen), blurred horizontally three times at quarter
-     resolution, each pass reaching 4× further;
+     staff and sky ignored, 1×1 ping-pong racked over ~0.2 s), the circle of
+     confusion is |1/focus − 1/distance| × aperture (≤ 4 world px; the held
+     staff always sharp), gathered with Gustafsson's golden-angle spiral (a
+     sample counts only if its own blur reaches this pixel); blurred colour
+     to a layer with coc/16 in alpha; the whole world drops out of focus
+     behind a tablet (title, Weighing, inventory family, codex, death); a
+     setting, `depthOfField`, key B;
+  4. **glare** (postprocessing's `BloomEffect`, its mipmap blur used
+     directly, no threshold);
   5. **the eye** (`post/Eye.ts`): centre-weighted log-luminance meter, 32²
      mip chain → 1×1 ping-pong, fast toward light, slow into dark;
   6. **the composite** (`post/Composite.ts`, full resolution): the world
      pixel by `texelFetch` (an exact block; in the forge the lookup
      shimmers through the heat), the DoF layer blended in where coc > ~1,
-     bloom, streaks and rays added — all four layers upsampled with a
-     4-tap bicubic B-spline, so light and blur are continuous over the
-     crisp pixels — procedural lens dirt (`post/lensDirt.ts`, painted once)
-     lit by the bloom and streaks, exposure half-way toward the place's
-     `air.eye` within ±½ EV, the split-tone grade, a per-channel filmic
-     shoulder instead of the hard clip, colour drained by a blow or near
-     death, a smooth oval vignette tinted with the place's darks (breathing
-     in the Hollow, closing with the heartbeat near death), fine grain in
-     the mid-tones at screen resolution, and a sub-step of output noise
-     against banding.
-  Each biome sets its `grade` and `air` (shimmer, breath, vignette, eye) on
-  arrival (`setGrade`) and they ease in over a second; the village has its
-  own (`VILLAGE_GRADE`, `VILLAGE_AIR`). The body's kicks — `shake` and
-  `playerHurt` events, health — are kept by `post/feel.ts` (pure, tested).
-  The fx particles snap to the world's grid (`worldGrid()`), not the
-  canvas's.
+     the air and rays added, the glare blended in (8%, energy kept), faint
+     procedural lens dirt (`post/lensDirt.ts`) lit by the glare — every
+     layer upsampled with a 4-tap bicubic B-spline, so light and blur are
+     continuous over the crisp pixels — then exposure half-way toward the
+     place's `air.eye` within ±½ EV, the split-tone grade, ACES (Narkowicz
+     fit, per channel: fire runs red → orange → white) blended in from the
+     mid-tones up so the painted darks stay as they were (the curve's toe
+     would crush them), colour drained by a blow or near death, a smooth
+     oval vignette tinted with the place's darks (breathing in the Hollow,
+     closing with the heartbeat near death), fine grain in the mid-tones at
+     screen resolution, and a sub-step of output noise against banding.
+  Each biome sets its `grade` and `air` (shimmer, breath, mist, vignette,
+  eye) on arrival (`setGrade`) and they ease in over a second; the village
+  has its own (`VILLAGE_GRADE`, `VILLAGE_AIR`). The body's kicks — `shake`
+  and `playerHurt` events, health — are kept by `post/feel.ts` (pure,
+  tested). The fx particles snap to the world's grid (`worldGrid()`), not
+  the canvas's.
 - **Shadows are a quality toggle** (F4 / main menu, persisted, default off):
   a shadow-casting point light re-renders the scene six times per frame,
   measured at roughly +50% frame time even at low resolution.

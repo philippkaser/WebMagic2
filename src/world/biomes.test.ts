@@ -82,6 +82,7 @@ describe("biomes", () => {
       expect(eye).toBeLessThan(-3);
       expect(eye).toBeGreaterThan(-12);
       expect(def.air.vignette).toBeLessThanOrEqual(1);
+      expect(def.air.mist).toBeGreaterThan(0);
       expect(def.accent).toMatch(HEX);
     }
   });

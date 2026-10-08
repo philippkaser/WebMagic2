@@ -4,27 +4,28 @@ import type { Grade } from "../../world/biomes";
 import { POST_GLSL } from "./glsl";
 
 /** The final picture, drawn at the screen's full resolution: crisp pixel
- * art seen through a perfect modern lens.
+ * art seen through a camera.
  *
  *  - **The world's pixels**, fetched exactly — each world pixel is a block
  *    of exactly `scale` screen pixels (render/pixelGrid), never filtered.
  *    In the Ember Forge the air over the magma shimmers: the lookup wavers,
  *    more the further you look through it, so the pixels themselves swim.
  *  - **Everything that is light or blur is smooth.** The out-of-focus layer
- *    (post/LensEffect), the bloom, the god rays and the anamorphic streaks
- *    are all computed at the world's low resolution — cheap — and upsampled
- *    here bicubically, so they lie over the pixels as soft, continuous
- *    light: a torch's glow wraps round a pillar in a smooth falloff, a light
- *    out of focus is a round soft disc, the moon's shafts are clean.
- *  - **The glass**: lens dirt that only shows where light falls through it.
- *  - **The eye and the grade**: exposure from the adapted eye (half-way
+ *    (post/LensEffect), the light hanging in the air (post/Air), the god
+ *    rays and the lens's glare are all computed at the world's low
+ *    resolution — cheap — and upsampled here bicubically, so they lie over
+ *    the pixels as soft, continuous light.
+ *  - **The lens's glare**: a thresholdless, energy-conserving bloom, as a
+ *    real lens has it — every light spreads a little of itself, so only
+ *    what is truly bright visibly glows — and faint dirt on the glass that
+ *    catches it.
+ *  - **The eye and the film**: exposure from the adapted eye (half-way
  *    toward each place's key, within ±½ EV), the place's split tone,
- *    saturation and log contrast, and a filmic shoulder in place of the
- *    hard clip — per channel, like the clip the art was painted against (a
- *    hot red runs to orange and then white, as fire does), but rolled off
- *    so flames and blasts keep their shape. A blow drains the colour; near
- *    death the world greys.
- *  - **The film**: a smooth, heavy vignette tinted with the place's darks
+ *    saturation and log contrast, then ACES — film's S-curve, per channel,
+ *    so lights roll off into a soft shoulder and fire burns from red
+ *    through orange to white — over the painted darks, which are kept as
+ *    they were. A blow drains the colour; near death the world greys.
+ *  - **The print**: a smooth, heavy vignette tinted with the place's darks
  *    (it breathes in the Hollow and closes with the heartbeat near death), a
  *    fine grain at screen resolution, strongest in the mid-tones, and a
  *    sub-step of noise in the output so dark gradients never band. */
@@ -37,18 +38,16 @@ uniform sampler2D uDepth;
 uniform sampler2D uDof;
 uniform sampler2D uBloom;
 uniform sampler2D uRays;
-uniform sampler2D uStreak;
+uniform sampler2D uAir;
 uniform sampler2D uDirt;
 uniform sampler2D uEye;
 uniform vec2 uLow;
 uniform vec2 uBloomSize;
-uniform vec2 uStreakSize;
 uniform float uScale;
 uniform float uDofOn;
 uniform float uRaysOn;
-uniform float uBloomStrength;
-uniform float uStreakStrength;
-uniform vec3 uStreakTint;
+uniform float uBloomMix;
+uniform float uFilmExposure;
 uniform float uDirtStrength;
 uniform float uHaze;
 uniform float uTime;
@@ -70,13 +69,14 @@ uniform float uGrain;
 uniform float uFrame;
 uniform float uAspect;
 
-#define KNEE 0.72
 #define COC_RANGE 16.0
 
-vec3 shoulder(vec3 c) {
-  const float span = 1.0 - KNEE;
-  vec3 rolled = KNEE + span * (1.0 - exp(-(c - KNEE) / span));
-  return mix(c, rolled, step(KNEE, c));
+// ACES (Narkowicz's fit of the Academy's filmic reference): the S-curve
+// film and most cinema-grade engines grade through — rich contrast, and
+// per channel, so a hot red runs to orange and then to yellow-white as fire
+// does, and every light rolls off into a soft shoulder instead of a clip.
+vec3 aces(vec3 x) {
+  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
 }
 
 float hazeNoise(vec2 p) {
@@ -117,13 +117,16 @@ void main() {
     c = mix(c, max(dof.rgb, 0.0), smoothstep(0.45, 1.6, coc));
   }
 
-  // Light, smooth over the pixels.
-  vec3 glow = max(postBicubic(uBloom, uv, uBloomSize).rgb, 0.0) * uBloomStrength;
-  vec3 streak = max(postBicubic(uStreak, uv, uStreakSize).rgb, 0.0) * uStreakStrength * uStreakTint;
-  c += glow + streak;
+  // Light in the air, and the moon's shafts: smooth over the pixels.
+  c += max(postBicubic(uAir, uv, uLow).rgb, 0.0);
   if (uRaysOn > 0.5) c += max(postBicubic(uRays, uv, uLow).rgb, 0.0);
-  // The glass catches the light that falls through it.
-  c += (glow + streak * 1.5) * texture2D(uDirt, uv).rgb * uDirtStrength;
+  // The lens's own glare, as a camera has it: every light spreads a little
+  // of itself — no threshold, energy kept (a blend, not an add) — so only
+  // what is truly bright blooms visibly, wrapping round edges and over what
+  // stands in front of it; the glass's dirt catches the same glare.
+  vec3 glare = max(postBicubic(uBloom, uv, uBloomSize).rgb, 0.0);
+  c = mix(c, glare, uBloomMix);
+  c += glare * texture2D(uDirt, uv).rgb * uDirtStrength;
 
   // The eye: half-way toward the key, within a narrow range.
   float avg = texture2D(uEye, vec2(0.5)).r;
@@ -140,7 +143,10 @@ void main() {
   c *= mix(mix(vec3(1.0), sh, 0.45), mix(vec3(1.0), hi, 0.3), w);
   c += uShadows * 0.35;
   c = 0.18 * pow(max(c, 0.0) / 0.18, vec3(uContrast));
-  c = shoulder(c);
+  // The film: ACES from the mid-tones up (where light rolls off and burns
+  // to white), the painted darks kept exactly as they were — the curve's
+  // own toe would crush a torch-lit dungeon's shadows to black.
+  c = mix(min(c, 1.0), aces(c * uFilmExposure), smoothstep(0.03, 0.2, postLuma(c)));
   c = mix(vec3(postLuma(c)), c, 1.0 - uDrain);
 
   // Vignette: an oval following the screen, its inner edge drawn in as the
@@ -174,8 +180,7 @@ export interface CompositeInputs {
   dof: Texture;
   bloom: Texture;
   rays: Texture | null;
-  streak: Texture;
-  streakSize: Vector2;
+  air: Texture;
   eye: Texture;
   dirt: Texture;
 }
@@ -195,19 +200,17 @@ export class Composite {
           uDof: new Uniform(null),
           uBloom: new Uniform(null),
           uRays: new Uniform(null),
-          uStreak: new Uniform(null),
+          uAir: new Uniform(null),
           uDirt: new Uniform(null),
           uEye: new Uniform(null),
           uLow: new Uniform(new Vector2(1, 1)),
           uBloomSize: new Uniform(new Vector2(1, 1)),
-          uStreakSize: new Uniform(new Vector2(1, 1)),
           uScale: new Uniform(1),
           uDofOn: new Uniform(1),
           uRaysOn: new Uniform(0),
-          uBloomStrength: new Uniform(1),
-          uStreakStrength: new Uniform(0.45),
-          uStreakTint: new Uniform(new Color(0.55, 0.75, 1.2)),
-          uDirtStrength: new Uniform(1.6),
+          uBloomMix: new Uniform(0.08),
+          uFilmExposure: new Uniform(0.8),
+          uDirtStrength: new Uniform(0.25),
           uHaze: new Uniform(0),
           uTime: new Uniform(0),
           uNear: new Uniform(0.1),
@@ -268,8 +271,7 @@ export class Composite {
     u.uBloom.value = inputs.bloom;
     u.uRays.value = inputs.rays;
     u.uRaysOn.value = inputs.rays ? 1 : 0;
-    u.uStreak.value = inputs.streak;
-    (u.uStreakSize.value as Vector2).copy(inputs.streakSize);
+    u.uAir.value = inputs.air;
     u.uDirt.value = inputs.dirt;
     u.uEye.value = inputs.eye;
     (u.uLow.value as Vector2).set(img.width, img.height);
