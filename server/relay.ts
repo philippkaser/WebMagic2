@@ -12,13 +12,16 @@ import {
 } from "../src/net/protocol";
 import { canLeave, entryFloorForGear } from "../src/run/rules";
 import type { AccountRecord, AccountStore } from "./accounts";
+import { AccountAuth, argon2Hasher, type AuthDeps } from "./auth";
 
 /** The gameplay-blind relay core. Pure logic (I/O injected via `send`), so
  * the host-migration/authority/routing rules are unit-testable without a
  * socket in sight.
  *
  * Responsibilities — and the complete list, by design:
- *  - identity: device-token login backed by the AccountStore
+ *  - identity: device-token login backed by the AccountStore, plus the
+ *    ledger's password accounts and sign-in sessions (auth.ts decides,
+ *    the relay binds the connection to the answer)
  *  - matchmaking via FloorDirectory (rare same-floor encounters, max 4 per
  *    instance), with run validation: fresh runs start where the account's
  *    banked gear resonates, continuing runs only go one floor deeper
@@ -56,12 +59,19 @@ export class Relay {
    * upper bound on anything plundered from their graves). */
   private gravePools = new Map<string, { items: Map<string, number>; gold: number }>();
 
+  /** Password accounts, sign-in sessions and their rate limits. */
+  private auth: AccountAuth;
+
   constructor(
     private directory: FloorDirectory,
     private accounts: AccountStore,
     private now: () => number = () => Date.now(),
     private log: (text: string) => void = () => {},
-  ) {}
+    /** Tests inject a fake hasher (argon2 is deliberately slow). */
+    auth: Partial<AuthDeps> = {},
+  ) {
+    this.auth = new AccountAuth(accounts, { hasher: argon2Hasher, now, log, ...auth });
+  }
 
   connect(peer: RelayPeer): void {
     this.peers.set(peer.id, peer);
@@ -77,6 +87,7 @@ export class Relay {
     this.directory.forget(peerId);
     this.peers.delete(peerId);
     this.tokens.delete(peerId);
+    this.auth.forget(peerId);
   }
 
   handle(peerId: string, msg: ClientMsg): void {
@@ -84,13 +95,35 @@ export class Relay {
     if (!peer) return;
     switch (msg.t) {
       case "login": {
-        const account = this.accounts.login(
+        const resumed = this.auth.resume(
+          peer.id,
           typeof msg.token === "string" ? msg.token : undefined,
           String(msg.name).slice(0, MAX_NAME),
         );
+        if (!resumed) {
+          peer.send({ t: "authError", reason: "session-expired" });
+          break;
+        }
+        const { account, token } = resumed;
         peer.name = account.name;
         this.tokens.set(peer.id, account.token);
-        peer.send({ t: "loggedIn", token: account.token, save: this.accounts.saveOf(account) });
+        peer.send({ t: "loggedIn", token, save: this.accounts.saveOf(account), username: account.username });
+        break;
+      }
+      case "register":
+      case "loginPassword":
+      case "claim":
+        void this.signIn(peer, msg);
+        break;
+      case "logout": {
+        if (this.directory.instanceOf(peer.id)) {
+          peer.send({ t: "authError", reason: "in-dungeon" });
+          break;
+        }
+        this.auth.logout(peer.id, this.boundAccount(peer), msg.everywhere === true);
+        this.tokens.delete(peer.id);
+        peer.name = "Wizard";
+        peer.send({ t: "loggedOut" });
         break;
       }
       case "ping":
@@ -248,6 +281,56 @@ export class Relay {
     const account = this.accounts.login(undefined, peer.name);
     this.tokens.set(peer.id, account.token);
     return account;
+  }
+
+  // ── The ledger ─────────────────────────────────────────────────────────────
+
+  /** The account this connection is bound to, if any (never mints). */
+  private boundAccount(peer: RelayPeer): AccountRecord | null {
+    const token = this.tokens.get(peer.id);
+    return token ? this.accounts.get(token) : null;
+  }
+
+  /** Register / sign in / claim: auth.ts hashes and decides; the relay binds
+   * the connection to the answer. Out of the dungeon only — a wizard can't
+   * change hands mid-floor. */
+  private async signIn(
+    peer: RelayPeer,
+    msg: Extract<ClientMsg, { t: "register" | "loginPassword" | "claim" }>,
+  ): Promise<void> {
+    if (this.directory.instanceOf(peer.id)) {
+      peer.send({ t: "authError", reason: "in-dungeon" });
+      return;
+    }
+    const outcome =
+      msg.t === "register"
+        ? await this.auth.register(peer.id, msg.username, msg.password, String(msg.name ?? peer.name).slice(0, MAX_NAME))
+        : msg.t === "claim"
+          ? await this.auth.claim(peer.id, this.boundAccount(peer), msg.username, msg.password)
+          : await this.auth.login(peer.id, msg.username, msg.password);
+    const here = this.peers.get(peer.id) === peer;
+    if (outcome.ok && (!here || this.directory.instanceOf(peer.id))) {
+      this.auth.revoke(outcome.token); // never reached its wizard
+      if (here) peer.send({ t: "authError", reason: "in-dungeon" });
+      return;
+    }
+    if (!here) return;
+    if (!outcome.ok) {
+      const { reason, retryAfterMs } = outcome;
+      peer.send(retryAfterMs === undefined ? { t: "authError", reason } : { t: "authError", reason, retryAfterMs });
+      return;
+    }
+    const { account, token } = outcome;
+    peer.name = account.name;
+    this.tokens.set(peer.id, account.token);
+    peer.send({
+      t: "authOk",
+      token,
+      username: account.username ?? "",
+      name: account.name,
+      save: this.accounts.saveOf(account),
+    });
+    this.log(`${peer.id} ${msg.t === "register" ? "registered" : msg.t === "claim" ? "claimed" : "signed in"} as ${account.username}`);
   }
 
   // ── Instances ──────────────────────────────────────────────────────────────

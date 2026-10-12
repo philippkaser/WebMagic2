@@ -207,7 +207,8 @@ async function waitPhase(w, phase, timeout = 30000) {
     await a.page.screenshot({ path: `${SP}/shot-grave.png` });
     // Server side: the plunder must be bankable for the looter (grave pool).
     await sleep(1200);
-    const accounts = DATA_FILE ? JSON.parse(readFileSync(DATA_FILE, "utf8")) : [];
+    const file = DATA_FILE ? JSON.parse(readFileSync(DATA_FILE, "utf8")) : [];
+    const accounts = Array.isArray(file) ? file : file.accounts; // { version, accounts } since v2
     const oswin = accounts.filter((acc) => acc.name === "Oswin").at(-1);
     check("the server honors the grave plunder as a grant",
       !!oswin && oswin.runGrants.includes("amulet_vigor@3") && oswin.runGold >= 40,
