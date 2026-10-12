@@ -3,6 +3,7 @@ import {
   BAG_SLOTS,
   BELT_SLOTS,
   CHEST_SLOTS,
+  POUCH_SLOTS,
   addToGrid,
   clearSlot,
   emptyGrid,
@@ -99,6 +100,7 @@ describe("moveItem (drag & drop)", () => {
     },
     bag: emptyGrid(5),
     belt: emptyGrid(2),
+    pouch: emptyGrid(8),
     chest: emptyGrid(30),
     ...over,
   });
@@ -189,6 +191,7 @@ describe("routeAcquire", () => {
     equipment: { staff: { defId: "apprentice_staff", runLoot: false }, amulet: null, cloak: null, boots: null },
     bag: emptyGrid(BAG_SLOTS),
     belt: emptyGrid(BELT_SLOTS),
+    pouch: emptyGrid(POUCH_SLOTS),
     chest: emptyGrid(CHEST_SLOTS),
   });
 

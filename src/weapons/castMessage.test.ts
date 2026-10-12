@@ -10,15 +10,31 @@ import {
   sanitizeCastMsg,
   sanitizeCastStats,
   type CastMsg,
+  type CastStats,
 } from "./castMessage";
+
+const stats = (over: Partial<CastStats> = {}): CastStats => ({ ...NEUTRAL_CAST_STATS, ...over });
 
 const good = (): CastMsg => ({
   abilityId: "bolt",
   origin: [1, 2, 3],
   dir: [0, 0, -1],
   staffId: "splinter_staff",
-  stats: { damageMult: 1.12, extraProjectiles: 1, homing: 0.3 },
+  stats: stats({ damageMult: 1.12, extraProjectiles: 1, homing: 0.3 }),
 });
+
+const CAST_KEYS = [
+  "blastRadiusMult",
+  "bounces",
+  "chain",
+  "damageMult",
+  "extraProjectiles",
+  "homing",
+  "knockbackMult",
+  "pierce",
+  "projectileSpeedMult",
+  "splitShards",
+];
 
 describe("encodeCastMsg → sanitizeCastMsg", () => {
   test("a legit cast round-trips unchanged", () => {
@@ -27,7 +43,7 @@ describe("encodeCastMsg → sanitizeCastMsg", () => {
       { x: 4, y: 1.5, z: -2 },
       { x: 0, y: 0, z: 1 },
       "ember_staff",
-      { damageMult: 1.3, extraProjectiles: 2, homing: 0.5 },
+      stats({ damageMult: 1.3, extraProjectiles: 2, homing: 0.5, bounces: 2, blastRadiusMult: 1.6, splitShards: 3 }),
     );
     expect(sanitizeCastMsg(msg)).toEqual(msg);
   });
@@ -40,7 +56,7 @@ describe("encodeCastMsg → sanitizeCastMsg", () => {
       fireRateMult: 2,
       maxHealth: 500,
     } as never);
-    expect(Object.keys(msg.stats).sort()).toEqual(["damageMult", "extraProjectiles", "homing"]);
+    expect(Object.keys(msg.stats).sort()).toEqual(CAST_KEYS);
   });
 });
 
@@ -99,25 +115,31 @@ describe("sanitizeCastMsg — degrades softer problems", () => {
   test("the output carries only known fields", () => {
     const out = sanitizeCastMsg({ ...good(), damage: 9999, stats: { ...good().stats, fireRateMult: 50 } })!;
     expect(Object.keys(out).sort()).toEqual(["abilityId", "dir", "origin", "staffId", "stats"]);
-    expect(Object.keys(out.stats).sort()).toEqual(["damageMult", "extraProjectiles", "homing"]);
+    expect(Object.keys(out.stats).sort()).toEqual(CAST_KEYS);
   });
 });
 
 describe("sanitizeCastStats", () => {
   test("in-range values pass through", () => {
-    expect(sanitizeCastStats({ damageMult: 1.5, extraProjectiles: 2, homing: 0.8 })).toEqual({
-      damageMult: 1.5,
-      extraProjectiles: 2,
-      homing: 0.8,
-    });
+    expect(sanitizeCastStats({ damageMult: 1.5, extraProjectiles: 2, homing: 0.8, pierce: 2, knockbackMult: 1.5 })).toEqual(
+      stats({ damageMult: 1.5, extraProjectiles: 2, homing: 0.8, pierce: 2, knockbackMult: 1.5 }),
+    );
   });
 
-  test("damageMult is clamped to [0, 16] — above the deepest legit staff", () => {
-    expect(CAST_STAT_LIMITS.damageMult).toEqual({ min: 0, max: 16 });
-    expect(sanitizeCastStats({ damageMult: 1000 }).damageMult).toBe(16);
+  test("damageMult is clamped to [0, 24] — above the deepest legit build", () => {
+    expect(CAST_STAT_LIMITS.damageMult).toEqual({ min: 0, max: 24 });
+    expect(sanitizeCastStats({ damageMult: 1000 }).damageMult).toBe(24);
     expect(sanitizeCastStats({ damageMult: -3 }).damageMult).toBe(0);
-    // A level-120 staff with a fury amulet and a keen affix still fits.
-    expect(staffPotency(MAX_ITEM_LEVEL) * 1.3 * 1.12).toBeLessThan(16);
+    // A level-120 +5 staff with a fury amulet, a keen affix and an elixir
+    // of fury still fits.
+    expect(staffPotency(MAX_ITEM_LEVEL) * 1.3 * 1.3 * 1.12 * 1.35).toBeLessThan(24);
+  });
+
+  test("mods are clamped, and counts are whole", () => {
+    expect(sanitizeCastStats({ bounces: 40 }).bounces).toBe(6);
+    expect(sanitizeCastStats({ splitShards: 2.6 }).splitShards).toBe(3);
+    expect(sanitizeCastStats({ blastRadiusMult: 50 }).blastRadiusMult).toBe(4);
+    expect(sanitizeCastStats({ projectileSpeedMult: 0 }).projectileSpeedMult).toBe(0.3);
   });
 
   test("extraProjectiles is an integer in [0, 4]", () => {

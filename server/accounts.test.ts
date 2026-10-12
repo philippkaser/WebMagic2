@@ -85,8 +85,14 @@ describe("AccountStore", () => {
     store.grant(acc, "potion_hp_weak");
     store.grant(acc, "potion_hp_weak");
     expect(acc.runGrants).toEqual(["potion_hp_weak", "potion_hp_weak"]);
-    for (let i = 0; i < 500; i++) store.grant(acc, `item_${i}`);
-    expect(acc.runGrants.length).toBeLessThanOrEqual(200);
+    for (let i = 0; i < 2000; i++) store.grant(acc, `item_${i}`);
+    expect(acc.runGrants.length).toBeLessThanOrEqual(1500);
+    // One attestation may carry a few copies (a handful of reagents), bounded.
+    const other = store.login(undefined, "Eli");
+    store.grant(other, "slime_gel", 3);
+    store.grant(other, "grave_moss", 999);
+    expect(other.runGrants.filter((id) => id === "slime_gel").length).toBe(3);
+    expect(other.runGrants.filter((id) => id === "grave_moss").length).toBe(10);
   });
 
   test("bank keeps previously banked gear even when grants are empty", () => {

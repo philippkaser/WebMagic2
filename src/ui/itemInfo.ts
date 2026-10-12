@@ -1,4 +1,6 @@
-import { gearWard, staffPotency } from "../items/power";
+import { getBuffDef } from "../items/buffs";
+import { enhancePotency, enhanceWard, gearWard, staffPotency } from "../items/power";
+import { STAT_SPECS } from "../items/stats";
 import { getAbility } from "../weapons/spells";
 import { itemPassives, type ResolvedItem } from "../items/catalog";
 import type { ItemDef, Passives, Slot } from "../items/types";
@@ -11,6 +13,7 @@ export const ITEM_ICONS: Record<Slot, string> = {
   cloak: "▲",
   boots: "⬢",
   consumable: "⚗",
+  material: "◆",
 };
 
 export function iconOf(def: ItemDef): string {
@@ -43,10 +46,15 @@ export function statLines(item: ResolvedItem, comparedTo?: ResolvedItem | null):
   lines.push(...passiveLines(item, comparedTo ?? null));
   if (def.jump === "double") lines.push({ text: "Double jump" });
   if (def.jump === "hover") lines.push({ text: "Hold Space to hover" });
+  if (def.jump === "triple") lines.push({ text: "Triple jump" });
   if (def.dash) lines.push({ text: "Shift: blink-dash" });
   if (def.consumable) {
     if (def.consumable.heal) lines.push({ text: `Restores ${def.consumable.heal} health` });
     if (def.consumable.mana) lines.push({ text: `Restores ${def.consumable.mana} mana` });
+    if (def.consumable.buff) {
+      const b = getBuffDef(def.consumable.buff);
+      lines.push({ text: `${b.name} for ${b.seconds} s` });
+    }
     if (def.consumable.escape)
       lines.push({ text: "Return to the village, banking this run's loot" });
     lines.push({ text: "Consumed on use (Q/E)" });
@@ -60,65 +68,24 @@ function levelLine(item: ResolvedItem, worn: ResolvedItem | null): StatLine | nu
   if (item.level <= 0) return null;
   const sameSlot = worn && worn.def.slot === item.def.slot ? worn : null;
   if (item.def.slot === "staff") {
-    const pct = Math.round((staffPotency(item.level) - 1) * 100);
-    const delta = sameSlot ? staffPotency(item.level) - staffPotency(sameSlot.level) : 0;
-    return { text: `Lv ${item.level} — +${pct}% spell damage from depth`, delta: delta || undefined };
+    const power = (i: ResolvedItem) => staffPotency(i.level) * enhancePotency(i.enhance);
+    const pct = Math.round((power(item) - 1) * 100);
+    const delta = sameSlot ? power(item) - power(sameSlot) : 0;
+    return { text: `Lv ${item.level} — +${pct}% spell damage from depth${item.enhance ? " and forge" : ""}`, delta: delta || undefined };
   }
-  const ward = gearWard(item.level);
-  const delta = sameSlot ? ward - gearWard(sameSlot.level) : 0;
+  const wardOf = (i: ResolvedItem) => gearWard(i.level) + enhanceWard(i.enhance);
+  const ward = wardOf(item);
+  const delta = sameSlot ? ward - wardOf(sameSlot) : 0;
   return { text: `Lv ${item.level} — +${ward} max health ward`, delta: delta || undefined };
 }
 
 // ── Passive comparison ───────────────────────────────────────────────────────
-// Each passive gets a neutral value, a formatter, and a "which way is up".
-// The diff for a line = (candidate - worn) × direction.
+// Each passive has a neutral value, a formatter, and a "which way is up"
+// (items/stats.ts). The diff for a line = (candidate - worn) × direction.
 
-interface PassiveSpec {
-  key: keyof Passives;
-  neutral: number;
-  /** Additive stats sum across gear; the rest multiply. */
-  additive: boolean;
-  /** +1: bigger is better; −1: smaller is better. */
-  better: 1 | -1;
-  format(value: number): string;
-}
+const PASSIVE_SPECS = STAT_SPECS;
 
-const PASSIVE_SPECS: PassiveSpec[] = [
-  {
-    key: "maxHealth",
-    neutral: 0,
-    additive: true,
-    better: 1,
-    format: (v) => `${v > 0 ? "+" : ""}${v} max health`,
-  },
-  { key: "speedMult", neutral: 1, additive: false, better: 1, format: (v) => pct(v, "movement speed") },
-  { key: "manaRegenMult", neutral: 1, additive: false, better: 1, format: (v) => pct(v, "mana regeneration") },
-  { key: "damageMult", neutral: 1, additive: false, better: 1, format: (v) => pct(v, "spell damage") },
-  { key: "damageTakenMult", neutral: 1, additive: false, better: -1, format: (v) => pct(v, "damage taken") },
-  { key: "aggroMult", neutral: 1, additive: false, better: -1, format: (v) => pct(v, "enemy notice range") },
-  {
-    key: "extraProjectiles",
-    neutral: 0,
-    additive: true,
-    better: 1,
-    format: (v) => `+${v} projectile${Math.abs(v) === 1 ? "" : "s"} per cast`,
-  },
-  {
-    key: "homing",
-    neutral: 0,
-    additive: true,
-    better: 1,
-    format: (v) => `+${Math.round(v * 100)}% projectile homing`,
-  },
-  { key: "fireRateMult", neutral: 1, additive: false, better: 1, format: (v) => pct(v, "fire rate") },
-];
-
-function pct(mult: number, label: string): string {
-  const delta = Math.round((mult - 1) * 100);
-  return `${delta > 0 ? "+" : ""}${delta}% ${label}`;
-}
-
-/** Total passive value of an item (base + affix folded). */
+/** Total passive value of an item (base + affixes folded, enhancement applied). */
 export function totalPassives(item: ResolvedItem): Partial<Passives> {
   const total: Partial<Passives> = {};
   for (const block of itemPassives(item)) {

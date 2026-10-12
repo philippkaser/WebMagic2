@@ -1,11 +1,11 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import { Vector3, type Camera } from "three";
-import { playCast } from "../audio/sound";
+import { playSpellCast } from "../audio/spellSounds";
 import { gameEvents } from "../core/events";
 import { castFlareFx } from "../fx/effects";
 import { playerVelocity } from "../game/player-state";
-import { getItemDef } from "../items/catalog";
+import { getItemDef, hasProc } from "../items/catalog";
 import type { ItemDef } from "../items/types";
 import { peerMessage } from "../net/channels";
 import { estimatePeer } from "../net/players";
@@ -13,6 +13,7 @@ import { input } from "../player/input";
 import { getStats, useGame } from "../state/gameStore";
 import { encodeCastMsg, sanitizeCastMsg, type CastMsg } from "./castMessage";
 import { localWizardId } from "./localWizard";
+import { getSpellDef } from "./spellCatalog";
 import { getAbility } from "./spells";
 
 /** With too little mana, a held button re-tries this often (seconds) instead
@@ -65,17 +66,39 @@ const peerCast = peerMessage<CastMsg>("cast", (raw, meta) => {
   // Their staff flares too (we don't know their velocity; a peer's flare is
   // seen from a distance, where the lag doesn't show) — and is heard from
   // where they stand.
-  castFlareFx(replayOrigin, replayDir, staff.color);
-  playCast(msg.origin);
+  const def = getSpellDef(msg.abilityId);
+  if (def.cooldown >= TICK_SPELL || Math.random() < 0.3) castFlareFx(replayOrigin, replayDir, staff.color, undefined, def.cooldown >= TICK_SPELL ? 1 : 0.5);
+  playSpellCast(def, msg.origin);
 });
 
-/** Cast one of the equipped staff's abilities from the staff tip, tell the
- * floor, and play the feedback. Returns the slot's next cooldown. */
-function castFromStaff(abilityId: string, staff: ItemDef, camera: Camera): number {
-  const ability = getAbility(abilityId);
-  if (!useGame.getState().spendMana(ability.mana)) return DRY_FIRE_THROTTLE;
-  const stats = getStats();
+/** Spells that tick faster than this are held streams (beam, flame): their
+ * every tick is a cast, so the per-cast juice is scaled down. */
+const TICK_SPELL = 0.15;
+/** The Warden's Key: every Nth cast also looses a void lance. */
+const WARDEN_KEY_EVERY = 5;
+/** Echoes repeat a cast this much later, at this share of its damage. */
+const ECHO_DELAY_MS = 230;
+const ECHO_SHARE = 0.6;
+/** Bloodstone: health paid per point of mana a spell couldn't find. */
+const BLOOD_PER_MANA = 0.6;
 
+let castCount = 0;
+
+/** Pay for a spell: mana, scaled by the kit's mana cost — or, wearing the
+ * Bloodstone Pact with too little mana, the shortfall in blood. */
+function pay(cost: number, stats: ReturnType<typeof getStats>): boolean {
+  const game = useGame.getState();
+  if (game.spendMana(cost)) return true;
+  if (!hasProc(stats, "bloodpact")) return false;
+  const blood = (cost - game.mana) * BLOOD_PER_MANA;
+  if (game.health <= blood + 1) return false;
+  useGame.setState({ mana: 0, health: game.health - blood });
+  gameEvents.emit("playerHurt", { amount: blood * 0.3 });
+  return true;
+}
+
+/** Where the staff tip is right now, and where it points. */
+function aimFrom(camera: Camera): void {
   camera.getWorldDirection(aim);
   side.crossVectors(aim, UP).normalize();
   muzzle
@@ -83,16 +106,49 @@ function castFromStaff(abilityId: string, staff: ItemDef, camera: Camera): numbe
     .addScaledVector(aim, MUZZLE.forward)
     .addScaledVector(side, MUZZLE.right)
     .addScaledVector(UP, -MUZZLE.down);
+}
 
+/** Loose one spell from the staff tip and tell the floor. */
+function loose(abilityId: string, staff: ItemDef, stats: ReturnType<typeof getStats>, juice: number): void {
+  const ability = getAbility(abilityId);
   ability.cast({ origin: muzzle, dir: aim, stats, staff, caster: localWizardId() });
   peerCast.send(encodeCastMsg(ability.id, muzzle, aim, staff.id, stats));
   // Muzzle flare: rides with our own velocity so a strafing cast doesn't
   // leave its flash hanging in the air behind the staff.
-  castFlareFx(muzzle, aim, staff.color, playerVelocity);
+  castFlareFx(muzzle, aim, staff.color, playerVelocity, juice < 1 ? 0.5 : 1);
+  playSpellCast(getSpellDef(ability.id));
+}
 
-  playCast();
-  gameEvents.emit("staffKick", 0.9);
-  gameEvents.emit("shake", 0.05);
+/** Cast one of the equipped staff's abilities from the staff tip, tell the
+ * floor, and play the feedback. Returns the slot's next cooldown. */
+function castFromStaff(abilityId: string, staff: ItemDef, camera: Camera): number {
+  const ability = getAbility(abilityId);
+  const stats = getStats();
+  if (!pay(ability.mana * stats.manaCostMult, stats)) return DRY_FIRE_THROTTLE;
+  const stream = ability.cooldown < TICK_SPELL;
+
+  aimFrom(camera);
+  loose(ability.id, staff, stats, stream ? 0.3 : 1);
+  if (!stream) castCount++;
+
+  // The Warden's Key: every fifth cast unlocks a void lance, free.
+  if (!stream && hasProc(stats, "wardenkey") && castCount % WARDEN_KEY_EVERY === 0) {
+    loose("lance", staff, { ...stats, damageMult: stats.damageMult * 1.5 }, 1);
+    gameEvents.emit("shake", 0.2);
+  }
+  // Echoes: the spell rings out again a beat later, weaker, from wherever
+  // the staff points by then.
+  if (!stream && hasProc(stats, "echo")) {
+    setTimeout(() => {
+      const s = useGame.getState();
+      if (s.phase !== "dungeon" && s.phase !== "village") return;
+      aimFrom(camera);
+      loose(ability.id, staff, { ...getStats(), damageMult: getStats().damageMult * ECHO_SHARE }, 0.5);
+    }, ECHO_DELAY_MS);
+  }
+
+  gameEvents.emit("staffKick", stream ? 0.25 : 0.9);
+  if (!stream) gameEvents.emit("shake", 0.05);
   // Fire-rate gear shortens the cooldown (higher mult = faster).
   return ability.cooldown / Math.max(MIN_FIRE_RATE, stats.fireRateMult);
 }

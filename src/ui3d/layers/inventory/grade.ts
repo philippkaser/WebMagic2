@@ -1,17 +1,13 @@
 import type { ResolvedItem } from "../../../items/catalog";
+import { RARITIES, type Rarity } from "../../../items/rarity";
 import type { FrameColors } from "../../theme";
 
-/** An item's "rarity" as the grimoire shows it — the colour of its card's
- * frame, its gem and its name (artpass frames cards by rarity: common grey,
- * rare blue, epic violet, legendary amber).
- *
- * Our items have no rarity roll; they have a tier (1–3) and maybe an
- * enchantment. Enchanted wins — violet is already the enchant hue of names
- * and loot light, so a violet frame always means "this one has an affix" —
- * otherwise the tier picks grey, blue or amber. Arcane cyan is deliberately
- * NOT a grade: while you drag, cyan frames mean "this socket takes it". */
+/** An item's rarity as the grimoire shows it — the colour of its card's
+ * frame, its gem and its name (items/rarity.ts: common bone, enchanted
+ * blue, arcane violet, legendary amber). Arcane cyan is deliberately NOT a
+ * grade: while you drag, cyan frames mean "this socket takes it". */
 
-export type GradeId = "common" | "rare" | "legendary" | "enchanted";
+export type GradeId = Rarity;
 
 export interface Grade {
   id: GradeId;
@@ -23,19 +19,15 @@ export interface Grade {
   frame: FrameColors;
 }
 
-/** Colours match the menus' item cards (layers/menus/itemLook.ts) and
- * artpass's RARITIES: common bone, rare blue, legendary amber, epic violet. */
 export const GRADES: Record<GradeId, Grade> = {
-  common: { id: "common", label: "Common", color: "#b9b0a0", frame: { trim: "#7d7486", light: "#c9c0b0", dark: "#2e2836" } },
-  rare: { id: "rare", label: "Rare", color: "#5db9ff", frame: { trim: "#2f78c8", light: "#7cc8ff", dark: "#122e58" } },
-  legendary: { id: "legendary", label: "Legendary", color: "#ffb13d", frame: { trim: "#c98318", light: "#ffc860", dark: "#55320a" } },
-  enchanted: { id: "enchanted", label: "Enchanted", color: "#c86bff", frame: { trim: "#8a3fd0", light: "#d99bff", dark: "#2c1250" } },
+  common: { id: "common", label: RARITIES.common.label, color: RARITIES.common.color, frame: { trim: "#7d7486", light: "#c9c0b0", dark: "#2e2836" } },
+  enchanted: { id: "enchanted", label: RARITIES.enchanted.label, color: RARITIES.enchanted.color, frame: { trim: "#2f78c8", light: "#7cc8ff", dark: "#122e58" } },
+  arcane: { id: "arcane", label: RARITIES.arcane.label, color: RARITIES.arcane.color, frame: { trim: "#8a3fd0", light: "#d99bff", dark: "#2c1250" } },
+  legendary: { id: "legendary", label: RARITIES.legendary.label, color: RARITIES.legendary.color, frame: { trim: "#c98318", light: "#ffc860", dark: "#55320a" } },
 };
 
 export function gradeOf(item: ResolvedItem): Grade {
-  if (item.affix) return GRADES.enchanted;
-  if (item.def.tier >= 3) return GRADES.legendary;
-  return item.def.tier === 2 ? GRADES.rare : GRADES.common;
+  return GRADES[item.rarity];
 }
 
 /** An empty socket's frame: dark iron, barely there (artpass's dashed

@@ -40,7 +40,7 @@ const NAME_PX = pxFor(SCENE_DISTANCE, TEXT.plaqueLine);
 const PRICE_PX = pxFor(SCENE_DISTANCE, TEXT.label);
 const BUTTON_PX = typePx(SCENE_DISTANCE, STEP.text, "label");
 const COIN_PX = (PRICE_PX * 8) / spriteSize("coin").h;
-const ORB = GRADES.enchanted;
+const ORB = GRADES.arcane;
 
 export function MerchantStall() {
   const ix = useInventory();

@@ -6,6 +6,7 @@ import { AudioWorld } from "../audio/AudioWorld";
 import { BlackHoles } from "../weapons/singularity";
 import { CastingSystem } from "../weapons/CastingSystem";
 import { Projectiles } from "../weapons/projectiles";
+import { WorldRaySystem } from "../weapons/WorldRay";
 import { GRAVITY } from "../core/config";
 import { Graves } from "../encounters/Graves";
 import { PactSystem } from "../encounters/PactSystem";
@@ -82,6 +83,7 @@ export function GameScene() {
           <BlackHoles />
           <LootOrbs />
           <PeerBodies />
+          <WorldRaySystem />
         </Physics>
         <RemoteWizards />
         {/* The ears: raytraced room acoustics, placed sounds, the world's

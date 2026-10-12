@@ -20,8 +20,8 @@ import {
   SphereGeometry,
   TorusGeometry,
 } from "three";
-import { ENCHANT_COLOR } from "../items/affixes";
 import { resolveItem } from "../items/catalog";
+import { rarityColor } from "../items/rarity";
 import type { ItemDef } from "../items/types";
 import { additive, glow, group, instance, lathe, part, std } from "../render/models/modelKit";
 import { StaffModel } from "../render/models/StaffModel";
@@ -122,6 +122,14 @@ const G = {
   vane: featherVane(),
   quill: new CylinderGeometry(0.012, 0.02, 0.9, 5),
   mote: new OctahedronGeometry(0.03),
+  // Materials: rough, chunky lumps of the deep.
+  shard: new OctahedronGeometry(0.1, 0),
+  orb: new IcosahedronGeometry(0.17, 1),
+  clump: new IcosahedronGeometry(0.1, 0),
+  ingot: new BoxGeometry(0.34, 0.12, 0.18),
+  spool: new TorusGeometry(0.12, 0.05, 5, 10),
+  rod: new CylinderGeometry(0.03, 0.03, 0.34, 6),
+  sigil: new CylinderGeometry(0.2, 0.2, 0.05, 8),
 };
 
 /** Vertical drapery folds and a ragged hem for the lathed cloak. */
@@ -304,6 +312,82 @@ function feather(def: ItemDef): Group {
   return group([inner]);
 }
 
+/** Which lump a material is (by id — the catalog stays data only). */
+type MaterialShape = "crystal" | "orb" | "clump" | "ingot" | "spool" | "sigil";
+const MATERIAL_SHAPE: Record<string, MaterialShape> = {
+  grave_moss: "clump",
+  hollow_ash: "clump",
+  arcane_dust: "clump",
+  brine_pearl: "orb",
+  wisp_ember: "orb",
+  slime_gel: "orb",
+  cinder_iron: "ingot",
+  singing_shard: "crystal",
+  riftglass: "crystal",
+  sentry_core: "crystal",
+  shadow_silk: "spool",
+  warden_sigil: "sigil",
+};
+
+function material(def: ItemDef): Group {
+  const shape = MATERIAL_SHAPE[def.id] ?? "clump";
+  const k = hashId(def.id);
+  const rough = std(mix(def.color, "#1a1410", 0.35), { tex: "bone", roughness: 0.85 });
+  switch (shape) {
+    case "crystal": {
+      // A cluster of spikes: the big one glows, two lesser ones lean off it.
+      const lit = glow(def.color, def.tier >= 3 ? 3 : 2.2);
+      return group([
+        tagGlow(part(G.shard, lit, [0, 0.02, 0], [0, k * 3, 0.1], [1.1, 2.4, 1.1], false)),
+        tagGlow(part(G.shard, lit, [0.13, -0.08, 0.02], [0, 0, -0.6], [0.7, 1.5, 0.7], false)),
+        tagGlow(part(G.shard, lit, [-0.12, -0.1, -0.03], [0.2, 0, 0.7], [0.6, 1.2, 0.6], false)),
+        part(G.clump, rough, [0, -0.2, 0], [0, k, 0], [2.2, 0.8, 1.8]),
+      ]);
+    }
+    case "orb": {
+      const shell = new MeshStandardMaterial({ color: def.color, roughness: 0.15, metalness: 0.2, transparent: true, opacity: 0.55, depthWrite: false });
+      return group([
+        tagGlow(part(G.orb, glow(def.color, 2), [0, 0, 0], [0, 0, 0], 0.62, false)),
+        part(G.orb, shell, [0, 0, 0], [0, k * 2, 0], 1, false),
+      ]);
+    }
+    case "ingot": {
+      const iron = std(mix(def.color, "#2a2420", 0.6), { metalness: 0.7, roughness: 0.5 });
+      return group([
+        part(G.ingot, iron, [0, -0.06, 0], [0, 0.4, 0]),
+        part(G.ingot, iron, [0.03, 0.07, 0.02], [0, -0.3, 0], 0.85),
+        tagGlow(part(G.rod, glow(def.color, 2.4), [0.03, 0.15, 0.02], [0, 0, Math.PI / 2], [0.4, 0.9, 0.4], false)),
+      ]);
+    }
+    case "spool": {
+      const thread = std(def.color, { tex: "cloth", roughness: 0.9, emissive: def.color, emissiveIntensity: 0.4 });
+      const wood = std("#5a4030", { tex: "bark", roughness: 0.9 });
+      return group([
+        part(G.spool, thread, [0, 0, 0], [0, 0, 0], [1, 1, 1.6]),
+        part(G.rod, wood, [0, 0, 0], [Math.PI / 2, 0, 0], [2.2, 1, 2.2]),
+      ]);
+    }
+    case "sigil": {
+      const gold = std(GOLD, { metalness: 0.85, roughness: 0.35 });
+      return group([
+        part(G.sigil, gold, [0, 0, 0], [Math.PI / 2, 0, 0]),
+        tagGlow(part(G.gemOcta, glow(def.color, 3), [0, 0, 0.04], [0, 0, 0], 1.6, false)),
+        tagGlow(part(G.bezel, glow(def.color, 2), [0, 0, 0.03], [0, 0, 0], 2.2, false)),
+      ]);
+    }
+    default: {
+      // A little heap: a few rough lumps, one of them lit.
+      const lit = glow(def.color, 1.6);
+      const dull = std(def.color, { tex: "cloth", roughness: 1 });
+      return group([
+        part(G.clump, dull, [0, -0.1, 0], [k, 0, 0], [2, 1, 1.8]),
+        part(G.clump, dull, [0.1, 0, 0.05], [0, k * 2, 0], 1.1),
+        tagGlow(part(G.clump, lit, [-0.06, 0.04, 0.02], [0.3, 0, 0], 0.9, false)),
+      ]);
+    }
+  }
+}
+
 const templates = new Map<string, Group>();
 
 /** Built once per base item; the returned clone shares every buffer. */
@@ -314,6 +398,7 @@ function itemObject(def: ItemDef): Object3D | null {
     if (def.slot === "amulet") t = amulet(def);
     else if (def.slot === "cloak") t = cloak(def);
     else if (def.slot === "boots") t = boots(def);
+    else if (def.slot === "material") t = material(def);
     else if (def.consumable?.escape) t = feather(def);
     else t = draught(def);
     templates.set(def.id, t);
@@ -387,7 +472,8 @@ const STAFF_ITEM_Y = -0.55;
 export function ItemModel({ itemId, scale = 1, spin = false, highlight = 0, highlightRef, position, rotation }: ItemModelProps) {
   const item = useMemo(() => resolveItem(itemId), [itemId]);
   const obj = useMemo(() => itemObject(item.def), [item.def]);
-  const aura = useMemo(() => auraMaterial(item.affix ? ENCHANT_COLOR : item.def.color), [item.affix, item.def.color]);
+  const glowing = item.rarity !== "common";
+  const aura = useMemo(() => auraMaterial(glowing ? rarityColor(item.rarity) : item.def.color), [glowing, item.rarity, item.def.color]);
   useEffect(() => () => aura.dispose(), [aura]);
   const outer = useRef<Group>(null);
   const auraMesh = useRef<Mesh>(null);
@@ -396,7 +482,7 @@ export function ItemModel({ itemId, scale = 1, spin = false, highlight = 0, high
   useFrame((_, dt) => {
     const t = uiNow() + phase;
     if (outer.current && spin) outer.current.rotation.y += dt * 0.8;
-    const base = item.affix ? 0.55 + Math.sin(t * 2.2) * 0.15 : 0;
+    const base = glowing ? (item.rarity === "legendary" ? 0.8 : 0.55) + Math.sin(t * 2.2) * 0.15 : 0;
     const g = base + highlight + (highlightRef?.current ?? 0);
     aura.uniforms.uIntensity!.value = g;
     if (auraMesh.current) auraMesh.current.visible = g > 0.01;

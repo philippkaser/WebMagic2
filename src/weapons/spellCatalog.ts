@@ -36,6 +36,46 @@ export interface BoltSpell extends SpellCommon {
   /** Radius and peak impulse of each bolt's impact pop. */
   blastRadius: number;
   blastImpulse: number;
+  /** Upward lob as a share of speed (Siege Shell arcs its shells). */
+  lob?: number;
+}
+
+/** A hitscan line of light (Prism Ray, Starpierce): stops at walls, hurts
+ * what it touches. Held, the Prism Ray ticks every `cooldown` — a beam. */
+export interface RaySpell extends SpellCommon {
+  kind: "ray";
+  /** Per tick (beam) or per shot (rail). */
+  damage: number;
+  range: number;
+  /** Forgiveness: extra radius every body gets against the line. */
+  width: number;
+  impulse: number;
+  /** Bodies it passes through before it stops (99: all of them). */
+  pierce: number;
+  look: "beam" | "rail";
+}
+
+/** Lightning that leaps from foe to foe (Forked Lightning). */
+export interface ChainSpell extends SpellCommon {
+  kind: "chain";
+  damage: number;
+  range: number;
+  /** Leaps after the first strike, before chain gear. */
+  jumps: number;
+  jumpRange: number;
+  /** Damage kept per leap. */
+  falloff: number;
+  impulse: number;
+}
+
+/** A cone of fire up close (Dragon's Breath), ticking while held. */
+export interface ConeSpell extends SpellCommon {
+  kind: "cone";
+  damage: number;
+  range: number;
+  /** Half angle, degrees. */
+  angle: number;
+  impulse: number;
 }
 
 /** A forward explosion that kicks the caster back — aim at the floor to
@@ -82,7 +122,15 @@ export interface CollapseSpell extends SpellCommon {
   kind: "collapse";
 }
 
-export type SpellDef = BoltSpell | BlastSpell | ShockwaveSpell | SeedSpell | CollapseSpell;
+export type SpellDef =
+  | BoltSpell
+  | BlastSpell
+  | ShockwaveSpell
+  | SeedSpell
+  | CollapseSpell
+  | RaySpell
+  | ChainSpell
+  | ConeSpell;
 export type SpellKind = SpellDef["kind"];
 
 export const SPELLS: readonly Readonly<SpellDef>[] = [
@@ -191,6 +239,89 @@ export const SPELLS: readonly Readonly<SpellDef>[] = [
     particles: 54,
     light: 48,
   },
+  {
+    kind: "shockwave",
+    id: "thunderclap",
+    name: "Thunderclap",
+    mana: 16,
+    cooldown: 1.3,
+    damage: 18,
+    radius: 6.5,
+    impulse: 36,
+    particles: 60,
+    light: 56,
+  },
+  // ── Archetypes beyond the bolt ────────────────────────────────────────────
+  {
+    // The laser: hold it on a target and it burns.
+    kind: "ray",
+    id: "beam",
+    name: "Prism Ray",
+    mana: 1.2,
+    cooldown: 0.08,
+    damage: 5,
+    range: 22,
+    width: 0.25,
+    impulse: 1.5,
+    pierce: 0,
+    look: "beam",
+  },
+  {
+    // The railgun: one line through everything in its way.
+    kind: "ray",
+    id: "rail",
+    name: "Starpierce",
+    mana: 14,
+    cooldown: 1.1,
+    damage: 55,
+    range: 40,
+    width: 0.35,
+    impulse: 22,
+    pierce: 99,
+    look: "rail",
+  },
+  {
+    kind: "chain",
+    id: "chainbolt",
+    name: "Forked Lightning",
+    mana: 6,
+    cooldown: 0.45,
+    damage: 22,
+    range: 24,
+    jumps: 2,
+    jumpRange: 6,
+    falloff: 0.75,
+    impulse: 6,
+  },
+  {
+    // The flamethrower: short, wide, relentless.
+    kind: "cone",
+    id: "flame",
+    name: "Dragon's Breath",
+    mana: 1.1,
+    cooldown: 0.07,
+    damage: 4,
+    range: 6.5,
+    angle: 24,
+    impulse: 3,
+  },
+  {
+    // The grenade launcher: lobbed shells, wide bursts.
+    kind: "bolt",
+    id: "mortar",
+    name: "Siege Shell",
+    mana: 9,
+    cooldown: 0.9,
+    damage: 30,
+    speed: 22,
+    size: 0.22,
+    count: 1,
+    spread: 0.02,
+    gravityScale: 1,
+    blastRadius: 4.2,
+    blastImpulse: 26,
+    lob: 0.32,
+  },
 ];
 
 const byId = new Map(SPELLS.map((s) => [s.id, s]));
@@ -234,6 +365,14 @@ export function spellInfo(def: Readonly<SpellDef>): string {
       return `${def.damage} dmg, plant · Collapse to detonate`;
     case "collapse":
       return "implode your seeds → black holes";
+    case "ray":
+      return def.look === "beam"
+        ? `${def.damage} dmg ×${Math.round(1 / def.cooldown)}/s beam, hold`
+        : `${def.damage} dmg, pierces everything in line`;
+    case "chain":
+      return `${def.damage} dmg, leaps to ${def.jumps} more`;
+    case "cone":
+      return `${def.damage} dmg ×${Math.round(1 / def.cooldown)}/s cone, close range`;
     default: {
       const unknown: never = def;
       throw new Error(`Unhandled spell kind: ${(unknown as SpellDef).kind}`);

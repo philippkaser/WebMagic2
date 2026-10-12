@@ -12,8 +12,37 @@ import { isSpellId } from "./spellCatalog";
  * beyond cosmetics — a hostile wizard's replayed volley is what hurts us —
  * so every received message goes through sanitizeCastMsg. Pure; unit-tested. */
 
-/** The subset of DerivedStats that changes what a cast does. */
-export type CastStats = Pick<DerivedStats, "damageMult" | "extraProjectiles" | "homing">;
+/** The subset of DerivedStats that changes what a cast does (and so what a
+ * floor-mate must replay: a ricocheting volley must ricochet for them too). */
+export type CastStats = Pick<
+  DerivedStats,
+  | "damageMult"
+  | "extraProjectiles"
+  | "homing"
+  | "bounces"
+  | "pierce"
+  | "splitShards"
+  | "blastRadiusMult"
+  | "projectileSpeedMult"
+  | "chain"
+  | "knockbackMult"
+>;
+
+const CAST_STAT_KEYS = [
+  "damageMult",
+  "extraProjectiles",
+  "homing",
+  "bounces",
+  "pierce",
+  "splitShards",
+  "blastRadiusMult",
+  "projectileSpeedMult",
+  "chain",
+  "knockbackMult",
+] as const satisfies readonly (keyof CastStats)[];
+
+/** Whole-number stats (counts) are rounded after clamping. */
+const INTEGER_STATS = new Set<keyof CastStats>(["extraProjectiles", "bounces", "pierce", "splitShards", "chain"]);
 
 export type Vec3Tuple = [number, number, number];
 
@@ -29,19 +58,34 @@ export interface CastMsg {
 
 /** Plausible ranges for replayed gear stats. Generous against legit gear
  * stacking, but a hacked client can't send a 1000× volley. */
-export const CAST_STAT_LIMITS = {
+export const CAST_STAT_LIMITS: Readonly<Record<keyof CastStats, { min: number; max: number }>> = {
   // Deep staffs alone reach ~9× (items/power.ts staffPotency at level 120)
-  // before amulets and affixes; the ceiling sits above every legit build.
-  damageMult: { min: 0, max: 16 },
+  // before amulets, affixes, the forge and elixirs; the ceiling sits above
+  // every legit build.
+  damageMult: { min: 0, max: 24 },
   extraProjectiles: { min: 0, max: 4 },
   homing: { min: 0, max: 2 },
-} as const;
+  bounces: { min: 0, max: 6 },
+  pierce: { min: 0, max: 6 },
+  splitShards: { min: 0, max: 8 },
+  blastRadiusMult: { min: 0.3, max: 4 },
+  projectileSpeedMult: { min: 0.3, max: 4 },
+  chain: { min: 0, max: 6 },
+  knockbackMult: { min: 0, max: 4 },
+};
 
 /** What a replay assumes for a missing/garbled stat: bare-handed casting. */
 export const NEUTRAL_CAST_STATS: Readonly<CastStats> = Object.freeze({
   damageMult: 1,
   extraProjectiles: 0,
   homing: 0,
+  bounces: 0,
+  pierce: 0,
+  splitShards: 0,
+  blastRadiusMult: 1,
+  projectileSpeedMult: 1,
+  chain: 0,
+  knockbackMult: 1,
 });
 
 interface XYZ {
@@ -63,12 +107,15 @@ export function encodeCastMsg(
     origin: [origin.x, origin.y, origin.z],
     dir: [dir.x, dir.y, dir.z],
     staffId,
-    stats: {
-      damageMult: stats.damageMult,
-      extraProjectiles: stats.extraProjectiles,
-      homing: stats.homing,
-    },
+    stats: pickCastStats(stats),
   };
+}
+
+/** Just the cast-shaping stats of a full stat block. */
+export function pickCastStats(stats: CastStats): CastStats {
+  const out = {} as CastStats;
+  for (const k of CAST_STAT_KEYS) out[k] = stats[k];
+  return out;
 }
 
 /** Validate a received cast. Returns a clean copy, or null when the message
@@ -98,14 +145,12 @@ export function sanitizeCastStats(raw: unknown): CastStats {
   const s = (typeof raw === "object" && raw !== null ? raw : {}) as Partial<
     Record<keyof CastStats, unknown>
   >;
-  const L = CAST_STAT_LIMITS;
-  return {
-    damageMult: clampStat(s.damageMult, NEUTRAL_CAST_STATS.damageMult, L.damageMult),
-    extraProjectiles: Math.round(
-      clampStat(s.extraProjectiles, NEUTRAL_CAST_STATS.extraProjectiles, L.extraProjectiles),
-    ),
-    homing: clampStat(s.homing, NEUTRAL_CAST_STATS.homing, L.homing),
-  };
+  const out = {} as CastStats;
+  for (const k of CAST_STAT_KEYS) {
+    const v = clampStat(s[k], NEUTRAL_CAST_STATS[k], CAST_STAT_LIMITS[k]);
+    out[k] = INTEGER_STATS.has(k) ? Math.round(v) : v;
+  }
+  return out;
 }
 
 function clampStat(v: unknown, neutral: number, range: { min: number; max: number }): number {

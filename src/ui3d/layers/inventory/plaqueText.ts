@@ -1,6 +1,9 @@
 import type { ResolvedItem } from "../../../items/catalog";
 import type { SlotRef } from "../../../items/inventory";
-import type { GearSlot } from "../../../items/types";
+import { bandOfReagent } from "../../../items/materials";
+import { ITEM_POWER } from "../../../items/power";
+import type { Slot } from "../../../items/types";
+import { getBiomeDef } from "../../../world/biomes";
 import { statLines } from "../../../ui/itemInfo";
 import type { TextSpan } from "../../font/layout";
 import { ink } from "../../theme";
@@ -50,12 +53,13 @@ export interface PlaqueExtras {
   hint?: string | null;
 }
 
-const SLOT_NAME: Record<GearSlot | "consumable", string> = {
+const SLOT_NAME: Record<Slot, string> = {
   staff: "Staff",
   amulet: "Amulet",
   cloak: "Cloak",
   boots: "Boots",
   consumable: "Consumable",
+  material: "Reagent",
 };
 
 export function plaqueText(item: ResolvedItem, worn: ResolvedItem | null, extras: PlaqueExtras = {}): PlaqueText {
@@ -65,20 +69,42 @@ export function plaqueText(item: ResolvedItem, worn: ResolvedItem | null, extras
   if ((extras.qty ?? 1) > 1) title.push({ text: ` ×${extras.qty}`, color: INK.bright });
 
   const consumable = def.slot === "consumable";
-  const kind = consumable
-    ? (def.maxStack ?? 1) > 1
-      ? `Consumable · stacks to ${def.maxStack}`
-      : "Consumable"
-    : [SLOT_NAME[def.slot], ...(item.affix ? [`tier ${def.tier}`] : []), ...(item.level > 0 ? [`Lv ${item.level}`] : [])].join(" · ");
-  const sub: TextSpan[] = consumable
-    ? [{ text: kind.toUpperCase(), color: ink.faded }]
-    : [
-        { text: grade.label.toUpperCase(), color: grade.color },
-        { text: ` · ${kind.toUpperCase()}`, color: ink.faded },
-      ];
+  const reagent = def.slot === "material";
+  const kind =
+    consumable || reagent
+      ? (def.maxStack ?? 1) > 1
+        ? `${SLOT_NAME[def.slot]} · stacks to ${def.maxStack}`
+        : SLOT_NAME[def.slot]
+      : [SLOT_NAME[def.slot], ...(item.level > 0 ? [`Lv ${item.level}`] : []), ...(item.enhance > 0 ? [`forged +${item.enhance}`] : [])].join(" · ");
+  const sub: TextSpan[] =
+    consumable || (reagent && item.rarity === "common")
+      ? [{ text: kind.toUpperCase(), color: ink.faded }]
+      : [
+          { text: grade.label.toUpperCase(), color: grade.color },
+          { text: ` · ${kind.toUpperCase()}`, color: ink.faded },
+        ];
 
   const lines: TextSpan[][] = [];
-  if (item.affix) lines.push([{ text: `Enchanted: ${item.affix.desc}`, color: GRADES.enchanted.color }]);
+  // Each enchantment: its name in the item's grade, what it gives, and —
+  // for a mod — what it costs, in the colour of a worse stat.
+  for (const a of item.affixes) {
+    lines.push([
+      { text: `✦ ${a.name}: `, color: grade.color },
+      { text: a.boon, color: INK.better },
+      ...(a.bane ? [{ text: ` · ${a.bane}`, color: INK.worse }] : []),
+    ]);
+  }
+  if (item.enhance > 0) {
+    const pct = Math.round(item.enhance * ITEM_POWER.boonPerEnhance * 100);
+    lines.push([{ text: `Forged +${item.enhance}: boons ${pct}% stronger`, color: ink.brassLight }]);
+  }
+  if (reagent) {
+    const band = bandOfReagent(def.id);
+    if (band) {
+      const b = getBiomeDef(band);
+      lines.push([{ text: `Grows only in ${b.name} (floors ${b.floors[0]}–${b.floors[1]})`, color: INK.body }]);
+    }
+  }
   for (const line of statLines(item, worn)) {
     if (line.delta === undefined) lines.push([{ text: line.text, color: INK.body }]);
     else {
@@ -109,7 +135,7 @@ export function plaqueText(item: ResolvedItem, worn: ResolvedItem | null, extras
     sub,
     gem: grade.color,
     desc: def.desc || null,
-    statsHead: lines.length === 0 ? null : consumable ? "EFFECT" : worn ? "IF EQUIPPED" : extras.worn ? "GRANTS" : "STATS",
+    statsHead: lines.length === 0 ? null : consumable ? "EFFECT" : reagent ? "REAGENT" : worn ? "IF EQUIPPED" : extras.worn ? "GRANTS" : "STATS",
     stats: joinLines(lines),
     notes,
     frame: grade.id === "legendary" ? "gold" : "brass",
@@ -118,7 +144,7 @@ export function plaqueText(item: ResolvedItem, worn: ResolvedItem | null, extras
 
 /** The Orb of Fortune isn't an item — it gets its own words. */
 export function fortuneText(price: number, affordable: boolean): PlaqueText {
-  const g = GRADES.enchanted;
+  const g = GRADES.arcane;
   return {
     title: [{ text: "Orb of Fortune", color: g.color }],
     sub: [{ text: "GAMBLE", color: g.color }, { text: " · RANDOM GEAR", color: ink.faded }],
@@ -142,12 +168,16 @@ export function fortuneText(price: number, affordable: boolean): PlaqueText {
 
 /** What a shift-click (or double-click) on this cell would do, said plainly
  * (mirrors quickMove.ts's rules). */
-export function quickHint(from: SlotRef, consumable: boolean, chestOpen: boolean): string | null {
+export function quickHint(from: SlotRef, slot: Slot, chestOpen: boolean): string | null {
   // The staff never leaves the wizard's hand.
   if (from.container === "equipment" && from.slot === "staff") return null;
+  if (slot === "material") {
+    if (from.container === "pouch") return chestOpen ? "Shift-click: into the stash" : null;
+    return "Shift-click: into the pouch";
+  }
   if (from.container === "equipment" || from.container === "belt" || from.container === "chest") return "Shift-click: into the satchel";
   if (chestOpen) return "Shift-click: into the stash";
-  return consumable ? "Shift-click: onto the belt" : "Shift-click to equip";
+  return slot === "consumable" ? "Shift-click: onto the belt" : "Shift-click to equip";
 }
 
 function joinLines(lines: TextSpan[][]): TextSpan[] {
@@ -162,6 +192,6 @@ function joinLines(lines: TextSpan[][]): TextSpan[] {
 /** The worn counterpart to compare against: same gear slot, a different
  * item, and not the socket being read itself. */
 export function wornCounterpart(item: ResolvedItem, worn: ResolvedItem | null, readingWorn: boolean): ResolvedItem | null {
-  if (readingWorn || !worn || item.def.slot === "consumable") return null;
+  if (readingWorn || !worn || item.def.slot === "consumable" || item.def.slot === "material") return null;
   return worn.itemId === item.itemId ? null : worn;
 }

@@ -20,6 +20,9 @@ export type HitTeam = "enemy" | "prop";
 export interface Hittable {
   id: number;
   team: HitTeam;
+  /** Body radius for hitscan spells (beams, lightning, cones); ~0.5 if
+   * unset. */
+  radius?: number;
   getPosition(): Vec3Tuple;
   /** Apply damage plus a physical impulse (world-space). */
   hit(damage: number, impulse: Vec3Tuple): void;

@@ -233,7 +233,7 @@ function GraveChest({ grave }: { grave: LiveGrave }) {
     if (d2 > PROMPT_RANGE_SQ || useGame.getState().phase !== "dungeon") return;
     const state = useGame.getState();
     const picks = planGravePicks(
-      { equipment: state.equipment, bag: state.bag, belt: state.belt, chest: state.chest },
+      { equipment: state.equipment, bag: state.bag, belt: state.belt, pouch: state.pouch, chest: state.chest },
       grave,
     );
     const whose = grave.ownerId === selfId() ? "your own" : `${grave.ownerName}'s`;

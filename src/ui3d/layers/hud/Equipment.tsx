@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ENCHANT_COLOR } from "../../../items/affixes";
+import { rarityColor } from "../../../items/rarity";
 import { resolveItem } from "../../../items/catalog";
 import type { GearSlot } from "../../../items/types";
 import { useGame } from "../../../state/gameStore";
@@ -27,18 +27,19 @@ const HINT_HOLD = 6;
 
 /** Per-slot presentation: size and lean so four very different shapes read
  * as one row. Scales are in artpass pixels. */
-export const POSE: Record<GearSlot | "consumable", SlotPose> = {
+export const POSE: Record<GearSlot | "consumable" | "material", SlotPose> = {
   staff: { scale: 40, rot: [0, 0, -0.62] },
   amulet: { scale: 33, rot: [0.1, 0, 0] },
   cloak: { scale: 30, rot: [0.15, 0, 0] },
   boots: { scale: 33, rot: [0.3, -0.5, 0] },
   consumable: { scale: 36, rot: [0.15, 0, 0] },
+  material: { scale: 30, rot: [0.2, 0.4, 0] },
 };
 
-/** An item's card colour: its own, or the enchantment's violet. */
+/** An item's card colour: its own when common, else its rarity's. */
 export function itemColor(defId: string): string {
   const item = resolveItem(defId);
-  return item.affix ? ENCHANT_COLOR : item.def.color;
+  return item.rarity === "common" ? item.def.color : rarityColor(item.rarity);
 }
 
 export function Equipment() {

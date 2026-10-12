@@ -16,6 +16,23 @@ export function quickMoveTarget(inv: Carried, from: SlotRef, chestOpen: boolean)
   const stack = readSlot(inv, from);
   if (!stack) return null;
   const def = getItemDef(stack.defId);
+  // Reagents: anywhere → the pouch (topping up a stack first); out of the
+  // pouch only into the open chest.
+  if (def.slot === "material") {
+    if (from.container === "pouch") {
+      if (!chestOpen) return null;
+      const free = firstFree(inv.chest);
+      return free !== -1 ? { container: "chest", index: free } : null;
+    }
+    const merge = inv.pouch.findIndex((s) => s !== null && s.defId === stack.defId && s.qty < (def.maxStack ?? 1));
+    const free = merge !== -1 ? merge : firstFree(inv.pouch);
+    if (free !== -1) return { container: "pouch", index: free };
+    if (chestOpen && from.container === "bag") {
+      const c = firstFree(inv.chest);
+      return c !== -1 ? { container: "chest", index: c } : null;
+    }
+    return null;
+  }
   if (from.container === "bag" || from.container === "chest") {
     if (chestOpen && from.container === "bag") {
       const free = firstFree(inv.chest);

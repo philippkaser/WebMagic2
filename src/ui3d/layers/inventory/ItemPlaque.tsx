@@ -1,4 +1,5 @@
 import { useFrame, useThree } from "@react-three/fiber";
+import { isGearSlot } from "../../../items/types";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Group, Vector3 } from "three";
 import { resolveItem, type ResolvedItem } from "../../../items/catalog";
@@ -69,7 +70,7 @@ function readSocket(ix: InventoryInteraction, key: string | null): Reading | nul
   const item = resolveItem(stack.defId);
   const readingWorn = spec.ref.container === "equipment";
   let worn: ResolvedItem | null = null;
-  if (item.def.slot !== "consumable") {
+  if (isGearSlot(item.def.slot)) {
     const w = inv.equipment[item.def.slot];
     worn = wornCounterpart(item, w ? resolveItem(w.defId) : null, readingWorn);
   }
@@ -82,7 +83,7 @@ function readSocket(ix: InventoryInteraction, key: string | null): Reading | nul
       runLoot: stack.runLoot,
       worn: readingWorn,
       sellFor: selling ? sellOffer(inv, spec.ref) : null,
-      hint: quickHint(spec.ref, item.def.slot === "consumable", ix.mode === "chest" && inVillage),
+      hint: quickHint(spec.ref, item.def.slot, ix.mode === "chest" && inVillage),
     }),
   };
 }
@@ -164,7 +165,7 @@ export function ItemPlaque() {
       const stack = spec?.ref ? readSlot(carriedNow(), spec.ref) : null;
       if (stack && spec?.ref?.container !== "equipment") {
         const slot = resolveItem(stack.defId).def.slot;
-        if (slot !== "consumable") compare = slotKey({ container: "equipment", slot });
+        if (isGearSlot(slot)) compare = slotKey({ container: "equipment", slot });
       }
     }
     ix.compareKey = compare;

@@ -39,7 +39,8 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
 
   const coyote = useRef(0);
   const jumpBuffer = useRef(0);
-  const doubleJumpUsed = useRef(false);
+  /** Air jumps spent since the ground (double: 1 allowed, triple: 2). */
+  const airJumps = useRef(0);
   const dashCooldown = useRef(0);
   const wasGrounded = useRef(true);
   const bobPhase = useRef(0);
@@ -114,7 +115,7 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
 
     if (grounded) {
       coyote.current = PLAYER.coyoteTime;
-      doubleJumpUsed.current = false;
+      airJumps.current = 0;
       const k = 1 - Math.exp(-PLAYER.groundAccel * dt);
       nvx = v.x + (wish.x * speed - v.x) * k;
       nvz = v.z + (wish.z * speed - v.z) * k;
@@ -142,9 +143,9 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
         coyote.current = 0;
         playJump();
         dust(t, 0.45);
-      } else if (stats.jump === "double" && !doubleJumpUsed.current) {
-        vy = PLAYER.jumpVelocity * 0.92;
-        doubleJumpUsed.current = true;
+      } else if (airJumps.current < (stats.jump === "triple" ? 2 : stats.jump === "double" ? 1 : 0)) {
+        vy = PLAYER.jumpVelocity * (airJumps.current === 0 ? 0.92 : 0.84);
+        airJumps.current++;
         jumpBuffer.current = 0;
         playJump();
         // A rune circle flashes underfoot: the air itself was stepped on.

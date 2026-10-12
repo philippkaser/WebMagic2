@@ -1,4 +1,5 @@
 import { resolveItem } from "../items/catalog";
+import { isGearSlot } from "../items/types";
 
 /** The rules of a run — pure, shared by the client (portal UI, HUD, store)
  * and the server (entry validation, banking), so the two can never disagree.
@@ -37,7 +38,7 @@ export function gearLevel(gearIds: readonly (string | null | undefined)[]): numb
     if (!id) continue;
     try {
       const item = resolveItem(id);
-      if (item.def.slot !== "consumable") total += item.level;
+      if (isGearSlot(item.def.slot)) total += item.level;
     } catch {
       // A forged or retired id carries no weight.
     }

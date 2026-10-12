@@ -49,6 +49,10 @@ export interface GameEvents extends Record<string, unknown> {
   };
   /** A lore rune was read (HUD shows the fragment). */
   loreRead: { fragmentId: string };
+  /** The Phoenix refused a death: the burst of flame (weapons/procs). */
+  phoenix: undefined;
+  /** An elixir's blessing took hold (HUD shows it ticking down). */
+  buff: { id: import("../items/types").BuffId; seconds: number };
 }
 
 export const gameEvents = new Emitter<GameEvents>();

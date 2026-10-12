@@ -1,5 +1,6 @@
 import { allAffixDefs } from "../../../items/affixes";
 import { allItemDefs, resolveItem } from "../../../items/catalog";
+import { isGearSlot } from "../../../items/types";
 
 /** Which physical things to show on the death screen.
  *
@@ -27,7 +28,7 @@ function byName(): Map<string, string> {
   nameIndex = new Map();
   for (const def of allItemDefs()) {
     nameIndex.set(def.name, def.id);
-    if (def.slot === "consumable") continue;
+    if (!isGearSlot(def.slot) || def.unique) continue;
     for (const affix of allAffixDefs()) {
       const id = `${def.id}+${affix.id}`;
       try {

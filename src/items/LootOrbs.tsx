@@ -28,8 +28,8 @@ import { registerSyncProvider } from "../net/entities";
 import { isHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
 import { ItemModel } from "../ui3d/ItemModel";
-import { ENCHANT_COLOR } from "./affixes";
-import { getItemDef, resolveItem } from "./catalog";
+import { getItemDef, itemSummary, resolveItem } from "./catalog";
+import { rarityColor } from "./rarity";
 import { bossGoldAmount, enemyGoldAmount, propGoldAmount } from "./economy";
 import { rollDrop } from "./loot";
 import { useGame } from "../state/gameStore";
@@ -280,7 +280,7 @@ function ItemOrb({ orb }: { orb: Orb }) {
         ]);
         return;
       }
-      const desc = item.affix ? `${item.affix.desc} · ${def.desc}` : def.desc;
+      const desc = itemSummary(item);
       const at: [number, number, number] = [g.position.x, g.position.y + 0.7, g.position.z];
       offerInteraction(`E — Take ${item.name}  (${desc})`, d2, () => {
         if (requested.current > 0) return;
@@ -292,7 +292,7 @@ function ItemOrb({ orb }: { orb: Orb }) {
 
   return (
     <group ref={group} position={orb.position}>
-      <LootBeacon color={item.affix ? ENCHANT_COLOR : def.color} tier={def.tier} enchanted={!!item.affix} />
+      <LootBeacon color={item.rarity === "common" ? def.color : rarityColor(item.rarity)} tier={def.tier} enchanted={item.rarity !== "common"} />
       <group scale={LOOT_SCALE[def.slot]} rotation={[0, 0, def.slot === "staff" ? -0.35 : 0]}>
         <ItemModel itemId={orb.defId!} />
       </group>
@@ -368,6 +368,7 @@ const LOOT_SCALE: Record<Slot, number> = {
   cloak: 0.58,
   boots: 0.54,
   consumable: 0.55,
+  material: 0.45,
 };
 
 const BEACON_VERT = /* glsl */ `

@@ -5,7 +5,7 @@ import {
   maxStackOf,
   resolveItem,
 } from "../items/catalog";
-import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS, emptyGrid, type Grid } from "../items/inventory";
+import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS, emptyGrid, POUCH_SLOTS, type Grid } from "../items/inventory";
 import type { Equipment, GearSlot, ItemStack } from "../items/types";
 import type { WireInventory, WireStack } from "../net/protocol";
 
@@ -18,6 +18,7 @@ export interface SaveData {
   equipment: Equipment;
   bag: Grid;
   belt: Grid;
+  pouch: Grid;
   chest: Grid;
   gold: number;
 }
@@ -42,6 +43,7 @@ export function defaultSave(): SaveData {
     equipment: defaultEquipment(),
     bag: emptyGrid(BAG_SLOTS),
     belt: emptyGrid(BELT_SLOTS),
+    pouch: emptyGrid(POUCH_SLOTS),
     chest: emptyGrid(CHEST_SLOTS),
     gold: 0,
   };
@@ -62,6 +64,7 @@ export function loadSave(): SaveData {
           deepest: Math.max(0, Math.floor(Number(data.deepest ?? checkpoint) || 0)),
           bag: coerceGrid(data.bag, BAG_SLOTS),
           belt: coerceGrid(data.belt, BELT_SLOTS),
+          pouch: coerceGrid(data.pouch, POUCH_SLOTS),
           chest: coerceGrid(data.chest, CHEST_SLOTS),
           gold: Math.max(0, Math.floor(Number(data.gold) || 0)),
         };
@@ -115,6 +118,7 @@ export function toWireInventory(save: Omit<SaveData, "deepest">): WireInventory 
     },
     bag: save.bag.map(stack),
     belt: save.belt.map(stack),
+    pouch: save.pouch.map(stack),
     chest: save.chest.map(stack),
     gold: save.gold,
   };
@@ -136,10 +140,11 @@ function validGearId(id: string | null, slot: GearSlot): string | null {
 
 /** Everything from the wire is banked (runLoot false) by definition. */
 export function fromWireInventory(wire: WireInventory): Omit<SaveData, "deepest"> {
-  const grid = (cells: (WireStack | null)[], size: number): Grid =>
+  const grid = (cells: (WireStack | null)[], size: number, materialsOnly = false): Grid =>
     Array.from({ length: size }, (_, i) => {
       const s = cells[i];
       if (!s || !validId(s.id)) return null;
+      if (materialsOnly && getItemDef(s.id).slot !== "material") return null;
       const qty = Math.max(1, Math.min(s.qty, maxStackOf(s.id)));
       return { defId: s.id, qty, runLoot: false };
     });
@@ -156,6 +161,7 @@ export function fromWireInventory(wire: WireInventory): Omit<SaveData, "deepest"
     },
     bag: grid(wire.bag, BAG_SLOTS),
     belt: grid(wire.belt, BELT_SLOTS),
+    pouch: grid(wire.pouch ?? [], POUCH_SLOTS, true),
     chest: grid(wire.chest, CHEST_SLOTS),
     gold: Math.max(0, Math.floor(wire.gold) || 0),
   };

@@ -1,16 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import { allItemDefs, resolveItem } from "../../../items/catalog";
+import { isGearSlot } from "../../../items/types";
 import { FRAMES } from "../../theme";
 import { GRADES, gradeOf } from "./grade";
 import { paintSprite, spriteSize } from "./spriteArt";
 
-describe("gradeOf (tier and enchantment as the grimoire's rarity)", () => {
-  test("tier picks common / rare / legendary; any enchantment is violet", () => {
+describe("gradeOf (the item's rarity as the grimoire shows it)", () => {
+  test("plain gear is common; one enchantment blue, two violet; uniques amber", () => {
     for (const def of allItemDefs()) {
-      if (def.slot === "consumable") continue;
-      const g = gradeOf(resolveItem(`${def.id}@3`));
-      expect(g.id).toBe(def.tier >= 3 ? "legendary" : def.tier === 2 ? "rare" : "common");
+      if (!isGearSlot(def.slot)) continue;
+      if (def.unique) {
+        expect(gradeOf(resolveItem(`${def.id}@3`)).id).toBe("legendary");
+        continue;
+      }
+      expect(gradeOf(resolveItem(`${def.id}@3`)).id).toBe("common");
       expect(gradeOf(resolveItem(`${def.id}+keen@3`)).id).toBe("enchanted");
+      expect(gradeOf(resolveItem(`${def.id}+keen+vigorous@3`)).id).toBe("arcane");
     }
   });
 

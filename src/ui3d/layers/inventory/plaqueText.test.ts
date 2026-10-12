@@ -9,13 +9,30 @@ const plain = (spans: TextSpan[]) => spans.map((s) => s.text).join("");
 const notes = (t: ReturnType<typeof plaqueText>) => t.notes.map((n) => plain(n.text));
 
 describe("plaqueText (the item plaque's words)", () => {
-  test("name in its grade's colour; enchanted names violet, with the enchantment first", () => {
-    expect(plaqueText(resolveItem("ember_staff@7"), null).title[0]).toEqual({ text: "Ember Staff", color: GRADES.rare.color });
-    expect(plaqueText(resolveItem("apprentice_staff@1"), null).title[0]!.color).toBe(GRADES.common.color);
+  test("name in its rarity's colour, each enchantment first with its boon and bane", () => {
+    expect(plaqueText(resolveItem("ember_staff@7"), null).title[0]).toEqual({ text: "Ember Staff", color: GRADES.common.color });
     const keen = plaqueText(resolveItem("amulet_vigor+keen@5"), null);
     expect(keen.title[0]!.color).toBe(GRADES.enchanted.color);
     expect(keen.gem).toBe(GRADES.enchanted.color);
-    expect(plain(keen.stats).split("\n")[0]).toBe("Enchanted: +12% spell damage");
+    expect(plain(keen.stats).split("\n")[0]).toBe("✦ Keen: +12% spell damage");
+    const mod = plaqueText(resolveItem("ember_staff+volatile+frenzied@7"), null);
+    expect(plain(mod.title)).toBe("Volatile Ember Staff of Frenzy");
+    expect(mod.gem).toBe(GRADES.arcane.color);
+    const lines = plain(mod.stats).split("\n");
+    expect(lines[0]).toBe("✦ Volatile: +60% blast radius · -15% fire rate");
+    expect(mod.stats.find((s) => s.text === " · -15% fire rate")!.color).toBe(INK.worse);
+    expect(lines[1]).toBe("✦ Frenzied: +35% fire rate · +35% mana cost");
+  });
+
+  test("forged items and reagents say so", () => {
+    const forged = plaqueText(resolveItem("cloak_warden@12^3"), null);
+    expect(plain(forged.title)).toBe("+3 Warden's Cloak");
+    expect(plain(forged.sub)).toBe("COMMON · CLOAK · LV 12 · FORGED +3");
+    expect(plain(forged.stats)).toContain("Forged +3: boons 36% stronger");
+    const moss = plaqueText(resolveItem("grave_moss"), null, { qty: 12 });
+    expect(plain(moss.title)).toBe("Grave Moss ×12");
+    expect(moss.statsHead).toBe("REAGENT");
+    expect(plain(moss.stats)).toContain("Grows only in The Catacombs (floors 1–9)");
   });
 
   test("stacks show their count; the small-caps line says what it is", () => {
@@ -23,8 +40,8 @@ describe("plaqueText (the item plaque's words)", () => {
     expect(plain(t.title)).toBe("Weak Healing Draught ×3");
     expect(plain(t.sub)).toBe("CONSUMABLE · STACKS TO 5");
     expect(t.statsHead).toBe("EFFECT");
-    expect(plain(plaqueText(resolveItem("cloak_blink@6"), null).sub)).toBe("RARE · CLOAK · LV 6");
-    expect(plain(plaqueText(resolveItem("cloak_blink+swift@6"), null).sub)).toBe("ENCHANTED · CLOAK · TIER 2 · LV 6");
+    expect(plain(plaqueText(resolveItem("cloak_blink@6"), null).sub)).toBe("COMMON · CLOAK · LV 6");
+    expect(plain(plaqueText(resolveItem("cloak_blink+swift@6"), null).sub)).toBe("ENCHANTED · CLOAK · LV 6");
   });
 
   test("comparison against the worn piece colours the deltas and names it", () => {
@@ -49,7 +66,8 @@ describe("plaqueText (the item plaque's words)", () => {
   });
 
   test("the legendary get a gold frame, the rest brass", () => {
-    expect(plaqueText(resolveItem("voidcore_staff@9"), null).frame).toBe(resolveItem("voidcore_staff@9").def.tier >= 3 ? "gold" : "brass");
+    expect(plaqueText(resolveItem("stormcaller@12"), null).frame).toBe("gold");
+    expect(plaqueText(resolveItem("voidcore_staff@9"), null).frame).toBe("brass");
     expect(plaqueText(resolveItem("apprentice_staff@1"), null).frame).toBe("brass");
   });
 
@@ -59,12 +77,13 @@ describe("plaqueText (the item plaque's words)", () => {
   });
 
   test("quickHint mirrors quickMove's rules, and the staff never moves", () => {
-    expect(quickHint({ container: "bag", index: 0 }, false, false)).toBe("Shift-click to equip");
-    expect(quickHint({ container: "bag", index: 0 }, true, false)).toBe("Shift-click: onto the belt");
-    expect(quickHint({ container: "bag", index: 0 }, false, true)).toBe("Shift-click: into the stash");
-    expect(quickHint({ container: "chest", index: 2 }, false, true)).toBe("Shift-click: into the satchel");
-    expect(quickHint({ container: "equipment", slot: "cloak" }, false, false)).toBe("Shift-click: into the satchel");
-    expect(quickHint({ container: "equipment", slot: "staff" }, false, false)).toBeNull();
+    expect(quickHint({ container: "bag", index: 0 }, "amulet", false)).toBe("Shift-click to equip");
+    expect(quickHint({ container: "bag", index: 0 }, "consumable", false)).toBe("Shift-click: onto the belt");
+    expect(quickHint({ container: "bag", index: 0 }, "amulet", true)).toBe("Shift-click: into the stash");
+    expect(quickHint({ container: "chest", index: 2 }, "amulet", true)).toBe("Shift-click: into the satchel");
+    expect(quickHint({ container: "equipment", slot: "cloak" }, "cloak", false)).toBe("Shift-click: into the satchel");
+    expect(quickHint({ container: "equipment", slot: "staff" }, "staff", false)).toBeNull();
+    expect(quickHint({ container: "bag", index: 1 }, "material", false)).toBe("Shift-click: into the pouch");
   });
 
   test("wornCounterpart: same slot, different item, never the worn socket itself or a potion", () => {

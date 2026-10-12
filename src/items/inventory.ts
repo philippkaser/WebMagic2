@@ -7,6 +7,8 @@ import type { Equipment, GearSlot, ItemInstance, ItemStack } from "./types";
 
 export const BAG_SLOTS = 5;
 export const BELT_SLOTS = 2; // [0] = Q, [1] = E
+/** The reagent pouch: materials only, deep stacks (items/materials.ts). */
+export const POUCH_SLOTS = 8;
 export const CHEST_SLOTS = 30;
 
 export type Grid = (ItemStack | null)[];
@@ -81,25 +83,28 @@ export function markBanked(grid: Grid): Grid {
 
 // ── Pickups ──────────────────────────────────────────────────────────────────
 
-export type AcquireTarget = "equipped" | "belt" | "bag";
+export type AcquireTarget = "equipped" | "belt" | "bag" | "pouch";
 
 /** Where a picked-up item goes — the one routing rule behind every pickup
  * (loot orbs, treasure, grave chests): gear fills its empty slot, otherwise
  * the bag; consumables fill the belt first (that's where you'll want them),
- * then the bag. Returns the new Carried and where the item landed, or null
- * when there's truly no room. */
+ * then the bag; materials go to the reagent pouch, then the bag. Returns the
+ * new Carried and where the item landed, or null when there's truly no room. */
 export function routeAcquire(
   inv: Carried,
   defId: string,
   runLoot: boolean,
 ): { next: Carried; to: AcquireTarget } | null {
   const def = getItemDef(defId);
-  if (def.slot === "consumable") {
+  if (def.slot === "material") {
+    const pouch = addToGrid(inv.pouch, defId, runLoot);
+    if (pouch) return { next: { ...inv, pouch }, to: "pouch" };
+  } else if (def.slot === "consumable") {
     const belt = addToGrid(inv.belt, defId, runLoot);
     if (belt) return { next: { ...inv, belt }, to: "belt" };
-  } else if (inv.equipment[def.slot] === null) {
+  } else if (inv.equipment[def.slot as GearSlot] === null) {
     return {
-      next: { ...inv, equipment: { ...inv.equipment, [def.slot]: { defId, runLoot } } },
+      next: { ...inv, equipment: { ...inv.equipment, [def.slot as GearSlot]: { defId, runLoot } } },
       to: "equipped",
     };
   }
@@ -112,15 +117,19 @@ export function routeAcquire(
 // chest, with swap semantics, consumable stack merging, and the two hard
 // rules (belt holds only consumables; the staff slot may never end empty).
 
+export type GridContainer = "bag" | "belt" | "chest" | "pouch";
+
 export type SlotRef =
   | { container: "equipment"; slot: GearSlot }
-  | { container: "bag" | "belt" | "chest"; index: number };
+  | { container: GridContainer; index: number };
 
 /** Everything a wizard owns, as one movable unit. */
 export interface Carried {
   equipment: Equipment;
   bag: Grid;
   belt: Grid;
+  /** Materials only. Carried like the bag (at risk until banked). */
+  pouch: Grid;
   chest: Grid;
 }
 
@@ -144,6 +153,7 @@ function accepts(ref: SlotRef, stack: ItemStack | null): boolean {
   const def = getItemDef(stack.defId);
   if (ref.container === "equipment") return def.slot === ref.slot && stack.qty === 1;
   if (ref.container === "belt") return def.slot === "consumable";
+  if (ref.container === "pouch") return def.slot === "material";
   return true; // bag/chest take anything
 }
 
@@ -152,6 +162,7 @@ function cloneCarried(inv: Carried): Carried {
     equipment: { ...inv.equipment },
     bag: cloneGrid(inv.bag),
     belt: cloneGrid(inv.belt),
+    pouch: cloneGrid(inv.pouch),
     chest: cloneGrid(inv.chest),
   };
 }

@@ -14,6 +14,7 @@ export interface CarriedKit {
   equipment: Equipment;
   bag: Grid;
   belt: Grid;
+  pouch: Grid;
 }
 
 /** One lost stack, by item id (grave contents, death screen). */
@@ -42,6 +43,7 @@ export function bankKit(kit: CarriedKit): CarriedKit {
     },
     bag: markBanked(kit.bag),
     belt: markBanked(kit.belt),
+    pouch: markBanked(kit.pouch),
   };
 }
 
@@ -74,7 +76,8 @@ export function settleDeath(kit: CarriedKit, starterStaffId: string): DeathOutco
   };
   const bag = stripRunLoot(kit.bag);
   const belt = stripRunLoot(kit.belt);
-  for (const s of [...bag.lost, ...belt.lost]) lose(s.defId, s.qty);
+  const pouch = stripRunLoot(kit.pouch);
+  for (const s of [...bag.lost, ...belt.lost, ...pouch.lost]) lose(s.defId, s.qty);
 
-  return { kept: { equipment, bag: bag.grid, belt: belt.grid }, lost, lostNames };
+  return { kept: { equipment, bag: bag.grid, belt: belt.grid, pouch: pouch.grid }, lost, lostNames };
 }

@@ -17,6 +17,7 @@ function carried(over: Partial<Carried> = {}): Carried {
     },
     bag: [stack("cloak_shadow"), stack("potion_hp_weak", 2), null, stack("arc_staff@3"), null],
     belt: [stack("potion_hp_weak", 3), null],
+    pouch: emptyGrid(8),
     chest: emptyGrid(30),
     ...over,
   };

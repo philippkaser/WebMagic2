@@ -1,11 +1,19 @@
 /** Gear slots — the four pieces that define a wizard's kit. */
 export type GearSlot = "staff" | "amulet" | "cloak" | "boots";
 
-/** Everything an item can be: worn gear or a consumable that lives in the
- * belt/bag and is spent on use. */
-export type Slot = GearSlot | "consumable";
+/** Everything an item can be: worn gear, a consumable that lives in the
+ * belt/bag and is spent on use, or a material — what creatures and the deep
+ * leave behind, carried in the reagent pouch and spent at the cauldron and
+ * the forge (items/crafting.ts). */
+export type Slot = GearSlot | "consumable" | "material";
 
-export type JumpKind = "single" | "double" | "hover";
+export const GEAR_SLOTS: readonly GearSlot[] = ["staff", "amulet", "cloak", "boots"];
+
+export function isGearSlot(slot: Slot): slot is GearSlot {
+  return slot !== "consumable" && slot !== "material";
+}
+
+export type JumpKind = "single" | "double" | "hover" | "triple";
 
 /** Additive/multiplicative passive modifiers granted by items. */
 export interface Passives {
@@ -19,16 +27,49 @@ export interface Passives {
   extraProjectiles: number; // additive: extra bolts per projectile cast
   homing: number; // additive 0..~1: how hard player bolts seek enemies
   fireRateMult: number; // multiplicative: >1 shortens ability cooldowns
+  /** Multiplies every spell's mana cost (>1 = thirstier). */
+  manaCostMult: number;
+  /** Additive: times a bolt ricochets off walls before it bursts. */
+  bounces: number;
+  /** Additive: foes a bolt passes through before it bursts. */
+  pierce: number;
+  /** Multiplies every blast, pop and shockwave radius. */
+  blastRadiusMult: number;
+  /** Multiplies bolt speed. */
+  projectileSpeedMult: number;
+  /** Additive: shards a bolt bursts into where it lands. */
+  splitShards: number;
+  /** Additive 0..1: share of damage dealt that heals the caster. */
+  lifesteal: number;
+  /** Additive: extra foes a hit arcs on to. */
+  chain: number;
+  /** Multiplies the physical shove of every spell. */
+  knockbackMult: number;
 }
+
+/** Timed effects a draught (or a shrine) lays on the wizard — see
+ * items/buffs.ts for what each does and for how long. */
+export type BuffId = "haste" | "ironskin" | "fury" | "clarity" | "swiftness";
 
 /** What happens when a consumable is used (Q/E). */
 export interface ConsumableEffect {
   heal?: number;
   mana?: number;
+  /** A timed blessing (items/buffs.ts). */
+  buff?: BuffId;
   /** Vanish back to the village, banking this run's loot — a portable,
    * one-shot checkpoint portal (does NOT advance your checkpoint). */
   escape?: boolean;
 }
+
+/** Legendary items carry one special power each (weapons/procs.ts). */
+export type ProcId =
+  | "stormcall" // hits sometimes call lightning down on a nearby foe
+  | "soulshards" // hits sometimes burst into homing shards
+  | "wardenkey" // every fifth cast is a giant void lance
+  | "bloodpact" // spells cost health instead of mana when mana runs dry
+  | "phoenix" // once per floor, a killing blow is refused (you flare up)
+  | "echo"; // every cast is repeated a beat later, for free
 
 export interface ItemDef {
   id: string;
@@ -41,6 +82,10 @@ export interface ItemDef {
   desc: string;
   /** Relative drop rarity within its slot pool (default 1; <1 = rarer). */
   dropWeight?: number;
+  /** A named legendary: never rolls enchantments, carries a `proc`, drops
+   * only from bosses, vaults and the forge's great work. */
+  unique?: boolean;
+  proc?: ProcId;
   // staff-only
   primary?: string; // ability id
   secondary?: string; // ability id
@@ -83,4 +128,6 @@ export interface Equipment {
 export interface DerivedStats extends Passives {
   jump: JumpKind;
   dash: boolean;
+  /** Legendary powers in effect (from worn uniques). */
+  procs: ProcId[];
 }

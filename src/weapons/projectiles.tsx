@@ -23,8 +23,15 @@ import {
   type DamageTeam,
   type LocalRelation,
 } from "./allegiance";
+import { playRicochet } from "../audio/spellSounds";
+import { GROUPS } from "../core/config";
+import { hitSparksFx } from "../fx/effects";
+import { lightningFx, ricochetFx } from "../fx/spellFx";
+import { forEachHittable, type Hittable } from "../game/registry";
 import { explode } from "./explosions";
+import { chainPath, lightningPoints, sweptHits, type HitTarget } from "./hitscan";
 import { localWizardId } from "./localWizard";
+import { reportLocalHit } from "./procs";
 import { SingularitySeed } from "./singularity";
 
 // Shared across all bolts: allocating geometry/material per shot causes GC
@@ -75,6 +82,16 @@ export interface ProjectileSpec {
   singularity: boolean;
   /** Replayed peer/replicated projectile: explosion skips entity damage. */
   cosmetic: boolean;
+  /** Ricochets left: walls bounce it instead of bursting it (mods). */
+  bounces: number;
+  /** Creatures it may pass through (and hurt) before it bursts. */
+  pierce: number;
+  /** Shards it bursts into where it lands. */
+  splitShards: number;
+  /** Creatures its landing arcs on to. */
+  chain: number;
+  /** Fired by a legendary power — its hits don't roll powers again. */
+  noProc: boolean;
 }
 
 export interface FireOptions {
@@ -93,6 +110,11 @@ export interface FireOptions {
   homing?: number;
   singularity?: boolean;
   cosmetic?: boolean;
+  bounces?: number;
+  pierce?: number;
+  splitShards?: number;
+  chain?: number;
+  noProc?: boolean;
 }
 
 const MAX_LIVE = 80;
@@ -111,6 +133,18 @@ const COLLISION_MASKS: Readonly<Record<LocalRelation, number>> = {
   hostile: groupsMask("hostile"),
   dungeon: groupsMask("dungeon"),
 };
+/** A piercing bolt flies through creatures (it finds them itself, by a
+ * swept test each frame) — so its body ignores them. */
+const PIERCING_MASKS: Readonly<Record<LocalRelation, number>> = {
+  own: piercingMask("own"),
+  ally: piercingMask("ally"),
+  hostile: piercingMask("hostile"),
+  dungeon: piercingMask("dungeon"),
+};
+function piercingMask(relation: LocalRelation): number {
+  const g = PROJECTILE_GROUPS[relation];
+  return interactionGroups([...g.membership], g.filter.filter((f) => f !== GROUPS.ENEMY));
+}
 
 // Dev-only hook for end-to-end tests (mirrors __game / __spawnEnemy). Scripts
 // may omit `source`; it defaults by team, like explode() does.
@@ -123,11 +157,12 @@ if (typeof window !== "undefined" && import.meta.env?.DEV) {
 export function fireProjectile(opts: FireOptions): void {
   if (!enqueue) return;
   const relation = relationToLocal(opts.team, opts.source, localWizardId(), isHostileWizard);
+  const pierce = opts.team === "player" ? Math.max(0, Math.round(opts.pierce ?? 0)) : 0;
   enqueue({
     id: nextProjectileId++,
     team: opts.team,
     source: opts.source,
-    collisionGroups: COLLISION_MASKS[relation],
+    collisionGroups: (pierce > 0 ? PIERCING_MASKS : COLLISION_MASKS)[relation],
     position: opts.position,
     velocity: opts.velocity,
     damage: opts.damage,
@@ -139,6 +174,11 @@ export function fireProjectile(opts: FireOptions): void {
     homing: opts.homing ?? 0,
     singularity: opts.singularity ?? false,
     cosmetic: opts.cosmetic ?? false,
+    bounces: Math.max(0, Math.round(opts.bounces ?? 0)),
+    pierce,
+    splitShards: Math.max(0, Math.round(opts.splitShards ?? 0)),
+    chain: Math.max(0, Math.round(opts.chain ?? 0)),
+    noProc: opts.noProc ?? false,
   });
 }
 
@@ -170,6 +210,25 @@ export function Projectiles() {
   );
 }
 
+/** A piercing bolt's pass deals this share of its damage to each creature
+ * it goes through (the burst at the end deals the rest as usual). */
+const PIERCE_SHARE = 0.85;
+/** Shards: share of the parent's damage each, and how fast they fly. */
+const SHARD_SHARE = 0.35;
+const SHARD_SPEED = 17;
+/** An arcing landing: share of damage per leap, and how far it reaches. */
+const ARC_SHARE = 0.45;
+const ARC_RANGE = 6;
+
+function creatureTargets(): HitTarget<Hittable>[] {
+  const out: HitTarget<Hittable>[] = [];
+  forEachHittable((h) => {
+    if (h.team !== "enemy") return;
+    out.push({ pos: h.getPosition(), radius: h.radius ?? 0.5, ref: h });
+  });
+  return out;
+}
+
 function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => void }) {
   const body = useRef<RapierRigidBody>(null);
   const detonated = useRef(false);
@@ -177,6 +236,10 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
    * between, so it stays continuous at any speed or frame rate. */
   const prev = useRef({ x: spec.position[0], y: spec.position[1], z: spec.position[2] });
   const light = useRef<DynamicLightSource | null>(null);
+  const bounces = useRef(spec.bounces);
+  const pierce = useRef(spec.pierce);
+  const struck = useRef(new Set<Hittable>());
+  const speed = useRef(Math.hypot(spec.velocity[0], spec.velocity[1], spec.velocity[2]));
 
   const detonate = useCallback(() => {
     if (detonated.current) return;
@@ -196,9 +259,31 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
       particles: 14,
       light: 14,
       remote: spec.cosmetic,
+      noProc: spec.noProc,
     });
+    if (spec.team === "player") {
+      if (spec.splitShards > 0) splinter(spec, at, b);
+      if (spec.chain > 0) arc(spec, at, struck.current);
+    }
     remove(spec.id);
   }, [remove, spec]);
+
+  /** Walls ricochet a bolt with bounces left; anything else bursts it. */
+  const onContact = useCallback(
+    (other: { rigidBody?: { isFixed(): boolean } | null }) => {
+      if (bounces.current > 0 && other.rigidBody?.isFixed()) {
+        bounces.current--;
+        const t = body.current?.translation();
+        if (t) {
+          ricochetFx(t, spec.color);
+          playRicochet([t.x, t.y, t.z]);
+        }
+        return;
+      }
+      detonate();
+    },
+    [detonate, spec.color],
+  );
 
   useEffect(() => {
     body.current?.setLinvel(
@@ -215,7 +300,8 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
       priority: 3,
     });
     light.current = src;
-    const timeout = setTimeout(detonate, 3200);
+    // Ricocheting bolts live a little longer: they take the long way round.
+    const timeout = setTimeout(detonate, 3200 + spec.bounces * 900);
     return () => {
       clearTimeout(timeout);
       removeLightSource(src);
@@ -254,7 +340,41 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
       }
     }
 
+    // A ricochet keeps its pace: a weightless bolt never loses speed off a
+    // wall (the solver's restitution is close, not exact).
+    if (spec.bounces > 0 && spec.gravityScale === 0) {
+      const v = b.linvel();
+      const s = Math.hypot(v.x, v.y, v.z);
+      if (s > 0.1 && Math.abs(s - speed.current) > 0.5) {
+        const k = speed.current / s;
+        b.setLinvel({ x: v.x * k, y: v.y * k, z: v.z * k }, true);
+      }
+    }
+
     const t = b.translation();
+    // Piercing: hurt every creature the bolt passed through this frame; the
+    // first one past its pierce count bursts it.
+    if (spec.pierce > 0) {
+      for (const target of sweptHits(prev.current, t, spec.size, creatureTargets())) {
+        const h = target.ref;
+        if (struck.current.has(h)) continue;
+        struck.current.add(h);
+        if (pierce.current <= 0) {
+          detonate();
+          return;
+        }
+        pierce.current--;
+        hitSparksFx(target.pos, spec.color, 0.8);
+        if (!spec.cosmetic) {
+          const k = spec.blastImpulse * 0.4;
+          const v = b.linvel();
+          const vl = Math.hypot(v.x, v.y, v.z) || 1;
+          h.hit(spec.damage * PIERCE_SHARE, { x: (v.x / vl) * k, y: k * 0.3, z: (v.z / vl) * k });
+          if (!spec.noProc) reportLocalHit(target.pos, spec.damage * PIERCE_SHARE);
+        }
+      }
+    }
+
     boltTrailFx(prev.current, t, spec.color, spec.size);
     prev.current.x = t.x;
     prev.current.y = t.y;
@@ -268,14 +388,62 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
       gravityScale={spec.gravityScale}
       ccd
       colliders={false}
-      onCollisionEnter={detonate}
+      onCollisionEnter={(payload) => onContact(payload.other)}
     >
       <BallCollider
         args={[spec.size]}
         collisionGroups={spec.collisionGroups}
         mass={0.05}
+        restitution={spec.bounces > 0 ? 1 : 0}
+        friction={spec.bounces > 0 ? 0 : 0.5}
       />
       <mesh geometry={boltGeometry} material={boltMaterial(spec.color)} scale={spec.size} />
     </RigidBody>
   );
+}
+
+/** Splintering: the bolt bursts into shards that fly back out of what it
+ * hit, each a small bolt of its own (no further splintering). */
+function splinter(spec: ProjectileSpec, at: [number, number, number], b: RapierRigidBody | null): void {
+  const v = b?.linvel() ?? { x: spec.velocity[0], y: spec.velocity[1], z: spec.velocity[2] };
+  const vl = Math.hypot(v.x, v.y, v.z) || 1;
+  for (let i = 0; i < Math.min(spec.splitShards, 8); i++) {
+    // Back the way it came, fanned wide, a little up.
+    const a = Math.random() * Math.PI * 2;
+    const dx = -v.x / vl + Math.cos(a) * 0.9;
+    const dy = 0.35 + Math.random() * 0.5;
+    const dz = -v.z / vl + Math.sin(a) * 0.9;
+    const dl = Math.hypot(dx, dy, dz) || 1;
+    fireProjectile({
+      team: spec.team,
+      source: spec.source,
+      position: [at[0] - (v.x / vl) * 0.25, at[1] + 0.05, at[2] - (v.z / vl) * 0.25],
+      velocity: [(dx / dl) * SHARD_SPEED, (dy / dl) * SHARD_SPEED, (dz / dl) * SHARD_SPEED],
+      damage: spec.damage * SHARD_SHARE,
+      color: spec.color,
+      size: Math.max(0.05, spec.size * 0.55),
+      gravityScale: 0.5,
+      blastRadius: Math.max(0.8, spec.blastRadius * 0.5),
+      blastImpulse: spec.blastImpulse * 0.4,
+      cosmetic: spec.cosmetic,
+      noProc: spec.noProc,
+    });
+  }
+}
+
+/** Arcing: the landing leaps on to the nearest creatures nearby. */
+function arc(spec: ProjectileSpec, at: [number, number, number], already: Set<Hittable>): void {
+  const targets = creatureTargets().filter((t) => !already.has(t.ref));
+  const origin: HitTarget<Hittable | null> = { pos: { x: at[0], y: at[1], z: at[2] }, radius: 0, ref: null };
+  const path = chainPath<Hittable | null>(origin, targets, spec.chain, ARC_RANGE);
+  for (let i = 1; i < path.length; i++) {
+    const from = path[i - 1]!.pos;
+    const to = path[i]!;
+    lightningFx(lightningPoints(from, to.pos, 6, 0.35), spec.color);
+    if (!spec.cosmetic && to.ref) {
+      const damage = spec.damage * ARC_SHARE;
+      to.ref.hit(damage, { x: 0, y: 2, z: 0 });
+      if (!spec.noProc) reportLocalHit(to.pos, damage);
+    }
+  }
 }

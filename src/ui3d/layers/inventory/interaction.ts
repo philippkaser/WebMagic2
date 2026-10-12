@@ -249,7 +249,7 @@ export function useInventoryVersion(ix: InventoryInteraction): number {
  * pointer handlers need the state at the moment of the click). */
 export function carriedNow(): Carried {
   const s = useGame.getState();
-  return { equipment: s.equipment, bag: s.bag, belt: s.belt, chest: s.chest };
+  return { equipment: s.equipment, bag: s.bag, belt: s.belt, pouch: s.pouch, chest: s.chest };
 }
 
 /** One cell's contents as primitives (stable for zustand selectors). */

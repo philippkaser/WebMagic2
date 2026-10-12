@@ -203,6 +203,7 @@ export class Relay {
         if (!inst || !inst.players.has(msg.playerId)) return;
         const target = this.peers.get(msg.playerId);
         if (!target) return;
+        let qty = typeof msg.qty === "number" && Number.isFinite(msg.qty) ? Math.max(1, Math.floor(msg.qty)) : 1;
         if (msg.source === "grave") {
           const pool = this.gravePools.get(inst.id);
           const left = pool?.items.get(msg.itemId) ?? 0;
@@ -210,9 +211,10 @@ export class Relay {
             this.log(`refused grave grant of ${msg.itemId} in ${inst.id} (not in any grave)`);
             return;
           }
-          pool.items.set(msg.itemId, left - 1);
+          qty = Math.min(qty, left);
+          pool.items.set(msg.itemId, left - qty);
         }
-        this.accounts.grant(this.accountOf(target), msg.itemId);
+        this.accounts.grant(this.accountOf(target), msg.itemId, qty);
         break;
       }
       case "grantGold": {

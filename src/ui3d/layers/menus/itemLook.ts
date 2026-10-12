@@ -1,17 +1,15 @@
 import { resolveItem } from "../../../items/catalog";
+import { RARITIES } from "../../../items/rarity";
 import type { Slot } from "../../../items/types";
 
-/** How an item card looks on the menu screens: the artpass item card is
- * framed and named in its rarity colour. Our items have tiers and
- * enchantments instead of rarities, so they borrow its scale — plain
- * common bone, tier-two rare blue, tier-three legendary amber, and
- * anything enchanted (an affix) epic violet. */
+/** How an item card looks on the menu screens: framed and named in its
+ * rarity colour (items/rarity.ts). */
 
 export const RARITY_COLOR = {
-  common: "#b9b0a0",
-  rare: "#5db9ff",
-  epic: "#c86bff",
-  legendary: "#ffb13d",
+  common: RARITIES.common.color,
+  rare: RARITIES.enchanted.color,
+  epic: RARITIES.arcane.color,
+  legendary: RARITIES.legendary.color,
 } as const;
 
 export interface ItemLook {
@@ -26,14 +24,7 @@ export interface ItemLook {
 export function itemLook(itemId: string): ItemLook | null {
   try {
     const item = resolveItem(itemId);
-    const color = item.affix
-      ? RARITY_COLOR.epic
-      : item.def.tier >= 3
-        ? RARITY_COLOR.legendary
-        : item.def.tier === 2
-          ? RARITY_COLOR.rare
-          : RARITY_COLOR.common;
-    return { name: item.name, level: item.level, slot: item.def.slot, color };
+    return { name: item.name, level: item.level, slot: item.def.slot, color: RARITIES[item.rarity].color };
   } catch {
     return null;
   }

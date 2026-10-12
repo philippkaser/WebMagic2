@@ -28,7 +28,7 @@ import { allocId, registerDynamicBody, registerHittable } from "../game/registry
 import { wizardDistSqTo } from "../game/targets";
 import { GOLD_DROPS } from "../items/economy";
 import { rollDrop } from "../items/loot";
-import { resolveItem } from "../items/catalog";
+import { itemSummary, resolveItem } from "../items/catalog";
 import { dropGold, dropLoot } from "../items/LootOrbs";
 import { hostCommand, hostEvent } from "../net/channels";
 import { registerSyncProvider } from "../net/entities";
@@ -173,6 +173,7 @@ export function Breakable({
     const unregisterHit = registerHittable({
       id: allocId(),
       team: "prop",
+      radius: kind === "pot" ? 0.32 : 0.45,
       getPosition: () => body.current?.translation() ?? { x: 0, y: -999, z: 0 },
       hit: (damage, impulse) => {
         if (deadRef.current) return;
@@ -639,7 +640,7 @@ export function TreasurePedestal({ position, floor, seed }: { position: Vec3; fl
         ]);
         return;
       }
-      const desc = item.affix ? `${item.affix.desc} · ${def.desc}` : def.desc;
+      const desc = itemSummary(item);
       offerInteraction(
         `E — Take ${item.name}  (${desc})`,
         d2,

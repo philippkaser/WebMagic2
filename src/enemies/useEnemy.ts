@@ -216,6 +216,7 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
     flash,
     dead,
     immobile: options.immobile,
+    radius: getEnemyStats(options.kind).hitRadius * Math.sqrt(options.healthScale ?? 1),
     knockTimer,
     knockbackScale: options.knockbackScale,
     onKill: kill,
@@ -386,6 +387,8 @@ export function useEnemyNet(opts: {
   onDamaged?: () => void;
   /** Authoritative hp changed (applied here, or a snapshot on a replica). */
   onHp?: (hp: number) => void;
+  /** Body radius hitscan spells aim at. */
+  radius?: number;
 }): NetBody {
   const {
     entityId,
@@ -401,6 +404,7 @@ export function useEnemyNet(opts: {
     hitFeedback,
     onDamaged,
     onHp,
+    radius,
   } = opts;
 
   const netRef = useRef<NetBody | null>(null);
@@ -457,6 +461,7 @@ export function useEnemyNet(opts: {
     return registerHittable({
       id: allocId(),
       team: "enemy",
+      radius,
       getPosition: () => body.current?.translation() ?? { x: 0, y: -999, z: 0 },
       hit: (damage, impulse) => {
         if (deadRef.current) return;

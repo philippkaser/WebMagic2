@@ -84,6 +84,7 @@ describe("planning a plunder", () => {
         null,
       ],
       belt: [{ defId: "potion_mp_weak", qty: 5, runLoot: false }, null],
+      pouch: emptyGrid(8),
       chest: emptyGrid(CHEST_SLOTS),
     };
     expect(BAG_SLOTS).toBe(5);

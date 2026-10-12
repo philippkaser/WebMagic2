@@ -17,6 +17,7 @@ function kit(): CarriedKit {
     },
     bag,
     belt,
+    pouch: [{ defId: "slime_gel", qty: 4, runLoot: true }, { defId: "grave_moss", qty: 2, runLoot: false }, null],
   };
 }
 
@@ -35,7 +36,11 @@ describe("run outcomes", () => {
       { id: "cloak_warden@5", qty: 1 },
       { id: "amulet_focus@4", qty: 1 },
       { id: "potion_hp_weak", qty: 3 },
+      { id: "slime_gel", qty: 4 },
     ]);
+    // Reagents brought from home stay in the pouch; this run's are lost.
+    expect(out.kept.pouch[0]).toBeNull();
+    expect(out.kept.pouch[1]).toEqual({ defId: "grave_moss", qty: 2, runLoot: false });
     expect(out.lostNames).toContain("Keen Ember Staff");
     expect(out.lostNames).toContain("Weak Healing Draught ×3");
   });
@@ -46,5 +51,6 @@ describe("run outcomes", () => {
     expect(banked.equipment.cloak!.runLoot).toBe(false);
     expect(banked.bag.every((s) => !s || !s.runLoot)).toBe(true);
     expect(banked.belt.every((s) => !s || !s.runLoot)).toBe(true);
+    expect(banked.pouch.every((s) => !s || !s.runLoot)).toBe(true);
   });
 });

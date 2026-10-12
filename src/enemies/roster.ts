@@ -34,6 +34,8 @@ export interface EnemyStats {
   singleton: boolean;
   /** Preferred spawn height — sentries sit on the ground, fliers hover. */
   spawnY: number;
+  /** Body radius hitscan spells aim at (beams, lightning, flame). */
+  hitRadius: number;
 }
 
 export const ENEMY_STATS: EnemyStats[] = [
@@ -44,6 +46,7 @@ export const ENEMY_STATS: EnemyStats[] = [
     baseHealth: 30,
     singleton: false,
     spawnY: 1.6,
+    hitRadius: 0.45,
   },
   {
     id: "sentry",
@@ -52,6 +55,7 @@ export const ENEMY_STATS: EnemyStats[] = [
     baseHealth: 60,
     singleton: false,
     spawnY: 0,
+    hitRadius: 0.6,
   },
   {
     id: "shadow",
@@ -60,6 +64,7 @@ export const ENEMY_STATS: EnemyStats[] = [
     baseHealth: 34,
     singleton: false,
     spawnY: 0.8,
+    hitRadius: 0.55,
   },
   {
     id: "slime",
@@ -68,6 +73,7 @@ export const ENEMY_STATS: EnemyStats[] = [
     baseHealth: 46,
     singleton: false,
     spawnY: 0.6,
+    hitRadius: 0.6,
   },
   {
     id: "boss",
@@ -76,6 +82,7 @@ export const ENEMY_STATS: EnemyStats[] = [
     baseHealth: 420,
     singleton: true,
     spawnY: 1.8,
+    hitRadius: 1.6,
   },
 ];
 

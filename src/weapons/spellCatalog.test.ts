@@ -72,6 +72,19 @@ const TODAY: Record<string, SpellNumbers> = {
     kind: "shockwave", mana: 14, cooldown: 1.15, damage: 12, radius: 5.5, impulse: 44,
     particles: 54, light: 48,
   },
+  // The archetypes added after the refactor (beam, rail, chain, cone, mortar).
+  thunderclap: {
+    kind: "shockwave", mana: 16, cooldown: 1.3, damage: 18, radius: 6.5, impulse: 36,
+    particles: 60, light: 56,
+  },
+  beam: { kind: "ray", mana: 1.2, cooldown: 0.08, damage: 5, range: 22, width: 0.25, impulse: 1.5, pierce: 0, look: "beam" },
+  rail: { kind: "ray", mana: 14, cooldown: 1.1, damage: 55, range: 40, width: 0.35, impulse: 22, pierce: 99, look: "rail" },
+  chainbolt: { kind: "chain", mana: 6, cooldown: 0.45, damage: 22, range: 24, jumps: 2, jumpRange: 6, falloff: 0.75, impulse: 6 },
+  flame: { kind: "cone", mana: 1.1, cooldown: 0.07, damage: 4, range: 6.5, angle: 24, impulse: 3 },
+  mortar: {
+    kind: "bolt", mana: 9, cooldown: 0.9, damage: 30, speed: 22, size: 0.22,
+    count: 1, spread: 0.02, gravityScale: 1, blastRadius: 4.2, blastImpulse: 26, lob: 0.32,
+  },
 };
 
 describe("spell catalog — numbers unchanged by the data refactor", () => {
@@ -96,6 +109,12 @@ describe("spell catalog — numbers unchanged by the data refactor", () => {
       voidseed: "Void Seed",
       collapse: "Collapse",
       shockwave: "Shockwave",
+      thunderclap: "Thunderclap",
+      beam: "Prism Ray",
+      rail: "Starpierce",
+      chainbolt: "Forked Lightning",
+      flame: "Dragon's Breath",
+      mortar: "Siege Shell",
     });
   });
 });
@@ -111,6 +130,11 @@ describe("spellInfo — tooltip derived from the numbers", () => {
     expect(info("shockwave")).toBe("12 dmg, huge knockback");
     expect(info("voidseed")).toBe("30 dmg, plant · Collapse to detonate");
     expect(info("collapse")).toBe("implode your seeds → black holes");
+    expect(info("beam")).toBe("5 dmg ×13/s beam, hold");
+    expect(info("rail")).toBe("55 dmg, pierces everything in line");
+    expect(info("chainbolt")).toBe("22 dmg, leaps to 2 more");
+    expect(info("flame")).toBe("4 dmg ×14/s cone, close range");
+    expect(info("mortar")).toBe("30 dmg + blast");
   });
 
   test("every damaging spell's tooltip shows its damage number", () => {

@@ -70,9 +70,11 @@ describe("menu text", () => {
     expect(lossVerdict(null).label).toBeNull();
   });
 
-  test("item cards borrow the rarity scale: tier, enchantment", () => {
-    expect(itemLook("ember_staff")?.color).toBeDefined();
-    expect(itemLook("ember_staff+keen")?.color).toBe(RARITY_COLOR.epic);
+  test("item cards borrow the rarity scale: enchantments, legendaries", () => {
+    expect(itemLook("ember_staff")?.color).toBe(RARITY_COLOR.common);
+    expect(itemLook("ember_staff+keen")?.color).toBe(RARITY_COLOR.rare);
+    expect(itemLook("ember_staff+keen+frenzied")?.color).toBe(RARITY_COLOR.epic);
+    expect(itemLook("stormcaller")?.color).toBe(RARITY_COLOR.legendary);
     expect(itemLook("ember_staff+keen")?.name).toBe("Keen Ember Staff");
     expect(itemLook("no_such_thing")).toBeNull();
   });

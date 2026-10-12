@@ -8,7 +8,7 @@ import {
   multisetOf,
   sellValue,
 } from "../src/items/economy";
-import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS } from "../src/items/inventory";
+import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS, POUCH_SLOTS } from "../src/items/inventory";
 import type { ServerSave, WireEquipment, WireInventory, WireStack } from "../src/net/protocol";
 
 /** Server-side accounts & saves — the anti-cheat foundation.
@@ -64,10 +64,13 @@ const DEFAULT_ITEMS: readonly string[] = [BASIC_STAFF_ID, BASIC_BOOTS_ID];
 
 const MAX_NAME = 24;
 const MAX_ITEM_ID = 64;
-/** Cap per-run grants — far above any legitimate run, only bounds abuse. */
-const MAX_RUN_GRANTS = 200;
+/** Cap per-run grants — far above any legitimate run (materials make a deep
+ * run's list long), only bounds abuse. */
+const MAX_RUN_GRANTS = 1500;
 /** Generic per-cell stack bound (real stack caps are client meaning). */
 const MAX_STACK = 99;
+/** Copies one host attestation may grant (a handful of reagents at once). */
+const MAX_GRANT_QTY = 10;
 
 export function defaultWireEquipment(): WireEquipment {
   return { staff: BASIC_STAFF_ID, amulet: null, cloak: null, boots: BASIC_BOOTS_ID };
@@ -78,6 +81,7 @@ export function defaultWireInventory(): WireInventory {
     equipment: defaultWireEquipment(),
     bag: new Array(BAG_SLOTS).fill(null),
     belt: new Array(BELT_SLOTS).fill(null),
+    pouch: new Array(POUCH_SLOTS).fill(null),
     chest: new Array(CHEST_SLOTS).fill(null),
     gold: 0,
   };
@@ -157,10 +161,10 @@ export class AccountStore {
 
   /** Host attested that this account picked up an item this run. Duplicates
    * are counted — the grants are a multiset. */
-  grant(account: AccountRecord, itemId: string): void {
+  grant(account: AccountRecord, itemId: string, qty = 1): void {
     if (!isItemId(itemId)) return;
-    if (account.runGrants.length >= MAX_RUN_GRANTS) return;
-    account.runGrants.push(itemId);
+    const n = Math.max(1, Math.min(MAX_GRANT_QTY, Math.floor(qty) || 1));
+    for (let i = 0; i < n && account.runGrants.length < MAX_RUN_GRANTS; i++) account.runGrants.push(itemId);
     this.flush();
   }
 
@@ -330,6 +334,7 @@ export class AccountStore {
       },
       belt: settleGrid(sub.belt),
       bag: settleGrid(sub.bag),
+      pouch: settleGrid(sub.pouch),
       chest: settleGrid(sub.chest),
       gold: Math.min(
         sub.gold,
@@ -399,6 +404,7 @@ export function sanitizeInventory(raw: unknown): WireInventory {
     },
     bag: sanitizeGrid(d.bag, BAG_SLOTS),
     belt: sanitizeGrid(d.belt, BELT_SLOTS),
+    pouch: sanitizeGrid(d.pouch, POUCH_SLOTS),
     chest: sanitizeGrid(d.chest, CHEST_SLOTS),
     gold: clampGold(d.gold, GOLD_RULES.accountCap),
   };
@@ -409,6 +415,7 @@ function cloneInventory(inv: WireInventory): WireInventory {
     equipment: { ...inv.equipment },
     bag: inv.bag.map((s) => (s ? { ...s } : null)),
     belt: inv.belt.map((s) => (s ? { ...s } : null)),
+    pouch: inv.pouch.map((s) => (s ? { ...s } : null)),
     chest: inv.chest.map((s) => (s ? { ...s } : null)),
     gold: inv.gold,
   };

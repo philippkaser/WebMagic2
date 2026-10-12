@@ -36,20 +36,30 @@ export function merchantPrice(itemId: string): number | null {
  * tier, +bonus if enchanted; consumables at a quarter of his own price.
  * Returns null for ids he won't touch (unknown/corrupt). */
 const GEAR_SELL_BY_TIER = [0, 9, 21, 38] as const;
+/** Per enchantment. */
 const AFFIX_SELL_BONUS = 14;
+/** Per forge enhancement step — enhancing is costly, selling it back isn't
+ * a way to turn reagents into gold. */
+const ENHANCE_SELL_BONUS = 10;
+const UNIQUE_SELL_BONUS = 70;
 /** Deeper finds fetch a little more — enough to notice, never a gold farm. */
 const SELL_PER_LEVEL = 0.8;
+/** Reagents fetch pocket change: they're worth far more brewed or forged. */
+const MATERIAL_SELL_BY_TIER = [0, 1, 3, 12] as const;
 
 export function sellValue(itemId: string): number | null {
   try {
     const item = resolveItem(itemId);
+    if (item.def.slot === "material") return MATERIAL_SELL_BY_TIER[item.def.tier];
     if (item.def.slot === "consumable") {
       const price = merchantPrice(item.def.id);
-      return price !== null ? Math.ceil(price / 4) : 4;
+      return price !== null ? Math.ceil(price / 4) : item.def.tier >= 2 ? 8 : 4;
     }
     return (
       GEAR_SELL_BY_TIER[item.def.tier] +
-      (item.affix ? AFFIX_SELL_BONUS : 0) +
+      item.affixes.length * AFFIX_SELL_BONUS +
+      item.enhance * ENHANCE_SELL_BONUS +
+      (item.def.unique ? UNIQUE_SELL_BONUS : 0) +
       Math.floor(Math.max(0, item.level - 1) * SELL_PER_LEVEL)
     );
   } catch {
@@ -108,7 +118,7 @@ export function multisetOf(inv: WireInventory): Map<string, number> {
   add(inv.equipment.amulet);
   add(inv.equipment.cloak);
   add(inv.equipment.boots);
-  for (const grid of [inv.bag, inv.belt, inv.chest]) {
+  for (const grid of [inv.bag, inv.belt, inv.pouch ?? [], inv.chest]) {
     for (const stack of grid) if (stack) add(stack.id, stack.qty);
   }
   return counts;

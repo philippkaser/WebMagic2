@@ -61,12 +61,14 @@ export interface WireStack {
 }
 
 /** The full banked inventory: equipment, the Q/E belt, the 5-slot bag, the
- * 30-slot village chest, and gold. Item ids stay opaque to the server; it
+ * reagent pouch, the 30-slot village chest, and gold. Item ids stay opaque to the server; it
  * validates PROVENANCE (multiset ⊆ owned ∪ granted), never meaning. */
 export interface WireInventory {
   equipment: WireEquipment;
   bag: (WireStack | null)[];
   belt: (WireStack | null)[];
+  /** The reagent pouch (materials). Absent in saves from before it existed. */
+  pouch: (WireStack | null)[];
   chest: (WireStack | null)[];
   gold: number;
 }
@@ -121,7 +123,7 @@ export type ClientMsg =
    * `source: "grave"` = plundered from a grave: honored only against what
    * wizards who died in that instance were actually granted (their grave
    * pool), so a forged grave can't mint bankable items. */
-  | { t: "grant"; playerId: string; itemId: string; source?: "grave" }
+  | { t: "grant"; playerId: string; itemId: string; qty?: number; source?: "grave" }
   /** HOST attestation of a gold pickup — gold's provenance path, mirroring
    * `grant` (server-side sanity caps in items/economy.ts GOLD_RULES). */
   | { t: "grantGold"; playerId: string; amount: number; source?: "grave" }

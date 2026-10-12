@@ -7,7 +7,7 @@ import { Rng } from "../core/rng";
 import { KillCredit } from "../encounters/killCredit";
 import type { DamageSource } from "../game/damageSource";
 import { getFloorRules } from "../game/floorRules";
-import { computeStats, getItemDef, resolveItem } from "../items/catalog";
+import { computeStats, getItemDef, hasProc, resolveItem } from "../items/catalog";
 import { GAMBLE_PRICE, merchantPrice, multisetOf, sellValue } from "../items/economy";
 import {
   addToGrid,
@@ -20,6 +20,7 @@ import {
   type Grid,
   type SlotRef,
 } from "../items/inventory";
+import { addBuff, getBuffDef, liveBuffs, withBlessings, type ActiveBuff } from "../items/buffs";
 import { rollGamble } from "../items/loot";
 import type { DerivedStats, Equipment } from "../items/types";
 import { netBus } from "../net/bus";
@@ -81,12 +82,16 @@ export interface GameState {
   bag: Grid;
   /** 2 quick slots for consumables: belt[0] = Q, belt[1] = E. */
   belt: Grid;
+  /** The reagent pouch — materials only, at risk like the bag. */
+  pouch: Grid;
   /** 30 slots, lives in the village — never carried, never at risk. */
   chest: Grid;
   /** Banked gold (safe). */
   gold: number;
   /** Gold gathered this run — lost on death, banked with the rest. */
   runGold: number;
+  /** Timed blessings from elixirs (items/buffs.ts), ended by time or death. */
+  buffs: ActiveBuff[];
   overlay: Overlay;
   /** Contextual interaction prompt ("E — Descend…") and where in the world
    * it belongs (null = in front of the player). */
@@ -228,6 +233,8 @@ export function isDevInvuln(): boolean {
 }
 /** An Orb of Fortune is in the server's hands — reveal on the next save. */
 let pendingGamble = false;
+/** The floor (instance:floor) the Phoenix last refused a death on. */
+let phoenixFloor = "";
 
 export const useGame = create<GameState>((set, get) => ({
   phase: "menu",
@@ -241,9 +248,11 @@ export const useGame = create<GameState>((set, get) => ({
   equipment: saved.equipment,
   bag: saved.bag,
   belt: saved.belt,
+  pouch: saved.pouch,
   chest: saved.chest,
   gold: saved.gold,
   runGold: 0,
+  buffs: [],
   overlay: "none",
   prompt: null,
   promptAt: null,
@@ -498,6 +507,12 @@ export const useGame = create<GameState>((set, get) => ({
     set({ belt: takeOneAt(state.belt, index) });
     if (effect.heal) get().heal(effect.heal);
     if (effect.mana) set({ mana: Math.min(PLAYER.maxMana, get().mana + effect.mana) });
+    if (effect.buff) {
+      const now = performance.now();
+      set({ buffs: addBuff(liveBuffs(get().buffs, now), effect.buff, now) });
+      const buff = getBuffDef(effect.buff);
+      gameEvents.emit("buff", { id: effect.buff, seconds: buff.seconds });
+    }
     playPickup();
     gameEvents.emit("message", `${def.name} used`);
     syncVillage(get());
@@ -542,7 +557,14 @@ export const useGame = create<GameState>((set, get) => ({
     killCredit.record(source, performance.now(), useNet.getState().playerId || "self");
     const stats = getStats();
     const dealt = amount * stats.damageTakenMult;
-    const health = Math.max(0, state.health - dealt);
+    let health = Math.max(0, state.health - dealt);
+    // Heart of the Phoenix: once a floor, a killing blow is refused.
+    if (health <= 0 && state.phase === "dungeon" && hasProc(stats, "phoenix") && phoenixFloor !== `${state.instanceId}:${state.floor}`) {
+      phoenixFloor = `${state.instanceId}:${state.floor}`;
+      health = Math.round(stats.maxHealth * 0.35);
+      gameEvents.emit("phoenix", undefined);
+      gameEvents.emit("message", "The Phoenix refuses your death — once.");
+    }
     playHurt();
     gameEvents.emit("playerHurt", { amount: dealt });
     gameEvents.emit("shake", Math.min(dealt / 40, 1));
@@ -678,7 +700,7 @@ function clampedHealth(state: Pick<GameState, "health" | "equipment">): number {
 }
 
 function carriedOf(state: GameState): Carried {
-  return { equipment: state.equipment, bag: state.bag, belt: state.belt, chest: state.chest };
+  return { equipment: state.equipment, bag: state.bag, belt: state.belt, pouch: state.pouch, chest: state.chest };
 }
 
 /** Everything carried becomes safe; run gold joins the purse. */
@@ -696,6 +718,7 @@ function persistCurrent(state: SaveData): void {
     equipment: state.equipment,
     bag: state.bag,
     belt: state.belt,
+    pouch: state.pouch,
     chest: state.chest,
     gold: state.gold,
   });
@@ -770,6 +793,7 @@ function die(
       grave,
     },
     runGold: 0,
+    buffs: [],
     prompt: null,
     overlay: "none",
   });
@@ -821,14 +845,18 @@ netBus.on("assigned", (a) => {
 // The ears start as the player left them.
 setHeadphones(useGame.getState().headphones);
 
-// Dev-only hook for debugging and end-to-end scripts.
+// Dev-only hooks for debugging and end-to-end scripts.
 if (typeof window !== "undefined" && import.meta.env?.DEV) {
   (window as unknown as Record<string, unknown>).__game = useGame;
+  (window as unknown as Record<string, unknown>).__invuln = setDevInvuln;
 }
 
-/** Current derived stats — cheap enough to compute on demand. */
+/** Current derived stats — the gear's (cheap enough to compute on demand)
+ * with any live blessings folded over it. */
 export function getStats(): DerivedStats {
-  return computeStats(useGame.getState().equipment);
+  const s = useGame.getState();
+  const gear = computeStats(s.equipment);
+  return s.buffs.length > 0 ? withBlessings(gear, s.buffs, performance.now()) : gear;
 }
 
 /** What the Weighing reads from this equipment: gear level and entry floor. */

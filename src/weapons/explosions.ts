@@ -11,6 +11,7 @@ import { forEachHittable } from "../game/registry";
 import { useGame } from "../state/gameStore";
 import { localBlastEffect, type DamageTeam } from "./allegiance";
 import { localWizardId } from "./localWizard";
+import { reportLocalHit } from "./procs";
 
 export type { DamageTeam } from "./allegiance";
 
@@ -39,6 +40,8 @@ export interface ExplosionOptions {
    * entity damage — the authoritative copy of this explosion runs elsewhere.
    * Prevents double damage in multiplayer. */
   remote?: boolean;
+  /** Made by a legendary power: its hits don't roll powers again. */
+  noProc?: boolean;
 }
 
 const tmp = new Vector3();
@@ -70,6 +73,10 @@ export function explode(opts: ExplosionOptions): void {
   playExplosion(radius, [center.x, center.y, center.z]);
 
   if (!opts.remote) {
+    // Our own magic's toll on creatures feeds lifesteal and the
+    // legendaries' powers (weapons/procs.ts).
+    const ours = team === "player" && opts.source?.kind === "wizard" && opts.source.id === localWizardId();
+    let dealt = 0;
     forEachHittable((h) => {
       const hurtEnemies = team === "player" || team === "neutral";
       if (h.team === "enemy" && !hurtEnemies) return;
@@ -81,7 +88,9 @@ export function explode(opts: ExplosionOptions): void {
       tmp.normalize().multiplyScalar(impulse * falloff);
       tmp.y += impulse * falloff * 0.35; // lift things — more satisfying
       h.hit(damage * falloff, { x: tmp.x, y: tmp.y, z: tmp.z });
+      if (h.team === "enemy") dealt += damage * falloff;
     });
+    if (ours && !opts.noProc && dealt > 0) reportLocalHit(center, dealt);
   }
 
   // The local wizard is physical too, and every machine decides for itself:

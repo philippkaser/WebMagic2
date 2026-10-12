@@ -12,14 +12,16 @@ describe("item ids & enchantments", () => {
     expect(makeItemId("ember_staff", "keen")).toBe("ember_staff+keen");
     expect(splitItemId("ember_staff")).toEqual({
       baseId: "ember_staff",
-      affixId: null,
+      affixIds: [],
       level: null,
+      enhance: 0,
       wellFormed: true,
     });
     expect(splitItemId("ember_staff+keen")).toEqual({
       baseId: "ember_staff",
-      affixId: "keen",
+      affixIds: ["keen"],
       level: null,
+      enhance: 0,
       wellFormed: true,
     });
   });
@@ -29,8 +31,9 @@ describe("item ids & enchantments", () => {
     expect(makeItemId("ember_staff", null, 3)).toBe("ember_staff@3");
     expect(splitItemId("ember_staff+keen@12")).toEqual({
       baseId: "ember_staff",
-      affixId: "keen",
+      affixIds: ["keen"],
       level: 12,
+      enhance: 0,
       wellFormed: true,
     });
     expect(splitItemId("ember_staff@3").level).toBe(3);
@@ -72,8 +75,8 @@ describe("item ids & enchantments", () => {
   test("resolveItem names and validates enchanted items", () => {
     const item = resolveItem("void_staff+keen");
     expect(item.name).toBe("Keen Staff of the Hollow");
-    expect(item.affix!.id).toBe("keen");
-    expect(resolveItem("worn_boots").affix).toBeNull();
+    expect(item.affixes.map((a) => a.id)).toEqual(["keen"]);
+    expect(resolveItem("worn_boots").affixes).toEqual([]);
     expect(() => resolveItem("void_staff+nope")).toThrow();
     expect(() => resolveItem("nope+keen")).toThrow();
   });
@@ -111,13 +114,13 @@ describe("item ids & enchantments", () => {
     for (let i = 0; i < 300; i++) {
       const id = rollDrop(rng, 12);
       const item = resolveItem(id); // throws on any malformed roll
-      if (item.affix) {
+      if (item.affixes.length > 0) {
         enchanted++;
         expect(item.def.slot).not.toBe("consumable"); // consumables stay plain
       }
       if (item.def.slot === "consumable") {
         expect(splitItemId(id).level).toBeNull();
-      } else {
+      } else if (!item.def.unique) {
         // Gear is found at (about) the depth it dropped on.
         expect(item.level).toBeGreaterThanOrEqual(11);
         expect(item.level).toBeLessThanOrEqual(13);
@@ -132,7 +135,7 @@ describe("item ids & enchantments", () => {
     for (let i = 0; i < 200; i++) {
       const item = resolveItem(rollGamble(rng, 5));
       expect(item.def.slot).not.toBe("consumable");
-      if (item.affix) enchanted++;
+      if (item.affixes.length > 0) enchanted++;
     }
     expect(enchanted).toBeGreaterThan(40); // ~45% odds
     // A gamble should be a gamble, not a guaranteed profit.

@@ -15,6 +15,7 @@ function carried(over: Partial<Carried> = {}): Carried {
     },
     bag: emptyGrid(5),
     belt: emptyGrid(2),
+    pouch: emptyGrid(8),
     chest: emptyGrid(30),
     ...over,
   };
