@@ -1,8 +1,8 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Group, PlaneGeometry, Vector3 } from "three";
-import { resolveItem } from "../../../items/catalog";
-import type { GearSlot } from "../../../items/types";
+import { getItemDef, resolveItem } from "../../../items/catalog";
+import { isGearSlot, type GearSlot } from "../../../items/types";
 import { pxFor } from "../../anchors";
 import { uiNow } from "../../clock";
 import { ItemModel } from "../../ItemModel";
@@ -15,7 +15,7 @@ import { emitUiSparks } from "../../UiSparks";
 import { cardFrame, cardMaterial, cardQuad } from "./card";
 import { EMPTY_FRAME, gradeOf, litFrame, type Grade } from "./grade";
 import { useCell, useInventory, type InventoryInteraction } from "./interaction";
-import { SCENE_DISTANCE, TEXT, type SocketSpec } from "./layout";
+import { ANVIL_KEY, SCENE_DISTANCE, TEXT, type SocketSpec } from "./layout";
 import { PixelSprite, spriteSize, type SpriteName } from "./sprites";
 
 /** One socket, drawn as a grimoire item card (artpass `.wm-card`): a
@@ -74,8 +74,13 @@ function lookOf(ix: InventoryInteraction, key: string): Look {
   if (drag) {
     if (drag.fromKey === key) return "from";
     if (drag.accepts.has(key)) return drag.targetKey === key ? "target" : "accepts";
-    // Maro's wares never take anything: over them, the drop means "sell".
-    return drag.overKey === key && !key.startsWith("ware:") ? "refuses" : "idle";
+    // The anvil takes gear: it kindles like a socket that would take it.
+    if (key === ANVIL_KEY && ix.mode === "forge") {
+      if (drag.action.kind === "anvil") return "target";
+      return isGearSlot(getItemDef(drag.itemId).slot) ? "accepts" : "idle";
+    }
+    // Wares and recipes never take anything (over a ware, the drop means "sell").
+    return drag.overKey === key && !key.startsWith("ware:") && !key.startsWith("recipe:") ? "refuses" : "idle";
   }
   if (ix.hover === key) return "hover";
   if (ix.compareKey === key) return "compare";

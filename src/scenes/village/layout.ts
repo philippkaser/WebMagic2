@@ -67,6 +67,15 @@ export const SPAWN: Vec3 = [0, 1.2, 10];
 
 export const CHEST = { pos: [8, 0, 9.5] as Vec3, rot: -2.2 };
 export const MERCHANT = { pos: [-8.5, 0, 11] as Vec3, rot: 2.5 };
+/** Old Wenna's cauldron, out east past the pavilion. */
+export const CAULDRON = { pos: [16.5, 0, 2.5] as Vec3, rot: facing([16.5, 2.5], [4, 3]) };
+/** Brannoc's forge, east of the gate under the forest. */
+export const FORGE = { pos: [15, 0, -4.5] as Vec3, rot: facing([15, -4.5], [4, -1]) };
+/** The fellowship board: notices, sworn fellowships, invite codes — beside
+ * the lane where everyone walks. */
+export const GUILD_BOARD = { pos: [-3.6, 0, 12.2] as Vec3, rot: facing([-3.6, 12.2], [0, 11.5]) };
+/** The obelisk to the Proving Ground, north of the gate before the forest. */
+export const OBELISK = { pos: [0, 0, -11.5] as Vec3, rot: facing([0, -11.5], [0, 0]) };
 export const DEV_SLAB: Vec3 = [0, 0, 14];
 /** Torch posts flanking the gate. */
 export const GATE_TORCHES: Vec3[] = [
@@ -111,6 +120,10 @@ export const BOUNDS = 25;
 export const KEEP_CLEAR: [number, number, number][] = [
   [CHEST.pos[0], CHEST.pos[2], 2],
   [MERCHANT.pos[0], MERCHANT.pos[2], 2.8],
+  [CAULDRON.pos[0], CAULDRON.pos[2], 2.6],
+  [FORGE.pos[0], FORGE.pos[2], 2.8],
+  [GUILD_BOARD.pos[0], GUILD_BOARD.pos[2], 1.6],
+  [OBELISK.pos[0], OBELISK.pos[2], 2.6],
   [DEV_SLAB[0], DEV_SLAB[2], 2],
   [4.2, 6.1, 1.4], // crates
   [-4.6, 6.6, 1.4], // barrel + pot

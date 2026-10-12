@@ -1,4 +1,5 @@
-import { maxStackOf } from "../../../items/catalog";
+import { getItemDef, maxStackOf } from "../../../items/catalog";
+import { isGearSlot } from "../../../items/types";
 import { sellValue } from "../../../items/economy";
 import { moveItem, readSlot, type Carried, type SlotRef } from "../../../items/inventory";
 import type { InventoryMode, SocketSpec, TabletId } from "./layout";
@@ -26,6 +27,9 @@ export type DropAction =
   | { kind: "move"; to: SlotRef; swap: boolean; merge: boolean }
   /** Onto Maro's stall: he pays `gold` for the whole stack. */
   | { kind: "sell"; gold: number }
+  /** Onto Brannoc's forge: the item is laid on the anvil (it stays where it
+   * is; the forge works it there). */
+  | { kind: "anvil" }
   /** Off the tablets in the dungeon: it falls to the floor as real loot. */
   | { kind: "drop" }
   /** Off the tablets in the village: it's gone. */
@@ -71,6 +75,14 @@ export function resolveDrop(inv: Carried, from: SlotRef, hit: PointerHit, ctx: D
     return { kind: "move", to, swap: !!target && !merge, merge };
   }
 
+  // Anywhere on the forge lays gear on the anvil.
+  const onForge = (hit.kind === "socket" || hit.kind === "tablet") && hit.tablet === "forge";
+  if (onForge) {
+    if (ctx.mode !== "forge" || !ctx.inVillage) return { kind: "none" };
+    if (!isGearSlot(getItemDef(stack.defId).slot)) return { kind: "none", reason: "Only gear goes on the anvil" };
+    return { kind: "anvil" };
+  }
+
   // Anywhere on Maro's stall (a ware's shelf included) sells.
   const onStall = (hit.kind === "socket" || hit.kind === "tablet") && hit.tablet === "stall";
   if (onStall) {
@@ -101,6 +113,8 @@ export function dropHint(action: DropAction, inv: Carried, from: SlotRef): { tex
     }
     case "sell":
       return { text: `SELL · ${action.gold} GOLD`, tone: "gold" };
+    case "anvil":
+      return { text: "ON THE ANVIL", tone: "gold" };
     case "drop": {
       const stack = readSlot(inv, from);
       return { text: stack && stack.qty > 1 ? `DROP ×${stack.qty}` : "DROP", tone: "danger" };
@@ -131,7 +145,7 @@ export function acceptingSockets(
  * or bag cell that gained an item, so the scene can fly it there from Maro's
  * shelf. The store chooses the cell; this only finds it afterwards. */
 export function landedCell(before: Carried, after: Carried): SlotRef | null {
-  for (const container of ["belt", "bag"] as const) {
+  for (const container of ["belt", "bag", "pouch", "chest"] as const) {
     const a = before[container];
     const b = after[container];
     if (a === b) continue;

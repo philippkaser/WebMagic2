@@ -31,7 +31,8 @@ import { ItemModel } from "../ui3d/ItemModel";
 import { getItemDef, itemSummary, resolveItem } from "./catalog";
 import { rarityColor } from "./rarity";
 import { bossGoldAmount, enemyGoldAmount, propGoldAmount } from "./economy";
-import { rollDrop } from "./loot";
+import { rollMaterialDrops, type MaterialSource } from "./materials";
+import { rollDrop, rollReward, rollUnique } from "./loot";
 import { useGame } from "../state/gameStore";
 import type { Slot } from "./types";
 import type { Vec3 } from "../world/types";
@@ -41,14 +42,17 @@ import type { Vec3 } from "../world/types";
  * can never be taken twice. All of it is typed net messages — pickup code has
  * no host/replica branches, and offline the same requests dispatch locally.
  *
- * Two orb families share the pipeline: ITEM orbs (E to take, routed into the
- * inventory) and GOLD orbs (vacuumed automatically by walking close). */
+ * Three orb families share the pipeline: ITEM orbs (E to take, routed into
+ * the inventory), GOLD orbs and REAGENT orbs (both vacuumed automatically by
+ * walking close — reagents into the pouch, a few at a time). */
 
 interface Orb {
   id: string;
   /** Item orb when set; gold orb when null. */
   defId: string | null;
   gold: number;
+  /** Copies (reagents drop in little clutches). */
+  qty?: number;
   position: Vec3;
 }
 
@@ -57,9 +61,16 @@ let pushOrb: ((orb: Orb) => void) | null = null;
 let takeOrbLocal: ((orbId: string, by: string) => void) | null = null;
 let liveOrbs: (() => Orb[]) | null = null;
 
-const orbSpawned = hostEvent<{ orbId: string; defId: string | null; gold: number; pos: Vec3 }>(
+const orbSpawned = hostEvent<{ orbId: string; defId: string | null; gold: number; qty?: number; pos: Vec3 }>(
   "orbSpawned",
-  (d) => pushOrb?.({ id: d.orbId, defId: d.defId ?? null, gold: d.gold ?? 0, position: d.pos }),
+  (d) =>
+    pushOrb?.({
+      id: d.orbId,
+      defId: d.defId ?? null,
+      gold: d.gold ?? 0,
+      qty: Math.max(1, Math.min(10, Math.floor(d.qty ?? 1) || 1)),
+      position: d.pos,
+    }),
 );
 
 const orbTaken = hostEvent<{ orbId: string; by: string }>("orbTaken", (d) =>
@@ -80,7 +91,7 @@ const takeOrb = hostCommand<{ orbId: string }>("takeOrb", (d, meta) => {
     return;
   orbTaken.announce({ orbId: d.orbId, by: meta.from });
   // Host attestation makes the pickup bankable server-side for that player.
-  if (orb.defId) session.attestGrant(meta.from, orb.defId);
+  if (orb.defId) session.attestGrant(meta.from, orb.defId, undefined, orb.qty ?? 1);
   else if (orb.gold > 0) session.attestGold(meta.from, orb.gold);
 });
 
@@ -98,11 +109,12 @@ const dropOrb = hostCommand<{ defId: string; pos: Vec3 }>("dropOrb", (d, meta) =
   announceOrb(d.defId, 0, d.pos);
 });
 
-function announceOrb(defId: string | null, gold: number, pos: Vec3): void {
+function announceOrb(defId: string | null, gold: number, pos: Vec3, qty = 1): void {
   orbSpawned.announce({
     orbId: `orb_${orbCounter++}_${Math.random().toString(36).slice(2, 6)}`,
     defId,
     gold,
+    ...(qty > 1 ? { qty } : {}),
     pos,
   });
 }
@@ -133,10 +145,43 @@ export function dropLoot(position: Vec3, floor: number, chance = 1): void {
   announceOrb(itemId, 0, position);
 }
 
+/** A legendary for this depth (bosses, vaults) — the authority rolls it. */
+export function dropUnique(position: Vec3, floor: number): void {
+  if (!isHost()) return;
+  const id = rollUnique(new Rng((Math.random() * 0xffffffff) >>> 0), floor);
+  if (id) announceOrb(id, 0, position);
+}
+
+/** A reward roll (vaults, ward stones): always gear, juiced enchantments,
+ * `legendary` odds of a named piece. Authority-only. */
+export function dropReward(position: Vec3, floor: number, legendary: number): void {
+  if (!isHost()) return;
+  announceOrb(rollReward(new Rng((Math.random() * 0xffffffff) >>> 0), floor, legendary), 0, position);
+}
+
+/** A clutch of one reagent (vault rewards, salvage on the floor). */
+export function dropReagent(defId: string, qty: number, position: Vec3): void {
+  if (!isHost()) return;
+  announceOrb(defId, 0, position, qty);
+}
+
 /** Drop one SPECIFIC item (boss feathers, scripted rewards) — no roll. */
 export function dropItem(defId: string, position: Vec3): void {
   if (!isHost()) return;
   announceOrb(defId, 0, position);
+}
+
+/** What a kill or a break leaves for the cauldron and the forge
+ * (items/materials.ts). Authority-only, like every drop; the floor's loot
+ * rule (omens) scales the odds. Each reagent is its own little orb, fanned
+ * out round the body. */
+export function dropMaterials(position: Vec3, floor: number, source: MaterialSource): void {
+  if (!isHost()) return;
+  const drops = rollMaterialDrops(new Rng((Math.random() * 0xffffffff) >>> 0), source, floor, getFloorRules().lootChanceMult);
+  drops.forEach((d, i) => {
+    const a = (i / Math.max(1, drops.length)) * Math.PI * 2 + Math.random();
+    announceOrb(d.id, 0, [position[0] + Math.cos(a) * 0.5, position[1], position[2] + Math.sin(a) * 0.5], d.qty);
+  });
 }
 
 /** Scatter coins at a position. Amounts live in items/economy.ts — the one
@@ -174,8 +219,11 @@ export function LootOrbs() {
         if (!orb) return prev;
         const myId = useNet.getState().playerId;
         if (by === myId || by === "self") {
-          if (orb.defId) useGame.getState().acquireItem(orb.defId);
-          else if (orb.gold > 0) useGame.getState().addGold(orb.gold);
+          if (orb.defId) {
+            const n = orb.qty ?? 1;
+            if (n > 1) useGame.getState().acquireMany(orb.defId, n);
+            else useGame.getState().acquireItem(orb.defId);
+          } else if (orb.gold > 0) useGame.getState().addGold(orb.gold);
         }
         spawnBurst({
           position: [orb.position[0], orb.position[1] + 0.5, orb.position[2]],
@@ -226,7 +274,13 @@ export function LootOrbs() {
   return (
     <>
       {orbs.map((orb) =>
-        orb.defId ? <ItemOrb key={orb.id} orb={orb} /> : <GoldOrb key={orb.id} orb={orb} />,
+        !orb.defId ? (
+          <GoldOrb key={orb.id} orb={orb} />
+        ) : getItemDef(orb.defId).slot === "material" ? (
+          <ReagentOrb key={orb.id} orb={orb} />
+        ) : (
+          <ItemOrb key={orb.id} orb={orb} />
+        ),
       )}
     </>
   );
@@ -294,6 +348,57 @@ function ItemOrb({ orb }: { orb: Orb }) {
     <group ref={group} position={orb.position}>
       <LootBeacon color={item.rarity === "common" ? def.color : rarityColor(item.rarity)} tier={def.tier} enchanted={item.rarity !== "common"} />
       <group scale={LOOT_SCALE[def.slot]} rotation={[0, 0, def.slot === "staff" ? -0.35 : 0]}>
+        <ItemModel itemId={orb.defId!} />
+      </group>
+    </group>
+  );
+}
+
+/** Reagents gather themselves too — they hop toward you from a little
+ * further than coins, glinting in their own colour. */
+const REAGENT_VACUUM_RANGE_SQ = 2.2 * 2.2;
+
+function ReagentOrb({ orb }: { orb: Orb }) {
+  const group = useRef<Group>(null);
+  const light = useRef<DynamicLightSource | null>(null);
+  const requested = useRef(0);
+  const def = getItemDef(orb.defId!);
+  const [x, y, z] = orb.position;
+  const fallY = useRef(y);
+  const spin = useRef(Math.random() * 6);
+
+  useEffect(() => {
+    const src = addLightSource({ position: [x, y + 0.3, z], color: def.color, intensity: def.tier >= 3 ? 2.4 : 1.2, distance: 3.5, priority: 0 });
+    light.current = src;
+    return () => {
+      removeLightSource(src);
+      light.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useFrame(({ clock }, dt) => {
+    const g = group.current;
+    if (!g) return;
+    const t = clock.elapsedTime + spin.current;
+    fallY.current = Math.max(0, fallY.current - dt * 1.7);
+    g.position.set(x, fallY.current + 0.2 + Math.sin(t * 3.4) * 0.05, z);
+    g.rotation.y = t * 2.6;
+    light.current?.position.copy(g.position);
+    requested.current -= dt;
+    const d2 = playerPosition.distanceToSquared(g.position);
+    if (requested.current > 0 || d2 > REAGENT_VACUUM_RANGE_SQ) return;
+    if (!useGame.getState().canAcquire(orb.defId!)) {
+      if (d2 < 3) offerInteraction(`Your pouch is full — ${def.name} stays`, d2, () => {}, [g.position.x, g.position.y + 0.6, g.position.z]);
+      return;
+    }
+    requested.current = 0.6; // throttle while the grant round-trips
+    takeOrb.request({ orbId: orb.id });
+  });
+
+  return (
+    <group ref={group} position={orb.position}>
+      <group scale={LOOT_SCALE.material}>
         <ItemModel itemId={orb.defId!} />
       </group>
     </group>

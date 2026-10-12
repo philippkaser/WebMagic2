@@ -1,5 +1,6 @@
 import { DUNGEON } from "../src/core/config";
 import { Rng } from "../src/core/rng";
+import { isWireSlot } from "../src/items/crafting";
 import { rollGamble } from "../src/items/loot";
 import { FloorDirectory, type JoinOptions } from "../src/net/matchmaking";
 import {
@@ -177,6 +178,23 @@ export class Relay {
         const save = this.accounts.gamble(account, rolled);
         peer.send({ t: "saved", save: save ?? this.accounts.saveOf(account) });
         if (save) this.log(`${peer.id} gambled and drew ${rolled}`);
+        break;
+      }
+      case "craft": {
+        // Cauldron and forge: the server's dice, the shared pure recipe,
+        // the banked inventory. Never mid-run.
+        const account = this.accountOf(peer);
+        if (this.directory.instanceOf(peer.id)) return;
+        if (typeof msg.recipe !== "string") return;
+        const target = isWireSlot(msg.target) ? msg.target : undefined;
+        const out = this.accounts.craft(account, { recipe: msg.recipe, target }, new Rng((Math.random() * 0xffffffff) >>> 0));
+        const save = this.accounts.saveOf(account);
+        if (out.ok) {
+          peer.send({ t: "crafted", save, ok: true, produced: out.produced, changed: out.changed });
+          this.log(`${peer.id} crafted ${msg.recipe}`);
+        } else {
+          peer.send({ t: "crafted", save, ok: false, reason: out.reason });
+        }
         break;
       }
       case "died": {

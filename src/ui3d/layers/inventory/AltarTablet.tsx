@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Group } from "three";
-import { BAG_SLOTS } from "../../../items/inventory";
+import { BAG_SLOTS, POUCH_SLOTS } from "../../../items/inventory";
 import { useGame } from "../../../state/gameStore";
 import { useUiShow } from "../../presence";
 import { Tablet } from "../../Tablet";
@@ -29,10 +29,16 @@ function ReadyFlag() {
 }
 
 /** The span of a socket row, for its recess and caption. */
-function rowSpan(spec: TabletSpec, variant: "belt" | "bag") {
+function rowSpan(spec: TabletSpec, variant: "belt" | "bag" | "pouch") {
   const xs = spec.sockets.filter((s) => s.variant === variant).map((s) => s.x);
-  const half = ALTAR.rowSize / 2 + CARD_TEXEL * 3;
+  const half = (variant === "pouch" ? ALTAR.pouchSize : ALTAR.rowSize) / 2 + CARD_TEXEL * 3;
   return { x0: Math.min(...xs) - half, x1: Math.max(...xs) + half };
+}
+
+/** "POUCH · 4/8" — how many of the pouch's cells hold a reagent. */
+function PouchCount({ x, y }: { x: number; y: number }) {
+  const used = useGame((s) => s.pouch.filter(Boolean).length);
+  return <SectionLabel text={`${used}/${POUCH_SLOTS}`} x={x} y={y} align="right" color={used >= POUCH_SLOTS ? ink.blood : ink.faded} delay={0.25} />;
 }
 
 /** "SATCHEL · 3/5" — how full the bag is, like artpass's item count. */
@@ -55,6 +61,10 @@ export function AltarTablet({ tilt = false }: { tilt?: boolean }) {
   const wellTop = ALTAR.rowY + ALTAR.rowSize / 2 + CARD_TEXEL * 3;
   const wellBottom = ALTAR.rowY - ALTAR.rowSize / 2 - CARD_TEXEL * 3 - LABEL_PX * 8.5;
   const captionY = wellTop + LABEL_PX * 4.5;
+  const pouch = rowSpan(spec, "pouch");
+  const pouchTop = ALTAR.pouchY + ALTAR.pouchSize / 2 + CARD_TEXEL * 3;
+  const pouchBottom = ALTAR.pouchY - ALTAR.pouchSize / 2 - CARD_TEXEL * 3;
+  const pouchCaptionY = pouchTop + LABEL_PX * 4.5;
   const m = ALTAR.marginX;
 
   return (
@@ -72,6 +82,9 @@ export function AltarTablet({ tilt = false }: { tilt?: boolean }) {
         <BagCount x={bag.x1} y={captionY} />
         <Recess x={(belt.x0 + belt.x1) / 2} y={(wellTop + wellBottom) / 2} w={belt.x1 - belt.x0} h={wellTop - wellBottom} />
         <Recess x={(bag.x0 + bag.x1) / 2} y={(wellTop + wellBottom) / 2} w={bag.x1 - bag.x0} h={wellTop - wellBottom} />
+        <SectionLabel text="REAGENT POUCH" x={pouch.x0} y={pouchCaptionY} />
+        <PouchCount x={pouch.x1} y={pouchCaptionY} />
+        <Recess x={(pouch.x0 + pouch.x1) / 2} y={(pouchTop + pouchBottom) / 2} w={pouch.x1 - pouch.x0} h={pouchTop - pouchBottom} />
         {spec.sockets.map((s) => (
           <Socket key={s.key} spec={s} />
         ))}

@@ -29,7 +29,7 @@ import { wizardDistSqTo } from "../game/targets";
 import { GOLD_DROPS } from "../items/economy";
 import { rollDrop } from "../items/loot";
 import { itemSummary, resolveItem } from "../items/catalog";
-import { dropGold, dropLoot } from "../items/LootOrbs";
+import { dropGold, dropLoot, dropMaterials } from "../items/LootOrbs";
 import { hostCommand, hostEvent } from "../net/channels";
 import { registerSyncProvider } from "../net/entities";
 import { isHost, useNet } from "../net/netStore";
@@ -106,6 +106,7 @@ export function Breakable({
         if (!remote) {
           dropLoot([t.x, Math.max(t.y, 0.5), t.z], floor, spec.lootChance);
           dropGold([t.x, Math.max(t.y, 0.5), t.z], floor, GOLD_DROPS.propChance, "prop");
+          dropMaterials([t.x, Math.max(t.y, 0.5), t.z], floor, "prop");
         }
         if (spec.explodes) {
           // Defer so the chain reaction never re-enters this hit handler. A

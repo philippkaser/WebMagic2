@@ -8,6 +8,8 @@ import {
   multisetOf,
   sellValue,
 } from "../src/items/economy";
+import type { Rng } from "../src/core/rng";
+import { applyCraft, type CraftOutcome, type CraftRequest } from "../src/items/crafting";
 import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS, POUCH_SLOTS } from "../src/items/inventory";
 import type { ServerSave, WireEquipment, WireInventory, WireStack } from "../src/net/protocol";
 
@@ -286,6 +288,17 @@ export class AccountStore {
     };
     this.flush();
     return this.saveOf(account);
+  }
+
+  /** Cauldron and forge: the shared pure recipe over the BANKED inventory,
+   * the caller's dice. Village only (the caller checks). On success the
+   * result becomes the account's inventory. */
+  craft(account: AccountRecord, req: CraftRequest, rng: Rng): CraftOutcome {
+    const out = applyCraft(account.inventory, req, rng, { deepest: account.deepest });
+    if (!out.ok) return out;
+    account.inventory = sanitizeInventory(out.inventory);
+    this.flush();
+    return { ...out, inventory: cloneInventory(account.inventory) };
   }
 
   // ── Internals ──────────────────────────────────────────────────────────────

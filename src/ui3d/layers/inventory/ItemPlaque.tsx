@@ -2,7 +2,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { isGearSlot } from "../../../items/types";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Group, Vector3 } from "three";
-import { resolveItem, type ResolvedItem } from "../../../items/catalog";
+import { getItemDef, resolveItem, type ResolvedItem } from "../../../items/catalog";
 import { GAMBLE_PRICE, merchantPrice } from "../../../items/economy";
 import { readSlot } from "../../../items/inventory";
 import { useGame } from "../../../state/gameStore";
@@ -16,7 +16,14 @@ import { measureText, RuneText } from "../../text/RuneText";
 import { ink } from "../../theme";
 import { sellOffer } from "./dropTarget";
 import { carriedNow, useInventory, useInventoryVersion, type InventoryInteraction } from "./interaction";
-import { GAMBLE_WARE, placePlaque, SCENE_DISTANCE, slotKey, TEXT, viewHalfExtent } from "./layout";
+import { ANVIL_KEY, GAMBLE_WARE, placePlaque, SCENE_DISTANCE, slotKey, TEXT, viewHalfExtent } from "./layout";
+import { useAnvil } from "./anvil";
+import { countItem, getRecipe } from "../../../items/crafting";
+import { toWireInventory } from "../../../state/persistence";
+
+const INK_FAINT = "#9a8f7e";
+const INK_OK = "#7bea8d";
+const INK_SHORT = "#ff7066";
 import { flat, plane } from "./materials";
 import { fortuneText, plaqueText, quickHint, wornCounterpart, type PlaqueText } from "./plaqueText";
 import { PixelSprite, spriteSize, type SpriteName } from "./sprites";
@@ -58,6 +65,37 @@ function readSocket(ix: InventoryInteraction, key: string | null): Reading | nul
   if (!entry) return null;
   const state = useGame.getState();
   const spec = entry.spec;
+  // A cauldron recipe: what it brews, and what it takes.
+  if (spec.recipe) {
+    const recipe = getRecipe(spec.recipe);
+    if (!recipe?.output) return null;
+    const have = toWireInventory(state);
+    const text = plaqueText(resolveItem(recipe.output), null, {});
+    text.notes = [
+      ...recipe.cost!.items.map((s) => {
+        const n = countItem(have, s.id);
+        return {
+          text: [
+            { text: `${resolveItem(s.id).name} `, color: INK_FAINT },
+            { text: `${Math.min(n, 999)}/${s.qty}`, color: n >= s.qty ? INK_OK : INK_SHORT },
+          ],
+          icon: "gem" as const,
+          iconTint: getItemDef(s.id).color,
+        };
+      }),
+      ...(recipe.cost!.gold > 0
+        ? [{ text: [{ text: `${recipe.cost!.gold} gold`, color: state.gold >= recipe.cost!.gold ? ink.gold : INK_SHORT }], icon: "coin" as const, iconTint: ink.gold }]
+        : []),
+    ];
+    return { key, text };
+  }
+  // The anvil reads whatever lies on it.
+  if (key === ANVIL_KEY) {
+    const ref = useAnvil.getState().ref;
+    const stack = ref ? readSlot(carriedNow(), ref) : null;
+    if (!stack) return null;
+    return { key, text: plaqueText(resolveItem(stack.defId), null, { worn: ref?.container === "equipment" }) };
+  }
   if (spec.ware) {
     if (spec.ware === GAMBLE_WARE) return { key, text: fortuneText(GAMBLE_PRICE, state.gold >= GAMBLE_PRICE) };
     const price = merchantPrice(spec.ware) ?? 0;
@@ -149,12 +187,14 @@ export function ItemPlaque() {
   const bag = useGame((s) => s.bag);
   const belt = useGame((s) => s.belt);
   const chest = useGame((s) => s.chest);
+  const pouch = useGame((s) => s.pouch);
   const equipment = useGame((s) => s.equipment);
+  const anvil = useAnvil((s) => s.ref);
   const hoverKey = ix.drag ? null : ix.hover;
   const reading = useMemo(
     () => readSocket(ix, hoverKey),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ix, hoverKey, gold, bag, belt, chest, equipment, ix.mode],
+    [ix, hoverKey, gold, bag, belt, chest, pouch, equipment, anvil, ix.mode],
   );
 
   // Hovering a bag item lights the gear card it would replace.

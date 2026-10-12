@@ -13,7 +13,9 @@ import { measureText, RuneText } from "../../text/RuneText";
 import { ink } from "../../theme";
 import { AltarTablet } from "./AltarTablet";
 import { AltarVoice } from "./AltarVoice";
+import { CauldronTablet } from "./CauldronTablet";
 import { ChestTablet } from "./ChestTablet";
+import { ForgeTablet } from "./ForgeTablet";
 import { Flights, HeldItem } from "./HeldItem";
 import { InventoryContext, InventoryInteraction } from "./interaction";
 import { ItemPlaque } from "./ItemPlaque";
@@ -92,7 +94,15 @@ function InventoryScene({ mode }: { mode: InventoryMode }) {
           </Placed>
           {arr.side && (
             <Placed at={arr.side.placement} key={arr.side.id}>
-              {arr.side.id === "chest" ? <ChestTablet /> : <MerchantStall />}
+              {arr.side.id === "chest" ? (
+                <ChestTablet />
+              ) : arr.side.id === "stall" ? (
+                <MerchantStall />
+              ) : arr.side.id === "cauldron" ? (
+                <CauldronTablet />
+              ) : (
+                <ForgeTablet />
+              )}
             </Placed>
           )}
           {arr.hingeX !== null && <Hinge x={arr.hingeX} y={arr.altar.y} />}
@@ -182,8 +192,18 @@ type HintPart = { key: string } | { text: string; color?: string };
  * caps and faded words. */
 function UsageHint({ mode, y }: { mode: InventoryMode; y: number }) {
   const phase = useGame((s) => s.phase);
+  const first =
+    mode === "merchant"
+      ? "drag onto Maro's stall to sell"
+      : mode === "chest"
+        ? "drag between satchel and chest"
+        : mode === "forge"
+          ? "drag gear onto the forge to work it"
+          : mode === "cauldron"
+            ? "reagents come from pouch, satchel and chest"
+            : "drag to move";
   const parts: HintPart[] = [
-    { text: mode === "merchant" ? "drag onto Maro's stall to sell" : mode === "chest" ? "drag between satchel and chest" : "drag to move" },
+    { text: first },
     { text: "·", color: ink.stoneLight },
     { key: "Shift" },
     { text: "+ click: quick move" },

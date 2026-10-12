@@ -1,5 +1,6 @@
+import { allRecipes } from "../../../items/crafting";
 import { MERCHANT_STOCK } from "../../../items/economy";
-import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS, type SlotRef } from "../../../items/inventory";
+import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS, POUCH_SLOTS, type SlotRef } from "../../../items/inventory";
 import type { GearSlot } from "../../../items/types";
 import type { Overlay } from "../../../state/gameStore";
 import { capFraction, STEP } from "../../text/type";
@@ -15,13 +16,13 @@ import { capFraction, STEP } from "../../text/type";
 
 /** The in-game overlays this scene shows. Listed explicitly (not "every
  * overlay but X") so a new overlay kind never falls through to it. */
-export type InventoryMode = Extract<Overlay, "inventory" | "chest" | "merchant">;
+export type InventoryMode = Extract<Overlay, "inventory" | "chest" | "merchant" | "cauldron" | "forge">;
 
 export function isInventoryMode(overlay: Overlay): overlay is InventoryMode {
-  return overlay === "inventory" || overlay === "chest" || overlay === "merchant";
+  return overlay === "inventory" || overlay === "chest" || overlay === "merchant" || overlay === "cauldron" || overlay === "forge";
 }
-export type TabletId = "altar" | "chest" | "stall";
-export type SocketVariant = "gear" | "belt" | "bag" | "chest" | "ware";
+export type TabletId = "altar" | "chest" | "stall" | "cauldron" | "forge";
+export type SocketVariant = "gear" | "belt" | "bag" | "pouch" | "chest" | "ware" | "recipe" | "anvil";
 
 /** Metres from the eye to the scene's centre plane. */
 export const SCENE_DISTANCE = 1.35;
@@ -53,6 +54,8 @@ export interface SocketSpec {
   ref: SlotRef | null;
   /** Merchant ware id (an item id, or GAMBLE_WARE). */
   ware?: string;
+  /** Cauldron recipe id (its socket shows what it brews). */
+  recipe?: string;
   variant: SocketVariant;
   x: number;
   y: number;
@@ -91,23 +94,27 @@ export function wareKey(ware: string): string {
 
 export const ALTAR = {
   width: 1.62,
-  height: 1.36,
+  height: 1.62,
   /** The headline row ("The Wizard" … gold) and the rule under it. */
-  titleY: 0.565,
-  ruleY: 0.485,
+  titleY: 0.695,
+  ruleY: 0.615,
   /** Left/right text margin from the centre, m. */
   marginX: 0.745,
   gearSize: 0.2,
   gearX: 0.5,
-  gearRows: [0.255, -0.06] as const,
-  rowY: -0.44,
+  gearRows: [0.385, 0.07] as const,
+  rowY: -0.31,
   rowSize: 0.17,
   rowPitch: 0.2,
   /** Extra gap between the belt pair and the bag, m. */
   beltGap: 0.06,
+  /** The reagent pouch: a row of smaller cards along the foot. */
+  pouchY: -0.62,
+  pouchSize: 0.13,
+  pouchPitch: 0.165,
   /** The wizard's window: feet on the ledge at `ledgeY`, arch top at `archTop`. */
-  ledgeY: -0.2,
-  archTop: 0.43,
+  ledgeY: -0.07,
+  archTop: 0.56,
   archWidth: 0.46,
   goldX: 0.745,
 } as const;
@@ -167,6 +174,19 @@ export function altarLayout(): TabletSpec {
       size: ALTAR.rowSize,
       label: `${i + 1}`,
       order: order(x, ALTAR.rowY),
+    });
+  }
+  const px0 = (-(POUCH_SLOTS - 1) * ALTAR.pouchPitch) / 2;
+  for (let i = 0; i < POUCH_SLOTS; i++) {
+    const x = px0 + i * ALTAR.pouchPitch;
+    sockets.push({
+      key: slotKey({ container: "pouch", index: i }),
+      ref: { container: "pouch", index: i },
+      variant: "pouch",
+      x,
+      y: ALTAR.pouchY,
+      size: ALTAR.pouchSize,
+      order: order(x, ALTAR.pouchY),
     });
   }
   return { id: "altar", width: ALTAR.width, height: ALTAR.height, sockets };
@@ -252,6 +272,74 @@ export function stallLayout(): TabletSpec {
   return { id: "stall", width: STALL.width, height: STALL.height, sockets };
 }
 
+// ── Wenna's cauldron ─────────────────────────────────────────────────────────
+
+export const CAULDRON = {
+  width: 1.5,
+  height: 1.62,
+  titleY: 0.695,
+  subtitleY: 0.615,
+  marginX: 0.68,
+  firstRowY: 0.5,
+  rowPitch: 0.142,
+  rowWidth: 1.38,
+  rowHeight: 0.128,
+  socketX: -0.615,
+  size: 0.1,
+  textX: -0.545,
+  buttonX: 0.56,
+  buttonWidth: 0.19,
+} as const;
+
+export function cauldronLayout(): TabletSpec {
+  const sockets = allRecipes("cauldron").map<SocketSpec>((r, i) => ({
+    key: `recipe:${r.id}`,
+    ref: null,
+    recipe: r.id,
+    ware: r.output,
+    variant: "recipe",
+    x: CAULDRON.socketX,
+    y: CAULDRON.firstRowY - i * CAULDRON.rowPitch,
+    size: CAULDRON.size,
+    order: i / 10,
+  }));
+  return { id: "cauldron", width: CAULDRON.width, height: CAULDRON.height, sockets };
+}
+
+// ── Brannoc's forge ──────────────────────────────────────────────────────────
+
+export const FORGE = {
+  width: 1.5,
+  height: 1.62,
+  titleY: 0.695,
+  subtitleY: 0.615,
+  marginX: 0.68,
+  /** The anvil: the card the work is done on. */
+  anvilY: 0.395,
+  anvilSize: 0.21,
+  /** The worked item's name and state, beside the anvil. */
+  infoX: -0.4,
+  /** The works, one framed row each. */
+  firstRowY: 0.135,
+  rowPitch: 0.148,
+  rowWidth: 1.38,
+  rowHeight: 0.132,
+  textX: -0.645,
+  buttonX: 0.56,
+  buttonWidth: 0.19,
+} as const;
+
+export const ANVIL_KEY = "anvil";
+
+export function forgeLayout(): TabletSpec {
+  return {
+    id: "forge",
+    width: FORGE.width,
+    height: FORGE.height,
+    sockets: [{ key: ANVIL_KEY, ref: null, variant: "anvil", x: -0.56, y: FORGE.anvilY, size: FORGE.anvilSize, order: 0 }],
+  };
+}
+
 // ── Scene arrangement ────────────────────────────────────────────────────────
 
 /** Gap between side-by-side tablets, m. */
@@ -275,8 +363,26 @@ export interface Arrangement {
 }
 
 export function sideTablet(mode: InventoryMode): Exclude<TabletId, "altar"> | null {
-  return mode === "chest" ? "chest" : mode === "merchant" ? "stall" : null;
+  switch (mode) {
+    case "chest":
+      return "chest";
+    case "merchant":
+      return "stall";
+    case "cauldron":
+      return "cauldron";
+    case "forge":
+      return "forge";
+    default:
+      return null;
+  }
 }
+
+const SIDE_WIDTH: Record<Exclude<TabletId, "altar">, number> = {
+  chest: 1.3,
+  stall: 1.44,
+  cauldron: 1.5,
+  forge: 1.5,
+};
 
 export function arrangement(mode: InventoryMode): Arrangement {
   const side = sideTablet(mode);
@@ -284,7 +390,7 @@ export function arrangement(mode: InventoryMode): Arrangement {
   if (!side) {
     return { altar: { x: 0, y: SCENE_Y, yaw: 0 }, hingeX: null, side: null, halfWidth: ALTAR.width / 2, hintY };
   }
-  const width = side === "chest" ? CHEST.width : STALL.width;
+  const width = SIDE_WIDTH[side];
   const total = ALTAR.width + PAIR_GAP + width;
   const altarX = -total / 2 + ALTAR.width / 2;
   const sideX = total / 2 - width / 2;

@@ -13,7 +13,7 @@ import { getPlayerBody, playerPosition } from "../game/player-state";
 import { allocId, registerHittable } from "../game/registry";
 import { nearestWizardTo } from "../game/targets";
 import { GOLD_DROPS } from "../items/economy";
-import { dropGold, dropLoot } from "../items/LootOrbs";
+import { dropGold, dropLoot, dropMaterials } from "../items/LootOrbs";
 import { isHost } from "../net/netStore";
 import { useNetBody, type NetBody } from "../net/NetSystems";
 import { combatActive, getStats, useGame } from "../state/gameStore";
@@ -181,6 +181,7 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
         // Base odds only — LootOrbs applies the floor's loot/gold rules itself.
         if (drops.lootChance > 0) dropLoot(at, o.floor, drops.lootChance);
         dropGold(at, o.floor, GOLD_DROPS.enemyChance, "enemy");
+        if (o.kind !== "boss") dropMaterials(at, o.floor, o.kind);
       }
       o.onDeathFx?.(t);
       if (isEnemyVoice(o.kind)) playEnemyDeath(o.kind, [t.x, t.y, t.z]);

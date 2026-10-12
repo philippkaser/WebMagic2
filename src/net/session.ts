@@ -2,6 +2,7 @@ import { gameEvents } from "../core/events";
 import { netBus } from "./bus";
 import { netClock } from "./clock";
 import { useNet } from "./netStore";
+import type { WireSlot } from "../items/crafting";
 import type { FloorAssignment, ServerMsg, WireInventory } from "./protocol";
 import { LocalTransport, WebSocketTransport, type Transport } from "./transport";
 
@@ -120,6 +121,12 @@ export class GameSession {
     this.transport?.send({ t: "gamble" });
   }
 
+  /** Cauldron or forge — the server applies the recipe and answers with
+   * `crafted` (netBus "crafted"). */
+  sendCraft(recipe: string, target?: WireSlot): void {
+    this.transport?.send({ t: "craft", recipe, ...(target ? { target } : {}) });
+  }
+
   /** The run is lost — the server discards its grants. */
   sendDied(): void {
     this.transport?.send({ t: "died" });
@@ -222,6 +229,9 @@ export class GameSession {
         break;
       case "saved":
         netBus.emit("serverSave", msg.save);
+        break;
+      case "crafted":
+        netBus.emit("crafted", msg);
         break;
       case "pong":
         netClock.onPong(msg.sent, msg.serverTime);

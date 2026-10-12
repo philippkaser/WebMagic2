@@ -14,7 +14,7 @@ import { castFlareFx, chargeBurstFx, explosionFx, soulDissolveFx, telegraphFx } 
 import { getFloorRules } from "../../game/floorRules";
 import { nearestWizardTo } from "../../game/targets";
 import { SAVE_FEATHER_ID } from "../../items/catalog";
-import { dropGold, dropItem, dropLoot } from "../../items/LootOrbs";
+import { dropGold, dropItem, dropLoot, dropMaterials, dropUnique } from "../../items/LootOrbs";
 import { ENEMY_GLOW, WARDEN_COLOR, WardenModel } from "../../render/models/enemies";
 import { enemyBoom, enemyCast } from "../../weapons/hostileEffects";
 import type { Vec3 } from "../../world/types";
@@ -86,6 +86,10 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
       dropLoot([t.x - 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
       dropLoot([t.x + 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
       dropGold([t.x, Math.max(t.y, 0.8), t.z - 0.6], floor, 1, "boss");
+      // The Warden's own: sigils for the Great Work, riftglass, and now and
+      // then a legendary of its own.
+      dropMaterials([t.x, Math.max(t.y, 0.8), t.z], floor, "boss");
+      if (Math.random() < 0.18) dropUnique([t.x, Math.max(t.y, 0.8), t.z - 1.4], floor + 2);
       // The Warden hoards escapes too — a feather drop is a real prize.
       if (Math.random() < 0.35) dropItem(SAVE_FEATHER_ID, [t.x, Math.max(t.y, 0.8), t.z + 1.4]);
       gameEvents.emit("message", "The Warden falls. The seal breaks.");

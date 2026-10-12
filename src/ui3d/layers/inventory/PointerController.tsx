@@ -21,6 +21,9 @@ import {
 } from "./interaction";
 import { slotKey, type InventoryMode } from "./layout";
 import { quickMoveTarget } from "./quickMove";
+import { useAnvil } from "./anvil";
+import { getItemDef } from "../../../items/catalog";
+import { isGearSlot } from "../../../items/types";
 
 /** Hover, drag & drop, shift/double-click — the scene's hands.
  *
@@ -248,6 +251,11 @@ function finishDrag(ix: InventoryInteraction, hit: HitScratch): void {
       playItemSet();
       break;
     }
+    case "anvil":
+      useAnvil.getState().set(drag.from);
+      home();
+      playItemSet();
+      break;
     case "sell":
       act.sellStack(drag.from);
       if (moved(before)) ix.launch?.({ itemId: drag.itemId, kind: "sell", from: at });
@@ -280,7 +288,13 @@ function cancelDrag(ix: InventoryInteraction): void {
 /** Did the store take the last action? (It refuses silently.) */
 function moved(before: Carried): boolean {
   const s = useGame.getState();
-  return s.equipment !== before.equipment || s.bag !== before.bag || s.belt !== before.belt || s.chest !== before.chest;
+  return (
+    s.equipment !== before.equipment ||
+    s.bag !== before.bag ||
+    s.belt !== before.belt ||
+    s.pouch !== before.pouch ||
+    s.chest !== before.chest
+  );
 }
 
 /** Record the arrival hints first (the store re-renders synchronously), then
@@ -299,6 +313,16 @@ function applyMove(ix: InventoryInteraction, from: SlotRef, to: SlotRef, hints: 
 function quickMove(ix: InventoryInteraction, from: SlotRef): void {
   const inv = carriedNow();
   const inVillage = useGame.getState().phase === "village";
+  // At the forge, the obvious move for gear is onto the anvil.
+  if (ix.mode === "forge" && inVillage) {
+    const stack = readSlot(inv, from);
+    if (stack && isGearSlot(getItemDef(stack.defId).slot)) {
+      useAnvil.getState().set(from);
+      playItemSet();
+      ix.emit();
+      return;
+    }
+  }
   const to = quickMoveTarget(inv, from, ix.mode === "chest" && inVillage);
   if (!to) return;
   const fromKey = slotKey(from);

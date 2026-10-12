@@ -1,3 +1,5 @@
+import type { WireSlot } from "../items/crafting";
+
 /** Wire protocol between client and the relay server.
  *
  * The server is deliberately GAMEPLAY-BLIND. It handles matchmaking, host
@@ -116,6 +118,10 @@ export type ClientMsg =
    * deducts the price, places it in the bag and answers with `saved` — the
    * client learns what it won from the save diff. Village only. */
   | { t: "gamble" }
+  /** Wenna's cauldron or Brannoc's forge (items/crafting.ts): the SERVER
+   * applies the shared pure recipe to the banked inventory with its own
+   * dice and answers with `crafted`. Village only. */
+  | { t: "craft"; recipe: string; target?: WireSlot }
   /** The run is lost — the server discards this run's grants. */
   | { t: "died" }
   /** HOST attestation: `playerId` legitimately picked up `itemId`. The only
@@ -136,6 +142,15 @@ export type ServerMsg =
   | { t: "loggedIn"; token: string; save: ServerSave }
   /** Authoritative save after a bank request (cheated items stripped). */
   | { t: "saved"; save: ServerSave }
+  /** A craft's result: the authoritative save, and what happened. */
+  | {
+      t: "crafted";
+      save: ServerSave;
+      ok: boolean;
+      reason?: string;
+      produced?: WireStack[];
+      changed?: { from: string; to: string };
+    }
   | { t: "floorAssigned"; assignment: FloorAssignment }
   | { t: "peerJoined"; member: MemberInfo }
   | { t: "peerLeft"; playerId: string }

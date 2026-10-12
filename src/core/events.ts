@@ -49,6 +49,8 @@ export interface GameEvents extends Record<string, unknown> {
   };
   /** A lore rune was read (HUD shows the fragment). */
   loreRead: { fragmentId: string };
+  /** A craft finished (or was refused) — the cauldron/forge play it. */
+  crafted: { ok: boolean; recipe: string; text: string; changed?: string; produced?: string[] };
   /** The Phoenix refused a death: the burst of flame (weapons/procs). */
   phoenix: undefined;
   /** An elixir's blessing took hold (HUD shows it ticking down). */

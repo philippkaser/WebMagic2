@@ -117,8 +117,10 @@ export function lightningFx(points: readonly Vec3Like[], color: string): void {
   for (let i = 0; i + 1 < points.length; i++) {
     readVec(points[i]!, a);
     readVec(points[i + 1]!, b);
-    line("#e8fbff", 0.07, 0.035, 0.09, 3.6, 0, 80);
-    line(color, 0.18, 0.08, 0.12, 1.6, 0.03, 40);
+    // At a third of the screen's resolution a thin bolt vanishes: a fat
+    // white-hot core, a wider tinted halo, both held for a few frames.
+    line("#e8fbff", 0.06, 0.06, 0.16, 4, 0, 90);
+    line(color, 0.12, 0.13, 0.2, 2, 0.04, 60);
   }
   const end = points[points.length - 1];
   if (end) {

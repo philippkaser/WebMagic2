@@ -21,6 +21,7 @@ import {
   type SlotRef,
 } from "../items/inventory";
 import { addBuff, getBuffDef, liveBuffs, withBlessings, type ActiveBuff } from "../items/buffs";
+import { applyCraft, describeOutcome, type CraftOutcome, type WireSlot } from "../items/crafting";
 import { rollGamble } from "../items/loot";
 import type { DerivedStats, Equipment } from "../items/types";
 import { netBus } from "../net/bus";
@@ -46,7 +47,7 @@ export type Phase = "menu" | "village" | "weighing" | "loading" | "dungeon" | "d
  * keeps simulating (shared floors can't pause), so these are DOM layers, not
  * phases. "devroom" is a dev-only testing panel (see ui/DevRoom) reached from
  * the village dev slab. */
-export type Overlay = "none" | "inventory" | "chest" | "merchant" | "codex" | "devroom";
+export type Overlay = "none" | "inventory" | "chest" | "merchant" | "cauldron" | "forge" | "codex" | "devroom";
 
 /** The current run, while in the dungeon. */
 export interface RunProgress {
@@ -133,6 +134,8 @@ export interface GameState {
   /** Route a granted pickup (items/inventory.ts routeAcquire). Returns false
    * if truly full. */
   acquireItem(defId: string): boolean;
+  /** Route `qty` copies (a clutch of reagents) — one message for all. */
+  acquireMany(defId: string, qty: number): number;
   addGold(amount: number): void;
   /** Move/swap/merge between any two cells (equipment/bag/belt/chest) —
    * the one action behind every drag, drop and click in the inventory UI.
@@ -150,6 +153,10 @@ export interface GameState {
   gamble(): void;
   /** Use the consumable in belt[index] (0 = Q, 1 = E). */
   useBelt(index: number): void;
+  /** Wenna's cauldron / Brannoc's forge (items/crafting.ts): work `recipe`,
+   * on the item at `target` for the forge's item work. Village only;
+   * server-rolled online. */
+  craft(recipe: string, target?: SlotRef): void;
   buyItem(defId: string): void;
   setOverlay(overlay: Overlay): void;
   /** Hurt the local wizard. `source` attributes the hit (kill credit, grave
@@ -235,6 +242,8 @@ export function isDevInvuln(): boolean {
 let pendingGamble = false;
 /** The floor (instance:floor) the Phoenix last refused a death on. */
 let phoenixFloor = "";
+/** A craft is in the server's hands (its recipe id). */
+let pendingCraft: string | null = null;
 
 export const useGame = create<GameState>((set, get) => ({
   phase: "menu",
@@ -374,6 +383,29 @@ export const useGame = create<GameState>((set, get) => ({
     );
     syncVillage(get());
     return true;
+  },
+
+  acquireMany: (defId, qty) => {
+    let carried = carriedOf(get());
+    let got = 0;
+    let to = "";
+    for (let i = 0; i < qty; i++) {
+      const routed = routeAcquire(carried, defId, get().phase === "dungeon");
+      if (!routed) break;
+      carried = routed.next;
+      to = routed.to;
+      got++;
+    }
+    const name = resolveItem(defId).name;
+    if (got === 0) {
+      gameEvents.emit("message", `${name} slips away — no room`);
+      return 0;
+    }
+    set({ ...carried, health: clampedHealth({ ...get(), ...carried }) });
+    playPickup();
+    gameEvents.emit("message", `${name} ×${got} → ${to}${got < qty ? " (no room for the rest)" : ""}`);
+    syncVillage(get());
+    return got;
   },
 
   addGold: (amount) => {
@@ -516,6 +548,34 @@ export const useGame = create<GameState>((set, get) => ({
     playPickup();
     gameEvents.emit("message", `${def.name} used`);
     syncVillage(get());
+  },
+
+  craft: (recipe, target) => {
+    const state = get();
+    if (state.phase !== "village") {
+      gameEvents.emit("message", "The cauldron and the forge are back in the camp");
+      return;
+    }
+    const wireTarget = target ? toWireSlot(target) : undefined;
+    // A local dry run answers "can I?" at once (and is the whole craft
+    // offline, where the local save is the record).
+    const local = applyCraft(toWireInventory(state), { recipe, target: wireTarget }, new Rng((Math.random() * 0xffffffff) >>> 0), {
+      deepest: state.deepest,
+    });
+    if (!local.ok) {
+      gameEvents.emit("message", local.reason);
+      gameEvents.emit("crafted", { ok: false, recipe, text: local.reason });
+      return;
+    }
+    if (useNet.getState().mode === "online") {
+      pendingCraft = recipe;
+      session.sendCraft(recipe, wireTarget);
+      return;
+    }
+    const inv = fromWireInventory(local.inventory);
+    set({ ...inv, health: clampedHealth({ ...get(), ...inv }) });
+    persistCurrent(get());
+    announceCraft(recipe, local);
   },
 
   buyItem: (defId) => {
@@ -757,6 +817,19 @@ function escapeByFeather(
   gameEvents.emit("message", "The feather carries you home — loot banked");
 }
 
+/** Say what a craft made, and let the stations play it. */
+function announceCraft(recipe: string, out: Extract<CraftOutcome, { ok: true }>): void {
+  const text = describeOutcome(out);
+  playPickup();
+  const verb = recipe.startsWith("brew:") ? "Brewed" : recipe === "salvage" ? "Salvaged into" : recipe === "greatwork" ? "The Great Work yields" : "Forged";
+  gameEvents.emit("message", `${verb}: ${text}`);
+  gameEvents.emit("crafted", { ok: true, recipe, text, changed: out.changed?.to, produced: out.produced.map((s) => s.id) });
+}
+
+function toWireSlot(ref: SlotRef): WireSlot {
+  return ref.container === "equipment" ? { c: "equipment", s: ref.slot } : { c: ref.container, i: ref.index };
+}
+
 /** Death: everything found this run is lost. On a shared floor it stays
  * behind in a grave (encounters/Graves listens for "wizardFell"). */
 function die(
@@ -827,6 +900,23 @@ netBus.on("serverSave", (save) => {
     health: computeStats(inv.equipment).maxHealth,
   });
   persistCurrent({ deepest: save.deepest, ...inv });
+});
+
+// The server worked (or refused) a craft: its save is the truth either way.
+netBus.on("crafted", (msg) => {
+  const state = useGame.getState();
+  if (state.phase === "dungeon" || state.phase === "loading") return;
+  const recipe = pendingCraft ?? "";
+  pendingCraft = null;
+  const inv = fromWireInventory(msg.save.inventory);
+  useGame.setState({ deepest: msg.save.deepest, ...inv, health: clampedHealth({ ...useGame.getState(), ...inv }) });
+  persistCurrent({ deepest: msg.save.deepest, ...inv });
+  if (msg.ok) {
+    announceCraft(recipe, { ok: true, inventory: msg.save.inventory, produced: msg.produced ?? [], changed: msg.changed });
+  } else {
+    gameEvents.emit("message", msg.reason ?? "The work failed");
+    gameEvents.emit("crafted", { ok: false, recipe, text: msg.reason ?? "The work failed" });
+  }
 });
 
 // Reconnect resync: the session re-enters our floor after a dropped socket.

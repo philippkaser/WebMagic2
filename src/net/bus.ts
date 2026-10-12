@@ -1,5 +1,5 @@
 import { Emitter } from "../core/events";
-import type { FloorAssignment, MemberInfo, ServerSave } from "./protocol";
+import type { FloorAssignment, MemberInfo, ServerMsg, ServerSave } from "./protocol";
 
 /** Internal networking event hub. The session publishes connection/relay
  * events here; channels, entities and players subscribe. Keeping this
@@ -23,6 +23,8 @@ export interface NetBusEvents extends Record<string, unknown> {
   serverSave: ServerSave;
   /** The connection dropped and was re-established with a fresh identity. */
   reconnected: undefined;
+  /** The server worked a craft (or refused it). */
+  crafted: Extract<ServerMsg, { t: "crafted" }>;
 }
 
 export const netBus = new Emitter<NetBusEvents>();
