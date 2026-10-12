@@ -5,6 +5,8 @@ import { omenGenMods, rollOmen } from "../omens";
 import type { FloorLayout, Vec3 } from "../types";
 import { planArchitecture } from "./architecture";
 import { connectRooms } from "./corridors";
+import { placeDoorways } from "./doorways";
+import { planDressing } from "./dressing";
 import { Grid, floodFill, gridSize, worldToTile } from "./grid";
 import { placeLore } from "./lorePlacement";
 import { placePois } from "./pois";
@@ -22,7 +24,8 @@ import { buildWalls } from "./walls";
  *
  *   omen (own stream) → rooms → corridors → walls → points of interest
  *   → torches → props & enemies → traps → lore runes (own stream)
- *   → architecture (own stream)
+ *   → doorways (own stream) → architecture (own stream)
+ *   → dressing (own stream)
  *
  * Stages sharing the layout stream run in a fixed order and each draws the
  * same numbers whatever the biome or omen (those only scale counts and
@@ -51,6 +54,7 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
   });
   const traps = placeTraps(rng, rooms, pois, floor, size);
   const lore = placeLore({ grid, seed, floor, rooms, pois, torchTiles: torches.tiles });
+  const doorways = placeDoorways({ grid, seed, floor, rooms, torches: torches.torches, lore });
   const architecture = planArchitecture({
     grid,
     seed,
@@ -63,6 +67,22 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     props,
     enemies,
     traps,
+    doorways,
+    lightMult: mods.torchMult,
+  });
+  const dressing = planDressing({
+    grid,
+    seed,
+    floor,
+    biome: biome.id,
+    rooms,
+    pois,
+    torches: torches.torches,
+    lore,
+    props,
+    enemies,
+    traps,
+    architecture,
     lightMult: mods.torchMult,
   });
 
@@ -88,6 +108,7 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     wallBoxes,
     extent: (size * TILE) / 2,
     architecture,
+    dressing,
   };
 }
 

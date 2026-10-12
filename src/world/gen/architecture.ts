@@ -1,8 +1,9 @@
-import { ARCHITECTURE, TILE } from "../../core/config";
+import { ARCHITECTURE, PLAYER, TILE } from "../../core/config";
 import { Rng } from "../../core/rng";
 import type {
   BiomeId,
   CrystalSpawn,
+  DoorwaySpawn,
   EnemySpawn,
   FloorArchitecture,
   LightShaftSpawn,
@@ -14,18 +15,17 @@ import type {
   TrapSpawn,
   Vec3,
 } from "../types";
+import { doorwayLocal, inDoorLane, leafExtent, touchesDoorway } from "./doorways";
 import { type Grid, SOLID, dist2World, worldToTile } from "./grid";
 import type { Pois } from "./pois";
 import { STREAM_SALT, streamSeed } from "./seeds";
 
-/** Stage 8 — architecture: what turns a carved box into a hall. Arch ribs
+/** Stage 9 — architecture: what turns a carved box into a hall. Arch ribs
  * spanning each room under the vault on piers, colonnades in the big
  * rooms, shafts of light falling from cracks in the vault, and — in the
- * Crystal Deep — glowing crystal clusters in the corners.
- *
- * For now only the SHAFTS render (scenes/DungeonFloor.tsx): the dungeon is
- * kept to its basic painted look, so ribs, pillars and crystals are planned
- * (and tested) but drawn nowhere and collide with nothing, ready to return.
+ * Crystal Deep — glowing crystal clusters in the corners. All of it is
+ * built (render/models/ArchStone.tsx): ribs, piers and pillars in the
+ * band's dressed stone, pillars with colliders.
  *
  * Runs LAST, on its own stream, reading only finished layout data: adding or
  * retuning architecture can never move a room, prop, enemy, trap or rune.
@@ -49,6 +49,9 @@ export interface ArchitectureInput {
   props: PropSpawn[];
   enemies: EnemySpawn[];
   traps: TrapSpawn[];
+  /** Framed corridor mouths (doorways.ts): piers keep off their frames and
+   * door leaves, and no pillar stands in the lane straight through one. */
+  doorways: DoorwaySpawn[];
   /** The omen's torch multiplier: a floor robbed of light gets no shafts. */
   lightMult: number;
 }
@@ -74,6 +77,8 @@ export const PILLAR_CLEARANCE = {
   prop: 1,
   enemy: 1.2,
   trap: 1.3,
+  /** How far into a room the lane through a doorway runs (m). */
+  doorLane: 4.5,
 } as const;
 
 /** A pier (and its rib) keeps this far (m, along the wall) from torches and
@@ -106,7 +111,7 @@ export function planArchitecture(input: ArchitectureInput): FloorArchitecture {
   }
   const shafts = placeShafts(rng, input, ribs, pillars);
   const crystals = input.biome === "crystal" ? placeCrystals(rng, input) : [];
-  return { pillars, ribs, shafts, crystals };
+  return { pillars, ribs, shafts, crystals, doorways: input.doorways };
 }
 
 // ── Room geometry ────────────────────────────────────────────────────────────
@@ -200,6 +205,10 @@ function pierFits(input: ArchitectureInput, frame: RoomFrame, at: number, face: 
   };
   if (input.torches.some(onThisWall)) return false;
   if (input.lore.some((r) => onThisWall(r.pos))) return false;
+  // Clear of door frames and broken leaves on the same wall.
+  const wallAxis = frame.span === "x" ? "z" : "x";
+  const hw = ARCHITECTURE.pierWidth / 2 + 0.1;
+  if (input.doorways.some((d) => touchesDoorway(d, wallAxis, face, at - hw, at + hw, 0.1))) return false;
   return true;
 }
 
@@ -215,6 +224,9 @@ function pillarFits(input: ArchitectureInput, p: Vec3): boolean {
   if (!input.props.every((q) => far(q.pos, c.prop))) return false;
   if (!input.enemies.every((q) => far(q.pos, c.enemy))) return false;
   if (!input.traps.every((q) => far(q.pos, c.trap))) return false;
+  // Never in the lane straight through a doorway.
+  const lanePad = ARCHITECTURE.pillarBase + PLAYER.radius + 0.3;
+  if (input.doorways.some((d) => inDoorLane(d, p, c.doorLane, lanePad))) return false;
   // Belt and braces: the footprint must stand on open floor.
   const [tx, ty] = worldToTile(p, input.grid.size);
   return input.grid.isFloor(tx, ty);
@@ -276,6 +288,14 @@ function placeShafts(rng: Rng, input: ArchitectureInput, ribs: RibSpawn[], pilla
 
 // ── Crystal clusters ─────────────────────────────────────────────────────────
 
+/** Would a cluster at `p` grow into a broken door leaning on the wall? */
+function nearLeaf(d: DoorwaySpawn, p: Vec3): boolean {
+  const leaf = leafExtent(d);
+  if (!leaf) return false;
+  const { along, into } = doorwayLocal(d, p);
+  return into < 1.6 && along > leaf[0] - 0.8 && along < leaf[1] + 0.8;
+}
+
 function placeCrystals(rng: Rng, input: ArchitectureInput): CrystalSpawn[] {
   const { grid, pois } = input;
   const crystals: CrystalSpawn[] = [];
@@ -311,6 +331,7 @@ function placeCrystals(rng: Rng, input: ArchitectureInput): CrystalSpawn[] {
       if (!input.props.every((q) => far(q.pos, 1.2))) continue;
       if (!input.enemies.every((q) => far(q.pos, 1.2))) continue;
       if (!input.traps.every((q) => far(q.pos, 1.3))) continue;
+      if (input.doorways.some((d) => nearLeaf(d, pos))) continue;
       crystals.push({
         pos,
         // Lean out of the corner, toward the room.

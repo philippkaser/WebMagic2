@@ -86,6 +86,29 @@ export interface CrystalSpawn {
   hue: 0 | 1;
 }
 
+/** What hangs in a doorway: nothing, an iron portcullis raised into the
+ * header (its spikes just showing under the arch), or one leaf of a broken
+ * wooden door hanging on its last hinge against the wall beside it. */
+export type DoorwayStyle = "open" | "portcullis" | "door";
+
+/** A corridor mouth framed in dressed stone on its room's side: two jambs,
+ * an arch springing from them, and the header that closes the 6 m slot
+ * above it (world/gen/doorways.ts). */
+export interface DoorwaySpawn {
+  /** Axis the opening spans along ("x": it pierces a north or south wall). */
+  axis: "x" | "z";
+  /** World coordinate of the room's wall face, on the other axis. */
+  face: number;
+  /** Edges of the opening along `axis` (world, from < to). */
+  from: number;
+  to: number;
+  /** Which way is into the room, along the other axis. */
+  inward: 1 | -1;
+  style: DoorwayStyle;
+  /** A broken door hangs from this side's jamb: −1 = `from`, +1 = `to`. */
+  hinge: -1 | 1;
+}
+
 /** The floor's architecture: what makes a room a hall. Purely a function of
  * the carved layout and its own seed stream (world/gen/architecture.ts), so
  * it can grow without moving a single room, prop or enemy. */
@@ -95,6 +118,44 @@ export interface FloorArchitecture {
   shafts: LightShaftSpawn[];
   /** Only on Crystal Deep floors; empty elsewhere. */
   crystals: CrystalSpawn[];
+  /** Every framed corridor mouth (doorways.ts, on its own stream). */
+  doorways: DoorwaySpawn[];
+}
+
+/** Set dressing (world/decor.ts, world/gen/dressing.ts): what the centuries
+ * left lying about. Cosmetic, but rolled from the seed so floor-mates see
+ * the same skulls in the same corners. */
+export type DecorKind =
+  | "bones"
+  | "candles"
+  | "chain"
+  | "cobweb"
+  | "banner"
+  | "grate"
+  | "rubble"
+  | "niche"
+  | "barnacles"
+  | "kelp"
+  | "puddle"
+  | "anvil"
+  | "slag"
+  | "brazier"
+  | "spur"
+  | "roots"
+  | "chime";
+
+export interface DecorSpawn {
+  kind: DecorKind;
+  /** Anchor: a point on the floor (floor decor), on the wall face (wall
+   * decor) or on the vault (hanging decor) — see DecorDef.mount. */
+  pos: Vec3;
+  /** Yaw (three's rotation.y). Wall decor faces into the room: its local +Z
+   * points (sin yaw, cos yaw). */
+  yaw: number;
+  /** Size multiplier. */
+  scale: number;
+  /** Which of the kind's shapes (0 … DecorDef.variants − 1). */
+  variant: number;
 }
 
 export interface FloorLayout {
@@ -134,6 +195,8 @@ export interface FloorLayout {
   wallBoxes: WallBox[];
   /** World-space half-extent of the whole grid (for floor/ceiling planes). */
   extent: number;
-  /** Pillars, arch ribs, light shafts and crystal clusters. */
+  /** Pillars, arch ribs, light shafts, crystal clusters and doorways. */
   architecture: FloorArchitecture;
+  /** Bones, candles, chains, cobwebs, banners… (world/gen/dressing.ts). */
+  dressing: DecorSpawn[];
 }

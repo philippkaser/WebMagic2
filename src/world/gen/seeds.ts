@@ -12,6 +12,8 @@ export const STREAM_SALT = {
   omen: 0x6f6d656e, // "omen"
   lore: 0x6c6f7265, // "lore"
   architecture: 0x61726368, // "arch"
+  doorways: 0x646f6f72, // "door"
+  dressing: 0x64726573, // "dres"
 } as const;
 
 /** The layout stream's seed. Kept byte-for-byte as it has always been, so
