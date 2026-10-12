@@ -104,6 +104,10 @@ export interface GameState {
    * head, its shadow — sounds outside your head, all round you) or for
    * speakers (a pan). Headphones by default; persisted. */
   headphones: boolean;
+  /** Motion blur from the camera's own movement (render/post/LensEffect):
+   * on by default — it's a shutter, not a smear — but some eyes dislike it
+   * in a first-person game, so it's a setting; persisted. */
+  motionBlur: boolean;
   /** Display name shown to floor-mates. */
   playerName: string;
 
@@ -155,12 +159,14 @@ export interface GameState {
   toggleShadows(): void;
   toggleReflections(): void;
   toggleHeadphones(): void;
+  toggleMotionBlur(): void;
   setPlayerName(name: string): void;
 }
 
 const SHADOWS_KEY = "webmagic.shadows.v1";
 const REFLECTIONS_KEY = "webmagic.reflections.v1";
 const HEADPHONES_KEY = "webmagic.headphones.v1";
+const MOTION_BLUR_KEY = "webmagic.motionblur.v1";
 const NAME_KEY = "webmagic.name.v1";
 
 function loadShadowSetting(): boolean {
@@ -187,6 +193,14 @@ function loadReflectionSetting(): boolean {
     return localStorage.getItem(REFLECTIONS_KEY) === "1";
   } catch {
     return false;
+  }
+}
+
+function loadMotionBlurSetting(): boolean {
+  try {
+    return localStorage.getItem(MOTION_BLUR_KEY) !== "0";
+  } catch {
+    return true;
   }
 }
 
@@ -237,6 +251,7 @@ export const useGame = create<GameState>((set, get) => ({
   shadows: loadShadowSetting(),
   reflections: loadReflectionSetting(),
   headphones: loadHeadphoneSetting(),
+  motionBlur: loadMotionBlurSetting(),
   playerName: loadPlayerName(),
 
   startGame: () => set({ phase: "village" }),
@@ -631,6 +646,17 @@ export const useGame = create<GameState>((set, get) => ({
       // Setting is session-only without storage.
     }
     gameEvents.emit("message", `Reflections ${reflections ? "on" : "off"}`);
+  },
+
+  toggleMotionBlur: () => {
+    const motionBlur = !get().motionBlur;
+    set({ motionBlur });
+    try {
+      localStorage.setItem(MOTION_BLUR_KEY, motionBlur ? "1" : "0");
+    } catch {
+      // Setting is session-only without storage.
+    }
+    gameEvents.emit("message", `Motion blur ${motionBlur ? "on" : "off"}`);
   },
 
   setPlayerName: (name) => {

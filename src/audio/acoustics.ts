@@ -1,5 +1,5 @@
 import { TILE, WALL_HEIGHT } from "../core/config";
-import { COTTAGES } from "../scenes/village/layout";
+import { inStructure, STRUCTURES } from "../scenes/village/layout";
 import type { BiomeId, FloorLayout } from "../world/types";
 
 /** Sound, traced through the place you're in. Pure (no WebAudio) and tested.
@@ -131,10 +131,11 @@ const VILLAGE_HALF = 48;
  * finer than that, and the path flood (see soundPath) stays cheap. */
 const VILLAGE_CELL = 2;
 
-/** The village green as 2 m cells: the cottages (their footprints as the
- * map draws them, a cell solid when the walls cover its middle) are solid;
- * the rest is open ground under the sky, and past the edge the air goes on.
- * (The well is too small to stop a sound.) */
+/** The camp as 2 m cells: the tents and the wagon are solid (a cell when
+ * they cover its middle) — the open-sided pavilion and the stilted tower
+ * let sound through, and the palisade is left out: a 3 m fence of logs
+ * under the open sky would act, in a flat grid, like a canyon wall. The
+ * rest is open ground under the sky, and past the edge the air goes on. */
 export function villageGrid(): AcousticGrid {
   const size = (VILLAGE_HALF * 2) / VILLAGE_CELL;
   const solid = new Uint8Array(size * size);
@@ -146,20 +147,10 @@ export function villageGrid(): AcousticGrid {
         if (inside(x, z)) solid[cz * size + cx] = 1;
       }
   };
-  for (const c of COTTAGES) {
-    const cos = Math.cos(c.rot);
-    const sin = Math.sin(c.rot);
-    // A little grace, so a small cottage still fills the cells it stands in.
-    const hx = c.size / 2 + 0.4;
-    const hz = (c.size * 0.8) / 2 + 0.4;
-    mark((x, z) => {
-      const dx = x - c.pos[0];
-      const dz = z - c.pos[2];
-      // Into the cottage's own frame (its yaw undone).
-      const lx = dx * cos - dz * sin;
-      const lz = dx * sin + dz * cos;
-      return Math.abs(lx) <= hx && Math.abs(lz) <= hz;
-    });
+  for (const s of STRUCTURES) {
+    if (s.kind !== "tent" && s.kind !== "wagon") continue;
+    // A little grace, so a small tent still fills the cells it stands in.
+    mark((x, z) => inStructure(s, x, z, 0.4));
   }
   return {
     cell: VILLAGE_CELL,

@@ -156,6 +156,8 @@ function TheWayIn() {
   const toggleReflections = useGame((s) => s.toggleReflections);
   const headphones = useGame((s) => s.headphones);
   const toggleHeadphones = useGame((s) => s.toggleHeadphones);
+  const motionBlur = useGame((s) => s.motionBlur);
+  const toggleMotionBlur = useGame((s) => s.toggleMotionBlur);
   const deepest = useGame((s) => s.deepest);
   const [editing, setEditing] = useState(false);
   const toggle = (label: string, on: boolean) => [
@@ -182,7 +184,7 @@ function TheWayIn() {
           px={tp(STEP.text)}
           width={0.15 * U}
           color={ink.parchmentDim}
-          position={[-0.165 * U, -0.25 * U, 0]}
+          position={[-0.2475 * U, -0.25 * U, 0]}
           delay={0.1}
         />
         <RuneButton
@@ -192,7 +194,7 @@ function TheWayIn() {
           px={tp(STEP.text)}
           width={0.15 * U}
           color={ink.parchmentDim}
-          position={[0, -0.25 * U, 0]}
+          position={[-0.0825 * U, -0.25 * U, 0]}
           delay={0.15}
         />
         {/* Sound for headphones (the ears' own cues) or speakers (a pan). */}
@@ -203,8 +205,18 @@ function TheWayIn() {
           px={tp(STEP.text)}
           width={0.15 * U}
           color={ink.parchmentDim}
-          position={[0.165 * U, -0.25 * U, 0]}
+          position={[0.0825 * U, -0.25 * U, 0]}
           delay={0.2}
+        />
+        <RuneButton
+          label={toggle("Motion blur", motionBlur)}
+          variant="ghost"
+          onPress={toggleMotionBlur}
+          px={tp(STEP.text)}
+          width={0.15 * U}
+          color={ink.parchmentDim}
+          position={[0.2475 * U, -0.25 * U, 0]}
+          delay={0.25}
         />
       </Delayed>
       {deepest > 0 && (

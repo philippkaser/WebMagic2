@@ -17,9 +17,10 @@ around fluid spellcasting combat, a physics-sandbox world, and drop-in shared
 floors.** It is a "wizard shooter": you aim and fire like an FPS, but your
 gun is a staff and your bullets are spells.
 
-You are a wizard from a small village that sits atop a hundred-floor dungeon.
-For **glory, fame, riches — and to reach the bottom and find god** — wizards
-step through the village portal and descend. Every floor is deeper, darker,
+You are a wizard of Riftwatch, an expedition's camp pitched round a rift
+torn in the floor of a mountain valley — the mouth of a hundred-floor
+dungeon. For **glory, fame, riches — and to reach the bottom and find god** —
+wizards step through the rift and descend. Every floor is deeper, darker,
 and harder than the last.
 
 The emotional loop we are chasing:
@@ -115,8 +116,19 @@ The emotional loop we are chasing:
   the inventory comes out the same — in parchment on soot, arcane cyan for magic and the way onward,
   gold for home, blood for danger. New UI must follow this — if it could be
   a DOM panel, it's wrong.
-- **Post-processing chain:** bloom (feeds the emissive specks and magic) →
-  split-tone colour grade (per biome) → film grain → heavy vignette. The pixelation itself is *free*: the
+- **Post-processing chain:** pixel-art edges found in the depth (a dark
+  outline behind every silhouette, a lit lip on every near edge) → the
+  lens (motion blur from your own turns and dashes, a zoom rush on a blast
+  or a rift's pull, colour fringing at the rim, the forge's heat shimmer,
+  the world going soft behind a menu) → bloom (feeds the emissive specks
+  and magic) → an eye that adapts (step out of a black corridor and the
+  hall opens up) → split-tone colour grade (per biome) with a filmic
+  shoulder so flames and blasts keep their shape → film grain on the pixel
+  grid → ordered dither → a heavy vignette tinted with each place's darks.
+  The body is in the image too: a blow drains the colour, a blast punches,
+  near death the world greys and the rim of sight closes with your pulse.
+  Each biome has its own air (the Hollow's dark breathes, the Crystal Deep
+  splits light like a prism, the Drowned Halls breathe faintly with the tide). The pixelation itself is *free*: the
   world renders at ~1/3 resolution and the browser upscales it with
   `image-rendering: pixelated` (the UI canvas above it renders at full
   resolution so the pixel font stays crisp).
@@ -367,14 +379,26 @@ and again whenever a map is cast.
 
 ### The fiction
 
-The world is one vertical place: a **village of wizards perched above a
-hundred-floor dungeon that bores down into the earth.** The village is the
-safe hub — quiet, night-time, a few huts with warm windows, a central portal
-ringed with torches, under a big pixel sky: the Milky Way with dark lanes of
-dust through it, thousands of single-pixel stars twinkling in hard steps, a
-small, simple moon — a real sphere in a few tones, its seas and big craters picked out by a
-sun over your shoulder, its dark side faint with earthshine — long banks
-of cloud silvered on top, and now and then a shooting star. Through the portal is the descent.
+The world is one vertical place: **a camp of wizards on the lip of a
+hundred-floor dungeon that bores down into the earth.** Riftwatch (the
+village, in the code) is the safe hub — an expedition that found the rift
+in a mountain valley and dug out the ancient paving round it, a ring of old
+standing stones, and settled in to explore: canvas tents with lamplight in
+their doorways, a command pavilion with the survey maps, a watchtower over
+the forest edge, the diggers' worktable and spoil heaps, banners with the
+expedition's eye, the fire everyone sits round, a palisade of sharpened
+logs. Beside the rift stands the **depth stone**, which reads your gear the
+way the Weighing does and shows, cut in light, the floor you'd be dropped
+into.
+
+It is night, always, and big: past the gate the forest climbs north toward
+a great range of snow-streaked mountains, two titan peaks standing either
+side of a **huge full moon** that rises right behind the rift as you come
+up the lane, glowing, its light streaming over the peaks and through the
+pines as god rays and long moonbeams across the camp. Overhead, a big pixel
+sky: the Milky Way with dark lanes of dust, thousands of single-pixel stars
+twinkling in hard steps, long banks of cloud, now and then a shooting star.
+Through the rift is the descent.
 
 Wizards go down for the classic reasons — **glory, fame, and riches** — but
 the deepest myth, the thing that drives the boldest, is that **god waits at
@@ -408,14 +432,15 @@ journal scraps, Founders' inscriptions, graffiti, oaths) and collected in the
   Halls** (where the sea got in), **the Ember Forge** (where the Founders
   forged their wards), **the Crystal Deep** (the dungeon's singing bones),
   **the Hollow** (near the bottom: silence, pale light — something listens).
-- The deepest carvings hint at the secret: the Founders built the village
-  not to get something out, but to **keep something in**.
+- The deepest carvings hint at the secret: the Founders sealed the rift
+  under the paving the expedition dug up — not to get something out, but to
+  **keep something in**.
 
 ### Tone
 
 Gritty, a little grim, but not humorless. Wizards are treasure-hunters and
-glory-seekers, not solemn chosen ones. The village is cozy; the dungeon is
-oppressive. The contrast between the two is the mood.
+glory-seekers, not solemn chosen ones. The camp is warm and the night above
+it vast; the dungeon is oppressive. The contrast between the two is the mood.
 
 ### Lore hooks left open (for future writers)
 

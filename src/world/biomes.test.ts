@@ -54,7 +54,7 @@ describe("biomes", () => {
     for (const id of BIOME_SURFACE_IDS) expect(painted.has(id)).toBe(true);
   });
 
-  test("looks are well-formed: shafts, mirror, glow, grade, accent", () => {
+  test("looks are well-formed: shafts, mirror, glow, grade, air, accent", () => {
     for (const def of BIOME_DEFS) {
       const { reflection, shaft } = def.look;
       expect(shaft.color).toMatch(HEX);
@@ -73,6 +73,15 @@ describe("biomes", () => {
       expect(def.grade.saturation).toBeLessThan(1.5);
       expect(def.grade.contrast).toBeGreaterThan(0.8);
       expect(def.grade.contrast).toBeLessThan(1.4);
+      const { eye, ...air } = def.air;
+      for (const v of Object.values(air)) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(2);
+      }
+      // A log2 luminance: dim, but not black.
+      expect(eye).toBeLessThan(-3);
+      expect(eye).toBeGreaterThan(-12);
+      expect(def.air.vignette).toBeLessThanOrEqual(1);
       expect(def.accent).toMatch(HEX);
     }
   });

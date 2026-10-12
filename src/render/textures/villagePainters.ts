@@ -7,7 +7,17 @@ import { blank, fbm, glowAt, hex, mix, putRgb, ramp, setRough, tint, toMaps, wor
  * a short stepped ramp, so the whole hamlet shares one moonlit palette.
  * Village-only; the dungeon's surfaces live in painters/. */
 
-export type VillageTexture = "grass" | "cobble" | "timber" | "shingles" | "treeBark" | "window" | "basalt";
+export type VillageTexture =
+  | "grass"
+  | "cobble"
+  | "timber"
+  | "shingles"
+  | "treeBark"
+  | "window"
+  | "basalt"
+  | "canvas"
+  | "banner"
+  | "earth";
 
 const GRASS = ramp(["#131d12", "#1a2716", "#22321b", "#2c3f20", "#374b26"]);
 const EARTH = ramp(["#1f1810", "#2a2015", "#35291b", "#433422"]);
@@ -161,6 +171,84 @@ function basalt(rng: Rng): Painted {
   return p;
 }
 
+/** Oiled tent canvas: sewn in vertical panels, weathered and patched, the
+ * hem dark with mud. */
+function canvas(rng: Rng): Painted {
+  const p = blank();
+  const cloth = ramp(["#4a4232", "#5a5140", "#6a604b", "#776c55", "#82775e"]);
+  for (let y = 0; y < 64; y++)
+    for (let x = 0; x < 64; x++) {
+      const n = rng.next();
+      const f = fbm(x, y, 64, 64, 5, 351);
+      const seam = x % 16 === 0 || x % 16 === 15;
+      // A faint weave: alternate texels a hair lighter.
+      const weave = (x + y) % 2 === 0 ? 0.04 : 0;
+      let c = cloth(0.25 + f * 0.6 + weave + (n - 0.5) * 0.12);
+      if (seam) c = mix(c, hex("#2e281e"), 0.55);
+      // Water stains run down from the ridge; mud splashes up the hem.
+      const stain = fbm(x, y, 64, 64, 3, 352) > 0.62 ? 0.3 : 0;
+      const hem = y > 56 ? (y - 56) / 8 : 0;
+      c = mix(c, hex("#2a2418"), Math.max(stain, hem * 0.75));
+      putRgb(p, x, y, c, seam ? 0.25 : 0.45 + f * 0.2);
+    }
+  // A couple of square patches, stitched on.
+  for (let k = 0; k < 2; k++) {
+    const px = 4 + Math.floor(rng.next() * 48);
+    const py = 6 + Math.floor(rng.next() * 40);
+    const pc = ramp(["#3c3a30", "#4a4a3c"]);
+    for (let y = py; y < py + 9; y++)
+      for (let x = px; x < px + 9; x++) {
+        const edge = x === px || y === py || x === px + 8 || y === py + 8;
+        putRgb(p, x, y, edge ? hex("#1e1a14") : pc(rng.next()), edge ? 0.2 : 0.6);
+      }
+  }
+  return p;
+}
+
+/** The expedition's banner: indigo cloth, a pale border, and its sigil — an
+ * open eye with a rift for a pupil, under a ring — glowing faintly. The
+ * bottom edge is cut into a swallowtail by the mesh's alpha (dark here). */
+function banner(rng: Rng): Painted {
+  const p = blank(32, 64, { emit: true });
+  const cloth = ramp(["#141838", "#1a2046", "#212854"]);
+  const sigil = hex("#7ff0d8");
+  for (let y = 0; y < 64; y++)
+    for (let x = 0; x < 32; x++) {
+      const n = rng.next();
+      const border = x === 2 || x === 29 || y === 3;
+      let c = cloth(n * 0.6 + fbm(x, y, 32, 64, 4, 361) * 0.4);
+      if (border) c = hex("#a89a70");
+      putRgb(p, x, y, c, border ? 0.6 : 0.4);
+      // The sigil, centred at (16, 24): a ring above, an eye below it.
+      const dx = x - 15.5;
+      const ring = Math.abs(Math.hypot(dx, y - 14) - 5) < 0.8;
+      const ey = y - 28;
+      const lid = Math.abs(Math.abs(ey) - (6 - (dx * dx) / 22)) < 0.8 && Math.abs(dx) < 11;
+      const rift = Math.abs(dx) < 1.1 - Math.abs(ey) * 0.15 && Math.abs(ey) < 6;
+      if (ring || lid || rift) {
+        putRgb(p, x, y, sigil, 0.7);
+        glowAt(p, x, y, sigil, rift ? 1 : 0.55);
+      }
+    }
+  return p;
+}
+
+/** Freshly dug earth: clods and stones, darker in the hollows. */
+function earth(rng: Rng): Painted {
+  const p = blank();
+  for (let y = 0; y < 64; y++)
+    for (let x = 0; x < 64; x++) {
+      const n = rng.next();
+      const c = worley(x, y, 64, 64, 10, 10, 371);
+      const clod = 1 - c.f1;
+      let col = EARTH(clod * 0.7 + n * 0.3);
+      if (c.f2 - c.f1 < 0.08) col = hex("#120d08");
+      if (n > 0.985) col = hex("#5a5650"); // a stone
+      putRgb(p, x, y, col, 0.25 + clod * 0.6);
+    }
+  return p;
+}
+
 const PAINTERS: Record<VillageTexture, (rng: Rng) => Painted> = {
   grass,
   cobble,
@@ -169,6 +257,9 @@ const PAINTERS: Record<VillageTexture, (rng: Rng) => Painted> = {
   treeBark,
   window: windowPane,
   basalt,
+  canvas,
+  banner,
+  earth,
 };
 
 const base = new Map<VillageTexture, PixelMaps>();

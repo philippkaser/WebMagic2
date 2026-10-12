@@ -421,15 +421,82 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   `AmbientParticles.tsx` — single pixels animated entirely on the GPU in a
   box that follows the camera (dust, spores and drips, embers and ash,
   glints, village fireflies; the Weightless Hour makes it all float up).
-- **Post chain**: bloom (feeds the emissive specks, torches and magic) →
-  split-tone colour grade → film grain → heavy vignette
-  (`render/Effects.tsx`). Each biome sets its grade on arrival
-  (`setGrade`) and it eases in over a second, so arriving reads as the air
-  changing; the village has its own (`VILLAGE_GRADE`).
+- **Post chain** (`render/Effects.tsx`, effects in `render/post/`), three
+  passes at the world's low resolution:
+  1. god rays (`render/godRays.ts`, see below);
+  2. the lens (`post/LensEffect.ts`, one pass reading depth): **pixel
+     edges** from the Laplacian of 1/depth (flat on any plane, so it fires
+     only at silhouettes and creases — a dark outline on the far side, a lit
+     lip on the near side, fading into the fog); **camera motion blur** by
+     reprojection (depth → world → last frame's view-projection, as a fixed
+     shutter, cuts detected and skipped, the held staff left sharp; a
+     setting, `motionBlur`, key B); the **zoom rush** of a blast, a dash or
+     a rift; rim-only **chromatic dispersion**; the forge's **heat shimmer**;
+     and the **focus pull** that softens the world behind a tablet (title,
+     Weighing, inventory family, codex, death);
+  3. one merged pass: bloom → `post/GradeEffect.ts` (eye adaptation from a
+     centre-weighted log-luminance meter, 32² mip chain → 1×1 ping-pong,
+     fast toward light and slow into dark, half-way and within ±½ EV of the
+     place's `air.eye`; the split-tone grade; a per-channel filmic shoulder
+     instead of the hard clip; colour drained by a blow or near death) →
+     `post/FilmEffect.ts` (an oval vignette tinted with the place's darks,
+     breathing in the Hollow and closing with the heartbeat near death; a
+     luminance-weighted Gaussian grain on the pixel grid; ordered Bayer
+     dither in display space against banding).
+  Each biome sets its `grade` and `air` (shimmer, dispersion, breath, grain,
+  vignette, eye) on arrival (`setGrade`) and they ease in over a second, so
+  arriving reads as the air changing; the village has its own
+  (`VILLAGE_GRADE`, `VILLAGE_AIR`). The body's kicks — `shake`,
+  `playerHurt` and `dash` events, health, the travel stage — are kept by
+  `post/feel.ts` (pure, tested) and decay on their own.
 - **Shadows are a quality toggle** (F4 / main menu, persisted, default off):
   a shadow-casting point light re-renders the scene six times per frame,
   measured at roughly +50% frame time even at low resolution.
 - **F3 overlay** shows fps / p95 / worst frame for perf reports.
+
+### The camp above (`scenes/village/`)
+
+Riftwatch is laid out in one table (`layout.ts`): the structures' footprints
+(tents, the command pavilion, the watchtower, the wagon), the fixtures, the
+palisade arc and `groundHeight` — so the scene, its colliders, the floor
+map and the acoustics all see the same camp. `Camp.tsx` bakes every static
+part into world space and merges per material (the whole camp is a handful
+of draw calls); `Wilds.tsx` is the land outside (one displaced terrain mesh,
+flat where you walk, the forested slope north) and ~1,100 instanced pines;
+`FloorPillar.tsx` is the depth stone (its face a 32 × 56 canvas texture
+drawn in the pixel fonts, sized to the world's own pixels, re-cut when your
+gear changes the entry floor).
+
+- **The backdrop is at infinity** (`Sky.tsx`): the dome, the stars, the
+  moon, the great range and the near hills ride along with the camera
+  (they translate with it, never turn), write no depth and are drawn first
+  — so the sky never clips against the far plane however far you walk, the
+  world always draws over it, and the mountains keep their size the way
+  real ones do.
+- **The great range is real relief** (`skyline.rangeHeight`, tested): a
+  ridged-multifractal heightfield in a ring 44–94 m round the eye (domain-
+  warped so the aretes wander and run in toward you), shaped by an envelope
+  — low round the valley, high in the north, two titans either side of the
+  moon reaching ~30°, a saddle under it that hides the moon's foot. Meshed
+  as a polar grid ordered outermost ring first, so without depth the nearer
+  ridges paint over the farther. Flat-shaded facets: dark rock, snow on the
+  gentle high faces, moonlight raking across from behind and the side so
+  every ridge has a lit and a shadowed flank, the sky lighting what faces
+  up — stepped in gamma — then the air: deeper blue with distance, mist at
+  the feet, darker where backlit against the moon. The near hills are a
+  crest in angles with a pine fringe (`hillsCrest`).
+- **The moon** is about 13° across, its face tinted by the air it's seen
+  through and bright enough to bloom; a halo drawn over its limb softens
+  the edge into the sky (a hard edge reads as near), with a wide smooth wash
+  beyond.
+- **God rays** (`render/godRays.ts`): screen-space light scattering, one
+  pass at the world's resolution. Each pixel marches toward the moon's place
+  on screen gathering *sky* light — pixels with no depth (the backdrop) that
+  are bright (the moon and its glow) — so the ranges, the forest and the camp
+  cut the light into shafts; stepped and dithered like everything else, and
+  kept off the moon's own face. A scene turns it on with `setGodRays` (the
+  camp) and off with `clearGodRays`. From the side, long additive moonbeams
+  (`MoonShafts.tsx`) slant down from the moon's direction across the camp.
 
 ## Sound (`audio/`)
 
@@ -438,8 +505,8 @@ UI blip, heard through a small raytraced acoustics model:
 
 - **The level as sound sees it** (`acoustics.ts`, pure and tested): an
   `AcousticGrid` of solid/open cells — the dungeon's tiles (2 m, rock past
-  the edge, a 6 m vault), or the village green in 2 m cells with the
-  cottages solid under an open sky. Rays are traversed cell by cell
+  the edge, a 6 m vault), or the camp in 2 m cells with the tents and the
+  wagon solid under an open sky. Rays are traversed cell by cell
   (Amanatides–Woo).
 - **The room** (`analyzeRoom`): 48 rays from the listener, each bouncing
   four times off the walls like a mirror (the approach of Vercidium's
@@ -478,7 +545,7 @@ UI blip, heard through a small raytraced acoustics model:
   the source give some back (a wide arch carries more than a crack). No
   way round within 60 m: a thud through the rock. Points inside a wall
   (the camera brushing one, a torch on its bracket, the grace round a
-  cottage) are first moved just out of it (`openPoint`).
+  tent) are first moved just out of it (`openPoint`).
 - **Rooms ring on their own** (rooms & portals, as in Wwise): the
   dungeon's generated rooms are **zones** (`AcousticGrid.zones`; corridors
   and the village green have none). A room with something sounding in it,
@@ -709,7 +776,7 @@ and the way onward, gold for home, blood for danger.
   first). Its light lives in the WORLD canvas (`FloorMap.tsx`, mounted by
   GameScene) so walls and wizards stand in front of it and it blooms with
   the world: a rune circle burns onto the floor, the floor under it dims,
-  the tiles ripple out and walls, cottages and standing stones rise as ribs
+  the tiles ripple out and walls, tents and standing stones rise as ribs
   of light (instanced, each born on its own beat), and markers kindle —
   every wizard on the floor (`net/players` poses), the way onward, the way
   home, the treasure and the Warden once seen. It carries no words (the

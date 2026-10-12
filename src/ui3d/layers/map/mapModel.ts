@@ -1,5 +1,5 @@
 import { TILE } from "../../../core/config";
-import { CHEST, COTTAGES, LANE, MERCHANT, PLAZA_R, STONE_RING, WELL } from "../../../scenes/village/layout";
+import { CAMPFIRE, CHEST, LANE, MERCHANT, PILLAR, PLAZA_R, STONE_RING, STRUCTURES } from "../../../scenes/village/layout";
 import type { FloorLayout, Vec3 } from "../../../world/types";
 import { ink } from "../../theme";
 
@@ -91,9 +91,10 @@ export function dungeonModel(layout: FloorLayout, seen: (tx: number, tz: number)
 /** Village radius drawn on the map, m. */
 const VILLAGE_R = 16;
 
-/** The village, whole: the green in 1 m cells (the cobbled plaza and the
- * lane brighter), the cottages, the standing stones round the gate, the
- * well — and the gate, the chest and Maro's stall marked. */
+/** The camp, whole: the green in 1 m cells (the cobbled plaza and the lane
+ * brighter), the tents, pavilion, tower and wagon, the standing stones round
+ * the gate, the depth stone and the fire — and the gate, the chest and
+ * Maro's stall marked. */
 export function villageModel(): MapModel {
   const floor: MapPiece[] = [];
   const raised: MapPiece[] = [];
@@ -107,14 +108,15 @@ export function villageModel(): MapModel {
       const path = r < PLAZA_R || (Math.abs(cx) < LANE.width / 2 && cz > LANE.z0 && cz < LANE.z1);
       floor.push({ key: key++, x: cx, z: cz, sx: 0.86, sz: 0.86, h: 0, rot: 0, bright: path ? 1.9 : 1 });
     }
-  for (const c of COTTAGES) {
-    raised.push({ key: key++, x: c.pos[0], z: c.pos[2], sx: c.size, sz: c.size * 0.8, h: c.size * 0.6, rot: c.rot, bright: 1 });
+  for (const c of STRUCTURES) {
+    raised.push({ key: key++, x: c.pos[0], z: c.pos[2], sx: c.w, sz: c.d, h: Math.min(c.h, 3), rot: c.rot, bright: 1 });
   }
+  raised.push({ key: key++, x: PILLAR.pos[0], z: PILLAR.pos[2], sx: 0.6, sz: 0.6, h: 2.4, rot: PILLAR.rot, bright: 1.6 });
   for (let i = 0; i < 9; i++) {
     const a = (i / 9) * Math.PI * 2 + 0.2;
     raised.push({ key: key++, x: Math.cos(a) * STONE_RING, z: Math.sin(a) * STONE_RING, sx: 0.5, sz: 0.4, h: 1.5, rot: a, bright: 1 });
   }
-  raised.push({ key: key++, x: WELL[0], z: WELL[2], sx: 1.1, sz: 1.1, h: 0.7, rot: 0.4, bright: 1 });
+  raised.push({ key: key++, x: CAMPFIRE[0], z: CAMPFIRE[2], sx: 0.9, sz: 0.9, h: 0.3, rot: 0.4, bright: 1.8 });
   const markers: MapMarker[] = [
     { key: "gate", at: [0, 0, 0], color: ink.arcane, size: 1.4 },
     { key: "chest", at: CHEST.pos, color: ink.gold, size: 0.9 },
