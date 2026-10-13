@@ -473,6 +473,45 @@ run server-/authority-side.
   naive approach could afford, with a *lower* and perfectly stable light
   count and zero mid-game shader recompiles. The only real lights outside
   the pool are the player's shadow-casting staff light and the village moon.
+- **The light grid** (`render/lighting/`): the floor plan on the GPU, so
+  the dungeon's own surfaces (walls, vault, floor, floor marks) know where
+  the rock is. Walls are full height, so whether rock stands between a
+  pixel and a light is a 2D question: each pooled light's direct light is
+  multiplied by a march through the floor's occupancy texture (one texel a
+  tile) from the pixel to the light — Amanatides–Woo DDA, `gridRay.ts`
+  (pure, tested) mirrored line for line in the shader. Torchlight stays in
+  its room, a doorway throws a hard wedge down the corridor, a bolt flying
+  past a corner sweeps its shadow across the floor. Each light is a small
+  disc and each texel (32 a metre, the paint's own grid) aims its one ray
+  at its own spot on it from a 2×2 ordered dither, so a shadow edge steps
+  in whole texels and its soft band is a dither, never a blur. Lights in
+  rock (a torch's flame a hair into its wall, a blast at an impact point)
+  step out through their nearest face first; lights out of reach, behind
+  the surface, or the eye's own (lantern, staff) are never marched; the
+  visibility rides one bit per light. **Bounce** (`bounce.ts`, pure): once
+  per floor, each torch's and shaft's light is laid on a grid twice the
+  tile resolution (kept on its side of the walls by the same DDA), times
+  the stone's albedo, and diffused over the open cells — so a torch's
+  colour fills its room and spills faintly round a corner, never through a
+  wall — then added to the surfaces' ambient irradiance (a half-float
+  texture, strength per band). `FloorLighting` hands both to the uniforms
+  when a floor mounts and clears them on unmount: uniforms and textures
+  only, no light-count change, no recompiles; the village never sees it.
+  Dev: `__lightGrid({ shadows, bounce })` A/Bs it live, `__sceneBench(n)`
+  times the world pass alone, `?nolightgrid` loads without the patch.
+- **Floor marks** (`fx/decals/`): blasts scorch the stone and the dead
+  leave goo, soul-ash or crystal shards, for as long as you stay on the
+  floor. The books are pure (`decalPool.ts`: 200 slots, past 184 live the
+  oldest erode away in an ordered dither, a full pool overwrites its
+  oldest; `scorchFor`/`splatFor` size a mark from the blast's footprint on
+  the floor and its power, or the creature's size and burst style). The
+  marks are painted (`render/textures/marks.ts`: one alpha-cut atlas, with
+  per-texel roughness, sheen and ember lifetime) and drawn as ONE instanced
+  draw of quads on the floor, lit like the floor (pool, grid shadows,
+  bounce, fog), sampled at the floor's own texel grid so their pixels sit
+  on the stone's; embers and soul-specks go out one by one. Fed by the bus
+  (`explosion` from `explode()`, `enemyDied` from `useEnemy`), which fires
+  on every client, so everyone's floor wears the same scars.
 - **Resolution IS the pixelation**: the canvas renders at dpr 0.35 and the
   browser upscales it with `image-rendering: pixelated`. That one decision
   cut measured frame time ~5× — every light, normal map and post pass pays
@@ -914,3 +953,4 @@ and the way onward, gold for home, blood for danger.
 | New screen / menu | a file in `ui3d/layers/menus/` + one line in `Menus.tsx` (wrap it in `<UiPresence>`, build it from `Tablet`/`RuneText`/`RuneButton`) |
 | New scene switch / travel style | a kind in `transition/timeline.ts` and `travel(kind, …)` around the switch |
 | New particle effect | a named function in `fx/effects.ts` (styles in `fx/particleSim.ts`) |
+| New floor mark | a row painter in `render/textures/marks.ts` + a `DecalKind` in `fx/decals/decalPool.ts` (same order) and the event that lays it |

@@ -57,6 +57,34 @@ export interface GameEvents extends Record<string, unknown> {
   buff: { id: import("../items/types").BuffId; seconds: number };
   /** A room event changed phase (roomEvents/net.ts) — views flash, sounds play. */
   roomEvent: { id: string; kind: import("../world/types").RoomEventKind; phase: string; at: import("../world/types").Vec3 };
+  /** A blast went off (weapons/explosions.ts#explode — on every client,
+   * replays included). Cosmetic listeners: the floor's scorch marks. */
+  explosion: {
+    x: number;
+    y: number;
+    z: number;
+    /** The scaled radius (omens included). */
+    radius: number;
+    color: string;
+    /** The caller's sense of its size: particles / 36 (bolt pop ≈ 0.4). */
+    power: number;
+    vfx: "blast" | "shockwave";
+  };
+  /** An enemy died for real (not a silent late-join catch-up), on every
+   * client. Cosmetic listeners: the splat it leaves on the floor. */
+  enemyDied: {
+    x: number;
+    y: number;
+    z: number;
+    /** What its body was made of (the death burst's colour), if known. */
+    body?: string;
+    /** Its soul-light's colour, if known. */
+    soul?: string;
+    /** The death burst's style (goo, shard, smoke, spark…). */
+    style?: string;
+    /** Size (1 = a wisp). */
+    scale: number;
+  };
 }
 
 export const gameEvents = new Emitter<GameEvents>();
