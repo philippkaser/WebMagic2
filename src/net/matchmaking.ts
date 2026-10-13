@@ -15,6 +15,10 @@ import { ENCOUNTERS } from "../core/config";
  * encounters stay uncommon, but every quiet floor makes the next one feel a
  * little more dangerous.
  *
+ * Fellowships bypass it too: a wizard whose party (net/party.ts) already
+ * stands in an instance of the floor, with room, walks into theirs — so a
+ * party goes down together, floor after floor.
+ *
  * Reconnects bypass the roll: `preferInstanceId` puts a dropped wizard back
  * into the very instance they fell out of. An instance whose last wizard
  * leaves LINGERS (empty, invisible to encounters) for a minute before it is
@@ -47,6 +51,9 @@ export interface JoinOptions {
   /** Rejoin this instance if it still exists on the floor with room
    * (reconnect affinity) — no encounter roll. */
   preferInstanceId?: string;
+  /** Party members: join the first of their instances on this floor that
+   * has room (no roll). */
+  companions?: readonly string[];
 }
 
 export class FloorDirectory {
@@ -81,6 +88,15 @@ export class FloorDirectory {
     const preferred = opts.preferInstanceId ? this.instances.get(opts.preferInstanceId) : undefined;
     if (preferred && preferred.floor === floor && preferred.players.size < this.maxPerInstance) {
       return this.seat(playerId, preferred);
+    }
+
+    for (const mate of opts.companions ?? []) {
+      const theirs = this.instanceOf(mate);
+      if (theirs && theirs.floor === floor && theirs.players.size < this.maxPerInstance) {
+        // Company, not a chance meeting: the tension clock rests.
+        this.soloStreak.set(playerId, 0);
+        return this.seat(playerId, theirs);
+      }
     }
 
     const open = [...this.instances.values()].filter(
