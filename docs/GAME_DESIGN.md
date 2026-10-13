@@ -78,9 +78,16 @@ The emotional loop we are chasing:
   floor reads as the air changing. And no floor is one colour end to end:
   each turns its band's palette a little around the colour wheel (seeded),
   and across the floor hue, richness and brightness drift from room to
-  room — the stone, its glowing seams, the torches and the fog with it. Rooms are plain on purpose (tall 6 m
-  walls, fog, shafts of dusty light, torches): the feel comes from texture,
-  light and fog, not from clutter.
+  room — the stone, its glowing seams, the torches and the fog with it. The
+  bones of an old crawler carry the space: every doorway is an arch of
+  dressed stone (some with a portcullis raised in it, some with a door
+  hanging off its last hinge), halls are crossed by ribs on piers and big
+  ones stand on pillars. Then texture, not clutter: skulls in the corners,
+  candles somebody keeps lighting, chains and bone chimes from the vault,
+  webs, the Founders' banners in rags, grates, fallen masonry — and each
+  band its own (barnacles and kelp, anvils and braziers, crystal spurs,
+  pale roots). It all keeps to the corners, the walls and the vault, so the
+  floor you fight on stays readable.
 - **Particles everywhere, and alive — in pixels.** Every particle is a
   crisp chunk on the pixel grid: explosions with a core flash, pixel-chain
   sparks, dithered smoke and a stepped shockwave ring; comet-tailed bolts;
@@ -414,9 +421,9 @@ fast enough, and a grave remains.
 
 ### The written lore
 
-The mythos is now carved into the walls (`world/lore.ts`, ~35 fragments —
-journal scraps, Founders' inscriptions, graffiti, oaths) and collected in the
-**codex** (C). What the fragments collectively know:
+The mythos is now carved into the walls (`world/lore.ts`, ~75 fragments —
+journal scraps, Founders' inscriptions, graffiti, oaths, recipes) and
+collected in the **codex** (C). What the fragments collectively know:
 
 - **The Weighing Gate** weighs what a wizard carries and casts them where
   their weight belongs. **The Tithe of Five** is the deep's price for
@@ -435,6 +442,25 @@ journal scraps, Founders' inscriptions, graffiti, oaths) and collected in the
 - The deepest carvings hint at the secret: the Founders sealed the rift
   under the paving the expedition dug up — not to get something out, but to
   **keep something in**.
+- **The camp's people**: Maro the Provisioner; **Old Wenna**, the alchemist
+  who brews what the deep sheds; **Brannoc** the smith, who went down nine
+  times and came home with three gold rings and a hand that won't close;
+  and **Ysolde Varr**, who keeps the **Proving Ground** — the Founders'
+  trial hall behind the obelisk by the fire, where duels end at the yield
+  because the hall gives back the blood spilled in it. Their voices are
+  data in `world/npcLines.ts` (greetings, barks, and hints gated by how
+  deep you've been).
+- **What the creatures leave** — shards, ash, gel, cores — is the Founders'
+  wards breaking down: the deep is digesting the wards, not the wizards.
+  **Riftglass** is a piece of the rift gone hard, the tear being held shut
+  and the holding coming off in pieces. Every piece carried home thins the
+  lid; Wenna and Brannoc, knowingly or not, send them back down.
+- **One tear per floor**: once the tithe is paid it forks as you step in,
+  the way home and the way down — and deep enough, the way home narrows.
+  **Fellowships** swear at the Gate and the deep parts them anyway;
+  **vault chests** open for anyone (that's the trouble); a **ward stone**
+  still lit draws everything the deep has; **shrines** give freely, because
+  what a wizard leaves at a shrine, the lid keeps.
 
 ### Tone
 
@@ -670,7 +696,7 @@ table, and the extension guide.
 - Item levels (gear potency and health wards scale with depth), gear-level
   entry, the Tithe of Five — enforced server-side.
 - Five depth biomes (own surfaces, light, drone and monster mix), six omens,
-  ~35 lore carvings and the codex.
+  ~75 lore carvings and the codex, and the camp's voice lines.
 - 100-floor procedural generation with difficulty scaling and boss floors.
 - Movement, all four equipment slots, the full ability/enemy/boss/prop set
   listed above, procedural audio, the dynamic-light look.
@@ -684,8 +710,8 @@ table, and the extension guide.
   chests, host-authority replication of enemies/props/boss/loot/graves,
   late-join sync, host migration, reconnect into the same instance.
 - The look ("gritty pixel-magic"): five biomes of painted pixel-art
-  surfaces with their own colour grades, plain 6 m halls with fog, light
-  shafts and ambient air; pixel particles for every effect; rift portals and
+  surfaces with their own colour grades, 6 m halls with arched doorways,
+  ribs, pillars and set dressing, fog, light shafts and ambient air; pixel particles for every effect; rift portals and
   portal journeys for every scene switch; and the whole UI in the world in
   the grimoire style (rune text in pixel fonts, framed stone-tablet menus,
   the framed HUD, 3D items).
