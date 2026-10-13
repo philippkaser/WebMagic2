@@ -16,10 +16,11 @@ export interface OccupancyGrid {
 }
 
 /** Hard cap on cells crossed per march: a pooled light reaches ≤ ~12 m (6
- * tiles) so ~13 crossings cover any segment it lights; the lantern's 17 m
- * reach needs a few more. Past the cap the march gives up and calls it lit
- * (fail open — the far end of a light's reach is dim anyway). */
-export const MAX_STEPS = 20;
+ * tiles), so ~13 crossings cover any segment it lights (the lantern, with
+ * its 17 m, is never marched — it rides at the eye). Past the cap the
+ * march gives up and calls it lit (fail open — the far end of a light's
+ * reach is dim anyway). */
+export const MAX_STEPS = 16;
 
 /** How far (cells) a light stuck in rock is pushed out past the face. */
 export const UNSTICK = 0.02;
