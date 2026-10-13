@@ -41,6 +41,27 @@ export interface TrapSpawn {
   pos: Vec3;
 }
 
+/** What a room can hold besides monsters (roomEvents/catalog.ts): a vault
+ * its guardians wake for, a ward circle to hold, a shrine's bargain, a
+ * fountain. */
+export type RoomEventKind = "vault" | "ward" | "shrine" | "fountain";
+
+export interface RoomEventSpawn {
+  /** Unique on the floor ("e0", "e1"): the key its shared state goes by,
+   * and the prefix of anything it spawns. */
+  id: string;
+  kind: RoomEventKind;
+  /** Where it stands (floor level). */
+  pos: Vec3;
+  /** Yaw it faces (three.js rotation.y). */
+  facing: number;
+  /** The room's walkable interior in world units [minX, minZ, maxX, maxZ] —
+   * where its guardians and waves appear and who counts as "in the room". */
+  area: [number, number, number, number];
+  /** A small per-event roll (which boon a shrine offers…). */
+  variant: number;
+}
+
 /** Axis-aligned merged wall collider (world units). */
 export interface WallBox {
   center: Vec3;
@@ -118,6 +139,8 @@ export interface FloorLayout {
   leave: Vec3;
   /** Guaranteed loot pedestal. */
   treasure: Vec3;
+  /** Vaults, ward circles, shrines, fountains (world/gen/eventPlacement.ts). */
+  events: RoomEventSpawn[];
   /** Boss arena spawn — present every 10th floor. The floor's portals stay
    * sealed until the boss dies. */
   boss: Vec3 | null;

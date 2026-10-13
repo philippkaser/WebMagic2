@@ -1,4 +1,5 @@
 import { TILE } from "../../../core/config";
+import { roomEventDef } from "../../../roomEvents/catalog";
 import { CAMPFIRE, CAULDRON, CHEST, FORGE, LANE, MERCHANT, PILLAR, PLAZA_R, STONE_RING, STRUCTURES } from "../../../scenes/village/layout";
 import type { FloorLayout, Vec3 } from "../../../world/types";
 import { ink } from "../../theme";
@@ -84,6 +85,7 @@ export function dungeonModel(layout: FloorLayout, seen: (tx: number, tz: number)
   if (known(layout.exit)) markers.push({ key: "exit", at: layout.exit, color: ink.arcane, size: 1.3 });
   if (known(layout.treasure)) markers.push({ key: "treasure", at: layout.treasure, color: ink.gold, size: 0.75 });
   if (layout.boss && known(layout.boss)) markers.push({ key: "boss", at: layout.boss, color: "#ff5a48", size: 1.4 });
+  for (const e of layout.events) if (known(e.pos)) markers.push({ key: e.id, at: e.pos, color: roomEventDef(e.kind).color, size: 0.85 });
   const bounds = floor.length ? padBounds({ minX: minX - TILE, maxX: maxX + TILE, minZ: minZ - TILE, maxZ: maxZ + TILE }, MIN_SPAN) : null;
   return { floor, raised, markers, bounds };
 }

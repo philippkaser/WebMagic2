@@ -49,7 +49,18 @@ export interface Passives {
 
 /** Timed effects a draught (or a shrine) lays on the wizard — see
  * items/buffs.ts for what each does and for how long. */
-export type BuffId = "haste" | "ironskin" | "fury" | "clarity" | "swiftness";
+export type BuffId =
+  | "haste"
+  | "ironskin"
+  | "fury"
+  | "clarity"
+  | "swiftness"
+  // A shrine's bargains (roomEvents/catalog.ts): each gives and takes.
+  | "blood_oath"
+  | "glass_hour"
+  | "wellspring"
+  | "storm_pact"
+  | "ricochet_rite";
 
 /** What happens when a consumable is used (Q/E). */
 export interface ConsumableEffect {

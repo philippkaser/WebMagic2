@@ -55,6 +55,8 @@ export interface GameEvents extends Record<string, unknown> {
   phoenix: undefined;
   /** An elixir's blessing took hold (HUD shows it ticking down). */
   buff: { id: import("../items/types").BuffId; seconds: number };
+  /** A room event changed phase (roomEvents/net.ts) — views flash, sounds play. */
+  roomEvent: { id: string; kind: import("../world/types").RoomEventKind; phase: string; at: import("../world/types").Vec3 };
 }
 
 export const gameEvents = new Emitter<GameEvents>();

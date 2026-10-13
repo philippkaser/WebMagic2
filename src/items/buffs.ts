@@ -13,6 +13,8 @@ export interface BuffDef {
   seconds: number;
   color: string;
   passives: Partial<Passives>;
+  /** The bargain in words, gift first ("+40% damage · −30 max health"). */
+  terms?: string;
 }
 
 const defs: BuffDef[] = [
@@ -21,6 +23,12 @@ const defs: BuffDef[] = [
   { id: "fury", name: "Fury", seconds: 30, color: "#ff6a3d", passives: { damageMult: 1.35 } },
   { id: "clarity", name: "Clarity", seconds: 25, color: "#8ff0ff", passives: { manaCostMult: 0.5 } },
   { id: "swiftness", name: "Swiftness", seconds: 20, color: "#a8ffe3", passives: { speedMult: 1.25 } },
+  // Shrine bargains: long, strong, and each takes something back.
+  { id: "blood_oath", name: "Oath of Blood", seconds: 150, color: "#ff3b3b", passives: { damageMult: 1.4, maxHealth: -30 }, terms: "+40% damage · −30 max health" },
+  { id: "glass_hour", name: "The Glass Hour", seconds: 150, color: "#c8f4ff", passives: { fireRateMult: 1.35, damageTakenMult: 1.25 }, terms: "+35% cast speed · take 25% more harm" },
+  { id: "wellspring", name: "Wellspring", seconds: 150, color: "#5db9ff", passives: { manaRegenMult: 2, speedMult: 0.85 }, terms: "double mana flow · 15% slower" },
+  { id: "storm_pact", name: "Storm Pact", seconds: 150, color: "#9fd8ff", passives: { chain: 1, manaCostMult: 1.4 }, terms: "every hit arcs on · spells cost 40% more" },
+  { id: "ricochet_rite", name: "Ricochet Rite", seconds: 150, color: "#ffd27a", passives: { bounces: 2, damageMult: 0.85 }, terms: "bolts bounce twice more · 15% less damage" },
 ];
 
 const byId = new Map(defs.map((d) => [d.id, d]));

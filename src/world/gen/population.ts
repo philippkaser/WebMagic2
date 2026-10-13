@@ -200,8 +200,9 @@ function propKind(roll: number, barrelBias: number): PropKind {
   return roll < potCut ? "pot" : roll < rest ? "crate" : "barrel";
 }
 
-/** Weighted pick over the kinds available at this depth (one rng draw). */
-function pickEnemyKind(
+/** Weighted pick over the kinds available at this depth (one rng draw).
+ * Also how a room event's guardians are drawn (roomEvents/net.ts). */
+export function pickEnemyKind(
   rng: Rng,
   floor: number,
   weights: Partial<Record<EnemyKind, number>>,

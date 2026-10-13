@@ -3,6 +3,7 @@ import { CuboidCollider, interactionGroups, RigidBody } from "@react-three/rapie
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { getEnemyDef } from "../enemies/registry";
 import { SpawnedEnemies } from "../enemies/SpawnedEnemies";
+import { RoomEvents } from "../roomEvents/RoomEvents";
 import { GROUPS, TILE, WALL_HEIGHT } from "../core/config";
 import { AmbientParticles } from "../fx/AmbientParticles";
 import { addLightSource, removeLightSource } from "../fx/DynamicLights";
@@ -130,6 +131,7 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
       <SpawnedEnemies />
 
       <TreasurePedestal position={layout.treasure} floor={layout.floor} seed={layout.seed} />
+      <RoomEvents events={layout.events} floor={layout.floor} />
 
       {layout.boss &&
         bossAlive &&

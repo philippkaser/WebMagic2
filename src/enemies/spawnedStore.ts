@@ -31,10 +31,17 @@ let counter = 1;
 const enemySpawned = hostEvent<SpawnedEnemy>("enemySpawned", (d) => spawnHandlers.push?.(d));
 
 /** Host-authoritative spawn. No-op off the host — replicas receive the event,
- * so a split rolls once and every client renders the same children. */
-export function spawnEnemy(kind: EnemyId, generation: number, pos: Vec3, floor: number): void {
+ * so a split rolls once and every client renders the same children. `id`
+ * lets a caller name its own spawns (a room event's guardians, "e0g1") so
+ * it can count them later — even after the authority changes hands. */
+export function spawnEnemy(kind: EnemyId, generation: number, pos: Vec3, floor: number, id = `s${counter++}`): void {
   if (!isHost()) return;
-  enemySpawned.announce({ id: `s${counter++}`, kind, generation, pos, floor });
+  enemySpawned.announce({ id, kind, generation, pos, floor });
+}
+
+/** Ids of the runtime spawns alive on THIS client right now. */
+export function liveSpawnIds(): Set<string> {
+  return new Set((spawnHandlers.live?.() ?? []).map((s) => s.id));
 }
 
 /** Drop a spawned enemy from THIS client's live list (its death fires on every

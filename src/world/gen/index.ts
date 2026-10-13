@@ -6,6 +6,7 @@ import type { FloorLayout, Vec3 } from "../types";
 import { planArchitecture } from "./architecture";
 import { connectRooms } from "./corridors";
 import { Grid, floodFill, gridSize, worldToTile } from "./grid";
+import { placeRoomEvents } from "./eventPlacement";
 import { placeLore } from "./lorePlacement";
 import { placePois } from "./pois";
 import { placeTorches, populateRooms } from "./population";
@@ -22,7 +23,7 @@ import { buildWalls } from "./walls";
  *
  *   omen (own stream) → rooms → corridors → walls → points of interest
  *   → torches → props & enemies → traps → lore runes (own stream)
- *   → architecture (own stream)
+ *   → architecture (own stream) → room events (own stream)
  *
  * Stages sharing the layout stream run in a fixed order and each draws the
  * same numbers whatever the biome or omen (those only scale counts and
@@ -65,6 +66,27 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     traps,
     lightMult: mods.torchMult,
   });
+  const events = placeRoomEvents({
+    grid,
+    seed,
+    floor,
+    rooms,
+    pois,
+    occupied: [
+      ...props.map((p) => p.pos),
+      ...enemies.map((e) => e.pos),
+      ...traps.map((t) => t.pos),
+      ...torches.torches,
+      ...lore.map((l) => l.pos),
+      ...architecture.pillars.map((p) => p.pos),
+      ...architecture.crystals.map((c) => c.pos),
+      pois.exit,
+      pois.leave,
+      pois.treasure,
+      pois.spawn,
+      ...(pois.boss ? [pois.boss] : []),
+    ],
+  });
 
   return {
     floor,
@@ -79,6 +101,7 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     exit: pois.exit,
     leave: pois.leave,
     treasure: pois.treasure,
+    events,
     boss: pois.boss,
     torches: torches.torches,
     props,
