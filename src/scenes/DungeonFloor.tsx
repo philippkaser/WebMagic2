@@ -14,6 +14,7 @@ import { PlayerController } from "../player/PlayerController";
 import { floorTint, turnHue } from "../render/floorTint";
 import { DungeonGround } from "../render/models/DungeonGround";
 import { DungeonStone } from "../render/models/DungeonStone";
+import { FloorLighting } from "../render/lighting/FloorLighting";
 import { LightShafts } from "../render/models/LightShaftModel";
 import { RuneCircleModel } from "../render/models/RuneCircleModel";
 import { floorsUntilExit } from "../run/rules";
@@ -98,6 +99,8 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
       <ambientLight intensity={biome.ambient.intensity} color={ambientColor} />
 
       <WallsAndFloor layout={layout} />
+      {/* The light grid: wall shadows for the pooled lights, torch bounce. */}
+      <FloorLighting layout={layout} torchColors={torchColors} />
       {/* The air itself: dust, spores, embers, glitter or ash per biome. */}
       <AmbientParticles biome={layout.biome} omen={layout.omen} ceiling={WALL_HEIGHT} />
 
