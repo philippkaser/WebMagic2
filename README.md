@@ -31,6 +31,10 @@ Testing encounters locally: two browser windows only meet ~12% of the time by
 design. Start the server with `ENCOUNTER_CHANCE=1 bun run dev:server` to make
 every same-floor entry meet whoever is already there.
 
+Several dev stacks side by side: `PORT=3203 bun server/server.ts` and
+`WM_SERVER_PORT=3203 bunx vite --port 3103` (vite's `/ws` proxy follows
+`WM_SERVER_PORT`, default 3001).
+
 End-to-end smoke test (headless Chromium, two wizards: a full solo run, then
 PvP, a pact, a death, a grave and its plunder — including the server honoring
 the plunder):
@@ -155,7 +159,12 @@ corner — check it against the latest commit when testing.
 ### Multiplayer
 
 A real Bun WebSocket server (`server/server.ts`) owns matchmaking, identity
-and saves. Instances hold up to 4 wizards on the same floor, but the
+and saves. Play as a **guest** (your wizard lives in this browser) or write
+it into **the Wizard's Ledger** on the title screen — a username and a
+password, and your wizard follows you to any browser; a guest can claim its
+wizard at any time and keep everything. Saves live server-side in
+`DATA_FILE`, written atomically, with rotating snapshots in `backups/`
+beside it. Instances hold up to 4 wizards on the same floor, but the
 matchmaker keeps them apart most of the time (the encounter "tension clock").
 Everyone in an instance generates the identical floor from the shared seed.
 
