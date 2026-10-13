@@ -32,7 +32,7 @@ describe("plaqueText (the item plaque's words)", () => {
     const moss = plaqueText(resolveItem("grave_moss"), null, { qty: 12 });
     expect(plain(moss.title)).toBe("Grave Moss ×12");
     expect(moss.statsHead).toBe("REAGENT");
-    expect(plain(moss.stats)).toContain("Grows only in The Catacombs (floors 1–9)");
+    expect(plain(moss.stats)).toContain("Grows only in The Catacombs, floors 1–9");
   });
 
   test("stacks show their count; the small-caps line says what it is", () => {
@@ -58,7 +58,8 @@ describe("plaqueText (the item plaque's words)", () => {
 
   test("footnotes: unbanked (hourglass), Maro's offer and price (coin), the quick-move hint", () => {
     const t = plaqueText(resolveItem("amulet_focus@3"), null, { runLoot: true, sellFor: 9, hint: "Shift-click to equip" });
-    expect(notes(t)).toEqual(["Unbanked — lost if you fall", "Maro pays 9 gold", "Shift-click to equip"]);
+    // …and, for gear, what the forge works it with.
+    expect(notes(t)).toEqual(["Unbanked — lost if you fall", "Maro pays 9 gold", "Hungers for Grave Moss", "Shift-click to equip"]);
     expect(t.notes[0]!.icon).toBe("hourglass");
     expect(t.notes[1]!.icon).toBe("coin");
     const ware = plaqueText(resolveItem("save_feather"), null, { price: { gold: 180, affordable: false } });

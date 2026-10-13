@@ -1,9 +1,9 @@
-import type { ResolvedItem } from "../../../items/catalog";
+import { getItemDef, type ResolvedItem } from "../../../items/catalog";
+import { attunementOf } from "../../../items/crafting";
 import type { SlotRef } from "../../../items/inventory";
-import { bandOfReagent } from "../../../items/materials";
+import { whereItGrows } from "../../../items/materials";
 import { ITEM_POWER } from "../../../items/power";
-import type { Slot } from "../../../items/types";
-import { getBiomeDef } from "../../../world/biomes";
+import { isGearSlot, type Slot } from "../../../items/types";
 import { statLines } from "../../../ui/itemInfo";
 import type { TextSpan } from "../../font/layout";
 import { ink } from "../../theme";
@@ -99,11 +99,8 @@ export function plaqueText(item: ResolvedItem, worn: ResolvedItem | null, extras
     lines.push([{ text: `Forged +${item.enhance}: boons ${pct}% stronger`, color: ink.brassLight }]);
   }
   if (reagent) {
-    const band = bandOfReagent(def.id);
-    if (band) {
-      const b = getBiomeDef(band);
-      lines.push([{ text: `Grows only in ${b.name} (floors ${b.floors[0]}–${b.floors[1]})`, color: INK.body }]);
-    }
+    const where = whereItGrows(def.id);
+    if (where) lines.push([{ text: `Grows only in ${where}`, color: INK.body }]);
   }
   for (const line of statLines(item, worn)) {
     if (line.delta === undefined) lines.push([{ text: line.text, color: INK.body }]);
@@ -127,6 +124,11 @@ export function plaqueText(item: ResolvedItem, worn: ResolvedItem | null, extras
       icon: "coin",
       iconTint: ink.gold,
     });
+  }
+  if (isGearSlot(def.slot)) {
+    // What Brannoc's forge works it with (items/crafting.ts attunementOf).
+    const want = getItemDef(attunementOf(item));
+    notes.push({ text: [{ text: "Hungers for ", color: INK.faint }, { text: want.name, color: want.color }] });
   }
   if (extras.hint) notes.push({ text: [{ text: extras.hint, color: ink.arcane }] });
 

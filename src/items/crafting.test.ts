@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Rng } from "../core/rng";
 import type { WireInventory, WireStack } from "../net/protocol";
-import { applyCraft, allRecipes, canAfford, countItem, enhanceCost, salvageYield, temperCost } from "./crafting";
+import { applyCraft, allRecipes, attunementOf, canAfford, countItem, enhanceCost, salvageYield, temperCap, temperCost } from "./crafting";
 import { resolveItem } from "./catalog";
-import { bandReagent } from "./materials";
 
 const grid = (n: number, cells: (WireStack | null)[] = []) => Array.from({ length: n }, (_, i) => cells[i] ?? null);
 
@@ -21,23 +20,23 @@ function inv(over: Partial<WireInventory> = {}): WireInventory {
 
 const rng = () => new Rng(7);
 const ctx = { deepest: 20 };
+const want = (id: string) => attunementOf(resolveItem(id));
 
 describe("brewing", () => {
-  test("reagents and gold become a draught on the belt", () => {
-    const start = inv({ pouch: grid(8, [{ id: "grave_moss", qty: 3 }, { id: "slime_gel", qty: 2 }]) });
+  test("Grave Moss and gold become a draught on the belt", () => {
+    const start = inv({ pouch: grid(8, [{ id: "grave_moss", qty: 3 }]) });
     const out = applyCraft(start, { recipe: "brew:potion_hp_weak" }, rng(), ctx);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.inventory.belt[0]).toEqual({ id: "potion_hp_weak", qty: 1 });
-    expect(countItem(out.inventory, "grave_moss")).toBe(2);
-    expect(countItem(out.inventory, "slime_gel")).toBe(0);
+    expect(countItem(out.inventory, "grave_moss")).toBe(1);
     expect(out.inventory.gold).toBe(496);
     // The input is never mutated.
-    expect(countItem(start, "slime_gel")).toBe(2);
+    expect(countItem(start, "grave_moss")).toBe(3);
   });
 
   test("short a reagent: refused, nothing spent", () => {
-    const start = inv({ pouch: grid(8, [{ id: "grave_moss", qty: 3 }, { id: "slime_gel", qty: 1 }]) });
+    const start = inv({ pouch: grid(8, [{ id: "grave_moss", qty: 1 }]) });
     const out = applyCraft(start, { recipe: "brew:potion_hp_weak" }, rng(), ctx);
     expect(out).toEqual({ ok: false, reason: "Not enough reagents" });
   });
@@ -45,41 +44,57 @@ describe("brewing", () => {
   test("reagents are found in the pouch, the bag and the chest", () => {
     const start = inv({
       pouch: grid(8, [{ id: "grave_moss", qty: 1 }]),
-      bag: grid(5, [{ id: "slime_gel", qty: 1 }]),
-      chest: grid(30, [null, { id: "slime_gel", qty: 4 }]),
+      bag: grid(5, [{ id: "brine_pearl", qty: 1 }]),
+      chest: grid(30, [null, { id: "grave_moss", qty: 4 }]),
     });
-    const out = applyCraft(start, { recipe: "brew:potion_hp_weak" }, rng(), ctx);
+    const out = applyCraft(start, { recipe: "brew:potion_hp" }, rng(), ctx);
     expect(out.ok).toBe(true);
-    if (out.ok) expect(countItem(out.inventory, "slime_gel")).toBe(3);
+    if (out.ok) {
+      expect(countItem(out.inventory, "grave_moss")).toBe(3);
+      expect(countItem(out.inventory, "brine_pearl")).toBe(0);
+    }
   });
 
-  test("every draught needs Grave Moss — the reason to walk the Catacombs", () => {
+  test("every draught is Grave Moss plus at most one other thing", () => {
     for (const r of allRecipes("cauldron")) {
-      if (r.output === "save_feather") continue;
-      expect(r.cost!.items.some((s) => s.id === "grave_moss")).toBe(true);
+      const ids = new Set(r.cost!.items.map((s) => s.id));
+      expect(ids.has("grave_moss")).toBe(true);
+      expect(ids.size).toBeLessThanOrEqual(2);
     }
   });
 });
 
 describe("the forge", () => {
-  test("temper raises the level with the reagent of the depth it rises to", () => {
-    const item = resolveItem("ember_staff@9");
-    const cost = temperCost(item)!;
-    expect(cost.items[0]!.id).toBe(bandReagent(10)); // floor 10 is the Drowned Halls
-    expect(cost.items[0]!.id).toBe("brine_pearl");
-    const start = inv({ equipment: { staff: "ember_staff@9", amulet: null, cloak: null, boots: null }, pouch: grid(8, [{ id: "brine_pearl", qty: 5 }]) });
+  test("each piece is worked with its own reagent; a shallow one wants Grave Moss", () => {
+    expect(want("ember_staff@9")).toBe("grave_moss");
+    const cost = temperCost(resolveItem("ember_staff@9"), ctx)!;
+    expect(cost.items).toEqual([{ id: "grave_moss", qty: 2 }]);
+    const start = inv({ equipment: { staff: "ember_staff@9", amulet: null, cloak: null, boots: null }, pouch: grid(8, [{ id: "grave_moss", qty: 5 }]) });
     const out = applyCraft(start, { recipe: "temper", target: { c: "equipment", s: "staff" } }, rng(), ctx);
     expect(out.ok && out.inventory.equipment.staff).toBe("ember_staff@10");
     expect(out.ok && out.changed).toEqual({ from: "ember_staff@9", to: "ember_staff@10" });
   });
 
-  test("enhance climbs to +5 and stops; it never changes the level", () => {
-    const item = resolveItem("cloak_warden+warded@14^4");
-    expect(enhanceCost(item)!.items.find((s) => s.id === "riftglass")!.qty).toBe(5);
+  test("temper stops a little past the deepest floor walked", () => {
+    expect(temperCap(0)).toBe(5);
+    expect(temperCap(20)).toBe(23);
+    expect(temperCost(resolveItem("ember_staff@5"), { deepest: 0 })).toBeNull();
+    const start = inv({ equipment: { staff: "ember_staff@5", amulet: null, cloak: null, boots: null }, pouch: grid(8, [{ id: "grave_moss", qty: 9 }]) });
+    const out = applyCraft(start, { recipe: "temper", target: { c: "equipment", s: "staff" } }, rng(), { deepest: 0 });
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.reason).toContain("Walk deeper");
+  });
+
+  test("enhance climbs to +5 on its reagent and riftglass; it never changes the level", () => {
+    const id = "cloak_warden+warded@14^4";
+    expect(enhanceCost(resolveItem(id))!.items).toEqual([
+      { id: want(id), qty: 10 },
+      { id: "riftglass", qty: 5 },
+    ]);
     expect(enhanceCost(resolveItem("cloak_warden@14^5"))).toBeNull();
     const start = inv({
-      bag: grid(5, [{ id: "cloak_warden+warded@14^4", qty: 1 }]),
-      pouch: grid(8, [{ id: "riftglass", qty: 9 }, { id: "arcane_dust", qty: 20 }, { id: bandReagent(14), qty: 4 }]),
+      bag: grid(5, [{ id, qty: 1 }]),
+      pouch: grid(8, [{ id: "riftglass", qty: 9 }, { id: want(id), qty: 12 }]),
     });
     const out = applyCraft(start, { recipe: "enhance", target: { c: "bag", i: 0 } }, rng(), ctx);
     expect(out.ok && out.inventory.bag[0]!.id).toBe("cloak_warden+warded@14^5");
@@ -87,7 +102,8 @@ describe("the forge", () => {
   });
 
   test("imbue adds a distinct enchantment; legendaries and full items refuse", () => {
-    const start = inv({ pouch: grid(8, [{ id: "arcane_dust", qty: 10 }, { id: "riftglass", qty: 2 }]) });
+    const amulet = "amulet_vigor+keen@9";
+    const start = inv({ pouch: grid(8, [{ id: want(amulet), qty: 10 }, { id: "riftglass", qty: 2 }]) });
     const out = applyCraft(start, { recipe: "imbue", target: { c: "equipment", s: "amulet" } }, rng(), ctx);
     expect(out.ok).toBe(true);
     if (out.ok) {
@@ -106,25 +122,35 @@ describe("the forge", () => {
     });
   });
 
-  test("salvage breaks gear into reagents and essence; never the staff in hand", () => {
-    expect(salvageYield(resolveItem("ember_staff+keen+hasty@23^3"))).toEqual([
-      { id: "cinder_iron", qty: 3 },
-      { id: "arcane_dust", qty: 7 },
+  test("salvage gives back its reagent (and riftglass from rich work); never the staff in hand", () => {
+    const rich = "ember_staff+keen+hasty@23^3";
+    expect(salvageYield(resolveItem(rich))).toEqual([
+      { id: want(rich), qty: 3 },
       { id: "riftglass", qty: 1 },
     ]);
-    const start = inv({ bag: grid(5, [{ id: "boots_hover+swift@12", qty: 1 }]) });
+    const plain = "boots_hover+swift@12";
+    const start = inv({ bag: grid(5, [{ id: plain, qty: 1 }]) });
     const out = applyCraft(start, { recipe: "salvage", target: { c: "bag", i: 0 } }, rng(), ctx);
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.inventory.bag[0]).toBeNull();
-      expect(countItem(out.inventory, "brine_pearl")).toBe(2);
-      expect(countItem(out.inventory, "arcane_dust")).toBe(2);
+      expect(countItem(out.inventory, want(plain))).toBe(2);
+      expect(countItem(out.inventory, "riftglass")).toBe(0);
     }
     expect(applyCraft(start, { recipe: "salvage", target: { c: "equipment", s: "staff" } }, rng(), ctx).ok).toBe(false);
   });
 
+  test("no loop prints riftglass: imbuing costs more than salvaging returns", () => {
+    const before = "amulet_vigor+keen@9";
+    const imbued = "amulet_vigor+keen+warded@9";
+    const spent = 2;
+    const back = salvageYield(resolveItem(imbued)).find((s) => s.id === "riftglass")?.qty ?? 0;
+    expect(back).toBeLessThan(spent);
+    expect(salvageYield(resolveItem(before)).some((s) => s.id === "riftglass")).toBe(false);
+  });
+
   test("the Great Work forges a legendary", () => {
-    const start = inv({ pouch: grid(8, [{ id: "warden_sigil", qty: 3 }, { id: "riftglass", qty: 4 }, { id: "arcane_dust", qty: 6 }]) });
+    const start = inv({ pouch: grid(8, [{ id: "warden_sigil", qty: 3 }, { id: "riftglass", qty: 5 }]) });
     const out = applyCraft(start, { recipe: "greatwork" }, rng(), ctx);
     expect(out.ok).toBe(true);
     if (out.ok) {

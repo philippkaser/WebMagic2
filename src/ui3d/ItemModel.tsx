@@ -127,7 +127,6 @@ const G = {
   orb: new IcosahedronGeometry(0.17, 1),
   clump: new IcosahedronGeometry(0.1, 0),
   ingot: new BoxGeometry(0.34, 0.12, 0.18),
-  spool: new TorusGeometry(0.12, 0.05, 5, 10),
   rod: new CylinderGeometry(0.03, 0.03, 0.34, 6),
   sigil: new CylinderGeometry(0.2, 0.2, 0.05, 8),
 };
@@ -313,19 +312,14 @@ function feather(def: ItemDef): Group {
 }
 
 /** Which lump a material is (by id — the catalog stays data only). */
-type MaterialShape = "crystal" | "orb" | "clump" | "ingot" | "spool" | "sigil";
+type MaterialShape = "crystal" | "orb" | "clump" | "ingot" | "sigil";
 const MATERIAL_SHAPE: Record<string, MaterialShape> = {
   grave_moss: "clump",
   hollow_ash: "clump",
-  arcane_dust: "clump",
   brine_pearl: "orb",
-  wisp_ember: "orb",
-  slime_gel: "orb",
   cinder_iron: "ingot",
   singing_shard: "crystal",
   riftglass: "crystal",
-  sentry_core: "crystal",
-  shadow_silk: "spool",
   warden_sigil: "sigil",
 };
 
@@ -357,14 +351,6 @@ function material(def: ItemDef): Group {
         part(G.ingot, iron, [0, -0.06, 0], [0, 0.4, 0]),
         part(G.ingot, iron, [0.03, 0.07, 0.02], [0, -0.3, 0], 0.85),
         tagGlow(part(G.rod, glow(def.color, 2.4), [0.03, 0.15, 0.02], [0, 0, Math.PI / 2], [0.4, 0.9, 0.4], false)),
-      ]);
-    }
-    case "spool": {
-      const thread = std(def.color, { tex: "cloth", roughness: 0.9, emissive: def.color, emissiveIntensity: 0.4 });
-      const wood = std("#5a4030", { tex: "bark", roughness: 0.9 });
-      return group([
-        part(G.spool, thread, [0, 0, 0], [0, 0, 0], [1, 1, 1.6]),
-        part(G.rod, wood, [0, 0, 0], [Math.PI / 2, 0, 0], [2.2, 1, 2.2]),
       ]);
     }
     case "sigil": {

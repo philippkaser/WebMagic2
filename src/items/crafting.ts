@@ -4,7 +4,7 @@ import { rollAffixIds } from "./affixes";
 import { getItemDef, maxStackOf, resolveItem, type ResolvedItem } from "./catalog";
 import { MAX_AFFIXES, MAX_ENHANCE, MAX_ITEM_LEVEL, withAffixes, withEnhance, withLevel } from "./itemId";
 import { rollUnique } from "./loot";
-import { bandReagent } from "./materials";
+import { attunedReagent, RIFTGLASS, WARDEN_SIGIL } from "./materials";
 import { isGearSlot, type GearSlot } from "./types";
 
 /** The crafting loop — Wenna's cauldron and Brannoc's forge — as one pure,
@@ -13,15 +13,18 @@ import { isGearSlot, type GearSlot } from "./types";
  * an imbue can't be fished for); offline the client applies it to its own
  * save. Village only: crafting never touches run loot.
  *
- *  - BREW (cauldron): reagents (+ a little gold) → a draught or elixir.
- *    Every recipe wants Grave Moss, which grows only in the Catacombs.
- *  - TEMPER (forge): +1 item level. Costs the reagent of the band the new
- *    level belongs to — you can only temper into a depth you've walked.
- *  - ENHANCE (forge): +1…+5. Riftglass and arcane dust, more each step.
- *  - IMBUE (forge): a new random enchantment on gear with room for one.
- *  - REFORGE (forge): re-roll an item's enchantments (same count).
- *  - SALVAGE (forge): break gear down into reagents and essence.
- *  - THE GREAT WORK (forge): Warden's Sigils and riftglass → a legendary.
+ *  - BREW (cauldron): Grave Moss (+ at most one deeper reagent, + a little
+ *    gold) → a draught or elixir. Moss grows only in the Catacombs.
+ *  - The forge works each piece with ITS reagent (attunementOf — one per
+ *    item, shown on its plaque), so what you need is always one question:
+ *    "what does this one hunger for?"
+ *    - TEMPER: +1 item level, never past what you've walked (temperCap).
+ *    - ENHANCE: +1…+5, more of its reagent and riftglass each step.
+ *    - IMBUE: a new random enchantment, if it has room (riftglass).
+ *    - REFORGE: re-roll its enchantments (riftglass) — which may change
+ *      what it hungers for.
+ *    - SALVAGE: break it down into its reagent (riftglass from rich work).
+ *  - THE GREAT WORK (forge): Wardens' Sigils and riftglass → a legendary.
  *
  * Inputs come from the pouch, then the bag, then the chest; outputs go
  * where they belong (draughts to the belt, reagents to the pouch, gear to
@@ -50,16 +53,18 @@ export interface Recipe {
 
 const m = (id: string, qty: number): WireStack => ({ id, qty });
 
+/** Every draught is brewed on Grave Moss; the better ones add ONE deeper
+ * band's reagent, so each band's harvest has a draught of its own. */
 const BREWS: Recipe[] = [
-  brew("potion_hp_weak", [m("grave_moss", 1), m("slime_gel", 2)], 4),
-  brew("potion_mp_weak", [m("grave_moss", 1), m("wisp_ember", 2)], 4),
-  brew("potion_hp", [m("grave_moss", 2), m("slime_gel", 2), m("brine_pearl", 1)], 10),
-  brew("potion_mp", [m("grave_moss", 2), m("wisp_ember", 2), m("brine_pearl", 1)], 10),
-  brew("elixir_haste", [m("grave_moss", 1), m("wisp_ember", 3), m("shadow_silk", 1)], 12),
-  brew("elixir_ironskin", [m("grave_moss", 1), m("sentry_core", 2), m("slime_gel", 1)], 12),
-  brew("elixir_fury", [m("grave_moss", 1), m("shadow_silk", 2), m("sentry_core", 1)], 14),
-  brew("elixir_clarity", [m("grave_moss", 1), m("wisp_ember", 2), m("brine_pearl", 2)], 14),
-  brew("save_feather", [m("riftglass", 1), m("shadow_silk", 3), m("wisp_ember", 3)], 40),
+  brew("potion_hp_weak", [m("grave_moss", 2)], 4),
+  brew("potion_mp_weak", [m("grave_moss", 2)], 4),
+  brew("potion_hp", [m("grave_moss", 2), m("brine_pearl", 1)], 10),
+  brew("potion_mp", [m("grave_moss", 2), m("brine_pearl", 1)], 10),
+  brew("elixir_clarity", [m("grave_moss", 1), m("brine_pearl", 2)], 12),
+  brew("elixir_fury", [m("grave_moss", 1), m("cinder_iron", 2)], 14),
+  brew("elixir_ironskin", [m("grave_moss", 1), m("singing_shard", 2)], 16),
+  brew("elixir_haste", [m("grave_moss", 1), m("hollow_ash", 2)], 18),
+  brew("save_feather", [m("grave_moss", 3), m(RIFTGLASS, 1)], 40),
 ];
 
 function brew(output: string, items: WireStack[], gold: number): Recipe {
@@ -77,18 +82,18 @@ function brew(output: string, items: WireStack[], gold: number): Recipe {
 }
 
 const FORGE: Recipe[] = [
-  { id: "temper", station: "forge", kind: "temper", name: "Temper", desc: "+1 item level — the reagent of the depth it's raised to" },
+  { id: "temper", station: "forge", kind: "temper", name: "Temper", desc: "+1 item level, as deep as you've walked" },
   { id: "enhance", station: "forge", kind: "enhance", name: "Enhance", desc: `+1 forge level (to +${MAX_ENHANCE}) — boons grow, banes don't` },
   { id: "imbue", station: "forge", kind: "imbue", name: "Imbue", desc: "A new random enchantment, if it has room" },
   { id: "reforge", station: "forge", kind: "reforge", name: "Reforge", desc: "Re-roll its enchantments" },
-  { id: "salvage", station: "forge", kind: "salvage", name: "Salvage", desc: "Break it down into reagents and essence" },
+  { id: "salvage", station: "forge", kind: "salvage", name: "Salvage", desc: "Break it down into its reagent" },
   {
     id: "greatwork",
     station: "forge",
     kind: "greatwork",
     name: "The Great Work",
     desc: "Forge a legendary from Wardens' Sigils",
-    cost: { items: [m("warden_sigil", 3), m("riftglass", 4), m("arcane_dust", 6)], gold: 300 },
+    cost: { items: [m(WARDEN_SIGIL, 3), m(RIFTGLASS, 5)], gold: 300 },
   },
 ];
 
@@ -137,51 +142,60 @@ export function isWireSlot(raw: unknown): raw is WireSlot {
 
 // ── Costs of the forge's target work ─────────────────────────────────────────
 
-/** What raising this item one level costs (null: it can't be raised). */
-export function temperCost(item: ResolvedItem): Cost | null {
-  if (!isGearSlot(item.def.slot) || item.level >= MAX_ITEM_LEVEL) return null;
-  const next = item.level + 1;
-  return { items: [m(bandReagent(next), 2 + Math.floor(item.level / 12))], gold: 8 + item.level * 3 };
+/** The reagent the forge works this piece with — its own, one per item
+ * (materials.attunedReagent). */
+export function attunementOf(item: ResolvedItem): string {
+  return attunedReagent(item.def.id, item.affixes.map((a) => a.id), item.level);
 }
 
-/** What one more forge level costs. */
+/** The highest level the forge will temper to: a little past the deepest
+ * floor walked home from (and never below 5, so a first run's gear can
+ * still be worked). */
+export function temperCap(deepest: number): number {
+  return Math.min(MAX_ITEM_LEVEL, Math.max(5, deepest + 3));
+}
+
+/** What raising this item one level costs (null: it can't be raised). */
+export function temperCost(item: ResolvedItem, ctx: CraftContext): Cost | null {
+  if (!isGearSlot(item.def.slot) || item.level >= temperCap(ctx.deepest)) return null;
+  return { items: [m(attunementOf(item), 2 + Math.floor(item.level / 12))], gold: 8 + item.level * 3 };
+}
+
+/** What one more forge level costs: its reagent and riftglass, more each step. */
 export function enhanceCost(item: ResolvedItem): Cost | null {
   if (!isGearSlot(item.def.slot) || item.enhance >= MAX_ENHANCE) return null;
   const step = item.enhance + 1;
-  return {
-    items: [m("riftglass", step), m("arcane_dust", 2 * step), m(bandReagent(Math.max(1, item.level)), 2)],
-    gold: 40 * step,
-  };
+  return { items: [m(attunementOf(item), 2 * step), m(RIFTGLASS, step)], gold: 40 * step };
 }
 
 export function imbueCost(item: ResolvedItem): Cost | null {
   if (!isGearSlot(item.def.slot) || item.def.unique || item.affixes.length >= MAX_AFFIXES) return null;
-  return { items: [m("arcane_dust", 4), m("riftglass", 1)], gold: 60 };
+  return { items: [m(attunementOf(item), 3), m(RIFTGLASS, 2)], gold: 60 };
 }
 
 export function reforgeCost(item: ResolvedItem): Cost | null {
   if (!isGearSlot(item.def.slot) || item.def.unique || item.affixes.length === 0) return null;
-  return { items: [m("arcane_dust", 3)], gold: 40 };
+  return { items: [m(attunementOf(item), 2), m(RIFTGLASS, 1)], gold: 40 };
 }
 
-/** What breaking this item down yields. */
+/** What breaking this item down yields: its reagent, and riftglass from
+ * rich work (a legendary, +3 or better, two enchantments) — never more
+ * than imbuing or enhancing it cost. */
 export function salvageYield(item: ResolvedItem): WireStack[] {
   if (!isGearSlot(item.def.slot)) return [];
-  const out: WireStack[] = [m(bandReagent(Math.max(1, item.level)), 1 + Math.floor(item.level / 10))];
-  const dust = item.affixes.length * 2 + item.enhance;
-  if (dust > 0) out.push(m("arcane_dust", dust));
-  const glass = item.def.unique ? 2 : item.enhance >= 3 ? 1 : 0;
-  if (glass > 0) out.push(m("riftglass", glass));
+  const out: WireStack[] = [m(attunementOf(item), 1 + Math.floor(item.level / 10))];
+  const glass = item.def.unique ? 2 : item.enhance >= 3 || item.affixes.length >= MAX_AFFIXES ? 1 : 0;
+  if (glass > 0) out.push(m(RIFTGLASS, glass));
   return out;
 }
 
 /** The forge's price for a recipe on a target (null: not possible). */
-export function forgeCost(kind: CraftKind, item: ResolvedItem | null): Cost | null {
+export function forgeCost(kind: CraftKind, item: ResolvedItem | null, ctx: CraftContext): Cost | null {
   if (kind === "greatwork") return getRecipe("greatwork")!.cost!;
   if (!item) return null;
   switch (kind) {
     case "temper":
-      return temperCost(item);
+      return temperCost(item, ctx);
     case "enhance":
       return enhanceCost(item);
     case "imbue":
@@ -327,8 +341,8 @@ export function applyCraft(inv: WireInventory, req: CraftRequest, rng: Rng, ctx:
   } catch {
     return { ok: false, reason: "The forge won't touch that" };
   }
-  const cost = forgeCost(recipe.kind, item);
-  if (!cost) return { ok: false, reason: cantReason(recipe.kind, item) };
+  const cost = forgeCost(recipe.kind, item, ctx);
+  if (!cost) return { ok: false, reason: cantReason(recipe.kind, item, ctx) };
   if (!canAfford(next, cost)) return { ok: false, reason: "Not enough to pay the forge" };
 
   if (recipe.kind === "salvage") {
@@ -368,11 +382,11 @@ export function applyCraft(inv: WireInventory, req: CraftRequest, rng: Rng, ctx:
   return { ok: true, inventory: next, produced: [], changed: { from: id, to } };
 }
 
-function cantReason(kind: CraftKind, item: ResolvedItem): string {
+export function cantReason(kind: CraftKind, item: ResolvedItem, ctx: CraftContext): string {
   if (!isGearSlot(item.def.slot)) return "Only gear goes on the anvil";
   switch (kind) {
     case "temper":
-      return "It can rise no further";
+      return item.level >= MAX_ITEM_LEVEL ? "It can rise no further" : `Walk deeper first — it rises no higher than Lv ${temperCap(ctx.deepest)}`;
     case "enhance":
       return `Already at +${MAX_ENHANCE}`;
     case "imbue":

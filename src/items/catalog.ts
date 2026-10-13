@@ -516,22 +516,16 @@ const defs: ItemDef[] = [
     maxStack: 2,
   },
   // ── Materials ─────────────────────────────────────────────────────────────
-  // What the deep's creatures and stones leave behind. They ride in the
-  // reagent pouch, vanish on death like any run loot, and are spent at
-  // Wenna's cauldron and Brannoc's forge (items/crafting.ts). Each depth band
-  // grows its own reagent and nowhere else, which is why a deep wizard still
-  // strips down now and then to walk the shallow floors (items/materials.ts).
+  // Seven, no more (items/materials.ts): each depth band grows one reagent
+  // and drops nothing else, plus rare riftglass and the Wardens' sigils.
+  // They ride in the reagent pouch, vanish on death like any run loot, and
+  // are spent at Wenna's cauldron and Brannoc's forge (items/crafting.ts).
   material("grave_moss", "Grave Moss", 1, 1, "#7f9a52", "Pale moss off the Catacombs' tombs — the root of every draught"),
   material("brine_pearl", "Brine Pearl", 1, 10, "#7fd8d0", "A pearl grown in the Drowned Halls' black water"),
   material("cinder_iron", "Cinder Iron", 1, 20, "#d0703a", "Iron that never cooled, from the Ember Forge"),
   material("singing_shard", "Singing Shard", 2, 35, "#b8a0ff", "A splinter of the Crystal Deep; it hums when held"),
   material("hollow_ash", "Hollow Ash", 2, 55, "#d8d4c8", "Ash from the Hollow, where nothing burns"),
-  material("wisp_ember", "Wisp Ember", 1, 1, "#7fd4ff", "The last spark of a wisp, still warm"),
-  material("slime_gel", "Slime Gel", 1, 3, "#7ae05a", "Quivering gel — the dungeon's digestion, stilled"),
-  material("sentry_core", "Sentry Core", 1, 5, "#ff9a4d", "A cracked heart-stone from a Founders' sentry"),
-  material("shadow_silk", "Shadow Silk", 1, 8, "#6a5a9a", "A thread of an oathbreaker's shadow"),
-  material("arcane_dust", "Arcane Dust", 2, 1, "#c86bff", "What an enchantment leaves when the forge breaks it down"),
-  material("riftglass", "Riftglass", 3, 1, "#46ffd0", "A shard of the rift itself — rare, and it knows it"),
+  material("riftglass", "Riftglass", 3, 1, "#46ffd0", "A shard of the rift itself — rare, and the forge's finest work runs on it"),
   material("warden_sigil", "Warden's Sigil", 3, 10, "#ffcf6a", "Torn from a fallen Warden; the forge's great work needs them"),
 ];
 

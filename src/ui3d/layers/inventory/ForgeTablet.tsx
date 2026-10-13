@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Group } from "three";
-import { canAfford, countItem, forgeCost, getRecipe, salvageYield, type CraftKind, type Cost } from "../../../items/crafting";
-import { resolveItem, type ResolvedItem } from "../../../items/catalog";
+import { attunementOf, canAfford, cantReason, countItem, forgeCost, getRecipe, salvageYield, type CraftKind, type Cost } from "../../../items/crafting";
+import { getItemDef, resolveItem, type ResolvedItem } from "../../../items/catalog";
 import { readSlot } from "../../../items/inventory";
 import { MAX_ENHANCE } from "../../../items/itemId";
 import { useGame } from "../../../state/gameStore";
@@ -74,6 +74,8 @@ export function ForgeTablet() {
   const bag = useGame((s) => s.bag);
   const chest = useGame((s) => s.chest);
   const equipment = useGame((s) => s.equipment);
+  const deepest = useGame((s) => s.deepest);
+  const ctx = useMemo(() => ({ deepest }), [deepest]);
   const have = useMemo(() => toWireInventory(useGame.getState()), [gold, pouch, bag, chest, equipment]);
   const onAnvil = useMemo(() => {
     const stack = anvil ? readSlot(carriedNow(), anvil) : null;
@@ -93,7 +95,7 @@ export function ForgeTablet() {
     return out.length ? out : [{ text: "no reagents", color: ink.faded }];
   };
 
-  const row = (key: string, y: number, i: number, title: string, effect: string | null, cost: Cost | null, onPress: () => void, legendary = false) => {
+  const row = (key: string, y: number, i: number, title: string, effect: string | null, cost: Cost | null, onPress: () => void, legendary = false, refusal?: string) => {
     const ok = !!cost && canAfford(have, cost);
     return (
       <group key={key}>
@@ -132,7 +134,7 @@ export function ForgeTablet() {
           />
         )}
         <RuneText
-          text={cost ? costText(cost) : [{ text: onAnvil ? "the forge can't" : "lay gear on the anvil", color: ink.faded }]}
+          text={cost ? costText(cost) : [{ text: refusal ?? "lay gear on the anvil", color: ink.faded }]}
           font="label"
           px={INFO_PX}
           glow={0.3}
@@ -175,7 +177,14 @@ export function ForgeTablet() {
           position={[FORGE.infoX, FORGE.anvilY + 0.04, 0.004]}
         />
         <RuneText
-          text={onAnvil ? `LV ${onAnvil.level}${onAnvil.enhance ? ` · FORGED +${onAnvil.enhance}` : ""} · ${onAnvil.affixes.length} ENCHANTMENT${onAnvil.affixes.length === 1 ? "" : "S"}` : "DRAG GEAR ONTO THE FORGE · OR SHIFT-CLICK IT"}
+          text={
+            onAnvil
+              ? [
+                  { text: `LV ${onAnvil.level}${onAnvil.enhance ? ` · FORGED +${onAnvil.enhance}` : ""} · HUNGERS FOR `, color: ink.faded },
+                  { text: getItemDef(attunementOf(onAnvil)).name.toUpperCase(), color: getItemDef(attunementOf(onAnvil)).color },
+                ]
+              : "DRAG GEAR ONTO THE FORGE · OR SHIFT-CLICK IT"
+          }
           font="label"
           px={INFO_PX}
           color={ink.faded}
@@ -190,14 +199,16 @@ export function ForgeTablet() {
             FORGE.firstRowY - i * FORGE.rowPitch,
             i,
             w.title,
-            onAnvil ? w.effect(onAnvil) : null,
-            forgeCost(w.kind, onAnvil),
+            onAnvil && forgeCost(w.kind, onAnvil, ctx) ? w.effect(onAnvil) : null,
+            forgeCost(w.kind, onAnvil, ctx),
             () => {
               if (!anvil) return;
               useGame.getState().craft(w.kind, anvil);
               // Salvage leaves the anvil bare.
               if (w.kind === "salvage") useAnvil.getState().set(null);
             },
+            false,
+            onAnvil ? cantReason(w.kind, onAnvil, ctx) : undefined,
           ),
         )}
         <SectionLabel text="THE GREAT WORK" x={-m} y={FORGE.firstRowY - WORKS.length * FORGE.rowPitch + LABEL_PX * 1} color={ink.gold} />

@@ -89,9 +89,9 @@ describe("AccountStore", () => {
     expect(acc.runGrants.length).toBeLessThanOrEqual(1500);
     // One attestation may carry a few copies (a handful of reagents), bounded.
     const other = store.login(undefined, "Eli");
-    store.grant(other, "slime_gel", 3);
+    store.grant(other, "brine_pearl", 3);
     store.grant(other, "grave_moss", 999);
-    expect(other.runGrants.filter((id) => id === "slime_gel").length).toBe(3);
+    expect(other.runGrants.filter((id) => id === "brine_pearl").length).toBe(3);
     expect(other.runGrants.filter((id) => id === "grave_moss").length).toBe(10);
   });
 

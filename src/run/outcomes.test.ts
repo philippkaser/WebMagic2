@@ -17,7 +17,7 @@ function kit(): CarriedKit {
     },
     bag,
     belt,
-    pouch: [{ defId: "slime_gel", qty: 4, runLoot: true }, { defId: "grave_moss", qty: 2, runLoot: false }, null],
+    pouch: [{ defId: "brine_pearl", qty: 4, runLoot: true }, { defId: "grave_moss", qty: 2, runLoot: false }, null],
   };
 }
 
@@ -36,7 +36,7 @@ describe("run outcomes", () => {
       { id: "cloak_warden@5", qty: 1 },
       { id: "amulet_focus@4", qty: 1 },
       { id: "potion_hp_weak", qty: 3 },
-      { id: "slime_gel", qty: 4 },
+      { id: "brine_pearl", qty: 4 },
     ]);
     // Reagents brought from home stay in the pouch; this run's are lost.
     expect(out.kept.pouch[0]).toBeNull();
