@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { generateFloor } from "../../world/gen";
-import { ditherPhase, gridVisible, isOpen, lightVisibility, type OccupancyGrid, toCell, unstick } from "./gridRay";
+import { discOffset, ditherPhase, gridVisible, isOpen, lightVisibility, type OccupancyGrid, toCell, unstick } from "./gridRay";
 
 /** A grid from rows of text: '.' open, '#' rock. Row k is grid y = k. */
 function grid(rows: string[]): OccupancyGrid {
@@ -108,15 +108,29 @@ describe("grid ray (DDA)", () => {
     expect(lightVisibility(ROOMS, 4.5, 6.5, 4.5, 3.0, 0.2, 0.5)).toBe(1);
   });
 
-  test("penumbra: half-lit at a shadow's edge, stepped (0, ½, 1)", () => {
-    // A light in room 1 seen from room 2 past the doorway's jamb.
-    const values = new Set<number>();
-    for (let x = 1.5; x < 8.5; x += 0.05) {
-      for (const phase of [0, 0.25, 0.5, 0.75]) {
-        values.add(lightVisibility(ROOMS, x, 7.5, 4.5, 2.0, 0.3, phase));
-      }
+  test("penumbra: a dithered band at a shadow's edge, lit to unlit in quarters", () => {
+    // A light in room 1 seen from room 2 past the doorway's jamb: average
+    // the four dither phases (a 2×2 block of texels) along the floor.
+    const levels: number[] = [];
+    for (let x = 1.5; x < 8.5; x += 0.02) {
+      let v = 0;
+      for (const phase of [0, 0.25, 0.5, 0.75]) v += lightVisibility(ROOMS, x, 7.5, 4.5, 2.0, 0.3, phase) / 4;
+      levels.push(v);
     }
-    expect([...values].sort()).toEqual([0, 0.5, 1]);
+    const seen = new Set(levels);
+    expect(seen.has(0)).toBe(true);
+    expect(seen.has(1)).toBe(true);
+    // In-between levels exist (the soft band), and only in quarters.
+    const mid = [...seen].filter((v) => v > 0 && v < 1);
+    expect(mid.length).toBeGreaterThan(0);
+    for (const v of mid) expect([0.25, 0.5, 0.75]).toContain(v);
+    // Each texel on its own is all or nothing.
+    for (const phase of [0, 0.25, 0.5, 0.75]) expect([0, 1]).toContain(lightVisibility(ROOMS, 3.1, 7.5, 4.5, 2.0, 0.3, phase));
+  });
+
+  test("the disc offsets spread evenly across the diameter", () => {
+    const o = [0, 0.25, 0.5, 0.75].map(discOffset);
+    expect(o).toEqual([-0.75, -0.25, 0.25, 0.75]);
   });
 
   test("dither phase: a 2×2 ordered pattern over the texels", () => {

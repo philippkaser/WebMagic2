@@ -91,12 +91,19 @@ export function unstick(g: OccupancyGrid, x: number, y: number): [number, number
   return [x, cy + 1 + UNSTICK];
 }
 
-/** A light's share reaching a point, with a stepped penumbra: two rays to
- * either side of the light (a small disc of `radius` cells, across the
- * ray), each 0 or 1, averaged — 0, ½ or 1. `phase` (0..1, from an ordered
- * dither of the surface's texel) slides the two sample points in and out
- * across the disc, so the half-lit band's edges dither on the texel grid
- * instead of blurring. Mirrors the shader exactly. */
+/** Where across the light's disc a texel's ray aims, from its dither
+ * phase: four spots spread evenly over the diameter. */
+export function discOffset(phase: number): number {
+  return 2 * phase - 0.75;
+}
+
+/** Whether a light reaches a point (0 or 1), with a dithered penumbra: the
+ * light is a small disc `radius` cells across the ray, and each texel's
+ * one ray aims at its own spot on it (`phase`, 0..1, from a 2×2 ordered
+ * dither of the surface's texel — see ditherPhase). Where only part of the
+ * disc is hidden, neighbouring texels disagree, and the shadow's edge
+ * comes out as an ordered dither in whole texels: soft in the pixel-art
+ * way, never a blur. Mirrors the shader exactly. */
 export function lightVisibility(
   g: OccupancyGrid,
   px: number,
@@ -111,15 +118,9 @@ export function lightVisibility(
   const dy = uy - py;
   const len = Math.hypot(dx, dy);
   if (len < 1e-3) return 1;
-  const k = radius * (0.25 + 0.75 * phase);
-  const nx = (-dy / len) * k;
-  const ny = (dx / len) * k;
-  let v = 0;
-  for (const s of [1, -1]) {
-    const [sx, sy] = unstick(g, ux + nx * s, uy + ny * s);
-    if (gridVisible(g, px, py, sx, sy)) v += 0.5;
-  }
-  return v;
+  const k = (radius * discOffset(phase)) / len;
+  const [sx, sy] = unstick(g, ux - dy * k, uy + dx * k);
+  return gridVisible(g, px, py, sx, sy) ? 1 : 0;
 }
 
 /** 2×2 ordered dither (Bayer) phase for an integer texel coordinate:

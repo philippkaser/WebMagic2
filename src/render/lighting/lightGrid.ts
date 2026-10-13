@@ -24,11 +24,11 @@ import { MAX_STEPS, UNSTICK } from "./gridRay";
  *    per pixel per light. Walls are full height, so the 2D march is exact:
  *    torchlight stays in its room, a doorway throws a hard-edged wedge of
  *    light down the corridor, a bolt flying past a corner sweeps the
- *    corner's shadow across the floor. Two rays per light to either side of
- *    a small disc give a stepped penumbra (0, ½, 1), and the pixel's TEXEL
- *    (32 per metre, the painted surfaces' own grid) picks where those rays
- *    sit from a 2×2 ordered dither — so a shadow edge steps in whole texels
- *    and its soft band dithers like the rest of the pixel art.
+ *    corner's shadow across the floor. Each light is a small disc; each
+ *    pixel's TEXEL (32 per metre, the painted surfaces' own grid) aims its
+ *    one ray at its own spot on the disc, picked by a 2×2 ordered dither —
+ *    so a shadow edge steps in whole texels and its soft band is an
+ *    ordered dither, like the rest of the pixel art.
  *  - **Bounce.** A soft indirect term from a per-floor bake (bounce.ts):
  *    each torch's colour spilled through the rooms and round corners, added
  *    to the ambient irradiance — the darks lifted with colour.
@@ -151,9 +151,9 @@ uniform sampler2D uLgOcc;
 uniform sampler2D uLgBounce;
 uniform vec4 uLgGrid;
 
+// No bounds check: the grid's outer two rings are always rock, so a march
+// from inside never leaves it (and WebGL makes a stray fetch safe anyway).
 bool lgOpen(ivec2 c) {
-  int n = int(uLgGrid.x);
-  if (c.x < 0 || c.y < 0 || c.x >= n || c.y >= n) return false;
   return texelFetch(uLgOcc, c, 0).r > 0.5;
 }
 
@@ -189,33 +189,34 @@ float lgMarch(vec2 a, vec2 b) {
   return 1.0;
 }
 
-// gridRay.ts#lightVisibility — two rays across a small disc: 0, 1 or 2
-// halves.
-uint lgVisibility(vec2 p, vec2 l, float phase) {
+// gridRay.ts#lightVisibility — one ray, aimed at this texel's dithered spot
+// on the light's disc: 0 or 1.
+float lgVisibility(vec2 p, vec2 l, float phase) {
   vec2 u = lgUnstick(l);
   vec2 d = u - p;
   float len = length(d);
-  if (len < 1e-3) return 2u;
-  vec2 n = vec2(-d.y, d.x) / len * (uLgGrid.y * (0.25 + 0.75 * phase));
-  return uint(lgMarch(p, lgUnstick(u + n)) + lgMarch(p, lgUnstick(u - n)));
+  if (len < 1e-3) return 1.0;
+  float k = uLgGrid.y * (2.0 * phase - 0.75) / len;
+  return lgMarch(p, lgUnstick(u + vec2(-d.y, d.x) * k));
 }
 
 vec2 lgCell(vec3 w) { return w.xz * ${(1 / TILE).toFixed(6)} + uLgGrid.x * 0.5; }
 `;
 
 /** Per-pixel setup (world position snapped to the texel grid, pushed off
- * its face, the dither phase), then each point light's visibility, packed
- * two bits a light into one uint (no local array) — in a plain loop, so the
- * march is compiled once rather than once per light. Lights out of reach of
- * this pixel, and the eye's own (the lantern and the staff ride at the
- * camera: whatever you can see, they light), are never marched. */
+ * its face, the dither phase), then each point light's visibility, one bit
+ * a light in a uint (no local array) — in a plain loop, so the march is
+ * compiled once rather than once per light. Never marched: lights out of
+ * this pixel's reach; the eye's own (the lantern and the staff ride at the
+ * camera — whatever you can see, they light); and lights well behind the
+ * surface (rock is in the way by definition — a wall's far side). */
 const LIGHTS_BEGIN_HEAD = /* glsl */ `
 vec3 lgWorld = (-vViewPosition - viewMatrix[3].xyz) * mat3(viewMatrix);
 vec3 lgNormal = normalize(nonPerturbedNormal * mat3(viewMatrix));
 vec3 lgTex = floor(lgWorld * ${TEXELS_PER_METRE.toFixed(1)});
 vec3 lgSnap = (lgTex + 0.5) / ${TEXELS_PER_METRE.toFixed(1)};
 lgSnap.y = lgWorld.y;
-uint lgMask = 0xAAAAAAAAu;
+uint lgMask = 0xFFFFFFFFu;
 #if NUM_POINT_LIGHTS > 0
 if ( uLgGrid.z > 0.5 ) {
   vec2 lgPlane = abs(lgNormal.y) > 0.5 ? lgTex.xz : (abs(lgNormal.x) > abs(lgNormal.z) ? lgTex.zy : lgTex.xy);
@@ -223,27 +224,29 @@ if ( uLgGrid.z > 0.5 ) {
   float lgPhase = mod(3.0 * lgB.y + 2.0 * lgB.x, 4.0) * 0.25;
   vec2 lgP = lgCell(lgSnap + lgNormal * 0.07);
   mat3 lgR = mat3(viewMatrix);
-  for ( int i = 0; i < NUM_POINT_LIGHTS && i < 16; i ++ ) {
+  for ( int i = 0; i < NUM_POINT_LIGHTS && i < 32; i ++ ) {
     vec3 lgL = pointLights[ i ].position;
     vec3 lgD = lgL + vViewPosition;
     float lgCut = pointLights[ i ].distance;
     if ( lgCut > 0.0 && dot( lgD, lgD ) >= lgCut * lgCut ) continue;
     if ( dot( lgL, lgL ) < 2.25 ) continue;
     if ( pointLights[ i ].color == vec3( 0.0 ) ) continue;
-    vec3 lgLV = lgL - viewMatrix[3].xyz;
-    vec2 lgLW = vec2( dot( lgLV, lgR[0] ), dot( lgLV, lgR[2] ) );
-    uint lgV = lgVisibility( lgP, lgLW * ${(1 / TILE).toFixed(6)} + uLgGrid.x * 0.5, lgPhase );
-    uint lgS = uint( i ) * 2u;
-    lgMask = ( lgMask & ~( 3u << lgS ) ) | ( lgV << lgS );
+    float lgV = 0.0;
+    if ( dot( lgD, nonPerturbedNormal ) > -0.25 ) {
+      vec3 lgLV = lgL - viewMatrix[3].xyz;
+      vec2 lgLW = vec2( dot( lgLV, lgR[0] ), dot( lgLV, lgR[2] ) );
+      lgV = lgVisibility( lgP, lgLW * ${(1 / TILE).toFixed(6)} + uLgGrid.x * 0.5, lgPhase );
+    }
+    if ( lgV < 0.5 ) lgMask &= ~( 1u << uint( i ) );
   }
 }
 #endif
 `;
 
-/** The unrolled light loop reads its light's two bits back. */
+/** The unrolled light loop reads its light's bit back. */
 const POINT_VIS = /* glsl */ `
-		#if UNROLLED_LOOP_INDEX < 16
-		directLight.color *= float( ( lgMask >> ( 2u * uint( UNROLLED_LOOP_INDEX ) ) ) & 3u ) * 0.5;
+		#if UNROLLED_LOOP_INDEX < 32
+		directLight.color *= float( ( lgMask >> uint( UNROLLED_LOOP_INDEX ) ) & 1u );
 		#endif`;
 
 const POINT_INFO = "getPointLightInfo( pointLight, geometryPosition, directLight );";
