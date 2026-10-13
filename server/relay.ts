@@ -2,13 +2,15 @@ import { DUNGEON } from "../src/core/config";
 import { Rng } from "../src/core/rng";
 import { isWireSlot } from "../src/items/crafting";
 import { rollGamble } from "../src/items/loot";
-import { FloorDirectory, type JoinOptions } from "../src/net/matchmaking";
+import { FloorDirectory, type FloorInstanceRecord, type JoinOptions } from "../src/net/matchmaking";
+import { isPartyCode, normalizePartyCode, PartyDirectory, type Party, type PartyError } from "../src/net/party";
 import {
   CHANNEL_AUTHORITY,
   CHANNEL_PEER,
   CHANNEL_TO_HOST,
   type ClientMsg,
   type MemberInfo,
+  type PartyInfo,
   type ServerMsg,
 } from "../src/net/protocol";
 import { canLeave, entryFloorForGear } from "../src/run/rules";
@@ -26,6 +28,10 @@ import { AccountAuth, argon2Hasher, type AuthDeps } from "./auth";
  *  - matchmaking via FloorDirectory (rare same-floor encounters, max 4 per
  *    instance), with run validation: fresh runs start where the account's
  *    banked gear resonates, continuing runs only go one floor deeper
+ *  - the camp: wizards who are home share a camp room (a second directory
+ *    where everyone meets), routed exactly like a floor
+ *  - fellowships (net/party.ts): codes, invites, and keeping a party in one
+ *    instance; room and party chat, trimmed and rate-limited
  *  - host designation + migration (epoch bumps on every change)
  *  - clock pongs (one shared timeline for interpolation)
  *  - relaying opaque envelopes by channel-prefix rule:
@@ -46,6 +52,21 @@ export interface RelayPeer {
 }
 
 const MAX_NAME = 24;
+/** How many wizards share one camp. */
+export const CAMP_SIZE = 12;
+/** Chat: at most this long, and at most CHAT_BURST lines per CHAT_WINDOW_MS. */
+export const CHAT_MAX = 140;
+const CHAT_BURST = 5;
+const CHAT_WINDOW_MS = 10_000;
+
+/** Make a chat line safe to show: no control characters, no runs of
+ * whitespace, at most CHAT_MAX characters. Empty → null. */
+export function cleanChat(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  // eslint-disable-next-line no-control-regex
+  const text = raw.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e]/g, "").replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, CHAT_MAX) : null;
+}
 
 export class Relay {
   private peers = new Map<string, RelayPeer>();
@@ -62,6 +83,11 @@ export class Relay {
 
   /** Password accounts, sign-in sessions and their rate limits. */
   private auth: AccountAuth;
+  /** The camp's rooms: everyone who's home meets (no encounter dice). */
+  private camp: FloorDirectory;
+  private parties: PartyDirectory;
+  /** peerId → when their recent chat lines were sent (rate limit). */
+  private chatTimes = new Map<string, number[]>();
 
   constructor(
     private directory: FloorDirectory,
@@ -72,6 +98,16 @@ export class Relay {
     auth: Partial<AuthDeps> = {},
   ) {
     this.auth = new AccountAuth(accounts, { hasher: argon2Hasher, now, log, ...auth });
+    this.camp = new FloorDirectory(
+      CAMP_SIZE,
+      () => 0,
+      now,
+      () => 0,
+      { baseChance: 1, perSoloFloor: 0, maxChance: 1 },
+      undefined,
+      "camp",
+    );
+    this.parties = new PartyDirectory(Math.random, now);
   }
 
   connect(peer: RelayPeer): void {
@@ -86,6 +122,10 @@ export class Relay {
     // (and lastInstance remembers where, for the same world).
     this.leaveInstance(peer);
     this.directory.forget(peerId);
+    this.camp.forget(peerId);
+    const party = this.parties.forget(peerId);
+    if (party) this.tellParty(party);
+    this.chatTimes.delete(peerId);
     this.peers.delete(peerId);
     this.tokens.delete(peerId);
     this.auth.forget(peerId);
@@ -137,6 +177,55 @@ export class Relay {
           msg.fresh === true,
         );
         break;
+      case "enterCamp":
+        this.enterCamp(peer);
+        break;
+      case "chat":
+        this.chat(peer, msg.text, msg.party === true);
+        break;
+      case "partyCreate":
+        this.tellParty(this.parties.create(peer.id));
+        break;
+      case "partyJoin": {
+        const code = typeof msg.code === "string" ? normalizePartyCode(msg.code) : "";
+        const before = this.parties.partyOf(peer.id);
+        const out = isPartyCode(code) ? this.parties.join(peer.id, code) : "no-such-party";
+        if (typeof out === "string") peer.send({ t: "partyError", reason: out });
+        else {
+          if (before && before.id !== out.id) this.tellParty(before, peer.id);
+          this.tellParty(out);
+        }
+        break;
+      }
+      case "partyLeave": {
+        const left = this.parties.leave(peer.id);
+        peer.send({ t: "party", party: null });
+        if (left) this.tellParty(left);
+        break;
+      }
+      case "partyInvite": {
+        const to = typeof msg.to === "string" ? this.peers.get(msg.to) : undefined;
+        // Only someone who shares your room: you can see who you're asking.
+        const room = this.roomOf(peer.id);
+        if (!to || !room || this.roomOf(to.id)?.id !== room.id) {
+          peer.send({ t: "partyError", reason: "no-invite" });
+          break;
+        }
+        const out = this.parties.invite(peer.id, to.id);
+        if (typeof out === "string") peer.send({ t: "partyError", reason: out });
+        else to.send({ t: "partyInvited", from: peer.id, name: peer.name });
+        break;
+      }
+      case "partyAccept": {
+        const before = this.parties.partyOf(peer.id);
+        const out = this.parties.accept(peer.id);
+        if (typeof out === "string") peer.send({ t: "partyError", reason: out });
+        else {
+          if (before && before.id !== out.id) this.tellParty(before, peer.id);
+          this.tellParty(out);
+        }
+        break;
+      }
       case "leaveDungeon":
         this.leaveInstance(peer);
         break;
@@ -374,12 +463,18 @@ export class Relay {
     } else {
       const eq = account.inventory.equipment;
       floor = entryFloorForGear([eq.staff, eq.amulet, eq.cloak, eq.boots]);
+      // A fellowship already below, no deeper than the Weighing allows:
+      // start where they are, so you go down together.
+      const below = this.companionFloors(peer.id).filter((f) => f <= floor);
+      if (below.length > 0) floor = Math.max(...below);
       if (requested !== floor) {
         this.log(`${peer.id} asked for floor ${requested}; the Weighing says ${floor}`);
       }
       this.accounts.startRun(account, floor);
     }
     this.leaveInstance(peer);
+    this.leaveCamp(peer);
+    opts.companions = this.parties.companionsOf(peer.id);
     const inst = this.directory.join(peer.id, floor, opts);
     this.lastInstance.set(account.token, inst.id);
     if (!this.epochs.has(inst.id)) this.epochs.set(inst.id, 1);
@@ -412,14 +507,44 @@ export class Relay {
   }
 
   private leaveInstance(peer: RelayPeer): void {
-    const inst = this.directory.instanceOf(peer.id);
+    this.leaveRoom(peer, this.directory);
+  }
+
+  private leaveCamp(peer: RelayPeer): void {
+    this.leaveRoom(peer, this.camp);
+  }
+
+  /** Seat a wizard who's home in the camp (their fellowship's camp first). */
+  private enterCamp(peer: RelayPeer): void {
+    if (this.directory.instanceOf(peer.id)) return; // mid-run: not home yet
+    this.leaveCamp(peer);
+    const inst = this.camp.join(peer.id, 0, { companions: this.parties.companionsOf(peer.id) });
+    if (!this.epochs.has(inst.id)) this.epochs.set(inst.id, 1);
+    peer.send({
+      t: "campAssigned",
+      assignment: {
+        instanceId: inst.id,
+        hostId: this.hostOf(peer.id),
+        epoch: this.epochs.get(inst.id)!,
+        members: this.membersOf(inst),
+      },
+    });
+    const member: MemberInfo = { id: peer.id, name: peer.name };
+    for (const m of this.mates(peer.id)) m.send({ t: "peerJoined", member });
+    // Your fellowship learns you're home (and you learn of it).
+    const party = this.parties.partyOf(peer.id);
+    if (party) this.tellParty(party);
+  }
+
+  private leaveRoom(peer: RelayPeer, dir: FloorDirectory): void {
+    const inst = dir.instanceOf(peer.id);
     if (!inst) return;
     const wasHost = this.hostOf(peer.id) === peer.id;
     const remaining = this.mates(peer.id);
     for (const m of remaining) m.send({ t: "peerLeft", playerId: peer.id });
-    this.directory.leave(peer.id);
+    dir.leave(peer.id);
     this.pruneGone();
-    if (!this.directory.instanceById(inst.id)) return; // garbage-collected
+    if (!dir.instanceById(inst.id)) return; // garbage-collected
     // Host migration: promote the next-oldest member, bump the epoch.
     if (wasHost && remaining.length > 0) {
       const hostId = this.hostOf(remaining[0].id);
@@ -434,7 +559,7 @@ export class Relay {
 
   private relay(sender: RelayPeer, ch: string, data: unknown, to?: string): void {
     if (typeof ch !== "string") return;
-    const inst = this.directory.instanceOf(sender.id);
+    const inst = this.roomOf(sender.id);
     if (!inst) return;
     const prefix = ch.slice(0, 2);
     const hostId = this.hostOf(sender.id);
@@ -454,7 +579,7 @@ export class Relay {
         if (to !== undefined) {
           const target = this.peers.get(to);
           // Deliver only if the target is still in the same instance.
-          if (target && this.directory.instanceOf(to)?.id === inst.id) {
+          if (target && this.roomOf(to)?.id === inst.id) {
             target.send(relayed);
           }
           return;
@@ -481,22 +606,76 @@ export class Relay {
   /** Drop per-instance bookkeeping for instances the directory has let go
    * (empty ones linger briefly for reconnects, then vanish). */
   private pruneGone(): void {
-    for (const id of this.epochs.keys()) if (!this.directory.instanceById(id)) this.epochs.delete(id);
+    for (const id of this.epochs.keys()) if (!this.roomById(id)) this.epochs.delete(id);
     for (const id of this.gravePools.keys()) {
       if (!this.directory.instanceById(id)) this.gravePools.delete(id);
     }
   }
 
+  /** The room a wizard is in: a floor instance, or a camp. */
+  private roomOf(playerId: string): FloorInstanceRecord | null {
+    return this.directory.instanceOf(playerId) ?? this.camp.instanceOf(playerId);
+  }
+
+  private roomById(id: string): FloorInstanceRecord | null {
+    return this.directory.instanceById(id) ?? this.camp.instanceById(id);
+  }
+
+  private membersOf(inst: FloorInstanceRecord): MemberInfo[] {
+    return [...inst.players].map((id) => ({ id, name: this.peers.get(id)?.name ?? "Wizard" }));
+  }
+
+  /** Floors a wizard's fellowship is on right now (mid-run members). */
+  private companionFloors(peerId: string): number[] {
+    const out: number[] = [];
+    for (const mate of this.parties.companionsOf(peerId)) {
+      const inst = this.directory.instanceOf(mate);
+      if (inst) out.push(inst.floor);
+    }
+    return out;
+  }
+
+  /** Tell every member how their fellowship stands now (and, when someone
+   * just left it, tell them too). */
+  private tellParty(party: Party, leaver?: string): void {
+    const info: PartyInfo = {
+      code: party.code,
+      leader: party.leader,
+      members: party.members.map((id) => ({ id, name: this.peers.get(id)?.name ?? "Wizard" })),
+    };
+    for (const id of party.members) this.peers.get(id)?.send({ t: "party", party: info });
+    if (leaver) this.peers.get(leaver)?.send({ t: "party", party: null });
+  }
+
+  private chat(peer: RelayPeer, raw: unknown, toParty: boolean): void {
+    const text = cleanChat(raw);
+    if (!text) return;
+    const now = this.now();
+    const recent = (this.chatTimes.get(peer.id) ?? []).filter((t) => now - t < CHAT_WINDOW_MS);
+    if (recent.length >= CHAT_BURST) return; // speaking too fast: dropped
+    recent.push(now);
+    this.chatTimes.set(peer.id, recent);
+    const line: ServerMsg = { t: "chat", from: peer.id, name: peer.name, text, party: toParty };
+    if (toParty) {
+      const party = this.parties.partyOf(peer.id);
+      if (!party) return void peer.send({ t: "partyError", reason: "not-in-a-party" satisfies PartyError });
+      for (const id of party.members) this.peers.get(id)?.send(line);
+      return;
+    }
+    peer.send(line);
+    for (const m of this.mates(peer.id)) m.send(line);
+  }
+
   /** Simulation host = first (oldest) member of the instance's player set. */
   private hostOf(playerId: string): string {
-    const inst = this.directory.instanceOf(playerId);
+    const inst = this.roomOf(playerId);
     if (!inst) return "";
     return inst.players.values().next().value ?? "";
   }
 
   /** Everyone sharing the peer's instance, excluding itself. */
   private mates(peerId: string): RelayPeer[] {
-    const inst = this.directory.instanceOf(peerId);
+    const inst = this.roomOf(peerId);
     if (!inst) return [];
     const result: RelayPeer[] = [];
     for (const id of inst.players) {

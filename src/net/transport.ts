@@ -175,6 +175,25 @@ export class LocalTransport implements Transport {
       case "leaveDungeon":
         this.directory.leave(this.playerId);
         break;
+      case "enterCamp":
+        // Alone at the fire.
+        this.deliver({
+          t: "campAssigned",
+          assignment: { instanceId: "camp_local", hostId: this.playerId, epoch: 1, members: [{ id: this.playerId, name: this.name }] },
+        });
+        break;
+      case "chat":
+        // Nobody to hear it but you.
+        this.deliver({ t: "chat", from: this.playerId, name: this.name, text: msg.text.slice(0, 140), party: msg.party === true });
+        break;
+      case "partyCreate":
+      case "partyJoin":
+      case "partyLeave":
+      case "partyInvite":
+      case "partyAccept":
+        // Fellowships need a server to keep them.
+        this.deliver({ t: "partyError", reason: "no-such-party" });
+        break;
       case "ping":
         // Zero-offset clock: local time IS server time offline.
         this.deliver({ t: "pong", sent: msg.sent, serverTime: performance.now() });

@@ -1,3 +1,4 @@
+import type { PartyError } from "./party";
 import type { WireSlot } from "../items/crafting";
 
 /** Wire protocol between client and the relay server.
@@ -38,6 +39,22 @@ export interface FloorAssignment {
    * the one the way home is judged by, so the client adopts it. Absent
    * offline (the client counts for itself). */
   runFloors?: number;
+}
+
+/** A seat in the camp (the village every wizard shares when home): who's
+ * there and who hosts its little world. */
+export interface CampAssignment {
+  instanceId: string;
+  hostId: string;
+  epoch: number;
+  members: MemberInfo[];
+}
+
+/** A fellowship as its members see it (net/party.ts). */
+export interface PartyInfo {
+  code: string;
+  leader: string;
+  members: MemberInfo[];
 }
 
 /** Opaque gameplay envelope, client → server. */
@@ -111,6 +128,22 @@ export type ClientMsg =
    * (portal, warp rune). Anything else forfeits the run and starts fresh. */
   | { t: "enterFloor"; floor: number; fresh?: boolean }
   | { t: "leaveDungeon" }
+  /** Home: take a seat in the camp among the other wizards there (your
+   * fellowship's camp first). Answered with `campAssigned`. Entering a floor
+   * leaves the camp. */
+  | { t: "enterCamp" }
+  /** Say something to whoever shares your room (camp or floor), or — with
+   * `party` — to your fellowship wherever they are. The server trims and
+   * rate-limits it. */
+  | { t: "chat"; text: string; party?: boolean }
+  /** Fellowships (net/party.ts). Each answered with `party` (to every
+   * member) or `partyError`. */
+  | { t: "partyCreate" }
+  | { t: "partyJoin"; code: string }
+  | { t: "partyLeave" }
+  /** Invite a wizard who shares your room; they get `partyInvited`. */
+  | { t: "partyInvite"; to: string }
+  | { t: "partyAccept" }
   /** Walk home through a way-home portal. Refused until the run has played
    * RUN.floorsBeforeExit floors; the server validates every item against what
    * was actually granted this run (host-attested) and answers with `saved`. */
@@ -175,6 +208,12 @@ export type ServerMsg =
       changed?: { from: string; to: string };
     }
   | { t: "floorAssigned"; assignment: FloorAssignment }
+  | { t: "campAssigned"; assignment: CampAssignment }
+  | { t: "chat"; from: string; name: string; text: string; party: boolean }
+  /** Your fellowship as it now stands (null: you have none). */
+  | { t: "party"; party: PartyInfo | null }
+  | { t: "partyInvited"; from: string; name: string }
+  | { t: "partyError"; reason: PartyError }
   | { t: "peerJoined"; member: MemberInfo }
   | { t: "peerLeft"; playerId: string }
   | { t: "hostChanged"; hostId: string; epoch: number }

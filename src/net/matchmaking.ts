@@ -70,6 +70,9 @@ export class FloorDirectory {
     private dice: () => number = Math.random,
     private tuning: EncounterTuning = ENCOUNTERS,
     private lingerMs = INSTANCE_LINGER_MS,
+    /** Instance ids are `${prefix}_${n}`: two directories (the floors and
+     * the camp) never hand out the same id. */
+    private prefix = "inst",
   ) {}
 
   /** Chance that this player's next floor entry meets someone (if anyone is
@@ -110,7 +113,7 @@ export class FloorDirectory {
     }
 
     const fresh: FloorInstanceRecord = {
-      id: `inst_${this.nextId++}`,
+      id: `${this.prefix}_${this.nextId++}`,
       floor,
       seed: this.seedFn(),
       players: new Set(),
