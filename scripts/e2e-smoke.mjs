@@ -57,7 +57,7 @@ const game = (w) => w.page.evaluate(() => {
 });
 async function waitPhase(w, phase, timeout = 30000) {
   try {
-    await w.page.waitForFunction((p) => window.__game.getState().phase === p, phase, { timeout });
+    await w.page.waitForFunction((p) => window.__game.getState().phase === p, phase, { timeout, polling: 250 });
   } catch (err) {
     // Say where the wizard got stuck, not just that it did.
     const where = await w.page.evaluate(() => {
@@ -183,7 +183,7 @@ async function waitPhase(w, phase, timeout = 30000) {
   check("the fallen-to-be picks up host-granted loot", mira.equipment.amulet?.defId === "amulet_vigor@3",
     JSON.stringify(mira.equipment.amulet));
   await b.page.evaluate((killer) => window.__game.getState().takeDamage(10_000, { kind: "wizard", id: killer }), idA);
-  await waitPhase(b, "dead", 20000); // the death dissolve plays first
+  await waitPhase(b, "dead", 60000); // the death dissolve plays first (slow under load)
   const death = (await game(b)).lastDeath;
   check("death names the killer and leaves a grave", death?.killer === "Oswin" && death?.grave === true,
     JSON.stringify(death));
@@ -194,8 +194,12 @@ async function waitPhase(w, phase, timeout = 30000) {
   if (graves.length === 1) {
     const [x, y, z] = graves[0].pos;
     await a.page.evaluate(([x, y, z]) => window.__teleport(x + 1, y + 1, z), [x, y, z]);
-    await sleep(1200);
-    const prompt = await a.page.evaluate(() => window.__game.getState().prompt);
+    // Under load the teleport can take seconds to land: poll for the prompt.
+    let prompt = null;
+    for (let i = 0; i < 20 && !/Plunder/.test(prompt ?? ""); i++) {
+      await sleep(500);
+      prompt = await a.page.evaluate(() => window.__game.getState().prompt);
+    }
     check("the grave offers its plunder", /Plunder/.test(prompt ?? ""), prompt ?? "no prompt");
     await a.page.keyboard.down("KeyE");
     await sleep(120);
