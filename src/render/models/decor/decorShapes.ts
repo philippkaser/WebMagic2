@@ -166,14 +166,16 @@ const URN: [number, number][] = [
   [0.07, 0.36],
 ];
 
+/** A chain link, chunky the way old dungeons draw them: a link a
+ * wizard could put a fist through reads at a pixel-art distance. */
 function chainLink(): BufferGeometry {
-  return new TorusGeometry(0.04, 0.011, 3, 6);
+  return new TorusGeometry(0.06, 0.019, 3, 6);
 }
 
 /** Links along a polyline of points (local y of each link along it). */
 function chainAlong(points: V3[], tile: DecorTile): DecorPart[] {
   const parts: DecorPart[] = [];
-  const step = 0.088;
+  const step = 0.13;
   let carry = 0;
   let n = 0;
   for (let i = 0; i + 1 < points.length; i++) {
@@ -187,7 +189,7 @@ function chainAlong(points: V3[], tile: DecorTile): DecorPart[] {
       const p = a.clone().addScaledVector(dir, t);
       const twist = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), n++ % 2 ? Math.PI / 2 : 0);
       const e = new Euler().setFromQuaternion(q.clone().multiply(twist));
-      parts.push(prep(chainLink(), tile, [p.x, p.y, p.z], [e.x, e.y, e.z], [1, 1.5, 1]));
+      parts.push(prep(chainLink(), tile, [p.x, p.y, p.z], [e.x, e.y, e.z], [1, 1.45, 1]));
       carry = t + step - len;
     }
   }
@@ -200,14 +202,16 @@ type Builder = (rng: Rng, variant: number, biome: BiomeId, flames: DecorFlame[])
 
 const BUILDERS: Record<DecorKind, Builder> = {
   bones(rng, variant) {
+    // Drawn a third over life size: at the world's pixel scale a true-size
+    // skull is a smudge.
     const parts: DecorPart[] = [];
     const skulls = variant === 1 ? 2 : 1;
     for (let i = 0; i < skulls; i++) parts.push(...xf(skull(), [i * 0.2 - 0.05 * skulls, 0, i * -0.12], [0, rng.range(-0.8, 0.8), rng.range(-0.15, 0.15)]));
     const bones = variant === 2 ? 2 : 4;
     for (let i = 0; i < bones; i++) {
       const a = rng.range(0, Math.PI * 2);
-      const r = rng.range(0.12, 0.3);
-      parts.push(...xf(longBone(rng.range(0.26, 0.42)), [Math.cos(a) * r, i * 0.03, Math.sin(a) * r], [0, rng.range(0, Math.PI), rng.range(-0.12, 0.12)]));
+      const r = rng.range(0.08, 0.22);
+      parts.push(...xf(longBone(rng.range(0.24, 0.38)), [Math.cos(a) * r, i * 0.03, Math.sin(a) * r], [0, rng.range(0, Math.PI), rng.range(-0.12, 0.12)]));
     }
     if (variant === 2) {
       // A ribcage lying on its side along a spine.
@@ -216,7 +220,7 @@ const BUILDERS: Record<DecorKind, Builder> = {
       for (let k = 0; k < 5; k++)
         parts.push(prep(new TorusGeometry(0.11, 0.012, 3, 7, Math.PI * 0.9), "bone", [-0.12 + k * 0.08, 0.02, 0.18], [Math.PI / 2, 0, 0.1]));
     }
-    return parts;
+    return xf(parts, [0, 0.012, 0], [0, 0, 0], 1.3);
   },
 
   candles(rng, variant, _biome, flames) {
@@ -248,17 +252,17 @@ const BUILDERS: Record<DecorKind, Builder> = {
       const sag = 1.9;
       for (let i = 0; i <= 24; i++) {
         const x = -half + (2 * half * i) / 24;
-        pts.push([x, -sag * (1 - (x / half) ** 2) - 0.04, 0]);
+        pts.push([x, -sag * (1 - (x / half) ** 2) - 0.14, 0]);
       }
       parts.push(...chainAlong(pts, tile));
       for (const x of [-half, half]) parts.push(prep(new BoxGeometry(0.12, 0.03, 0.12), tile, [x, -0.015, 0]));
       return parts;
     }
-    const len = variant === 0 ? 1.7 + rng.range(-0.2, 0.2) : 2.15;
+    const len = variant === 0 ? 1.7 + rng.range(-0.2, 0.2) : 2.08;
     parts.push(prep(new BoxGeometry(0.13, 0.03, 0.13), tile, [0, -0.015, 0]));
-    parts.push(...chainAlong([[0, -0.04, 0], [0, -len, 0]], tile));
-    if (variant === 0) parts.push(prep(new TorusGeometry(0.07, 0.014, 3, 8, Math.PI * 1.35), tile, [0.035, -len - 0.07, 0], [0, 0, Math.PI * 0.9]));
-    else parts.push(prep(new TorusGeometry(0.08, 0.016, 3, 10), tile, [0, -len - 0.08, 0], [0, Math.PI / 2, 0]));
+    parts.push(...chainAlong([[0, -0.14, 0], [0, -len, 0]], tile));
+    if (variant === 0) parts.push(prep(new TorusGeometry(0.1, 0.022, 3, 8, Math.PI * 1.35), tile, [0.05, -len - 0.1, 0], [0, 0, Math.PI * 0.9]));
+    else parts.push(prep(new TorusGeometry(0.11, 0.024, 3, 10), tile, [0, -len - 0.11, 0], [0, Math.PI / 2, 0]));
     return parts;
   },
 
@@ -278,9 +282,9 @@ const BUILDERS: Record<DecorKind, Builder> = {
   banner(rng, variant, biome) {
     const parts: DecorPart[] = [];
     const rodY = 5.56;
-    parts.push(prep(new CylinderGeometry(0.024, 0.024, 1.05, 6), "iron", [0, rodY, 0.15], [0, 0, Math.PI / 2]));
-    for (const x of [-0.55, 0.55]) parts.push(prep(new SphereGeometry(0.04, 5, 4), "iron", [x, rodY, 0.15]));
-    for (const x of [-0.38, 0.38]) parts.push(prep(new BoxGeometry(0.03, 0.03, 0.16), "iron", [x, rodY, 0.075]));
+    parts.push(prep(new CylinderGeometry(0.024, 0.024, 0.92, 6), "iron", [0, rodY, 0.15], [0, 0, Math.PI / 2]));
+    for (const x of [-0.46, 0.46]) parts.push(prep(new SphereGeometry(0.04, 5, 4), "iron", [x, rodY, 0.15]));
+    for (const x of [-0.32, 0.32]) parts.push(prep(new BoxGeometry(0.03, 0.03, 0.16), "iron", [x, rodY, 0.075]));
     const len = variant === 0 ? 2.7 : 2.25;
     const cloth = new PlaneGeometry(0.82, len, 2, 10);
     const pos = cloth.getAttribute("position");
@@ -344,10 +348,10 @@ const BUILDERS: Record<DecorKind, Builder> = {
       prep(new BoxGeometry(1.1, 0.16, 0.3), "stone", [0, 2.27, 0.15]),
       prep(new PlaneGeometry(0.76, 1.37), "void", [0, 1.535, 0.012]),
     ];
-    parts.push(prep(lathe(URN, 8), "clay", [-0.16, 0.85, 0.14], [0, rng.range(0, 6), 0], 1.25));
-    if (variant === 0) parts.push(prep(lathe(URN, 8), "clay", [0.18, 0.85, 0.12], [0, rng.range(0, 6), 0], 0.85));
+    parts.push(prep(lathe(URN, 8), "clay", [-0.16, 0.85, 0.19], [0, rng.range(0, 6), 0], 1.25));
+    if (variant === 0) parts.push(prep(lathe(URN, 8), "clay", [0.18, 0.85, 0.17], [0, rng.range(0, 6), 0], 0.85));
     else {
-      parts.push(...xf(skull(), [0.17, 0.85, 0.13], [0, rng.range(-0.4, 0.4), 0]));
+      parts.push(...xf(skull(), [0.17, 0.85, 0.17], [0, rng.range(-0.4, 0.4), 0]));
       parts.push(...candle(0.04, 0.2, 0.12, 0.025, flames, 0.85));
     }
     return parts;
@@ -362,7 +366,7 @@ const BUILDERS: Record<DecorKind, Builder> = {
       const r = rng.range(0.035, 0.07);
       const h = rng.range(0.04, 0.09);
       if (onWall) {
-        parts.push(prep(new ConeGeometry(r, h, 5), "barnacle", [rng.range(-0.4, 0.4), rng.range(0.05, 0.45), wallZ + h / 2], [Math.PI / 2, 0, 0]));
+        parts.push(prep(new ConeGeometry(r, h, 5), "barnacle", [rng.range(-0.28, 0.28), rng.range(0.05, 0.45), wallZ + h / 2], [Math.PI / 2, 0, 0]));
       } else {
         const a = rng.range(-Math.PI, 0);
         const d = rng.range(0, 0.42);
@@ -378,9 +382,9 @@ const BUILDERS: Record<DecorKind, Builder> = {
     const n = 3 + variant;
     for (let i = 0; i < n; i++) {
       const h = rng.range(1.1, 2.2);
-      const lean = rng.range(-0.25, 0.25);
-      const x = rng.range(-0.2, 0.2);
-      const z = rng.range(-0.2, 0.2);
+      const lean = rng.range(-0.18, 0.18);
+      const x = rng.range(-0.14, 0.14);
+      const z = rng.range(-0.14, 0.14);
       const yaw = rng.range(0, Math.PI);
       for (const turn of [0, Math.PI / 2]) {
         const g = new PlaneGeometry(0.34, h, 1, 5);
@@ -396,8 +400,8 @@ const BUILDERS: Record<DecorKind, Builder> = {
   },
 
   puddle(_rng, variant) {
-    const s: V3 = variant === 0 ? [1, 1, 1] : variant === 1 ? [1.35, 1, 0.8] : [0.8, 1, 1.2];
-    return [prep(new PlaneGeometry(1.8, 1.8), "water", [0, 0.006, 0], [-Math.PI / 2, 0, variant * 1.3], s)];
+    const s: V3 = variant === 0 ? [1, 1, 1] : variant === 1 ? [1.25, 1, 0.8] : [0.8, 1, 1.15];
+    return [prep(new CircleGeometry(0.85, 12), "water", [0, 0.006, 0], [-Math.PI / 2, 0, variant * 1.3], s)];
   },
 
   anvil(rng) {
@@ -466,7 +470,7 @@ const BUILDERS: Record<DecorKind, Builder> = {
       const len = i === 0 ? rng.range(0.6, 0.95) : rng.range(0.25, 0.6);
       const girth = rng.range(0.6, 1.2);
       const yaw = rng.range(0, Math.PI * 2);
-      const r = i === 0 ? 0 : rng.range(0.08, 0.28);
+      const r = i === 0 ? 0 : rng.range(0.08, 0.24);
       const g = lathe(
         [
           [0, -0.1],
@@ -485,13 +489,13 @@ const BUILDERS: Record<DecorKind, Builder> = {
     const parts: DecorPart[] = [prep(new CircleGeometry(0.55, 8), "root", [0, -0.012, 0], [Math.PI / 2, 0, 0])];
     const n = 4 + variant;
     for (let i = 0; i < n; i++) {
-      const len = rng.range(0.8, 2.15);
+      const len = rng.range(0.8, 2.0);
       const x0 = rng.range(-0.4, 0.4);
       const z0 = rng.range(-0.4, 0.4);
       const pts: Vector3[] = [];
       for (let k = 0; k <= 5; k++) {
         const t = k / 5;
-        pts.push(new Vector3(x0 + Math.sin(t * 5 + i) * 0.12 * t, -len * t, z0 + Math.cos(t * 4 + i * 2) * 0.1 * t));
+        pts.push(new Vector3(x0 + Math.sin(t * 5 + i) * 0.12 * t, -0.05 - (len - 0.05) * t, z0 + Math.cos(t * 4 + i * 2) * 0.1 * t));
       }
       parts.push(prep(new TubeGeometry(new CatmullRomCurve3(pts), 8, rng.range(0.018, 0.04), 4), "root"));
     }
@@ -509,7 +513,7 @@ const BUILDERS: Record<DecorKind, Builder> = {
       const a = (i / n) * Math.PI * 2;
       const x = Math.cos(a) * 0.2;
       const z = Math.sin(a) * 0.2;
-      const cord = rng.range(0.22, 0.55);
+      const cord = rng.range(0.22, 0.5);
       parts.push(prep(new BoxGeometry(0.01, cord, 0.01), "cord", [x, ringY - cord / 2, z]));
       const bone = longBone(rng.range(0.18, 0.28));
       parts.push(...xf(bone, [x, ringY - cord - 0.15, z], [0, a, Math.PI / 2]));

@@ -42,7 +42,7 @@ export interface DecorDef {
 }
 
 const DEFS: readonly DecorDef[] = [
-  { kind: "bones", mounts: ["corner", "wallBase"], radius: 0.45, variants: 3, scale: [0.85, 1.15] },
+  { kind: "bones", mounts: ["corner", "wallBase"], radius: 0.5, variants: 3, scale: [0.85, 1.15] },
   { kind: "candles", mounts: ["corner", "wallBase"], radius: 0.3, variants: 3, scale: [0.9, 1.15] },
   { kind: "chain", mounts: ["ceiling"], radius: 0.25, hang: 2.5, variants: 3, scale: [0.85, 1.05] },
   { kind: "cobweb", mounts: ["upperCorner"], radius: 0.1, variants: 2, scale: [0.8, 1.15] },
