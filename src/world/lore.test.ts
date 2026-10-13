@@ -6,7 +6,7 @@ const fragments = allLoreFragments();
 
 describe("lore fragments", () => {
   test("there is a real body of lore with unique ids", () => {
-    expect(fragments.length).toBeGreaterThanOrEqual(30);
+    expect(fragments.length).toBeGreaterThanOrEqual(70);
     const ids = fragments.map((f) => f.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) expect(getLoreFragment(id).id).toBe(id);
@@ -71,5 +71,36 @@ describe("lore fragments", () => {
       if (pickLoreFragment(rng, 90)!.minFloor >= 55) recent++;
     }
     expect(recent / 400).toBeGreaterThan(0.6);
+  });
+
+  test("the camp's people are met near the top; what they really do is learned near the bottom", () => {
+    const shallow = new Set(loreFragmentsForFloor(1).map((f) => f.id));
+    for (const id of ["wenna-cauldron", "brannoc-hand", "proving-ground-notice", "fellowship-rules", "maro-feathers"]) {
+      expect(shallow.has(id)).toBe(true);
+    }
+    // The deep truths — the wards are what's being digested, riftglass is
+    // the seal coming off, the shrines feed the lid, the alchemist and the
+    // smith send the pieces back down — never surface above the Hollow.
+    for (const id of ["digesting-the-wards", "riftglass-held-shut", "shrines-feed-the-lid", "wenna-knew", "brannoc-mending", "the-lid", "stone-upon-a-well"]) {
+      expect(getLoreFragment(id).minFloor).toBeGreaterThanOrEqual(55);
+    }
+  });
+
+  test("the new threads run the whole way down: the fork, riftglass, wards, shrines, fellowships", () => {
+    const threads: Record<string, RegExp> = {
+      fork: /fork/i,
+      riftglass: /riftglass/i,
+      wardStone: /ward stone/i,
+      shrine: /shrine/i,
+      fellowship: /fellowship/i,
+      vault: /vault chest/i,
+    };
+    for (const [name, re] of Object.entries(threads)) {
+      const carrying = fragments.filter((f) => re.test(`${f.title} ${f.text}`));
+      expect(carrying.length, name).toBeGreaterThanOrEqual(2);
+      // Each thread is met early and followed deeper.
+      expect(Math.min(...carrying.map((f) => f.minFloor)), name).toBeLessThan(20);
+      expect(Math.max(...carrying.map((f) => f.maxFloor ?? 100)), name).toBeGreaterThanOrEqual(60);
+    }
   });
 });
