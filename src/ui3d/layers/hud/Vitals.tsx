@@ -1,9 +1,9 @@
+import { useStats } from "../../../state/useStats";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import type { Group } from "three";
 import { PLAYER } from "../../../core/config";
 import { gameEvents } from "../../../core/events";
-import { computeStats } from "../../../items/catalog";
 import { useGame } from "../../../state/gameStore";
 import { uiNow } from "../../clock";
 import { RuneText } from "../../text/RuneText";
@@ -61,10 +61,10 @@ export function Vitals() {
   );
 }
 
-/** Max health follows worn gear; mana's is fixed. */
+/** Max health follows worn gear and blessings; mana's is fixed. */
 function useMax(kind: Kind): number {
-  const equipment = useGame((s) => s.equipment);
-  return useMemo(() => (kind === "health" ? computeStats(equipment).maxHealth : PLAYER.maxMana), [kind, equipment]);
+  const stats = useStats();
+  return kind === "health" ? stats.maxHealth : PLAYER.maxMana;
 }
 
 function OrbBlock({

@@ -1,8 +1,8 @@
+import { useStats } from "../../../state/useStats";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { Mesh, PlaneGeometry, ShaderMaterial, Vector2 } from "three";
 import { gameEvents } from "../../../core/events";
-import { computeStats } from "../../../items/catalog";
 import { useGame } from "../../../state/gameStore";
 import { uiNow } from "../../clock";
 
@@ -122,8 +122,7 @@ export function HurtVignette() {
   const hurt = useRef(0);
   const aspectRef = useRef(aspect);
   aspectRef.current = aspect;
-  const equipment = useGame((s) => s.equipment);
-  const maxHealth = useMemo(() => computeStats(equipment).maxHealth, [equipment]);
+  const maxHealth = useStats().maxHealth;
   const maxRef = useRef(maxHealth);
   maxRef.current = maxHealth;
 
