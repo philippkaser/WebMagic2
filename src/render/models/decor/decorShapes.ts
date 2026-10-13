@@ -467,31 +467,41 @@ const BUILDERS: Record<DecorKind, Builder> = {
     const n = rng.int(3, 6);
     for (let i = 0; i < n; i++) {
       const tile: DecorTile = variant === 2 ? (i % 2 ? "crystalCyan" : "crystalViolet") : variant === 0 ? "crystalViolet" : "crystalCyan";
-      const len = i === 0 ? rng.range(0.6, 0.95) : rng.range(0.25, 0.6);
-      const girth = rng.range(0.6, 1.2);
+      // Slender and sharp: a spur, not a bar.
+      const len = i === 0 ? rng.range(0.7, 1.05) : rng.range(0.3, 0.65);
+      const girth = rng.range(0.38, 0.7);
       const yaw = rng.range(0, Math.PI * 2);
-      const r = i === 0 ? 0 : rng.range(0.08, 0.24);
+      const r = i === 0 ? 0 : rng.range(0.06, 0.2);
       const g = lathe(
         [
           [0, -0.1],
           [0.08, -0.06],
-          [0.09, 0.65],
-          [0, 0.9],
+          [0.09, 0.55],
+          [0, 0.95],
         ],
-        6,
+        5,
       );
-      parts.push(prep(g, tile, [Math.sin(yaw) * r, 0, Math.cos(yaw) * r], [rng.range(0.15, 0.6), yaw, 0], [girth, len, girth], true));
+      parts.push(prep(g, tile, [Math.sin(yaw) * r, 0, Math.cos(yaw) * r], [rng.range(0.2, 0.6), yaw, 0], [girth, len, girth], true));
     }
     return parts;
   },
 
   roots(rng, variant) {
-    const parts: DecorPart[] = [prep(new CircleGeometry(0.55, 8), "root", [0, -0.012, 0], [Math.PI / 2, 0, 0])];
+    // Pale roots that broke through the vault: each creeps along it a
+    // little before it drops.
+    const parts: DecorPart[] = [];
     const n = 4 + variant;
     for (let i = 0; i < n; i++) {
       const len = rng.range(0.8, 2.0);
-      const x0 = rng.range(-0.4, 0.4);
-      const z0 = rng.range(-0.4, 0.4);
+      const x0 = rng.range(-0.5, 0.5);
+      const z0 = rng.range(-0.5, 0.5);
+      const a = rng.range(0, Math.PI * 2);
+      const creep = [
+        new Vector3(x0 + Math.cos(a) * 0.5, -0.03, z0 + Math.sin(a) * 0.5),
+        new Vector3(x0 + Math.cos(a) * 0.22, -0.04, z0 + Math.sin(a) * 0.22),
+        new Vector3(x0, -0.06, z0),
+      ];
+      parts.push(prep(new TubeGeometry(new CatmullRomCurve3(creep), 4, 0.03, 4), "root"));
       const pts: Vector3[] = [];
       for (let k = 0; k <= 5; k++) {
         const t = k / 5;

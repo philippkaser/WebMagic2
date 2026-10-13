@@ -132,8 +132,10 @@ function fill(t: TileView, tone: (v: number) => Rgb, field: (x: number, y: numbe
 }
 
 const BONE = ramp(["#5e5442", "#857a60", "#a89c7c", "#c8bc98", "#e2d8b6"]);
-const IRON = ramp(["#141317", "#1f1e23", "#2c2b31", "#3b3a42", "#504e58"]);
-const RUST = ramp(["#2a140c", "#43200f", "#5e3016", "#7a421e", "#955a2a"]);
+// Iron and rust are painted lighter than they'd be in daylight: under a
+// dark vault they only read by their highlights.
+const IRON = ramp(["#2a292f", "#3a3940", "#4d4b55", "#64626e", "#827f8c"]);
+const RUST = ramp(["#3e1e10", "#5a2c14", "#7a3e1c", "#985426", "#b46e34"]);
 const WOOD = ramp(["#1e130a", "#2c1c0e", "#3d2814", "#4f351b", "#664624"]);
 const WAX = ramp(["#7a6a4c", "#a69270", "#c9b58e", "#e4d4ac", "#f4ead0"]);
 const CLAY = ramp(["#3a1c10", "#552a18", "#713a22", "#8c4c2e", "#a6623c"]);
@@ -323,11 +325,12 @@ const PAINTERS: Record<DecorTile, Painter> = {
       t.put(Math.round(Math.cos(a) * r), Math.round(Math.sin(a) * r), hex("#8a8478"), 0.6, 0.95);
     }
   },
-  bannerCatacombs: (t, rng) => banner(t, rng, ramp(["#2a0c0c", "#3e1410", "#561c16", "#6e2a1e"]), hex("#c8a050")),
-  bannerDrowned: (t, rng) => banner(t, rng, ramp(["#0c2420", "#12322c", "#1a443a", "#245446"]), hex("#9ab8a0")),
-  bannerForge: (t, rng) => banner(t, rng, ramp(["#0c0a0a", "#16110f", "#211814", "#2c201a"]), hex("#ff7a2a"), true),
-  bannerCrystal: (t, rng) => banner(t, rng, ramp(["#141038", "#1e1850", "#2a2268", "#38307e"]), hex("#c8d8ff")),
-  bannerHollow: (t, rng) => banner(t, rng, ramp(["#3e3830", "#544c40", "#6a6050", "#807462"]), hex("#7a1020")),
+  // Faded, but still the strongest colour in a room: a banner is a landmark.
+  bannerCatacombs: (t, rng) => banner(t, rng, ramp(["#4a1410", "#661c16", "#86281e", "#a43628"]), hex("#e8c068")),
+  bannerDrowned: (t, rng) => banner(t, rng, ramp(["#14463c", "#1c5c4e", "#287262", "#388a76"]), hex("#e0ecc8")),
+  bannerForge: (t, rng) => banner(t, rng, ramp(["#22140f", "#321c15", "#46271c", "#5a3222"]), hex("#ff8a3a"), true),
+  bannerCrystal: (t, rng) => banner(t, rng, ramp(["#24205e", "#302c7a", "#3e3a96", "#504cb2"]), hex("#eef2ff")),
+  bannerHollow: (t, rng) => banner(t, rng, ramp(["#6e665a", "#887e6c", "#a29682", "#bcb098"]), hex("#8a1424")),
 };
 
 function crystal(t: TileView, tone: (v: number) => Rgb, light: Rgb): void {

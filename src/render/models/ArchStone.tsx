@@ -40,7 +40,7 @@ export function ArchStone({ layout }: { layout: FloorLayout }) {
   );
 
   return (
-    <group>
+    <group name="arch-stone">
       {colliders.length > 0 && (
         <RigidBody type="fixed" colliders={false}>
           {colliders.map((box, i) => (

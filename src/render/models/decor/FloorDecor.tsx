@@ -120,7 +120,7 @@ export function FloorDecor({ layout }: { layout: FloorLayout }) {
 
   const { solid, sheet, stone: stoneGeo } = bake.geometry;
   return (
-    <group>
+    <group name="floor-decor">
       {colliders.length > 0 && (
         <RigidBody type="fixed" colliders={false}>
           {colliders.map((c, i) => (
