@@ -68,6 +68,15 @@ export function explode(opts: ExplosionOptions): void {
   else explosionFx(center, radius, color, particles / 36);
   flashLight([center.x, center.y, center.z], color, light);
   playExplosion(radius, [center.x, center.y, center.z]);
+  gameEvents.emit("explosion", {
+    x: center.x,
+    y: center.y,
+    z: center.z,
+    radius,
+    color,
+    power: particles / 36,
+    vfx: opts.vfx ?? "blast",
+  });
 
   if (!opts.remote) {
     forEachHittable((h) => {

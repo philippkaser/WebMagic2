@@ -5,6 +5,7 @@ import { getEnemyDef } from "../enemies/registry";
 import { SpawnedEnemies } from "../enemies/SpawnedEnemies";
 import { GROUPS, TILE, WALL_HEIGHT } from "../core/config";
 import { AmbientParticles } from "../fx/AmbientParticles";
+import { FloorDecals } from "../fx/decals/FloorDecals";
 import { addLightSource, removeLightSource } from "../fx/DynamicLights";
 import { resetRegistries } from "../game/registry";
 import { hashSeed } from "../core/rng";
@@ -101,6 +102,8 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
       <WallsAndFloor layout={layout} />
       {/* The light grid: wall shadows for the pooled lights, torch bounce. */}
       <FloorLighting layout={layout} torchColors={torchColors} />
+      {/* Scorches and splats: the floor remembers its fights (fx/decals). */}
+      <FloorDecals />
       {/* The air itself: dust, spores, embers, glitter or ash per biome. */}
       <AmbientParticles biome={layout.biome} omen={layout.omen} ceiling={WALL_HEIGHT} />
 

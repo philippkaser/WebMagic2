@@ -4,6 +4,7 @@ import { playHit } from "../audio/sound";
 import { listenerAt } from "../audio/spatial";
 import { ENEMY_STRIDE, isEnemyVoice, playEnemyDeath, playEnemyStep, playEnemyWake } from "../audio/voices";
 import { floorScale, GROUPS, PLAYER } from "../core/config";
+import { gameEvents } from "../core/events";
 import { flashLight } from "../fx/DynamicLights";
 import { hitSparksFx, soulDissolveFx } from "../fx/effects";
 import { spawnBurst, type BurstOptions } from "../fx/Particles";
@@ -174,6 +175,17 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
         spawnBurst({ ...fx.burst, position: at });
         soulDissolveFx(at, fx.soul ?? fx.light.color, fx.scale ?? 1);
         flashLight(at, fx.light.color, fx.light.intensity);
+        // Cosmetic: the mark it leaves on the floor (fx/decals).
+        const body = fx.burst.color;
+        gameEvents.emit("enemyDied", {
+          x: t.x,
+          y: t.y,
+          z: t.z,
+          body: Array.isArray(body) ? body[0] : body,
+          soul: fx.soul ?? fx.light.color,
+          style: fx.burst.style,
+          scale: fx.scale ?? 1,
+        });
       }
       const drops = o.drops;
       if (drops) {
