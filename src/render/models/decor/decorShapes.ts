@@ -170,13 +170,13 @@ const URN: [number, number][] = [
 /** A chain link, chunky the way old dungeons draw them: a link a
  * wizard could put a fist through reads at a pixel-art distance. */
 function chainLink(): BufferGeometry {
-  return new TorusGeometry(0.06, 0.019, 3, 6);
+  return new TorusGeometry(0.07, 0.027, 3, 6);
 }
 
 /** Links along a polyline of points (local y of each link along it). */
 function chainAlong(points: V3[], tile: DecorTile): DecorPart[] {
   const parts: DecorPart[] = [];
-  const step = 0.13;
+  const step = 0.15;
   let carry = 0;
   let n = 0;
   for (let i = 0; i + 1 < points.length; i++) {
