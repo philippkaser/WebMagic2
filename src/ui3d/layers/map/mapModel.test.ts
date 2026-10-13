@@ -30,7 +30,9 @@ describe("the cast map's model", () => {
 
   test("markers appear only once their place is seen", () => {
     const all = dungeonModel(layout, (x, z) => x >= 0 && z >= 0 && x < n && z < n && layout.tiles[z * n + x] === 1);
-    expect(all.markers.map((m) => m.key)).toEqual(expect.arrayContaining(["exit", "leave", "treasure"]));
+    expect(all.markers.map((m) => m.key)).toEqual(expect.arrayContaining(["exit", "treasure"]));
+    // One rift per floor: the way home is in it, not beside it.
+    expect(all.markers.map((m) => m.key)).not.toContain("leave");
   });
 
   test("the village is all there, with its paths brighter", () => {
@@ -38,7 +40,7 @@ describe("the cast map's model", () => {
     expect(v.floor.length).toBeGreaterThan(500);
     expect(v.floor.some((p) => p.bright > 1)).toBe(true);
     expect(v.raised.length).toBeGreaterThan(5);
-    expect(v.markers.map((m) => m.key)).toEqual(["gate", "chest", "merchant"]);
+    expect(v.markers.map((m) => m.key)).toEqual(["gate", "chest", "merchant", "cauldron", "forge"]);
   });
 
   test("padBounds squares and grows about the centre", () => {

@@ -5,6 +5,7 @@ import { ItemModel } from "./ItemModel";
 import { Hud } from "./layers/hud/Hud";
 import { HudRig } from "./layers/hud/HudAnchor";
 import { Menus } from "./layers/menus/Menus";
+import { ForkChoice } from "./layers/ForkChoice";
 import { InventoryLayer } from "./layers/inventory/InventoryLayer";
 import { WorldMessages } from "./layers/WorldMessages";
 import { WorldPrompts } from "./layers/WorldPrompts";
@@ -30,6 +31,7 @@ export function UiRoot() {
       <Hud />
       <Menus />
       <InventoryLayer />
+      <ForkChoice />
       {import.meta.env.DEV && <DevShowcase />}
     </>
   );

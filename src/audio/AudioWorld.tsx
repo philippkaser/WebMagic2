@@ -70,9 +70,7 @@ function sourcesFor(layout: FloorLayout | null): Source[] {
   if (layout) {
     layout.torches.forEach((p, i) => out.push({ key: `t${i}`, at: p, reach: 24, level: 1, start: () => startTorch(p) }));
     const exit: At = [layout.exit[0], layout.exit[1] + 1.4, layout.exit[2]];
-    const leave: At = [layout.leave[0], layout.leave[1] + 1.4, layout.leave[2]];
     out.push({ key: "exit", at: exit, reach: 36, level: 1, start: () => startRiftHum(exit, 73.4) });
-    out.push({ key: "leave", at: leave, reach: 36, level: 0.7, start: () => startRiftHum(leave, 98, 0.7) });
   } else {
     GATE_TORCHES.forEach(([x, , z], i) => {
       const at: At = [x, 1.9, z];

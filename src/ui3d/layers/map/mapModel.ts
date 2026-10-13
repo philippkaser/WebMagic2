@@ -1,5 +1,5 @@
 import { TILE } from "../../../core/config";
-import { CAMPFIRE, CHEST, LANE, MERCHANT, PILLAR, PLAZA_R, STONE_RING, STRUCTURES } from "../../../scenes/village/layout";
+import { CAMPFIRE, CAULDRON, CHEST, FORGE, LANE, MERCHANT, PILLAR, PLAZA_R, STONE_RING, STRUCTURES } from "../../../scenes/village/layout";
 import type { FloorLayout, Vec3 } from "../../../world/types";
 import { ink } from "../../theme";
 
@@ -80,8 +80,8 @@ export function dungeonModel(layout: FloorLayout, seen: (tx: number, tz: number)
     return seen(tx, tz);
   };
   const markers: MapMarker[] = [];
-  if (known(layout.exit)) markers.push({ key: "exit", at: layout.exit, color: ink.arcane, size: 1.2 });
-  if (known(layout.leave)) markers.push({ key: "leave", at: layout.leave, color: ink.gold, size: 1.2 });
+  // The floor's one rift: the way down, and (once the tithe is paid) home.
+  if (known(layout.exit)) markers.push({ key: "exit", at: layout.exit, color: ink.arcane, size: 1.3 });
   if (known(layout.treasure)) markers.push({ key: "treasure", at: layout.treasure, color: ink.gold, size: 0.75 });
   if (layout.boss && known(layout.boss)) markers.push({ key: "boss", at: layout.boss, color: "#ff5a48", size: 1.4 });
   const bounds = floor.length ? padBounds({ minX: minX - TILE, maxX: maxX + TILE, minZ: minZ - TILE, maxZ: maxZ + TILE }, MIN_SPAN) : null;
@@ -121,6 +121,8 @@ export function villageModel(): MapModel {
     { key: "gate", at: [0, 0, 0], color: ink.arcane, size: 1.4 },
     { key: "chest", at: CHEST.pos, color: ink.gold, size: 0.9 },
     { key: "merchant", at: MERCHANT.pos, color: ink.gold, size: 0.9 },
+    { key: "cauldron", at: CAULDRON.pos, color: "#7dff6a", size: 0.9 },
+    { key: "forge", at: FORGE.pos, color: "#ff7a2e", size: 0.9 },
   ];
   return { floor, raised, markers, bounds: { minX: -VILLAGE_R, maxX: VILLAGE_R, minZ: -VILLAGE_R, maxZ: VILLAGE_R } };
 }

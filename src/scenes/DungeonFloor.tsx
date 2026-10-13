@@ -33,6 +33,9 @@ const WORLD_GROUPS = interactionGroups(GROUPS.WORLD, [
   GROUPS.PROP,
 ]);
 
+/** The rift once it forks: the way down's cyan warmed toward home's gold. */
+const FORKED_RIFT = "#9cf0b8";
+
 /** Regular enemies never despawn through the registry's onDeath (they manage
  * their own death); only the boss, rendered separately below, needs it. */
 const NOOP = () => {};
@@ -87,11 +90,7 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
     ];
   }, [layout.spawn]);
 
-  const descend = () => void useGame.getState().descend();
-  const walkHome = () => {
-    document.exitPointerLock();
-    useGame.getState().walkHome();
-  };
+  const enterRift = () => void useGame.getState().enterRift();
 
   return (
     <group>
@@ -141,27 +140,21 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
           onDeath: () => setBossAlive(false),
         })}
 
+      {/* The floor's one rift. Stepping in, it forks in the void — the way
+          down, and the way home once this run has paid the Tithe of Five
+          (transition/fork.ts, ui3d ForkChoice); before that the way home is
+          there but sealed. */}
       <Portal
         position={layout.exit}
-        color="#46ffd0"
-        prompt={`E — Descend to floor ${layout.floor + 1}`}
-        onUse={descend}
+        color={floorsOwed === 0 ? FORKED_RIFT : "#46ffd0"}
+        prompt={
+          floorsOwed === 0
+            ? "E — Step into the rift (it forks: deeper, or home)"
+            : `E — Descend to floor ${layout.floor + 1}  ·  home opens in ${floorsOwed} floor${floorsOwed === 1 ? "" : "s"}`
+        }
+        onUse={enterRift}
         locked={bossAlive}
         lockedPrompt="Sealed — the Warden of the Deep still lives"
-      />
-      {/* The way home: on every floor, but sealed until this run has paid
-          the Tithe of Five (run/rules.ts). */}
-      <Portal
-        position={layout.leave}
-        color="#ffd44f"
-        prompt="E — Walk home (everything you carry becomes safe)"
-        onUse={walkHome}
-        locked={bossAlive || floorsOwed > 0}
-        lockedPrompt={
-          bossAlive
-            ? "Sealed — the Warden of the Deep still lives"
-            : `The way home is sealed — the deep wants ${floorsOwed} more floor${floorsOwed === 1 ? "" : "s"}`
-        }
       />
 
       <PlayerController spawn={spawnPoint} />

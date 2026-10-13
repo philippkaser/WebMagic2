@@ -29,6 +29,7 @@ import { useNet } from "../net/netStore";
 import { session } from "../net/session";
 import { bankKit, settleDeath, type LostStack } from "../run/outcomes";
 import { canLeave, entryFloorFor, floorsUntilExit, gearLevel } from "../run/rules";
+import { askFork } from "../transition/fork";
 import { isTraveling, travel } from "../transition/travel";
 import {
   defaultSave,
@@ -129,6 +130,9 @@ export interface GameState {
   descend(): Promise<void>;
   /** Through an open way-home portal: bank everything carried. */
   walkHome(): Promise<void>;
+  /** Into the floor's one rift: it forks (deeper / home) once the Tithe of
+   * Five is paid — the wizard chooses in the void (transition/fork.ts). */
+  enterRift(): Promise<void>;
   /** Can this pickup go ANYWHERE right now? Gates loot-orb prompts. */
   canAcquire(defId: string): boolean;
   /** Route a granted pickup (items/inventory.ts routeAcquire). Returns false
@@ -311,24 +315,7 @@ export const useGame = create<GameState>((set, get) => ({
     const next = get().floor + 1;
     if (!run || next > DUNGEON.maxFloor || isTraveling()) return;
     set({ phase: "loading", prompt: null, overlay: "none" });
-    await travel("descend", async () => {
-      const assignment = await session.requestFloor(next);
-      const floorsPlayed = assignment.runFloors ?? run.floorsPlayed + 1;
-      set({
-        phase: "dungeon",
-        floor: assignment.floor,
-        floorSeed: assignment.seed,
-        instanceId: assignment.instanceId,
-        run: { ...run, floorsPlayed },
-      });
-      const owed = floorsUntilExit(floorsPlayed);
-      gameEvents.emit(
-        "message",
-        owed === 0
-          ? `Floor ${assignment.floor} — the way home is open.`
-          : `Floor ${assignment.floor} — ${owed} more floor${owed === 1 ? "" : "s"} before the deep lets go.`,
-      );
-    });
+    await travel("descend", () => descendSwitch(set, get));
   },
 
   walkHome: async () => {
@@ -337,29 +324,29 @@ export const useGame = create<GameState>((set, get) => ({
     // "loading" at once: input, casting and damage stop while the portal
     // takes you (the floor stays mounted underneath — floor > 0).
     set({ phase: "loading", prompt: null, overlay: "none" });
-    await travel("home", () => {
-      // Read the state at switch time: a host-granted pickup may still have
-      // landed during the ENTER.
-      const state = get();
-      const banked = bankedState(state);
-      const deepest = Math.max(state.deepest, state.floor);
-      persistCurrent({ ...state, ...banked, deepest });
-      // Server-side bank: provenance-validated; the "saved" ack corrects us if
-      // anything didn't check out. Offline this is a no-op (local save rules).
-      session.sendBank(toWireInventory({ ...banked, chest: state.chest }));
-      session.leaveDungeon();
-      set({
-        phase: "village",
-        ...banked,
-        deepest,
-        run: null,
-        floor: 0,
-        health: computeStats(banked.equipment).maxHealth,
-        mana: PLAYER.maxMana,
-        prompt: null,
-        overlay: "none",
+    await travel("home", () => homeSwitch(set, get));
+  },
+
+  enterRift: async () => {
+    const start = get();
+    if (!start.run || isTraveling()) return;
+    const homeOpen = canLeave(start.run.floorsPlayed);
+    const deeperOpen = start.floor + 1 <= DUNGEON.maxFloor;
+    if (!homeOpen && !deeperOpen) return;
+    set({ phase: "loading", prompt: null, overlay: "none" });
+    await travel("fork", async () => {
+      const way = await askFork({
+        homeOpen,
+        deeperOpen,
+        nextFloor: start.floor + 1,
+        owed: floorsUntilExit(start.run!.floorsPlayed),
       });
-      gameEvents.emit("message", `Home from floor ${state.floor}. Your loot is safe.`);
+      if (way === "home") {
+        homeSwitch(set, get);
+        return { arriveAs: "home" as const };
+      }
+      await descendSwitch(set, get);
+      return { arriveAs: "descend" as const };
     });
   },
 
@@ -782,6 +769,55 @@ function persistCurrent(state: SaveData): void {
     chest: state.chest,
     gold: state.gold,
   });
+}
+
+/** The descent itself, under a journey's tunnel: the next floor's instance
+ * (the server counts the run), then the floor. */
+async function descendSwitch(set: (partial: Partial<GameState>) => void, get: () => GameState): Promise<void> {
+  const run = get().run!;
+  const next = get().floor + 1;
+  const assignment = await session.requestFloor(next);
+  const floorsPlayed = assignment.runFloors ?? run.floorsPlayed + 1;
+  set({
+    phase: "dungeon",
+    floor: assignment.floor,
+    floorSeed: assignment.seed,
+    instanceId: assignment.instanceId,
+    run: { ...run, floorsPlayed },
+  });
+  const owed = floorsUntilExit(floorsPlayed);
+  gameEvents.emit(
+    "message",
+    owed === 0
+      ? `Floor ${assignment.floor} — the way home is open.`
+      : `Floor ${assignment.floor} — ${owed} more floor${owed === 1 ? "" : "s"} before the deep lets go.`,
+  );
+}
+
+/** Walking home, under a journey's tunnel: everything carried is banked. */
+function homeSwitch(set: (partial: Partial<GameState>) => void, get: () => GameState): void {
+  // Read the state at switch time: a host-granted pickup may still have
+  // landed during the ENTER.
+  const state = get();
+  const banked = bankedState(state);
+  const deepest = Math.max(state.deepest, state.floor);
+  persistCurrent({ ...state, ...banked, deepest });
+  // Server-side bank: provenance-validated; the "saved" ack corrects us if
+  // anything didn't check out. Offline this is a no-op (local save rules).
+  session.sendBank(toWireInventory({ ...banked, chest: state.chest }));
+  session.leaveDungeon();
+  set({
+    phase: "village",
+    ...banked,
+    deepest,
+    run: null,
+    floor: 0,
+    health: computeStats(banked.equipment).maxHealth,
+    mana: PLAYER.maxMana,
+    prompt: null,
+    overlay: "none",
+  });
+  gameEvents.emit("message", `Home from floor ${state.floor}. Your loot is safe.`);
 }
 
 /** Village inventory changes persist immediately and sync to the server (a

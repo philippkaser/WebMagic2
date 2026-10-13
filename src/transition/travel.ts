@@ -30,8 +30,12 @@ export interface TravelDeps {
   setStage(stage: TravelStage, kind: TravelKind, ms: number): void;
 }
 
+/** What a switch may say about how the journey ends: a fork's ARRIVE takes
+ * the colours of the way that was chosen. */
+export type SwitchResult = void | { arriveAs?: TravelKind };
+
 export interface Traveler {
-  travel(kind: TravelKind, doSwitch: () => void | Promise<void>): Promise<void>;
+  travel(kind: TravelKind, doSwitch: () => SwitchResult | Promise<SwitchResult>): Promise<void>;
   /** True from the start of ENTER until ARRIVE begins. */
   isTraveling(): boolean;
 }
@@ -50,13 +54,15 @@ export function createTraveler(deps: TravelDeps): Traveler {
       }
       const mine = ++generation;
       const style = TRAVEL_STYLES[kind];
+      let arriveAs = kind;
       inFlight = true;
       try {
         deps.setStage("entering", kind, style.enterMs);
         await deps.sleep(style.enterMs);
         deps.setStage("tunnel", kind, style.minTunnelMs);
         const tunnelStart = deps.now();
-        await doSwitch();
+        const result = await doSwitch();
+        if (result && result.arriveAs) arriveAs = result.arriveAs;
         await deps.settle();
         const left = style.minTunnelMs - (deps.now() - tunnelStart);
         if (left > 0) await deps.sleep(left);
@@ -67,9 +73,10 @@ export function createTraveler(deps: TravelDeps): Traveler {
       } finally {
         inFlight = false;
       }
-      deps.setStage("arriving", kind, style.arriveMs);
-      await deps.sleep(style.arriveMs);
-      if (generation === mine) deps.setStage("idle", kind, 0);
+      const arrive = TRAVEL_STYLES[arriveAs];
+      deps.setStage("arriving", arriveAs, arrive.arriveMs);
+      await deps.sleep(arrive.arriveMs);
+      if (generation === mine) deps.setStage("idle", arriveAs, 0);
     },
   };
 }

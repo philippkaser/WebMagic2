@@ -21,7 +21,7 @@
  * this file can be unit-tested exhaustively (timeline.test.ts). The samplers
  * write into caller-owned objects so the frame loop allocates nothing. */
 
-export type TravelKind = "gate" | "descend" | "home" | "feather" | "death" | "respawn";
+export type TravelKind = "gate" | "descend" | "fork" | "home" | "feather" | "death" | "respawn";
 export type TravelStage = "idle" | "entering" | "tunnel" | "arriving";
 
 /** How ENTER looks. `portal`: the view is sucked into a vortex (centred on
@@ -108,6 +108,28 @@ export const TRAVEL_STYLES: Record<TravelKind, TravelStyle> = {
     speed: 1.3,
     streaks: 1,
     rings: 0,
+    feathers: 0,
+    drift: 1,
+  },
+  // The floor's one rift, once the Tithe of Five is paid: the void you fall
+  // into is both colours at once, and splits in two (ui3d ForkChoice) —
+  // the way down, the way home. The ARRIVE is restyled by the choice.
+  fork: {
+    color: "#7fe8c8",
+    hot: "#fff2c0",
+    deep: "#1a1040",
+    look: "portal",
+    ...PORTAL_BEATS,
+    // Level and barely stretched: you hang in the void to read the fork's
+    // two ways (ui3d/layers/ForkChoice), so the tunnel mustn't tilt them.
+    fovKick: 1.12,
+    roll: 0,
+    pull: 1.5,
+    lift: 0,
+    spin: 0.7,
+    speed: 0.6,
+    streaks: 0.6,
+    rings: 0.4,
     feathers: 0,
     drift: 1,
   },
