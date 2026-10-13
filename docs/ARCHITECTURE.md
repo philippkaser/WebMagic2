@@ -197,16 +197,38 @@ staying gameplay-blind (item ids are opaque strings; it validates
 pure price table and feather id from `items/economy.ts`, the same way it has
 always known the starter-gear ids):
 
-1. **Identity** — `login` presents a device token (or none, minting a fresh
-   account). The token comes back with the save and is kept client-side
-   (`webmagic.token.v1`). Real auth (email/OAuth) later replaces only the
-   token-minting step. (`server/accounts.ts`)
+1. **Identity** — the Wizard's Ledger (`server/auth.ts`, pure, injected
+   hasher/clock/randomness; `auth.test.ts` is its spec). **Guests** work as
+   they always did: `login` with no token mints an account whose id doubles
+   as its device token; presenting it resumes. **Members** have a username
+   (3–16 of `A–Z a–z 0–9 _ -`, unique ignoring case, never shown to other
+   wizards — the display name is separate) and a password stored only as an
+   argon2id hash (`Bun.password`, 19 MiB × 2). `register`, `loginPassword`
+   and `claim` answer `authOk` with a fresh **sign-in token** (32 random
+   bytes, hex) that the client keeps where the device token was
+   (`webmagic.token.v1`); the server stores only its SHA-256 — at most ten
+   per account, each lapsing after 30 days unused (sliding), `logout`
+   revoking one or all. A lapsed token is answered `authError
+   session-expired`, never with a silent new guest. **Claiming** writes
+   credentials onto the guest's own record, so its progress is simply still
+   there; its device token stops working. Failures back off exponentially
+   per connection and per username, one hash runs per connection at a time,
+   and unknown usernames still pay for a decoy hash (no timing oracle).
+   Ledger messages are refused mid-dungeon. The relay only binds the
+   connection to the answer; shared rules live in `net/credentials.ts`.
 2. **Saves** — deepest floor + the full banked inventory (equipment, Q/E belt,
    5-slot bag, 30-slot chest, gold) live server-side; the client's
-   localStorage is a cache of the last `loggedIn`/`saved` payload (and the
-   full save of record when playing offline). Storage is a debounced JSON
-   file today (`DATA_FILE`), flushed on shutdown; swapping in a database
-   replaces one `persist` callback.
+   localStorage is a cache of the last `loggedIn`/`authOk`/`saved` payload
+   (and the full save of record when playing offline). The data file
+   (`DATA_FILE`, `{ version: 2, accounts }`; old bare arrays still load) goes
+   through `server/storage.ts`: debounced **atomic** writes (temp file,
+   fsync, rename), retried on failure and flushed synchronously on
+   SIGINT/SIGTERM; **rotating snapshots** in `backups/` beside it (on
+   startup, then at most hourly while data changes, newest 48 kept); a file
+   it **can't parse is never overwritten** — it is moved aside as
+   `.corrupt-<timestamp>`, loudly, and the newest readable snapshot
+   restored; a file from a newer server refuses to start. Swapping in a
+   database still replaces one `persist` callback.
 3. **Item & gold provenance** — the core rule: *an item may be banked ⇔
    previously banked ∪ starter gear ∪ granted this run by the floor HOST's
    attestation* (`grant` messages; the beneficiary can never vouch for
@@ -244,9 +266,12 @@ the dropper's server-side ownership intact, so a hacked dropper could keep
 what an honest taker was granted — a small dupe window in the same trust
 class as host attestation (closed by the same fix); grave chests ride the
 same path (the dying wizard declares its losses, the host grants each
-plundered copy); device tokens are bearer
-secrets in localStorage (fine for a foundation, replaced by real auth). Rate
-limiting and hit/pickup sanitization already run server-/authority-side.
+plundered copy); sign-in and guest tokens are bearer
+secrets in localStorage (an XSS would steal them — sessions lapse and can be
+revoked, a guest's cannot until claimed); the ledger's rate limits are per
+connection and per username, not per IP, and one account may be signed in
+from two places at once. Rate limiting and hit/pickup sanitization already
+run server-/authority-side.
 
 ### Scaling plan (server-side, future work)
 
@@ -793,7 +818,10 @@ and the way onward, gold for home, blood for danger.
   into a rounded tablet), `Plate` (a small slab that pops in with an
   overshoot — `Pop` is the shared arrival), `KeyCap` (a parchment cap),
   `RuneButton` (a slab, "✦ label ✦", its accent glowing from within the
-  stone, lifting on hover), `PixelFrame` (now only a faint engraved groove), `ItemModel` (every item family as primitives — also used
+  stone, lifting on hover), `RuneField` (a slab you write in: a hidden
+  input mirrored into runes behind a blinking cursor; Enter/Tab/Escape; a
+  password mode whose letters burn in as ✦ and settle into •),
+  `PixelFrame` (now only a faint engraved groove), `ItemModel` (every item family as primitives — also used
   for loot in the world), `ViewAnchor`/`WorldAnchor`/`placeInFront`, UI
   sparks and `audio/uiSounds.ts`.
 - **The carried HUD** (`hud/rig.ts`, `HudAnchor.tsx`): every piece held in
@@ -820,7 +848,10 @@ and the way onward, gold for home, blood for danger.
   on arrival or a new staff; the arrival banner, which keeps its distance
   as you move and burns away early once you walk off), the menus
   (`menus/`: title, the Weighing, death, and the codex — a leather-bound
-  tome) and the inventory family (`inventory/`: item slots are soft wells
+  tome; the title carries the Wizard's Ledger, `Ledger.tsx`: a line saying
+  who you are to it, and a tablet with username/password slabs that builds
+  where the laws stood — state in `state/account.ts`, words in
+  `ledgerText.ts`) and the inventory family (`inventory/`: item slots are soft wells
   worn into the stone, their grade glowing up from the floor). The DOM
   keeps only what isn't part of the fiction: the perf overlay, the build
   stamp and the dev room.

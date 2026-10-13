@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { hideLedgerForm, openLedger, useAccount } from "../../../state/account";
 import { useGame } from "../../../state/gameStore";
 import type { FontId } from "../../font/faces";
-import { UiPresence } from "../../presence";
+import { UiPresence, UiShow } from "../../presence";
 import { RuneButton } from "../../RuneButton";
 import { Tablet, TABLET_EXIT } from "../../Tablet";
 import { RuneText } from "../../text/RuneText";
@@ -10,6 +11,7 @@ import { ink } from "../../theme";
 import { ArcaneCircle } from "./ArcaneCircle";
 import { SoftGlow } from "./fx";
 import { colsFor, KeyLegend, PixelIcon, spaced, TitleText } from "./grimoire";
+import { LedgerLine, LedgerTablet } from "./Ledger";
 import { CONTROLS, PREMISE, TENETS } from "./menuText";
 import { NamePlaque } from "./NamePlaque";
 import { Delayed, screenUnit, Stage, Veil } from "./stage";
@@ -39,30 +41,44 @@ const CARD_W = 0.27;
 const CARD_H = 0.136;
 const CARD_X = 0.288;
 const CARD_Y = 0.022;
+/** The ledger line: who you are to the ledger, under everything else. */
+const LEDGER_Y = -0.455;
 
 export function MainMenu() {
   const phase = useGame((s) => s.phase);
+  // The Wizard's Ledger (Ledger.tsx): its form stands where the laws stood.
+  const ledger = useAccount((s) => s.form);
+  useEffect(() => {
+    if (phase === "menu") void openLedger();
+    else hideLedgerForm();
+  }, [phase]);
   return (
     <UiPresence show={phase === "menu"} exit={TABLET_EXIT}>
       <Veil color="#030206" inner="#150f22" strength={0.95} center={0.86} cy={0.24} />
       <Stage distance={D} width={1.0}>
         <ArcaneCircle mood="arcane" distance={3.2} stageDistance={D} cy={0.24} delay={0.1} />
         <Logo />
-        <Delayed by={0.9}>
-          <Tenets />
-        </Delayed>
-        <Delayed by={1.5}>
-          <TheWayIn />
-        </Delayed>
-        <Delayed by={2.0}>
-          <KeyLegend
-            entries={CONTROLS}
-            px={tp(STEP.text)}
-            maxWidth={0.86 * U}
-            position={[0, -0.318 * U, 0]}
-            step={0.05}
-          />
-        </Delayed>
+        <UiShow show={ledger === null}>
+          <Delayed by={0.9}>
+            <Tenets />
+          </Delayed>
+          <Delayed by={1.5}>
+            <TheWayIn />
+          </Delayed>
+          <Delayed by={2.0}>
+            <KeyLegend
+              entries={CONTROLS}
+              px={tp(STEP.text)}
+              maxWidth={0.86 * U}
+              position={[0, -0.318 * U, 0]}
+              step={0.05}
+            />
+          </Delayed>
+          <Delayed by={2.3}>
+            <LedgerLine U={U} y={LEDGER_Y * U} />
+          </Delayed>
+        </UiShow>
+        <LedgerTablet U={U} />
       </Stage>
     </UiPresence>
   );

@@ -16,6 +16,7 @@
  *                    (text/RuneText.tsx; font/ holds the font + layout)
  *   Tablet           a menu surface that builds itself from stones
  *   RuneButton       a pressable stone plaque with a kindling seam
+ *   RuneField        a slab you write in (hidden input; password mode)
  *   ItemModel        any item as a procedural 3D model
  *   ViewAnchor / WorldAnchor / placeInFront / pxFor   (anchors.tsx)
  *   UiPresence / UiShow / useUiShow   enter/exit choreography (presence.tsx)
@@ -44,6 +45,7 @@ export { ItemModel } from "./ItemModel";
 export { glowMaterial, metalMaterial, stoneMaterial } from "./materials";
 export { UiPresence, UiShow, UiShowContext, useUiShow } from "./presence";
 export { RuneButton } from "./RuneButton";
+export { RuneField, type RuneFieldHandle } from "./RuneField";
 export { UiTextStyleProvider, useUiTextStyle } from "./style";
 export { Tablet, TABLET_EXIT } from "./Tablet";
 export { RuneText, measureText } from "./text/RuneText";

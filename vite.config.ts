@@ -23,9 +23,10 @@ export default defineConfig({
   server: {
     port: 3000,
     // Game server (bun run dev:server). The client falls back to offline
-    // single-player when this isn't running.
+    // single-player when this isn't running. WM_SERVER_PORT points the
+    // proxy at a game server on another port (several dev stacks side by side).
     proxy: {
-      "/ws": { target: "ws://localhost:3001", ws: true },
+      "/ws": { target: `ws://localhost:${process.env.WM_SERVER_PORT ?? 3001}`, ws: true },
     },
   },
   build: {

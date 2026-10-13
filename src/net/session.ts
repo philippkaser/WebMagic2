@@ -6,6 +6,8 @@ import type { WireSlot } from "../items/crafting";
 import type { FloorAssignment, ServerMsg, WireInventory } from "./protocol";
 import { LocalTransport, WebSocketTransport, type Transport } from "./transport";
 
+/** The token this browser presents: a member's sign-in token, or a guest's
+ * device token (the key predates the ledger; both kinds share it). */
 const TOKEN_KEY = "webmagic.token.v1";
 
 function loadToken(): string | undefined {
@@ -21,6 +23,15 @@ function storeToken(token: string): void {
     localStorage.setItem(TOKEN_KEY, token);
   } catch {
     // Private mode etc. — a fresh account per session.
+  }
+}
+
+/** The stored token is dead (signed out, lapsed, revoked). */
+function clearToken(): void {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Nothing stored.
   }
 }
 
@@ -44,15 +55,48 @@ export class GameSession {
   /** Floor we're currently in (for reconnect re-entry); null in the village. */
   private currentFloor: number | null = null;
   private reconnecting = false;
+  /** The connection attempt in progress, shared by everyone who asks. */
+  private establishing: Promise<void> | null = null;
 
+  /** Connect (if not yet) and log in — with the stored token, or as a new
+   * guest if there is none. */
   async ensureConnected(name = "Wizard"): Promise<void> {
     this.name = name;
-    if (this.transport) {
-      this.login();
-      return;
-    }
-    await this.establish();
+    await this.open();
     this.login();
+  }
+
+  /** Connect without logging in (the title screen reads the ledger first).
+   * Concurrent callers share one attempt. */
+  open(): Promise<SessionMode> {
+    if (!this.establishing && !this.transport) {
+      this.establishing = this.establish().finally(() => {
+        this.establishing = null;
+      });
+    }
+    return (this.establishing ?? Promise.resolve()).then(() => this.mode);
+  }
+
+  /** Connect, and log in only if this browser already has a wizard (a
+   * stored token). Returns whether it did. */
+  async resume(name: string): Promise<boolean> {
+    this.name = name;
+    await this.open();
+    if (loadToken() === undefined) return false;
+    this.login();
+    return true;
+  }
+
+  /** Offline (no server answered): try the server again. */
+  async retryOnline(): Promise<SessionMode> {
+    if (this.mode === "offline" && !this.establishing) {
+      this.stopPinging();
+      this.unsubscribe?.();
+      this.unsubscribe = null;
+      this.transport?.close();
+      this.transport = null;
+    }
+    return this.open();
   }
 
   private login(): void {
@@ -143,6 +187,27 @@ export class GameSession {
     this.transport?.send({ t: "grantGold", playerId, amount, source });
   }
 
+  // ── The ledger (answers arrive as netBus "ledger" + "serverSave") ─────────
+
+  /** A new wizard with a username and password, starting as `name`. */
+  sendRegister(username: string, password: string, name: string): void {
+    this.name = name;
+    this.transport?.send({ t: "register", username, password, name });
+  }
+
+  sendSignIn(username: string, password: string): void {
+    this.transport?.send({ t: "loginPassword", username, password });
+  }
+
+  /** Seal the guest we're playing with a username and password. */
+  sendClaim(username: string, password: string): void {
+    this.transport?.send({ t: "claim", username, password });
+  }
+
+  sendLogout(everywhere = false): void {
+    this.transport?.send({ t: "logout", everywhere });
+  }
+
   // ── Connection plumbing ────────────────────────────────────────────────────
 
   private async establish(): Promise<void> {
@@ -183,7 +248,7 @@ export class GameSession {
     netClock.reset();
     gameEvents.emit("message", "Connection lost — reconnecting…");
     try {
-      await this.establish();
+      await this.open();
       this.login(); // same token → same account, run floor and grants intact
       netBus.emit("reconnected", undefined);
       if (this.currentFloor !== null) {
@@ -226,6 +291,20 @@ export class GameSession {
       case "loggedIn":
         storeToken(msg.token);
         netBus.emit("serverSave", msg.save);
+        netBus.emit("ledger", msg.username ? { kind: "member", username: msg.username } : { kind: "guest" });
+        break;
+      case "authOk":
+        storeToken(msg.token); // replaces any device token
+        netBus.emit("serverSave", msg.save);
+        netBus.emit("ledger", { kind: "member", username: msg.username, name: msg.name });
+        break;
+      case "authError":
+        if (msg.reason === "session-expired") clearToken();
+        netBus.emit("ledger", { kind: "refused", reason: msg.reason, retryAfterMs: msg.retryAfterMs });
+        break;
+      case "loggedOut":
+        clearToken();
+        netBus.emit("ledger", { kind: "signedOut" });
         break;
       case "saved":
         netBus.emit("serverSave", msg.save);

@@ -12,6 +12,7 @@ import type { Rng } from "../src/core/rng";
 import { applyCraft, type CraftOutcome, type CraftRequest } from "../src/items/crafting";
 import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS, POUCH_SLOTS } from "../src/items/inventory";
 import type { ServerSave, WireEquipment, WireInventory, WireStack } from "../src/net/protocol";
+import { restoreSignIn, type SessionRecord } from "./auth";
 
 /** Server-side accounts & saves — the anti-cheat foundation.
  *
@@ -35,8 +36,9 @@ import type { ServerSave, WireEquipment, WireInventory, WireStack } from "../src
  * server-side without the server learning what any item does.
  *
  * Identity is a device token: first login mints an account + token, the
- * client stores it, later logins present it. (Real auth — email/OAuth —
- * slots in behind login() without touching anything else.)
+ * client stores it, later logins present it. `token` stays the account's
+ * stable id; password accounts and sign-in sessions (auth.ts) ride on the
+ * same record, so a claimed guest keeps everything.
  *
  * Pure logic with injected persistence, so the rules are unit-testable. */
 
@@ -59,6 +61,43 @@ export interface AccountRecord {
   /** Floors entered during the current run, counting the one it's on. The
    * way home only opens at RUN.floorsBeforeExit (the Tithe of Five). */
   runFloors: number;
+
+  // Sign-in (auth.ts). Absent on guests — and on every pre-ledger record.
+  /** Sign-in name, spelled as chosen (unique ignoring case). */
+  username?: string;
+  /** argon2id hash (PHC string) — never the password. */
+  passwordHash?: string;
+  /** Live sign-in sessions (token hashes). */
+  sessions?: SessionRecord[];
+}
+
+/** The data file's schema version: `{ version, accounts }`. Version 1 was a
+ * bare array of records, which still loads. */
+export const ACCOUNTS_FILE_VERSION = 2;
+
+/** The account rows in a parsed data file of either shape. Throws if it is
+ * neither (the caller treats that as corrupt). */
+export function accountRows(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  const rows = (parsed as { accounts?: unknown } | null)?.accounts;
+  if (Array.isArray(rows)) return rows;
+  throw new Error("not an accounts file");
+}
+
+/** Storage's check of a data file before trusting it: null = good, else why
+ * it's corrupt. A file written by a NEWER server throws — loading it would
+ * silently drop whatever this version doesn't know, so refuse to start. */
+export function checkAccountsFile(parsed: unknown): string | null {
+  const version = Array.isArray(parsed) ? 1 : Number((parsed as { version?: unknown } | null)?.version);
+  if (version > ACCOUNTS_FILE_VERSION) {
+    throw new Error(`data file is version ${version}; this server reads up to ${ACCOUNTS_FILE_VERSION}`);
+  }
+  try {
+    accountRows(parsed);
+    return null;
+  } catch (err) {
+    return String((err as Error).message ?? err);
+  }
 }
 
 /** Everyone owns starter gear implicitly. */
@@ -101,7 +140,7 @@ export class AccountStore {
   ) {
     if (initialJson) {
       try {
-        for (const raw of JSON.parse(initialJson) as (AccountRecord & {
+        for (const raw of accountRows(JSON.parse(initialJson)) as (AccountRecord & {
           equipment?: WireEquipment; // pre-inventory record shape
           checkpoint?: number; // pre-run-rules record shape
         })[]) {
@@ -118,6 +157,7 @@ export class AccountStore {
               runFloor: clampFloor(raw.runFloor),
               runFloors: clampFloor(raw.runFloors),
             });
+            restoreSignIn(this.accounts.get(raw.token)!, raw);
           }
         }
       } catch {
@@ -155,6 +195,16 @@ export class AccountStore {
 
   get(token: string): AccountRecord | null {
     return this.accounts.get(token) ?? null;
+  }
+
+  /** Every account (auth.ts indexes usernames and sessions from these). */
+  all(): IterableIterator<AccountRecord> {
+    return this.accounts.values();
+  }
+
+  /** Persist after a change made to a record from outside (sign-in fields). */
+  touch(): void {
+    this.flush();
   }
 
   saveOf(account: AccountRecord): ServerSave {
@@ -357,7 +407,7 @@ export class AccountStore {
   }
 
   private flush(): void {
-    this.persist?.(JSON.stringify([...this.accounts.values()]));
+    this.persist?.(JSON.stringify({ version: ACCOUNTS_FILE_VERSION, accounts: [...this.accounts.values()] }));
   }
 }
 

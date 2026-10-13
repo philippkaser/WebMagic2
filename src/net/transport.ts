@@ -135,6 +135,14 @@ export class LocalTransport implements Transport {
         // so the client keeps its local persistence path.
         this.name = msg.name;
         break;
+      case "register":
+      case "loginPassword":
+      case "claim":
+      case "logout":
+        // No server, no ledger: the offline wizard lives in localStorage
+        // (and a sign-in token can't be revoked from here, so it stays).
+        this.deliver({ t: "authError", reason: "offline" });
+        break;
       case "bank":
       case "escape":
       case "stash":

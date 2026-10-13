@@ -6,12 +6,12 @@
  * Prod: bun run start        (serves dist/ and /ws from one process)
  */
 import type { ServerWebSocket } from "bun";
-import { writeFileSync } from "node:fs";
 import { ENCOUNTERS } from "../src/core/config";
 import { FloorDirectory } from "../src/net/matchmaking";
 import type { ClientMsg } from "../src/net/protocol";
-import { AccountStore } from "./accounts";
+import { AccountStore, checkAccountsFile } from "./accounts";
 import { Relay, type RelayPeer } from "./relay";
+import { DataFile } from "./storage";
 
 const PORT = Number(process.env.PORT ?? 3001);
 const MAX_PLAYERS_PER_FLOOR = 4;
@@ -38,35 +38,25 @@ interface SocketData {
 
 const log = (text: string) => console.log(`[webmagic] ${text}`);
 
-// Accounts persist to a JSON file (override with DATA_FILE), write-debounced.
+// Accounts persist to a JSON file (override with DATA_FILE) through
+// storage.ts: debounced atomic writes, rotating backups in backups/ beside
+// it, and a file it can't read is moved aside, never overwritten.
 // Swapping this for a real database later means replacing only `persist`.
 const DATA_FILE = process.env.DATA_FILE ?? new URL("../server-data.json", import.meta.url).pathname;
-const dataFile = Bun.file(DATA_FILE);
-const initialAccounts = (await dataFile.exists()) ? await dataFile.text() : null;
-let writeTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingJson: string | null = null;
-const persistAccounts = (json: string) => {
-  pendingJson = json;
-  if (writeTimer !== null) clearTimeout(writeTimer);
-  writeTimer = setTimeout(() => {
-    pendingJson = null;
-    Bun.write(DATA_FILE, json).catch((err) => log(`save write failed: ${err}`));
-  }, 300);
-};
+const storage = new DataFile({ file: DATA_FILE, log, validate: checkAccountsFile });
+const initialAccounts = storage.load();
 // Debounced writes must not lose the last mutation on shutdown.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    if (pendingJson !== null) {
-      try {
-        writeFileSync(DATA_FILE, pendingJson);
-      } catch (err) {
-        log(`final save write failed: ${err}`);
-      }
+    try {
+      storage.flushSync();
+    } catch (err) {
+      log(`final save write failed: ${err}`);
     }
     process.exit(0);
   });
 }
-const accounts = new AccountStore(persistAccounts, initialAccounts);
+const accounts = new AccountStore((json) => storage.schedule(json), initialAccounts);
 log(`accounts: ${accounts.size} loaded from ${DATA_FILE}`);
 
 // ENCOUNTER_CHANCE=1 makes every same-floor entry meet whoever is there — a

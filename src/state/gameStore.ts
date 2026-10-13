@@ -276,7 +276,12 @@ export const useGame = create<GameState>((set, get) => ({
   motionBlur: loadMotionBlurSetting(),
   playerName: loadPlayerName(),
 
-  startGame: () => set({ phase: "village" }),
+  startGame: () => {
+    set({ phase: "village" });
+    // Log in as whoever this browser is — a member, a guest, or (no token
+    // yet) a brand-new guest — so the village holds the server's save.
+    void session.ensureConnected(get().playerName);
+  },
 
   openWeighing: () => {
     playWeighing();

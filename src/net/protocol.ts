@@ -15,6 +15,7 @@ import type { WireSlot } from "../items/crafting";
  *   "h:"  to-host   — anyone may send; delivered to the current host only.
  *   "p:"  peer      — anyone may send; broadcast to the rest of the instance.
  */
+import type { AuthErrorReason } from "./credentials";
 
 export interface MemberInfo {
   id: string;
@@ -83,9 +84,26 @@ export interface ServerSave {
 }
 
 export type ClientMsg =
-  /** Device identity: no token = new account; the reply carries the token to
-   * keep. Also updates the display name. */
+  /** Identity: the stored token — a member's sign-in token or a guest's
+   * device token; none = a new guest account. The reply (`loggedIn`) carries
+   * the token to keep. A lapsed or revoked sign-in token is answered with
+   * `authError` "session-expired" instead. Also updates the display name. */
   | { t: "login"; name: string; token?: string }
+  /** The ledger (server/auth.ts) — title screen / village only. Each is
+   * answered with `authOk` (a fresh sign-in token to keep in place of any
+   * other) or `authError`. Passwords are hashed with argon2id, never kept.
+   *
+   * register: write a NEW wizard into the ledger (`name` = its display name;
+   * the username is only for signing in). */
+  | { t: "register"; username: string; password: string; name?: string }
+  /** Sign in to an existing wizard. */
+  | { t: "loginPassword"; username: string; password: string }
+  /** The guest this connection plays seals itself with a username and
+   * password — its progress carries over; its device token stops working. */
+  | { t: "claim"; username: string; password: string }
+  /** Revoke this connection's sign-in token (`everywhere`: all of the
+   * account's) and unbind it; answered with `loggedOut`. */
+  | { t: "logout"; everywhere?: boolean }
   /** Enter a dungeon floor. `fresh` = a new run from the village portal: the
    * server ignores the requested floor and casts the wizard to the depth
    * their banked gear resonates at (run/rules.ts). Otherwise the request must
@@ -139,7 +157,12 @@ export type ClientMsg =
 
 export type ServerMsg =
   | { t: "welcome"; playerId: string }
-  | { t: "loggedIn"; token: string; save: ServerSave }
+  /** `username` is set for members (signed-in accounts), absent for guests. */
+  | { t: "loggedIn"; token: string; save: ServerSave; username?: string }
+  /** The ledger accepted: keep `token`; `name` is the wizard's display name. */
+  | { t: "authOk"; token: string; username: string; name: string; save: ServerSave }
+  | { t: "authError"; reason: AuthErrorReason; retryAfterMs?: number }
+  | { t: "loggedOut" }
   /** Authoritative save after a bank request (cheated items stripped). */
   | { t: "saved"; save: ServerSave }
   /** A craft's result: the authoritative save, and what happened. */
