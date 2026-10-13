@@ -1,4 +1,5 @@
 import { Emitter } from "../core/events";
+import type { AuthErrorReason } from "./credentials";
 import type { FloorAssignment, MemberInfo, ServerSave } from "./protocol";
 
 /** Internal networking event hub. The session publishes connection/relay
@@ -23,6 +24,16 @@ export interface NetBusEvents extends Record<string, unknown> {
   serverSave: ServerSave;
   /** The connection dropped and was re-established with a fresh identity. */
   reconnected: undefined;
+  /** The ledger answered: who this connection plays as now, or why not
+   * (state/account.ts turns it into the title screen's ledger). */
+  ledger: LedgerEvent;
 }
+
+export type LedgerEvent =
+  | { kind: "guest" }
+  /** `name` is the display name the server holds (absent on a resume). */
+  | { kind: "member"; username: string; name?: string }
+  | { kind: "signedOut" }
+  | { kind: "refused"; reason: AuthErrorReason; retryAfterMs?: number };
 
 export const netBus = new Emitter<NetBusEvents>();
