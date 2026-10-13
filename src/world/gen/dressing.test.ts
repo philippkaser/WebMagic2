@@ -91,11 +91,10 @@ describe("dressing", () => {
       expect(d.pos[1]).toBe(0);
       expect(tileAt(l, d.pos)).toBe(FLOOR);
       // Never on a landmark's tile.
-      const landmarks = [l.spawn, l.exit, l.leave, l.treasure, ...(l.boss ? [l.boss] : [])];
+      const landmarks = [l.spawn, l.exit, l.treasure, ...(l.boss ? [l.boss] : [])];
       for (const p of landmarks) expect(worldToTile(d.pos, l.size)).not.toEqual(worldToTile(p, l.size));
       expect(dist(d.pos, l.spawn)).toBeGreaterThanOrEqual(c.spawn + r - 1e-9);
       expect(dist(d.pos, l.exit)).toBeGreaterThanOrEqual(c.portal + r - 1e-9);
-      expect(dist(d.pos, l.leave)).toBeGreaterThanOrEqual(c.portal + r - 1e-9);
       expect(dist(d.pos, l.treasure)).toBeGreaterThanOrEqual(c.treasure + r - 1e-9);
       if (l.boss) expect(dist(d.pos, l.boss)).toBeGreaterThanOrEqual(c.boss + r - 1e-9);
       for (const t of l.traps) expect(dist(d.pos, t.pos)).toBeGreaterThanOrEqual(c.trap + r - 1e-9);

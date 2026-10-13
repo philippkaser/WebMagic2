@@ -334,7 +334,9 @@ class Context {
     const ty = Math.floor(p[2] / TILE + input.grid.size / 2);
     if (!input.grid.isFloor(tx, ty)) return false;
     if (room === this.arena && (spot.mount === "floor" || def.collider)) return false;
-    if (!far(pois.spawn, c.spawn + r) || !far(pois.exit, c.portal + r) || !far(pois.leave, c.portal + r)) return false;
+    // (The exit's rift is the floor's one way out — home or down — so the
+    // old way-home spot, pois.leave, is deliberately not consulted.)
+    if (!far(pois.spawn, c.spawn + r) || !far(pois.exit, c.portal + r)) return false;
     if (!far(pois.treasure, c.treasure + r)) return false;
     if (pois.boss && !far(pois.boss, c.boss + r)) return false;
     if (!input.traps.every((t) => far(t.pos, c.trap + r))) return false;
@@ -393,7 +395,7 @@ class Context {
     // Nothing hung behind a portal or the treasure (they read best clean).
     const front = wallPoint(w, along, 0, 1);
     const { pois } = input;
-    for (const q of [pois.exit, pois.leave, pois.treasure]) if (dist2World(front, q) < 2.4 * 2.4) return false;
+    for (const q of [pois.exit, pois.treasure]) if (dist2World(front, q) < 2.4 * 2.4) return false;
     return true;
   }
 
@@ -402,7 +404,7 @@ class Context {
     const { pois, architecture } = input;
     const p = d.pos;
     const far = (q: Vec3, dist: number) => dist2World(p, q) >= dist * dist;
-    if (!far(pois.exit, 2.6) || !far(pois.leave, 2.6) || !far(pois.treasure, 1.6)) return false;
+    if (!far(pois.exit, 2.6) || !far(pois.treasure, 1.6)) return false;
     if (pois.boss && !far(pois.boss, 3)) return false;
     if (!architecture.pillars.every((q) => far(q.pos, 1.1))) return false;
     if (!architecture.shafts.every((s) => far(s.pos, s.radius + 0.35))) return false;
