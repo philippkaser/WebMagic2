@@ -11,10 +11,14 @@ import { SURFACE_SETS, type SurfaceSetId } from "./surfaces/types";
 export type WallSurface = `${SurfaceSetId}-wall`;
 export type FloorSurface = `${SurfaceSetId}-floor`;
 export type CeilingSurface = `${SurfaceSetId}-ceiling`;
+/** Each band's dressed stone: doorway frames, piers, ribs, pillars, fallen
+ * masonry (surfaces/trim.ts). */
+export type TrimSurface = `${SurfaceSetId}-trim`;
 
 export const WALL_SURFACES: readonly WallSurface[] = SURFACE_SETS.map((s) => `${s}-wall` as const);
 export const FLOOR_SURFACES: readonly FloorSurface[] = SURFACE_SETS.map((s) => `${s}-floor` as const);
 export const CEILING_SURFACES: readonly CeilingSurface[] = SURFACE_SETS.map((s) => `${s}-ceiling` as const);
+export const TRIM_SURFACES: readonly TrimSurface[] = SURFACE_SETS.map((s) => `${s}-trim` as const);
 
 /** Breakable props, fixtures and model parts — 64², mapped per object. */
 export const PROP_SURFACES = ["planks", "barrel", "ceramic", "cloth", "runestone", "stone", "slab"] as const;
@@ -24,7 +28,9 @@ export const VILLAGE_SURFACES = ["dirt", "cobble", "timber", "shingles", "bark",
 
 export type PropSurface = (typeof PROP_SURFACES)[number];
 export type VillageSurface = (typeof VILLAGE_SURFACES)[number];
-export type ArchSurface = WallSurface | FloorSurface | CeilingSurface;
+/** The dungeon's own surfaces — what render/models/wallMaterial.ts builds
+ * its (tinted) materials from. */
+export type ArchSurface = WallSurface | FloorSurface | CeilingSurface | TrimSurface;
 
 /** Any painted surface. Every kind ships its recommended material alongside
  * its maps (see getSurface), so SurfaceKind and TextureKind name the same
@@ -35,23 +41,39 @@ export type SurfaceKind = ArchSurface | PropSurface | VillageSurface;
 /** Kept for existing call sites: `getTextures(kind)`. */
 export type TextureKind = SurfaceKind;
 
-/** The dungeon's architecture surfaces. */
+/** The dungeon's architecture surfaces: the walls, floors and ceilings of
+ * each set (its dressed stone is listed apart, TRIM_SURFACES). */
 export const ARCH_SURFACES: readonly ArchSurface[] = [...WALL_SURFACES, ...FLOOR_SURFACES, ...CEILING_SURFACES];
 
-export const SURFACE_KINDS: readonly SurfaceKind[] = [...ARCH_SURFACES, ...PROP_SURFACES, ...VILLAGE_SURFACES];
+export const SURFACE_KINDS: readonly SurfaceKind[] = [
+  ...ARCH_SURFACES,
+  ...TRIM_SURFACES,
+  ...PROP_SURFACES,
+  ...VILLAGE_SURFACES,
+];
 
 /** The three architecture kinds of a surface set. */
 export function setSurfaces(set: SurfaceSetId): { wall: WallSurface; floor: FloorSurface; ceiling: CeilingSurface } {
   return { wall: `${set}-wall`, floor: `${set}-floor`, ceiling: `${set}-ceiling` };
 }
 
+/** A set's dressed stone. */
+export function trimSurface(set: SurfaceSetId): TrimSurface {
+  return `${set}-trim`;
+}
+
+/** The dressed stone that goes with a wall surface. */
+export function trimForWall(wall: WallSurface): TrimSurface {
+  return trimSurface(archPart(wall)!.set);
+}
+
 /** Split an architecture kind back into its set and part (null for props). */
-export function archPart(kind: SurfaceKind): { set: SurfaceSetId; part: "wall" | "floor" | "ceiling" } | null {
+export function archPart(kind: SurfaceKind): { set: SurfaceSetId; part: "wall" | "floor" | "ceiling" | "trim" } | null {
   const dash = kind.lastIndexOf("-");
   if (dash < 0) return null;
   const set = kind.slice(0, dash) as SurfaceSetId;
   const part = kind.slice(dash + 1);
   if (!SURFACE_SETS.includes(set)) return null;
-  if (part !== "wall" && part !== "floor" && part !== "ceiling") return null;
+  if (part !== "wall" && part !== "floor" && part !== "ceiling" && part !== "trim") return null;
   return { set, part };
 }

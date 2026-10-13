@@ -37,6 +37,15 @@ Anything gameplay-relevant that must match between players is rolled from the
 seed (world layout, treasure). Cosmetic-only randomness (particle jitter,
 personal loot drops) uses `Math.random`.
 
+The generator (`world/gen/index.ts`) is a staged pipeline: omen → rooms →
+corridors → walls → points of interest → torches → props & enemies → traps
+→ lore runes → doorways → architecture → dressing. The layout stream's
+stages draw the same numbers whatever is added after them; every later
+system rolls on its own stream (`gen/seeds.ts`: omen, lore, architecture,
+doorways, dressing), so a seed keeps its rooms, props and enemies byte for
+byte as stages are added — and the set dressing, though cosmetic, is still
+seeded, so floor-mates see the same skull in the same corner.
+
 ## Multiplayer design
 
 ### The encounter rule
@@ -315,11 +324,31 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   weight multipliers; the generator reads the monster mix,
   `scenes/floorAtmosphere.ts` and `DungeonFloor` the rest. The look of each
   biome comes from the "gritty pixel-magic" art direction (see Rendering).
+- `world/gen/doorways.ts`: every corridor mouth — a run of one or two
+  open tiles just outside a room's edge, rock either side along that wall,
+  a real passage beyond (pure, no rng) — gets a frame; what hangs in it
+  (nothing, a raised portcullis, a broken door on its last hinge leaning on
+  unbroken wall clear of torches and runes) is rolled on its own stream.
 - `world/gen/architecture.ts`: a generator stage on its own RNG stream (so
   layouts never shift) that plans pillars, arch ribs, light shafts and
-  crystal clusters. For now only the light shafts are built — the dungeon
-  is deliberately plain while its basic look and feel settle; the rest of
-  the plan (tested to never block a path) is there to switch back on.
+  crystal clusters — all of it built now. Piers keep off door frames and
+  leaves, pillars out of the lane through any doorway; tested never to
+  block a path or crowd a landmark.
+- `world/decor.ts` + `world/gen/dressing.ts`: the set dressing, the last
+  stage, on its own stream. `decor.ts` is the table — each kind's mounts
+  (true corner, foot of a wall, flat on the floor, on a wall, the upper
+  corner, hanging from the vault), footprint, hang, collider and variants,
+  and what each band scatters (`DRESSING`: bones, candles, chains, cobwebs,
+  Founders' banners, grates, rubble, niches with urns; barnacles, kelp and
+  puddles below the tide line; anvils, braziers and slag in the Forge;
+  crystal spurs in the Deep; pale roots and bone chimes in the Hollow).
+  The stage only reads finished layout data. The rules, all tested: decor
+  never stands on a landmark's tile or near the spawn sigil, the exit's
+  rift, the treasure, the Warden, a trap plate or a spawned body; nothing
+  with bulk leaves the walls (only grates and puddles lie in the open);
+  nothing stands in a doorway's lane; hanging decor never reaches below
+  3.3 m; the two pieces with colliders (anvils, braziers) only fill
+  dead-end corners, so every path stays open.
 - `world/omens.ts`: ~28% of floors (never floor 1) roll an omen on their own
   RNG stream (so layouts stay stable). Omens carry `FloorRules` bends
   (gravity, enemy damage/speed/health, loot/gold, mana, explosion radius) and
@@ -373,6 +402,31 @@ limiting and hit/pickup sanitization already run server-/authority-side.
   (64 × 192 px textures, so texels stay square) in one draw call; physics
   colliders are greedy-merged rectangles (tested to cover every wall tile),
   so collider count stays low as floors grow.
+- **Dressed stone is one more** (`ArchStone.tsx`, built by the pure
+  `archStoneMesh.ts`): pillars (plinth, octagonal drums, abacus), arch ribs
+  of voussoirs on quoined piers, and a frame round every doorway — long and
+  short quoins, imposts, an arch round a proud keystone, the header that
+  closes the 6 m slot above it — in each band's trim
+  (`textures/surfaces/trim.ts`: tooled ashlar, a `<set>-trim` kind through
+  the walls' own tinted material). Big faces are world-mapped; small stones
+  snap onto one block of the texture, and alternate stones stand a few
+  centimetres prouder, so the pixel-edge pass outlines every joint.
+  Pillars and door headers have colliders. In the Crystal Deep the crystal
+  clusters grow in the corners, soft pooled lights ranked under the torches.
+- **Set dressing is at most three** (`models/decor/`): every decor texture
+  is one painted atlas (`textures/decorAtlas.ts`, with alpha for webs,
+  kelp, torn banners and puddles); each kind is a template of primitives
+  mapped into it (`decorShapes.ts`, bounds tested against `world/decor.ts`),
+  and a floor's whole dressing — portcullises and broken doors included —
+  is baked per material (`decorBake.ts`: the atlas solid, the atlas
+  cut-outs, the band's stone). Candles and braziers burn with the shared
+  pixel flame (`fx/Flames`, one call for every fire) and flicker; candle
+  clusters are pooled lights at priority 0.5, so they only take a slot when
+  they're the closest thing burning. Measured (SwiftShader, dpr 0.35): +1
+  to +6 draw calls per frame for all stonework and decor together, ~10–35k
+  more triangles in view, no frame-time difference above the noise; a
+  floor's stonework builds in ~20 ms and its decor bakes in ~10 ms, behind
+  the portal tunnel.
 - **The spawn sigil** (`RuneCircleModel.tsx`): a painted rune circle under
   every arrival, in the biome's accent, slowly turning.
 - **Reflective floors** (`render/models/DungeonGround.tsx`): an optional
@@ -820,6 +874,8 @@ and the way onward, gold for home, blood for danger.
 | New biome | row in `world/biomes.ts` + surfaces in `render/textures/painters/` (`kinds.ts`) + a drone in `scenes/floorAtmosphere.ts` |
 | New omen | row in `world/omens.ts` (rules via `game/floorRules.ts`) |
 | New lore | a fragment in `world/lore.ts` |
+| New camp voice line | a line in `world/npcLines.ts` (gate it with `minDeepest`) |
+| New decor | a row in `world/decor.ts` (+ a band's `DRESSING` line), a template in `render/models/decor/decorShapes.ts`, a tile in `render/textures/decorAtlas.ts` if it needs one |
 | New networked entity | `useNetBody({ id, body, … })` — snapshots, interpolation, late-join, migration are automatic |
 | New networked message | `hostEvent` / `hostCommand` / `peerMessage` in the owning module — zero server changes |
 | New late-join state | `registerSyncProvider(key, { collect, apply })` |

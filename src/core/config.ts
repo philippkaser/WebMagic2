@@ -10,17 +10,35 @@ export const TILE = 2; // world units per dungeon tile
 export const WALL_HEIGHT = 6;
 export const EYE_HEIGHT = 0.7; // camera offset above player body center
 
-/** The generator's architecture plan (world/gen/architecture.ts). Only the
- * light shafts render for now — the dungeon is kept to its basic look —
- * but the planned arcades (ribs on wall piers, pillar pairs) are still laid
- * out on their own seed stream, with these proportions, for later. */
+/** The dungeon's architecture (world/gen/architecture.ts plans it on its own
+ * seed stream, render/models/archStoneMesh.ts builds it in the band's
+ * dressed stone): arch ribs on wall piers, pillar pairs in the big halls,
+ * and a stone frame round every corridor mouth (world/gen/doorways.ts). */
 export const ARCHITECTURE = {
   /** Transverse arch ribs: spacing along a room. */
   ribSpacing: 4,
-  /** Free-standing pillars: half-size of the base block. */
+  /** Rib width along the room, and its depth at the crown. */
+  ribWidth: 0.55,
+  ribDepth: 0.42,
+  /** Free-standing pillars: half-size of the base block (also the
+   * collider's half-extent) and the octagonal shaft's radius. */
   pillarBase: 0.52,
-  /** Engaged piers under each rib end: width along the wall. */
+  pillarRadius: 0.36,
+  /** Engaged piers under each rib end: width along the wall, and how far
+   * they stand proud of it. */
   pierWidth: 0.7,
+  pierDepth: 0.22,
+  /** Doorway frames: each jamb's width along the wall and how far it stands
+   * proud of it; the arch ring's thickness; where the arch springs; how far
+   * the header closing the slot above reaches back into the corridor. */
+  jambWidth: 0.42,
+  jambDepth: 0.2,
+  archRing: 0.42,
+  doorSpring: 3,
+  headerDepth: 0.6,
+  /** One leaf of a broken door, lying back against the wall beside its
+   * jamb: its length along the wall. */
+  doorLeaf: 1.85,
 } as const;
 
 export const GRAVITY = -26;

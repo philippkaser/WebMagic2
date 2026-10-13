@@ -13,6 +13,8 @@ import { resetNetEntities, setExpectedEntities } from "../net/entities";
 import { useNet } from "../net/netStore";
 import { PlayerController } from "../player/PlayerController";
 import { floorTint, turnHue } from "../render/floorTint";
+import { ArchStone } from "../render/models/ArchStone";
+import { FloorDecor } from "../render/models/decor/FloorDecor";
 import { DungeonGround } from "../render/models/DungeonGround";
 import { DungeonStone } from "../render/models/DungeonStone";
 import { LightShafts } from "../render/models/LightShaftModel";
@@ -166,11 +168,12 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
 
 /** The floor's architecture, dressed in its band's painted surfaces (the
  * artpass look): walls one painted face per tile under a 6 m vault, the
- * floor and ceiling world-mapped, light shafts falling through the vault,
- * the arrival sigil at the spawn — and every collider they need. The floor
- * mirror only runs when the `reflections` quality flag is on (default off).
- * The generator still plans arcades and crystal clusters
- * (layout.architecture); for now only the shafts render. */
+ * floor and ceiling world-mapped, the dressed stonework (pillars, ribs on
+ * their piers, a frame round every doorway, crystal clusters in the Deep),
+ * the set dressing (bones, candles, chains, webs, banners…), light shafts
+ * falling through the vault, the arrival sigil at the spawn —
+ * and every collider they need. The floor mirror only runs when the
+ * `reflections` quality flag is on (default off). */
 function WallsAndFloor({ layout }: { layout: FloorLayout }) {
   const biome = getBiomeDef(layout.biome);
   const reflections = useGame((s) => s.reflections);
@@ -216,6 +219,8 @@ function WallsAndFloor({ layout }: { layout: FloorLayout }) {
         reflection={reflections ? biome.look.reflection : null}
         glow={biome.glow}
       />
+      <ArchStone layout={layout} />
+      <FloorDecor layout={layout} />
       {sigilRadius > 0 && <RuneCircleModel position={layout.spawn} radius={sigilRadius} accent={biome.accent} />}
       <LightShafts shafts={shafts} look={biome.look.shaft} />
       <ShaftLights layout={layout} />

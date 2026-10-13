@@ -6,11 +6,10 @@ import { PILLAR_CLEARANCE, PILLAR_MIN_ROOM, bayLines, roomFrame } from "./archit
 import { FLOOR, SOLID, floodFill, worldToTile } from "./grid";
 
 /** The architecture stage must dress floors without ever getting in the
- * way. For now only its light shafts render (the dungeon is kept to its
- * basic look); the arcades (pillars, ribs) and crystal clusters are still
- * planned and kept valid here for when they return — with colliders again,
- * so the promise that matters most stays "no path is ever blocked and no
- * landmark is crowded". */
+ * way. Everything it plans is built — ribs on their piers, pillars with
+ * real colliders, shafts, crystal clusters — so the promise that matters
+ * most is "no path is ever blocked and no landmark is crowded" (and, in
+ * doorways.test.ts, that piers and pillars keep off the doorways). */
 
 function sampleFloors(count: number): FloorLayout[] {
   const out: FloorLayout[] = [];

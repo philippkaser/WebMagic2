@@ -5,14 +5,16 @@ import { catacombs } from "./catacombs";
 import { crystal } from "./crystal";
 import { drowned } from "./drowned";
 import { forge } from "./forge";
+import { paintTrim } from "./trim";
 import { WALL_TEX_H, WALL_TEX_W, WALL_VARIANTS, type SurfaceSet, type SurfaceSetId } from "./types";
 
 export * from "./types";
+export { TRIM_BLOCK_H, TRIM_BLOCK_W, TRIM_SPAN, TRIM_TEX, trimBlocks } from "./trim";
 
 /** Every surface set by id. */
 export const SURFACES: Readonly<Record<SurfaceSetId, SurfaceSet>> = { catacombs, drowned, forge, crystal, abyss };
 
-export type SurfacePart = "wall" | "floor" | "ceiling";
+export type SurfacePart = "wall" | "floor" | "ceiling" | "trim";
 
 /** Paint one part of a set. Walls come back as the variant ATLAS: the
  * WALL_VARIANTS walls side by side, each WALL_TEX_W wide, so a floor's walls
@@ -22,6 +24,7 @@ export function paintSurfacePart(set: SurfaceSetId, part: SurfacePart): Painted 
   const painters = SURFACES[set];
   if (part === "floor") return painters.floor(new Rng(hashSeed(`${set}/floor/0`)));
   if (part === "ceiling") return painters.ceiling(new Rng(hashSeed(`${set}/ceiling/0`)));
+  if (part === "trim") return paintTrim(set, new Rng(hashSeed(`${set}/trim/0`)));
   let atlas: Painted | null = null;
   for (let v = 0; v < WALL_VARIANTS; v++) {
     const p = painters.wall(new Rng(hashSeed(`${set}/wall/${v}`)), v);
