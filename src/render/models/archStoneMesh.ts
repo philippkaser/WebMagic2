@@ -1,5 +1,4 @@
 import { ARCHITECTURE, WALL_HEIGHT } from "../../core/config";
-import { hashSeed } from "../../core/rng";
 import type { DoorwaySpawn, FloorArchitecture, RibSpawn, Vec3, WallBox } from "../../world/types";
 import { TRIM_BLOCK_H, TRIM_BLOCK_W, TRIM_SPAN, TRIM_TEX, trimBlocks } from "../textures/surfaces";
 import { type MeshData, MeshBuilder } from "./architectureMesh";
@@ -62,9 +61,18 @@ function blockUvs(key: number, w: number, h: number): number[] {
   return [u0, vBot, u1, vBot, u1, vTop, u0, vTop];
 }
 
-/** A stable small hash of a point (which block a stone gets). */
+/** A stable small hash of a point, to the centimetre (which block a
+ * stone gets). */
 function keyOf(p: Vec3, salt: number): number {
-  return hashSeed(`${p[0].toFixed(2)},${p[1].toFixed(2)},${p[2].toFixed(2)},${salt}`);
+  let h =
+    Math.imul(Math.round(p[0] * 100), 0x9e3779b1) ^
+    Math.imul(Math.round(p[1] * 100), 0x85ebca6b) ^
+    Math.imul(Math.round(p[2] * 100), 0xc2b2ae35) ^
+    Math.imul(salt + 1, 0x27d4eb2f);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2c1b3c6d);
+  h ^= h >>> 12;
+  return h >>> 0;
 }
 
 class StoneBuilder {

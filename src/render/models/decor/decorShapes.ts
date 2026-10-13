@@ -20,6 +20,7 @@ import {
 } from "three";
 import { ARCHITECTURE, WALL_HEIGHT } from "../../../core/config";
 import { Rng, hashSeed } from "../../../core/rng";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { BiomeId, DecorKind, DoorwaySpawn, Vec3 } from "../../../world/types";
 import { type DecorTile, SHEET_TILES, bannerTile, decorTileUv } from "../../textures/decorAtlas";
 import { TRIM_BLOCK_H, TRIM_BLOCK_W, TRIM_TEX, trimBlocks } from "../../textures/surfaces";
@@ -543,7 +544,16 @@ export function decorTemplate(kind: DecorKind, variant: number, biome: BiomeId):
   if (!t) {
     const flames: DecorFlame[] = [];
     stonePick = hashSeed(key) % STONE_BLOCKS.length;
-    const parts = BUILDERS[kind](new Rng(hashSeed(`decor:${key}`)), variant, biome, flames);
+    const built = BUILDERS[kind](new Rng(hashSeed(`decor:${key}`)), variant, biome, flames);
+    // One geometry per material, so placing a piece clones one to three
+    // buffers instead of every link of a chain.
+    const parts: DecorPart[] = [];
+    for (const mat of ["solid", "sheet", "stone"] as const) {
+      const geos = built.filter((p) => p.mat === mat).map((p) => p.geo);
+      if (geos.length === 0) continue;
+      parts.push({ geo: geos.length === 1 ? geos[0] : mergeGeometries(geos), mat });
+      if (geos.length > 1) for (const g of geos) g.dispose();
+    }
     t = { parts, flames };
     templates.set(key, t);
   }
