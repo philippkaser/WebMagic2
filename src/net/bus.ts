@@ -1,6 +1,7 @@
 import { Emitter } from "../core/events";
 import type { AuthErrorReason } from "./credentials";
-import type { FloorAssignment, MemberInfo, ServerMsg, ServerSave } from "./protocol";
+import type { PartyError } from "./party";
+import type { CampAssignment, FloorAssignment, MemberInfo, PartyInfo, ServerMsg, ServerSave } from "./protocol";
 
 /** Internal networking event hub. The session publishes connection/relay
  * events here; channels, entities and players subscribe. Keeping this
@@ -29,6 +30,12 @@ export interface NetBusEvents extends Record<string, unknown> {
   /** The ledger answered: who this connection plays as now, or why not
    * (state/account.ts turns it into the title screen's ledger). */
   ledger: LedgerEvent;
+  /** We took a seat in the camp (social/ reads who's here). */
+  camp: CampAssignment;
+  chat: { from: string; name: string; text: string; party: boolean };
+  party: PartyInfo | null;
+  partyInvited: { from: string; name: string };
+  partyError: PartyError;
 }
 
 export type LedgerEvent =

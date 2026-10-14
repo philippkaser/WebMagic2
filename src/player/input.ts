@@ -30,6 +30,8 @@ class InputState {
 
   handleKeyDown = (e: KeyboardEvent) => {
     if (e.repeat) return;
+    // Words typed into a field (chat, a name, a code) aren't moves.
+    if (isTyping(e.target)) return;
     this.keys.add(e.code);
     this.pressed.set(e.code, performance.now());
   };
@@ -55,6 +57,13 @@ class InputState {
     this.mouseLeft = false;
     this.mouseRight = false;
   };
+}
+
+/** Is this key going into an editable field (the in-world fields write
+ * through a hidden, focused <input>)? */
+export function isTyping(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable === true);
 }
 
 export const input = new InputState();

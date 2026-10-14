@@ -7,6 +7,7 @@ import { HudRig } from "./layers/hud/HudAnchor";
 import { Menus } from "./layers/menus/Menus";
 import { ForkChoice } from "./layers/ForkChoice";
 import { InventoryLayer } from "./layers/inventory/InventoryLayer";
+import { SocialLayer } from "./layers/social/Social";
 import { WorldMessages } from "./layers/WorldMessages";
 import { WorldPrompts } from "./layers/WorldPrompts";
 import { UiPresence } from "./presence";
@@ -32,6 +33,7 @@ export function UiRoot() {
       <Menus />
       <InventoryLayer />
       <ForkChoice />
+      <SocialLayer />
       {import.meta.env.DEV && <DevShowcase />}
     </>
   );

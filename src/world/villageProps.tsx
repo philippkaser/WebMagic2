@@ -1,3 +1,4 @@
+import { GUILD_LANTERN, GuildBoardModel } from "../render/models/GuildBoardModel";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import { Group, Mesh, MeshStandardMaterial } from "three";
@@ -24,7 +25,7 @@ import type { Vec3 } from "./types";
 function useOverlayInteraction(
   position: Vec3,
   prompt: string,
-  overlay: "chest" | "merchant" | "cauldron" | "forge",
+  overlay: "chest" | "merchant" | "cauldron" | "forge" | "guild",
   reach = 7,
 ): void {
   useFrame(() => {
@@ -238,6 +239,23 @@ export function Forge({ position, rotation = 0 }: { position: Vec3; rotation?: n
   return (
     <group position={position} rotation={[0, rotation, 0]}>
       <ForgeModel coalsRef={coals} bodyRef={body} />
+    </group>
+  );
+}
+
+/** The guild board: where fellowships are sworn — found one, speak its
+ * runes, see who's in the camp. E opens it (ui3d/layers/social/GuildBoard). */
+export function GuildBoard({ position, rotation = 0 }: { position: Vec3; rotation?: number }) {
+  const lamp = worldOf(position, rotation, GUILD_LANTERN);
+  useOverlayInteraction(position, "E — Read the guild board (fellowships)", "guild", 7);
+  useEffect(() => {
+    const src = addLightSource({ position: lamp, color: "#ffb84d", intensity: 3.5, distance: 7, priority: 1 });
+    return () => removeLightSource(src);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <GuildBoardModel />
     </group>
   );
 }

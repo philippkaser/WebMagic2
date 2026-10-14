@@ -10,6 +10,7 @@ import { netClock } from "../net/clock";
 import { useNet } from "../net/netStore";
 import { estimatePeer, peerIds, peerName } from "../net/players";
 import { input } from "../player/input";
+import { isPartyMember } from "../social/social";
 import { useGame } from "../state/gameStore";
 import { resetEncounters, useEncounters } from "./encounterStore";
 import {
@@ -64,12 +65,18 @@ function apply(peerId: string, event: PactEvent): void {
 
 function announce(notice: PactNotice, peerId: string): void {
   gameEvents.emit("message", pactNoticeText(notice, peerName(peerId) || "A wizard"));
-  if (notice === "sworn") playPactSworn();
+  if (notice === "sworn") {
+    playPactSworn();
+    gameEvents.emit("pactSworn", { with: peerId });
+  }
   if (notice === "broke" || notice === "betrayed") playPactBroken();
 }
 
-// Everyone starts hostile; only a sworn pact makes a wizard safe.
+// In the deep everyone starts hostile; only a sworn pact — or a fellowship —
+// makes a wizard safe. In the camp no one can be harmed.
 setRelationResolver((id) => {
+  if (useGame.getState().phase !== "dungeon") return "ally";
+  if (isPartyMember(id)) return "ally";
   const rel = useEncounters.getState().relations[id];
   if (!isHostileRelation(rel)) return "ally";
   return rel?.oathbreaker ? "oathbreaker" : "stranger";

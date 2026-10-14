@@ -57,6 +57,10 @@ export class GameSession {
   private reconnecting = false;
   /** The connection attempt in progress, shared by everyone who asks. */
   private establishing: Promise<void> | null = null;
+  /** We're home and want a seat in the camp (sent once logged in, and again
+   * after a reconnect). */
+  private wantCamp = false;
+  private loggedIn = false;
 
   /** Connect (if not yet) and log in — with the stored token, or as a new
    * guest if there is none. */
@@ -103,6 +107,12 @@ export class GameSession {
     this.transport?.send({ t: "login", name: this.name, token: loadToken() });
   }
 
+  /** Logged in (or signed in): a wizard who's home sits down in the camp. */
+  private onLoggedIn(): void {
+    this.loggedIn = true;
+    if (this.wantCamp && this.currentFloor === null) this.transport?.send({ t: "enterCamp" });
+  }
+
   /** Ask the server which instance of `floor` we belong to. Resolves with the
    * instance seed used to generate the floor locally. `fresh` starts a new
    * run from the village: the server decides the actual floor from our
@@ -113,6 +123,7 @@ export class GameSession {
         reject(new Error("not connected"));
         return;
       }
+      this.wantCamp = false;
       this.currentFloor = floor;
       this.pendingAssignment = resolve;
       this.transport.send({ t: "enterFloor", floor, fresh });
@@ -124,6 +135,38 @@ export class GameSession {
     useNet.setState({ roster: {}, hostId: "", epoch: 0 });
     netBus.emit("leftDungeon", undefined);
     this.transport?.send({ t: "leaveDungeon" });
+  }
+
+  // ── The camp and fellowships (answers arrive on the netBus) ───────────────
+
+  /** Home: take a seat in the camp (now, or as soon as we're logged in). */
+  enterCamp(): void {
+    this.wantCamp = true;
+    if (this.loggedIn && this.currentFloor === null) this.transport?.send({ t: "enterCamp" });
+  }
+
+  sendChat(text: string, party = false): void {
+    this.transport?.send({ t: "chat", text, ...(party ? { party } : {}) });
+  }
+
+  partyCreate(): void {
+    this.transport?.send({ t: "partyCreate" });
+  }
+
+  partyJoin(code: string): void {
+    this.transport?.send({ t: "partyJoin", code });
+  }
+
+  partyLeave(): void {
+    this.transport?.send({ t: "partyLeave" });
+  }
+
+  partyInvite(to: string): void {
+    this.transport?.send({ t: "partyInvite", to });
+  }
+
+  partyAccept(): void {
+    this.transport?.send({ t: "partyAccept" });
   }
 
   /** Send a gameplay envelope. Channel semantics live in channels.ts. */
@@ -245,6 +288,7 @@ export class GameSession {
     this.stopPinging();
     this.unsubscribe?.();
     this.transport = null;
+    this.loggedIn = false;
     netClock.reset();
     gameEvents.emit("message", "Connection lost — reconnecting…");
     try {
@@ -289,11 +333,13 @@ export class GameSession {
         useNet.setState({ playerId: msg.playerId });
         break;
       case "loggedIn":
+        this.onLoggedIn();
         storeToken(msg.token);
         netBus.emit("serverSave", msg.save);
         netBus.emit("ledger", msg.username ? { kind: "member", username: msg.username } : { kind: "guest" });
         break;
       case "authOk":
+        this.onLoggedIn();
         storeToken(msg.token); // replaces any device token
         netBus.emit("serverSave", msg.save);
         netBus.emit("ledger", { kind: "member", username: msg.username, name: msg.name });
@@ -314,6 +360,26 @@ export class GameSession {
         break;
       case "pong":
         netClock.onPong(msg.sent, msg.serverTime);
+        break;
+      case "campAssigned": {
+        const a = msg.assignment;
+        const roster: Record<string, string> = {};
+        for (const m of a.members) roster[m.id] = m.name;
+        useNet.setState({ hostId: a.hostId, epoch: a.epoch, roster });
+        netBus.emit("camp", a);
+        break;
+      }
+      case "chat":
+        netBus.emit("chat", { from: msg.from, name: msg.name, text: msg.text, party: msg.party });
+        break;
+      case "party":
+        netBus.emit("party", msg.party);
+        break;
+      case "partyInvited":
+        netBus.emit("partyInvited", { from: msg.from, name: msg.name });
+        break;
+      case "partyError":
+        netBus.emit("partyError", msg.reason);
         break;
       case "floorAssigned": {
         const a = msg.assignment;

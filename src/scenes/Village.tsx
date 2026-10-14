@@ -12,11 +12,11 @@ import { getModelTextures } from "../render/models/modelPaint";
 import { useGame } from "../state/gameStore";
 import { DevSlab, DevSpawns } from "../world/devProps";
 import { Breakable, Portal, Torch } from "../world/props";
-import { Cauldron, Forge, Merchant, StorageChest } from "../world/villageProps";
+import { Cauldron, Forge, GuildBoard, Merchant, StorageChest } from "../world/villageProps";
 import { Camp } from "./village/Camp";
 import { FloorPillar } from "./village/FloorPillar";
 import { Grounds } from "./village/Grounds";
-import { BOUNDS, CAULDRON, CHEST, DEV_SLAB, FORGE, GATE_TORCHES, MERCHANT, SPAWN, WORLD_GROUPS } from "./village/layout";
+import { BOUNDS, CAULDRON, CHEST, DEV_SLAB, FORGE, GATE_TORCHES, GUILD_BOARD, MERCHANT, SPAWN, WORLD_GROUPS } from "./village/layout";
 import { MoonShafts } from "./village/MoonShafts";
 import { Wilds } from "./village/Wilds";
 import { HORIZON, MOON_DIR, Sky } from "./village/Sky";
@@ -93,6 +93,7 @@ export function Village() {
       {/* The crafting corners: Old Wenna's cauldron and Brannoc's forge. */}
       <Cauldron position={CAULDRON.pos} rotation={CAULDRON.rot} />
       <Forge position={FORGE.pos} rotation={FORGE.rot} />
+      <GuildBoard position={GUILD_BOARD.pos} rotation={GUILD_BOARD.rot} />
 
       {/* A few crates to kick around — the sandbox starts at home. */}
       <Breakable kind="crate" position={[4, 1, 6]} floor={1} entityId="v0" />

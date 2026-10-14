@@ -49,7 +49,7 @@ export type Phase = "menu" | "village" | "weighing" | "loading" | "dungeon" | "d
  * keeps simulating (shared floors can't pause), so these are DOM layers, not
  * phases. "devroom" is a dev-only testing panel (see ui/DevRoom) reached from
  * the village dev slab. */
-export type Overlay = "none" | "inventory" | "chest" | "merchant" | "cauldron" | "forge" | "codex" | "devroom";
+export type Overlay = "none" | "inventory" | "chest" | "merchant" | "cauldron" | "forge" | "guild" | "codex" | "devroom";
 
 /** The current run, while in the dungeon. */
 export interface RunProgress {
