@@ -91,4 +91,14 @@ describe("slime brain", () => {
     expect(slimeSquash(100)).toBe(SLIME.squashMax);
     expect(slimeSquash(-100)).toBe(SLIME.squashMin);
   });
+
+  test("at death's door it hops frantically: sooner and lower", () => {
+    const calm = createSlimeBrain(0, () => 0.5);
+    const frantic = createSlimeBrain(0, () => 0.5);
+    calm.hopTimer = frantic.hopTimer = 0;
+    const a = tickSlime(calm, sense(), createSteering());
+    const b = tickSlime(frantic, sense({ vigor: 0.3 }), createSteering());
+    expect(b.vel.y).toBeCloseTo(a.vel.y * SLIME.franticHop, 6);
+    expect(frantic.hopTimer).toBeCloseTo(calm.hopTimer * SLIME.franticInterval, 6);
+  });
 });

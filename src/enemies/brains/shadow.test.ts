@@ -58,7 +58,31 @@ describe("shadow brain", () => {
 
     const near = createShadowBrain(dice(0));
     run(near, sense(SHADOW.lungeRange - 2), 2.05);
-    expect(near.mode).toBe("lunge");
+    expect(near.mode).toBe("coil"); // the tell, before the strike
+  });
+
+  test("a coil always comes before a lunge, and backs it off its prey", () => {
+    const b = createShadowBrain(dice(0));
+    b.lungeTimer = 0;
+    const i = sense(5);
+    const out = createSteering();
+    let prev = b.mode;
+    for (let t = 0; t < 20; t += i.dt) {
+      tickShadow(b, i, out);
+      if (b.mode === "lunge" && prev !== "lunge") expect(prev).toBe("coil");
+      if (b.mode === "coil") expect(out.vel.x).toBeLessThan(0.01); // drawing back
+      prev = b.mode;
+    }
+  });
+
+  test("at death's door it loses patience and swells longer before striking", () => {
+    const calm = createShadowBrain(dice(0.99)); // patience ≈ 4 s
+    const cornered = createShadowBrain(dice(0.99));
+    run(calm, sense(5), 1);
+    run(cornered, sense(5, { vigor: 0.3 }), 1);
+    expect(calm.mode).toBe("stalk");
+    expect(cornered.mode).toBe("coil");
+    expect(cornered.coilTime).toBeGreaterThan(SHADOW.coilTime);
   });
 
   test("lunge → recoil → stalk, re-rolling its patience", () => {
@@ -67,6 +91,8 @@ describe("shadow brain", () => {
     const i = sense(5);
     const out = createSteering();
     tickShadow(b, i, out);
+    expect(b.mode).toBe("coil");
+    run(b, i, SHADOW.coilTime + 0.01);
     expect(b.mode).toBe("lunge");
 
     run(b, i, SHADOW.lungeTime + 0.02);

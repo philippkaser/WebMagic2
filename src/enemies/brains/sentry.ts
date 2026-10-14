@@ -1,4 +1,4 @@
-import { wrapAngle, type RandomSource, type Vec } from "./common";
+import { desperate, wrapAngle, type RandomSource, type Vec } from "./common";
 
 /** Sentry brain — the turret. It never moves, so its brain is a reload clock
  * plus aiming math: glow brighter through a short wind-up, then (if a wizard
@@ -8,7 +8,10 @@ import { wrapAngle, type RandomSource, type Vec } from "./common";
  * The lead is deliberately partial: a perfect intercept would make bolts
  * undodgeable, so the sentry aims only part-way along the target's motion,
  * and never further ahead than a capped flight time. Strafing still works;
- * running in a straight line doesn't. */
+ * running in a straight line doesn't.
+ *
+ * At death's door (past the knee, after its crystal has visibly cracked) it
+ * overcharges: its reload runs at OVERCHARGE of the usual. */
 
 export const SENTRY = {
   /** Height of the crystal head above the body origin. */
@@ -34,6 +37,8 @@ export const SENTRY = {
   minCooldown: 1.4,
   /** Bolt spawns this fraction of a second of flight out of the head. */
   muzzleLead: 0.06,
+  /** Reload multiplier at death's door. */
+  overcharge: 0.75,
 } as const;
 
 export interface SentryBrain {
@@ -52,6 +57,12 @@ export function createSentryBrain(rand: RandomSource = Math.random): SentryBrain
   return { fireTimer: SENTRY.firstShotMin + rand() * SENTRY.firstShotSpread };
 }
 
+/** How far into its wind-up it is, 0…1 (0 outside it) — the crystal's swell. */
+export function sentryWindup(b: SentryBrain): number {
+  if (b.fireTimer >= SENTRY.chargeWindow) return 0;
+  return 1 - Math.max(b.fireTimer, 0) / SENTRY.chargeWindow;
+}
+
 export function createSentryTick(): SentryTick {
   return { fire: false, charge: 0 };
 }
@@ -61,15 +72,15 @@ export function sentryCooldown(floor: number): number {
 }
 
 /** Advance the reload clock. The wind-up glow is measured before the reset,
- * so the shot frame itself glows brightest. */
-export function tickSentry(b: SentryBrain, dt: number, floor: number, out: SentryTick): SentryTick {
+ * so the shot frame itself glows brightest. `vigor` is its life left (0…1). */
+export function tickSentry(b: SentryBrain, dt: number, floor: number, out: SentryTick, vigor = 1): SentryTick {
   b.fireTimer -= dt;
   out.charge =
     b.fireTimer < SENTRY.chargeWindow
       ? (SENTRY.chargeWindow - Math.max(b.fireTimer, 0)) * SENTRY.chargeGlow
       : 0;
   out.fire = b.fireTimer <= 0;
-  if (out.fire) b.fireTimer = sentryCooldown(floor);
+  if (out.fire) b.fireTimer = sentryCooldown(floor) * (desperate(vigor) ? SENTRY.overcharge : 1);
   return out;
 }
 

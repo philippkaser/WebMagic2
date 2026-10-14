@@ -518,14 +518,32 @@ export function collapseFlashFx(position: Vec3Like): void {
 
 // ── Hits and deaths ─────────────────────────────────────────────────────────
 
+const sprayDir: MutVec3 = { x: 0, y: 0, z: 0 };
+
 /** A shot landing on a creature: a small flash and a spray of sparks in the
- * creature's colour. */
-export function hitSparksFx(position: Vec3Like, color: string, scale = 1): void {
+ * creature's colour. With `spray` (a direction — back toward whoever struck)
+ * the sparks fly off the surface that way, a cone that widens with the
+ * blow; without, they burst all round. `scale` ~0.6 for a scratch, 2 for a
+ * creature's whole life. */
+export function hitSparksFx(position: Vec3Like, color: string, scale = 1, spray?: Vec3Like): void {
   readVec(position, at);
+  let directed = false;
+  if (spray) {
+    readVec(spray, sprayDir);
+    const l = Math.hypot(sprayDir.x, sprayDir.y, sprayDir.z);
+    if (l > 1e-4) {
+      sprayDir.x /= l;
+      sprayDir.y /= l;
+      sprayDir.z /= l;
+      directed = true;
+    }
+  }
   commit(flash("flare", at.x, at.y, at.z, 0.1 * scale, 0.22 * scale, 0.1, color, 2.6, 0.7));
   commit(flash("glow", at.x, at.y, at.z, 0.05 * scale, 0.08 * scale, 0.08, color, 2.4, 0.7));
+  const cone = 0.55 + 0.25 * Math.min(scale, 2);
   for (let i = 0, n = budget(11 * scale + 3); i < n; i++) {
-    randomUnit(dir);
+    if (directed) randomInCone(sprayDir.x, sprayDir.y, sprayDir.z, cone, dir);
+    else randomUnit(dir);
     const s = rand(3, 7.5) * scale;
     const p = place(beginParticle("spark"), at.x, at.y, at.z);
     p.vx = dir.x * s;
@@ -628,6 +646,132 @@ export function shatterFx(position: Vec3Like, colors: readonly string[], scale =
     ramp(p, "#6e6152", "#2a2622", 1, 1);
     commitParticle();
   }
+}
+
+/** A creature BREAKS — crossed the knee, barely alive from here: a white
+ * crack of light, a ring snapping out in its colour, and a spray of hot
+ * fragments off its body. `scale` 1 = a wisp. */
+export function breakFx(position: Vec3Like, color: string, scale = 1): void {
+  readVec(position, at);
+  const { x, y, z } = at;
+  commit(flash("flare", x, y, z, 0.25 * scale, 1.1 * scale, 0.16, "#ffffff", 3.2, 1));
+  commit(flash("glow", x, y, z, 0.18 * scale, 0.32 * scale, 0.12, color, 3, 0.9));
+  commit(ring(x, y, z, null, 0.25 * scale, 1.9 * scale, 0.32, 0.035, color, 2.8, 1, 0.5));
+  for (let i = 0, n = budget(16 + 8 * scale); i < n; i++) {
+    randomUnit(dir);
+    const s = rand(4, 8) * Math.sqrt(scale);
+    const p = place(beginParticle("spark"), x + dir.x * 0.2 * scale, y + dir.y * 0.2 * scale, z + dir.z * 0.2 * scale);
+    p.vx = dir.x * s;
+    p.vy = dir.y * s + 1.5;
+    p.vz = dir.z * s;
+    p.size0 = rand(0.012, 0.022);
+    p.stretch = 0.04;
+    p.life = rand(0.2, 0.45);
+    ramp(p, "#ffffff", color, 3, 1.2);
+    commitParticle();
+  }
+  for (let i = 0, n = budget(5 + 3 * scale); i < n; i++) {
+    randomUnit(dir);
+    const p = place(beginParticle("shard"), x + dir.x * 0.25 * scale, y + dir.y * 0.2 * scale, z + dir.z * 0.25 * scale);
+    const s = rand(2, 4.5);
+    p.vx = dir.x * s;
+    p.vy = Math.abs(dir.y) * s + rand(1, 3);
+    p.vz = dir.z * s;
+    p.size0 = rand(0.02, 0.045) * Math.sqrt(scale);
+    p.size1 = p.size0 * 0.4;
+    p.life = rand(0.7, 1.3);
+    ramp(p, color, color, 2, 1.4, 0.4);
+    commitParticle();
+  }
+}
+
+/** What a dying body leaks (enemies/useEnemy's wounds): soul-embers from a
+ * wisp, goo drops from a slime, smoke off a shadow, crack sparks from a
+ * sentry, molten pixels from the Warden. */
+export type LeakStyle = "ember" | "goo" | "smoke" | "crack" | "molten";
+
+/** One leak emit at `position` (a point on the body), `n` particles. */
+export function leakFx(style: LeakStyle, position: Vec3Like, color: string, n = 1): void {
+  readVec(position, at);
+  const { x, y, z } = at;
+  for (let i = 0, m = budget(n); i < m; i++) {
+    randomUnit(dir);
+    switch (style) {
+      case "ember": {
+        const p = place(beginParticle("ember"), x + dir.x * 0.12, y + dir.y * 0.12, z + dir.z * 0.12);
+        p.vx = dir.x * 0.6;
+        p.vy = rand(0.3, 1.1);
+        p.vz = dir.z * 0.6;
+        p.size0 = rand(0.012, 0.024);
+        p.life = rand(0.5, 1.1);
+        ramp(p, color, color, 2.4, 0.8, rand(0.2, 0.6));
+        commitParticle();
+        break;
+      }
+      case "goo": {
+        // A fat drop that falls, splats and lies there a moment.
+        const p = place(beginParticle("pixel"), x + dir.x * 0.15, y - 0.05, z + dir.z * 0.15);
+        p.vx = dir.x * 0.5;
+        p.vy = rand(-0.4, 0.4);
+        p.vz = dir.z * 0.5;
+        p.size0 = rand(0.04, 0.075);
+        p.size1 = p.size0 * 0.6;
+        p.life = rand(0.8, 1.4);
+        p.gravity = -11;
+        ramp(p, color, "#1f3a1a", 1.3, 1);
+        commitParticle();
+        break;
+      }
+      case "smoke": {
+        const p = place(beginParticle("smoke"), x + dir.x * 0.18, y + dir.y * 0.1, z + dir.z * 0.18);
+        p.vx = dir.x * 0.3;
+        p.vy = rand(0.35, 0.8);
+        p.vz = dir.z * 0.3;
+        p.size0 = 0.05;
+        p.size1 = rand(0.16, 0.26);
+        p.life = rand(0.7, 1.2);
+        p.alpha = 0.7;
+        ramp(p, color, "#050208", 1, 1);
+        commitParticle();
+        break;
+      }
+      case "crack": {
+        const p = place(beginParticle("spark"), x + dir.x * 0.2, y + dir.y * 0.15, z + dir.z * 0.2);
+        const s = rand(1.5, 3.5);
+        p.vx = dir.x * s;
+        p.vy = Math.abs(dir.y) * s + 1;
+        p.vz = dir.z * s;
+        p.size0 = rand(0.008, 0.016);
+        p.stretch = 0.03;
+        p.life = rand(0.15, 0.35);
+        ramp(p, "#ffffff", color, 2.8, 1);
+        commitParticle();
+        break;
+      }
+      case "molten": {
+        const p = place(beginParticle("pixel"), x + dir.x * 0.6, y + dir.y * 0.4, z + dir.z * 0.6);
+        p.vx = dir.x * 1.2;
+        p.vy = rand(0, 1.5);
+        p.vz = dir.z * 1.2;
+        p.size0 = rand(0.03, 0.06);
+        p.size1 = p.size0 * 0.3;
+        p.life = rand(0.6, 1.1);
+        ramp(p, "#ffd9a8", color, 2.2, 1.2);
+        commitParticle();
+        break;
+      }
+    }
+  }
+}
+
+/** The instant a creature dies: a white pop that punches, then gives way
+ * to its soul's colour. */
+export function killPopFx(position: Vec3Like, soul: string, scale = 1): void {
+  readVec(position, at);
+  const { x, y, z } = at;
+  commit(flash("flare", x, y, z, 0.3 * scale, 1.4 * scale, 0.12, "#ffffff", 3.4, 1));
+  commit(flash("glow", x, y, z, 0.22 * scale, 0.4 * scale, 0.1, "#ffffff", 3.2, 1));
+  commit(ring(x, y, z, null, 0.3 * scale, 1.2 * scale, 0.22, 0.04, soul, 2.4, 1, 0.6));
 }
 
 // ── The wizard's body ───────────────────────────────────────────────────────

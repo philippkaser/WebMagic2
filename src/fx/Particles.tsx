@@ -1,6 +1,7 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { Color, Mesh, Vector3 } from "three";
+import { presentScale } from "../core/presentTime";
 import { clamp01, randomInCone, randomUnit, type MutVec3 } from "./curves";
 import { FlameSprites, markRange } from "./Flames";
 import { fxUniforms } from "./fxUniforms";
@@ -327,7 +328,9 @@ export function FxSystems() {
   }, []);
 
   useFrame((state, rawDt) => {
-    const dt = Math.min(rawDt, 1 / 20) * timeScale;
+    // The presentation clock: hitstop freezes every spark mid-flight, slow
+    // motion slows them (core/presentTime.ts). Cosmetic only.
+    const dt = Math.min(rawDt, 1 / 20) * timeScale * presentScale();
     // Wrapped so shader noise keeps float precision on long sessions.
     fxUniforms.uTime.value = state.clock.elapsedTime % 3600;
     // The pixel grid every sprite snaps to (glsl.ts#PIXEL_GLSL).
