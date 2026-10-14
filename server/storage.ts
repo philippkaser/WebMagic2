@@ -47,6 +47,8 @@ export function stamp(ms: number): string {
   return new Date(ms).toISOString().replace(/:/g, "-").replace(".", "-");
 }
 
+const resolve = (p: string | (() => string)): string => (typeof p === "function" ? p() : p);
+
 export class DataFile {
   readonly file: string;
   readonly backupDir: string;
@@ -57,7 +59,7 @@ export class DataFile {
   private log: (text: string) => void;
   private validate: (parsed: unknown) => string | null;
 
-  private pending: string | null = null;
+  private pending: string | (() => string) | null = null;
   /** What the async write in progress is writing. */
   private inflight: string | null = null;
   /** After flushSync: no more async writes may land. */
@@ -108,8 +110,9 @@ export class DataFile {
     return null;
   }
 
-  /** Debounced write (the persist seam). */
-  schedule(json: string): void {
+  /** Debounced write (the persist seam). Takes the text, or a function that
+   * makes it — called only when the write actually happens. */
+  schedule(json: string | (() => string)): void {
     if (this.closed) return;
     this.pending = json;
     if (this.timer !== null) clearTimeout(this.timer);
@@ -126,7 +129,7 @@ export class DataFile {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    const json = this.pending;
+    const json = this.pending === null ? null : resolve(this.pending);
     if (json === null || this.closed) return this.writing;
     this.pending = null;
     this.writing = this.writing.then(async () => {
@@ -160,7 +163,7 @@ export class DataFile {
       this.timer = null;
     }
     this.closed = true;
-    const json = this.pending ?? this.inflight;
+    const json = this.pending !== null ? resolve(this.pending) : this.inflight;
     this.pending = null;
     if (json !== null) this.writeSync(json);
   }

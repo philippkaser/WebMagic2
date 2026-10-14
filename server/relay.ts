@@ -1,6 +1,6 @@
 import { DUNGEON } from "../src/core/config";
 import { Rng } from "../src/core/rng";
-import { isWireSlot } from "../src/items/crafting";
+import { MAX_GRANT_QTY } from "../src/items/economy";
 import { rollGamble } from "../src/items/loot";
 import { FloorDirectory, type FloorInstanceRecord, type JoinOptions } from "../src/net/matchmaking";
 import { isPartyCode, normalizePartyCode, PartyDirectory, type Party, type PartyError } from "../src/net/party";
@@ -8,6 +8,7 @@ import {
   CHANNEL_AUTHORITY,
   CHANNEL_PEER,
   CHANNEL_TO_HOST,
+  isWireSlot,
   type ClientMsg,
   type MemberInfo,
   type PartyInfo,
@@ -42,8 +43,10 @@ import { AccountAuth, argon2Hasher, type AuthDeps } from "./auth";
  *  - saves: host-attested item grants, provenance-checked banking (only once
  *    the run has paid the Tithe of Five), run loss
  *
- * Everything else is client-side gameplay code. Adding a networked feature
- * never changes this file. */
+ * Everything about the floor's world is client-side gameplay code: a new
+ * networked feature on the floor never changes this file. The bank (and the
+ * pure economy rules it runs on banked inventories) and the social rooms
+ * live here. */
 
 export interface RelayPeer {
   id: string;
@@ -309,13 +312,15 @@ export class Relay {
         if (this.directory.instanceOf(peer.id)) return;
         if (typeof msg.recipe !== "string") return;
         const target = isWireSlot(msg.target) ? msg.target : undefined;
-        const out = this.accounts.craft(account, { recipe: msg.recipe, target }, new Rng((Math.random() * 0xffffffff) >>> 0));
+        const expect = typeof msg.expect === "string" ? msg.expect.slice(0, 200) : undefined;
+        const recipe = msg.recipe.slice(0, 64);
+        const out = this.accounts.craft(account, { recipe, target, expect }, new Rng((Math.random() * 0xffffffff) >>> 0));
         const save = this.accounts.saveOf(account);
         if (out.ok) {
-          peer.send({ t: "crafted", save, ok: true, produced: out.produced, changed: out.changed });
-          this.log(`${peer.id} crafted ${msg.recipe}`);
+          peer.send({ t: "crafted", recipe, save, ok: true, produced: out.produced, changed: out.changed });
+          this.log(`${peer.id} crafted ${recipe}`);
         } else {
-          peer.send({ t: "crafted", save, ok: false, reason: out.reason });
+          peer.send({ t: "crafted", recipe, save, ok: false, reason: out.reason });
         }
         break;
       }
@@ -343,7 +348,7 @@ export class Relay {
         if (!inst || !inst.players.has(msg.playerId)) return;
         const target = this.peers.get(msg.playerId);
         if (!target) return;
-        let qty = typeof msg.qty === "number" && Number.isFinite(msg.qty) ? Math.max(1, Math.floor(msg.qty)) : 1;
+        let qty = typeof msg.qty === "number" && Number.isFinite(msg.qty) ? Math.max(1, Math.min(MAX_GRANT_QTY, Math.floor(msg.qty))) : 1;
         if (msg.source === "grave") {
           const pool = this.gravePools.get(inst.id);
           const left = pool?.items.get(msg.itemId) ?? 0;
@@ -352,7 +357,10 @@ export class Relay {
             return;
           }
           qty = Math.min(qty, left);
-          pool.items.set(msg.itemId, left - qty);
+          // Debit what was actually credited, not what was asked for.
+          const got = this.accounts.grant(this.accountOf(target), msg.itemId, qty);
+          pool.items.set(msg.itemId, left - got);
+          break;
         }
         this.accounts.grant(this.accountOf(target), msg.itemId, qty);
         break;

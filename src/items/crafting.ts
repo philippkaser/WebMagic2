@@ -1,5 +1,5 @@
 import type { Rng } from "../core/rng";
-import type { WireInventory, WireStack } from "../net/protocol";
+import { isWireSlot, type WireInventory, type WireSlot, type WireStack } from "../net/protocol";
 import { rollAffixIds } from "./affixes";
 import { getItemDef, maxStackOf, resolveItem, type ResolvedItem } from "./catalog";
 import { MAX_AFFIXES, MAX_ENHANCE, MAX_ITEM_LEVEL, withAffixes, withEnhance, withLevel } from "./itemId";
@@ -110,11 +110,6 @@ export function getRecipe(id: string): Recipe | null {
 
 // ── Targets ──────────────────────────────────────────────────────────────────
 
-/** Where the item to work on sits (the wire form of an inventory SlotRef). */
-export type WireSlot =
-  | { c: "equipment"; s: GearSlot }
-  | { c: "bag" | "belt" | "pouch" | "chest"; i: number };
-
 function readWire(inv: WireInventory, at: WireSlot): string | null {
   if (at.c === "equipment") return inv.equipment[at.s] ?? null;
   const grid = inv[at.c];
@@ -128,16 +123,6 @@ function writeWire(inv: WireInventory, at: WireSlot, id: string | null): void {
     return;
   }
   inv[at.c][at.i] = id ? { id, qty: 1 } : null;
-}
-
-export function isWireSlot(raw: unknown): raw is WireSlot {
-  const s = raw as Partial<{ c: unknown; s: unknown; i: unknown }> | null;
-  if (!s || typeof s !== "object") return false;
-  if (s.c === "equipment") return s.s === "staff" || s.s === "amulet" || s.s === "cloak" || s.s === "boots";
-  if (s.c === "bag" || s.c === "belt" || s.c === "pouch" || s.c === "chest") {
-    return typeof s.i === "number" && Number.isInteger(s.i) && s.i >= 0 && s.i < 64;
-  }
-  return false;
 }
 
 // ── Costs of the forge's target work ─────────────────────────────────────────
@@ -178,19 +163,25 @@ export function reforgeCost(item: ResolvedItem): Cost | null {
   return { items: [m(attunementOf(item), 2), m(RIFTGLASS, 1)], gold: 40 };
 }
 
-/** What breaking this item down yields: its reagent, and riftglass from
- * rich work (a legendary, +3 or better, two enchantments) — never more
- * than imbuing or enhancing it cost. */
+/** What breaking this item down yields: its reagent, and riftglass only
+ * from work the forge was paid riftglass for (+3 or better) or a legendary —
+ * never more than went in, so no loop (gamble, imbue, salvage…) prints it. */
 export function salvageYield(item: ResolvedItem): WireStack[] {
   if (!isGearSlot(item.def.slot)) return [];
   const out: WireStack[] = [m(attunementOf(item), 1 + Math.floor(item.level / 10))];
-  const glass = item.def.unique ? 2 : item.enhance >= 3 || item.affixes.length >= MAX_AFFIXES ? 1 : 0;
+  const glass = item.def.unique ? 2 : item.enhance >= 3 ? 1 : 0;
   if (glass > 0) out.push(m(RIFTGLASS, glass));
   return out;
 }
 
-/** The forge's price for a recipe on a target (null: not possible). */
-export function forgeCost(kind: CraftKind, item: ResolvedItem | null, ctx: CraftContext): Cost | null {
+/** The staff in a wizard's hand is never broken down. */
+function isStaffInHand(at: WireSlot | undefined): boolean {
+  return at?.c === "equipment" && at.s === "staff";
+}
+
+/** The forge's price for a recipe on a target (null: not possible). `at` is
+ * where the target sits, when that matters (the staff in hand). */
+export function forgeCost(kind: CraftKind, item: ResolvedItem | null, ctx: CraftContext, at?: WireSlot): Cost | null {
   if (kind === "greatwork") return getRecipe("greatwork")!.cost!;
   if (!item) return null;
   switch (kind) {
@@ -203,7 +194,7 @@ export function forgeCost(kind: CraftKind, item: ResolvedItem | null, ctx: Craft
     case "reforge":
       return reforgeCost(item);
     case "salvage":
-      return isGearSlot(item.def.slot) ? { items: [], gold: 0 } : null;
+      return isGearSlot(item.def.slot) && !isStaffInHand(at) ? { items: [], gold: 0 } : null;
     default:
       return null;
   }
@@ -289,6 +280,8 @@ export interface CraftRequest {
   recipe: string;
   /** The item worked on (forge recipes except the Great Work). */
   target?: WireSlot;
+  /** The id the asker saw at `target` — refused if it's something else. */
+  expect?: string;
 }
 
 export type CraftOutcome =
@@ -335,18 +328,18 @@ export function applyCraft(inv: WireInventory, req: CraftRequest, rng: Rng, ctx:
   if (!req.target || !isWireSlot(req.target)) return { ok: false, reason: "Lay something on the anvil" };
   const id = readWire(next, req.target);
   if (!id) return { ok: false, reason: "Lay something on the anvil" };
+  if (req.expect !== undefined && id !== req.expect) return { ok: false, reason: "The anvil holds something else" };
   let item: ResolvedItem;
   try {
     item = resolveItem(id);
   } catch {
     return { ok: false, reason: "The forge won't touch that" };
   }
-  const cost = forgeCost(recipe.kind, item, ctx);
-  if (!cost) return { ok: false, reason: cantReason(recipe.kind, item, ctx) };
+  const cost = forgeCost(recipe.kind, item, ctx, req.target);
+  if (!cost) return { ok: false, reason: cantReason(recipe.kind, item, ctx, req.target) };
   if (!canAfford(next, cost)) return { ok: false, reason: "Not enough to pay the forge" };
 
   if (recipe.kind === "salvage") {
-    if (req.target.c === "equipment" && req.target.s === "staff") return { ok: false, reason: "A wizard never breaks their staff" };
     writeWire(next, req.target, null);
     const out = salvageYield(item);
     for (const s of out) if (!give(next, s.id, s.qty)) return { ok: false, reason: "No room for the pieces" };
@@ -382,8 +375,9 @@ export function applyCraft(inv: WireInventory, req: CraftRequest, rng: Rng, ctx:
   return { ok: true, inventory: next, produced: [], changed: { from: id, to } };
 }
 
-export function cantReason(kind: CraftKind, item: ResolvedItem, ctx: CraftContext): string {
+export function cantReason(kind: CraftKind, item: ResolvedItem, ctx: CraftContext, at?: WireSlot): string {
   if (!isGearSlot(item.def.slot)) return "Only gear goes on the anvil";
+  if (kind === "salvage" && isStaffInHand(at)) return "A wizard never breaks their staff";
   switch (kind) {
     case "temper":
       return item.level >= MAX_ITEM_LEVEL ? "It can rise no further" : `Walk deeper first — it rises no higher than Lv ${temperCap(ctx.deepest)}`;

@@ -3,7 +3,7 @@ import { isGearSlot } from "../../../items/types";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Group, Vector3 } from "three";
 import { getItemDef, resolveItem, type ResolvedItem } from "../../../items/catalog";
-import { GAMBLE_PRICE, merchantPrice } from "../../../items/economy";
+import { gamblePrice, merchantPrice } from "../../../items/economy";
 import { readSlot } from "../../../items/inventory";
 import { useGame } from "../../../state/gameStore";
 import { pxFor } from "../../anchors";
@@ -97,7 +97,7 @@ function readSocket(ix: InventoryInteraction, key: string | null): Reading | nul
     return { key, text: plaqueText(resolveItem(stack.defId), null, { worn: ref?.container === "equipment" }) };
   }
   if (spec.ware) {
-    if (spec.ware === GAMBLE_WARE) return { key, text: fortuneText(GAMBLE_PRICE, state.gold >= GAMBLE_PRICE) };
+    if (spec.ware === GAMBLE_WARE) return { key, text: fortuneText(gamblePrice(state.deepest), state.gold >= gamblePrice(state.deepest)) };
     const price = merchantPrice(spec.ware) ?? 0;
     return { key, text: plaqueText(resolveItem(spec.ware), null, { price: { gold: price, affordable: state.gold >= price } }) };
   }

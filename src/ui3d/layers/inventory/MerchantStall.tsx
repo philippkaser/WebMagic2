@@ -2,7 +2,7 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Group, Mesh, TorusGeometry, Vector3 } from "three";
 import { getItemDef, resolveItem } from "../../../items/catalog";
-import { GAMBLE_PRICE, merchantPrice } from "../../../items/economy";
+import { gamblePrice, merchantPrice } from "../../../items/economy";
 import { useGame } from "../../../state/gameStore";
 import { pxFor } from "../../anchors";
 import { uiNow } from "../../clock";
@@ -48,6 +48,7 @@ export function MerchantStall() {
   const face = useRef<Group>(null);
   useLayoutEffect(() => ix.registerSurface("stall", { spec, object: face.current! }), [ix, spec]);
   const gold = useGame((s) => s.gold);
+  const deepest = useGame((s) => s.deepest);
   const m = STALL.marginX;
 
   const buy = (ware: string) => {
@@ -69,7 +70,7 @@ export function MerchantStall() {
         <Lore text="Coin up front · no credit." x={-m} y={STALL.subtitleY} />
         {spec.sockets.map((s, i) => {
           const isOrb = s.ware === GAMBLE_WARE;
-          const price = isOrb ? GAMBLE_PRICE : merchantPrice(s.ware!) ?? 0;
+          const price = isOrb ? gamblePrice(deepest) : merchantPrice(s.ware!) ?? 0;
           const affordable = gold >= price;
           const grade = isOrb ? ORB : gradeOf(resolveItem(s.ware!));
           const name = isOrb ? "Orb of Fortune" : getItemDef(s.ware!).name;

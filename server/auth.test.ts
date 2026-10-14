@@ -48,7 +48,7 @@ function fresh(): void {
   verifies = 0;
   now = 1_000_000;
   json = "";
-  store = new AccountStore((j) => (json = j));
+  store = new AccountStore((s) => (json = s()));
   auth = new AccountAuth(store, { hasher: fakeHasher, now: () => now, random });
 }
 

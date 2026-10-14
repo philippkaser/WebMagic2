@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Group } from "three";
 import { attunementOf, canAfford, cantReason, countItem, forgeCost, getRecipe, salvageYield, type CraftKind, type Cost } from "../../../items/crafting";
+import type { WireSlot } from "../../../net/protocol";
 import { getItemDef, resolveItem, type ResolvedItem } from "../../../items/catalog";
 import { readSlot } from "../../../items/inventory";
 import { MAX_ENHANCE } from "../../../items/itemId";
@@ -76,6 +77,11 @@ export function ForgeTablet() {
   const equipment = useGame((s) => s.equipment);
   const deepest = useGame((s) => s.deepest);
   const ctx = useMemo(() => ({ deepest }), [deepest]);
+  // Where the anvil's piece sits (the staff in hand is never salvaged).
+  const at = useMemo<WireSlot | undefined>(
+    () => (anvil ? (anvil.container === "equipment" ? { c: "equipment", s: anvil.slot } : { c: anvil.container, i: anvil.index }) : undefined),
+    [anvil],
+  );
   const have = useMemo(() => toWireInventory(useGame.getState()), [gold, pouch, bag, chest, equipment]);
   const onAnvil = useMemo(() => {
     const stack = anvil ? readSlot(carriedNow(), anvil) : null;
@@ -199,8 +205,8 @@ export function ForgeTablet() {
             FORGE.firstRowY - i * FORGE.rowPitch,
             i,
             w.title,
-            onAnvil && forgeCost(w.kind, onAnvil, ctx) ? w.effect(onAnvil) : null,
-            forgeCost(w.kind, onAnvil, ctx),
+            onAnvil && forgeCost(w.kind, onAnvil, ctx, at) ? w.effect(onAnvil) : null,
+            forgeCost(w.kind, onAnvil, ctx, at),
             () => {
               if (!anvil) return;
               useGame.getState().craft(w.kind, anvil);
@@ -208,7 +214,7 @@ export function ForgeTablet() {
               if (w.kind === "salvage") useAnvil.getState().set(null);
             },
             false,
-            onAnvil ? cantReason(w.kind, onAnvil, ctx) : undefined,
+            onAnvil ? cantReason(w.kind, onAnvil, ctx, at) : undefined,
           ),
         )}
         <SectionLabel text="THE GREAT WORK" x={-m} y={FORGE.firstRowY - WORKS.length * FORGE.rowPitch + LABEL_PX * 1} color={ink.gold} />

@@ -67,9 +67,21 @@ export function sellValue(itemId: string): number | null {
   }
 }
 
+/** The most copies one host attestation (one orb, one grant) may carry — the
+ * relay, the account store and the loot orbs all clamp to this one number. */
+export const MAX_GRANT_QTY = 10;
+
 /** Maro's Orb of Fortune: pay up front, the dungeon decides what you get
- * (items/loot.ts#rollGamble — always gear, boosted enchant odds). */
+ * (items/loot.ts#rollGamble — always gear, boosted enchant odds, rolled a
+ * little past your deepest floor). The price climbs with that depth faster
+ * than the gear's resale does, so gambling to sell is always a losing trade
+ * on average — the orb is for hunting enchantments, not for minting gold. */
 export const GAMBLE_PRICE = 65;
+const GAMBLE_PER_DEPTH = 1.25;
+
+export function gamblePrice(deepest: number): number {
+  return GAMBLE_PRICE + Math.ceil(Math.max(0, deepest) * GAMBLE_PER_DEPTH);
+}
 
 // ── Gold drops ───────────────────────────────────────────────────────────────
 
@@ -130,11 +142,6 @@ export function isSubMultiset(sub: Map<string, number>, owned: Map<string, numbe
     if ((owned.get(id) ?? 0) < qty) return false;
   }
   return true;
-}
-
-/** Total copies of one item across an inventory. */
-export function countOf(inv: WireInventory, itemId: string): number {
-  return multisetOf(inv).get(itemId) ?? 0;
 }
 
 /** Add an item into the first stackable/free bag cell (server-side purchase

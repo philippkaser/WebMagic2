@@ -219,10 +219,6 @@ export function getAffixDef(id: string): AffixDef {
   return def;
 }
 
-export function isAffixId(id: string): boolean {
-  return byId.has(id);
-}
-
 export function allAffixDefs(): readonly AffixDef[] {
   return defs;
 }

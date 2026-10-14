@@ -1,3 +1,4 @@
+import { MIN_MAX_HEALTH } from "./catalog";
 import { foldPassives } from "./stats";
 import type { BuffId, DerivedStats, Passives } from "./types";
 
@@ -39,10 +40,6 @@ export function getBuffDef(id: BuffId): BuffDef {
   return def;
 }
 
-export function isBuffId(id: string): id is BuffId {
-  return byId.has(id as BuffId);
-}
-
 /** An active blessing: which, and when it runs out (ms, the caller's clock). */
 export interface ActiveBuff {
   id: BuffId;
@@ -74,5 +71,7 @@ export function withBlessings(
   const out: DerivedStats = { ...stats, procs: [...stats.procs] };
   for (const b of live) foldPassives(out, getBuffDef(b.id).passives);
   for (const block of extra) foldPassives(out, block);
+  // A bargain can cost health, never all of it.
+  out.maxHealth = Math.max(MIN_MAX_HEALTH, out.maxHealth);
   return out;
 }

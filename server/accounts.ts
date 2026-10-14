@@ -1,12 +1,13 @@
 import { BASIC_BOOTS_ID, BASIC_STAFF_ID, maxStackOf, SAVE_FEATHER_ID } from "../src/items/catalog";
 import {
   addToWireBag,
-  GAMBLE_PRICE,
+  gamblePrice,
   GOLD_RULES,
   isSubMultiset,
   merchantPrice,
   multisetOf,
   sellValue,
+  MAX_GRANT_QTY,
 } from "../src/items/economy";
 import type { Rng } from "../src/core/rng";
 import { applyCraft, type CraftOutcome, type CraftRequest } from "../src/items/crafting";
@@ -30,10 +31,11 @@ import { restoreSignIn, type SessionRecord } from "./auth";
  * A hacked client can therefore repaint its own screen, but nothing survives
  * a bank round trip that the floor's authority didn't hand out.
  *
- * The only item MEANING the server borrows from the shared pure catalog is
- * the same kind it always has (starter ids): merchant prices and the feather
- * id, both via items/economy.ts — so purchases and feather escapes validate
- * server-side without the server learning what any item does.
+ * What the server knows of items is the shared pure ECONOMY: merchant and
+ * orb prices, sell values and the feather id (items/economy.ts), and the
+ * cauldron's and forge's recipes (items/crafting.ts) — the very functions
+ * the client runs offline, applied here to banked inventories with the
+ * server's own dice. It never learns what an item does in a fight.
  *
  * Identity is a device token: first login mints an account + token, the
  * client stores it, later logins present it. `token` stays the account's
@@ -111,7 +113,6 @@ const MAX_RUN_GRANTS = 1500;
 /** Generic per-cell stack bound (real stack caps are client meaning). */
 const MAX_STACK = 99;
 /** Copies one host attestation may grant (a handful of reagents at once). */
-const MAX_GRANT_QTY = 10;
 
 export function defaultWireEquipment(): WireEquipment {
   return { staff: BASIC_STAFF_ID, amulet: null, cloak: null, boots: BASIC_BOOTS_ID };
@@ -132,9 +133,11 @@ export class AccountStore {
   private accounts = new Map<string, AccountRecord>();
 
   constructor(
-    /** Called with the serialized store after every mutation (debounce lives
-     * in the caller). Null = in-memory only (tests, local play). */
-    private persist: ((json: string) => void) | null = null,
+    /** Told the store changed after every mutation, with a function that
+     * serializes it — called when the (debounced) write actually happens, so
+     * a burst of grants costs one JSON.stringify, not one each. Null =
+     * in-memory only (tests, local play). */
+    private persist: ((serialize: () => string) => void) | null = null,
     initialJson?: string | null,
     private tokenFn: () => string = () => crypto.randomUUID(),
   ) {
@@ -213,11 +216,14 @@ export class AccountStore {
 
   /** Host attested that this account picked up an item this run. Duplicates
    * are counted — the grants are a multiset. */
-  grant(account: AccountRecord, itemId: string, qty = 1): void {
-    if (!isItemId(itemId)) return;
+  /** Returns how many copies were actually granted (the caps may trim). */
+  grant(account: AccountRecord, itemId: string, qty = 1): number {
+    if (!isItemId(itemId)) return 0;
     const n = Math.max(1, Math.min(MAX_GRANT_QTY, Math.floor(qty) || 1));
-    for (let i = 0; i < n && account.runGrants.length < MAX_RUN_GRANTS; i++) account.runGrants.push(itemId);
-    this.flush();
+    let got = 0;
+    for (; got < n && account.runGrants.length < MAX_RUN_GRANTS; got++) account.runGrants.push(itemId);
+    if (got > 0) this.flush();
+    return got;
   }
 
   /** Host attested a gold pickup this run (sanity-capped, never trusted raw). */
@@ -328,13 +334,14 @@ export class AccountStore {
    * charged. */
   gamble(account: AccountRecord, rolledItemId: string): ServerSave | null {
     if (!isItemId(rolledItemId)) return null;
-    if (account.inventory.gold < GAMBLE_PRICE) return null;
+    const price = gamblePrice(account.deepest);
+    if (account.inventory.gold < price) return null;
     const bag = account.inventory.bag.map((s) => (s ? { ...s } : null));
     if (!addToWireBag(bag, rolledItemId, safeMaxStack(rolledItemId))) return null;
     account.inventory = {
       ...account.inventory,
       bag,
-      gold: account.inventory.gold - GAMBLE_PRICE,
+      gold: account.inventory.gold - price,
     };
     this.flush();
     return this.saveOf(account);
@@ -407,7 +414,7 @@ export class AccountStore {
   }
 
   private flush(): void {
-    this.persist?.(JSON.stringify({ version: ACCOUNTS_FILE_VERSION, accounts: [...this.accounts.values()] }));
+    this.persist?.(() => JSON.stringify({ version: ACCOUNTS_FILE_VERSION, accounts: [...this.accounts.values()] }));
   }
 }
 

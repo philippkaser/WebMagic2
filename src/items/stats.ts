@@ -50,10 +50,6 @@ export const STAT_SPECS: readonly StatSpec[] = [
 
 const byKey = new Map(STAT_SPECS.map((s) => [s.key, s]));
 
-export function statSpec(key: keyof Passives): StatSpec {
-  return byKey.get(key)!;
-}
-
 /** Neutral passives — what a bare wizard has before any gear. */
 export function neutralPassives(): Passives {
   const out = {} as Passives;

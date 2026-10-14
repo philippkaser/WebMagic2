@@ -28,11 +28,11 @@ import { registerSyncProvider } from "../net/entities";
 import { isHost, useNet } from "../net/netStore";
 import { session } from "../net/session";
 import { ItemModel } from "../ui3d/ItemModel";
-import { getItemDef, itemSummary, resolveItem } from "./catalog";
+import { getItemDef, itemSummary, maxStackOf, resolveItem } from "./catalog";
 import { rarityColor } from "./rarity";
-import { bossGoldAmount, enemyGoldAmount, propGoldAmount } from "./economy";
+import { bossGoldAmount, enemyGoldAmount, MAX_GRANT_QTY, propGoldAmount } from "./economy";
 import { rollMaterialDrops, type MaterialSource } from "./materials";
-import { rollDrop, rollReward, rollUnique } from "./loot";
+import { rollDrop, rollUnique } from "./loot";
 import { useGame } from "../state/gameStore";
 import type { Slot } from "./types";
 import type { Vec3 } from "../world/types";
@@ -53,6 +53,10 @@ interface Orb {
   gold: number;
   /** Copies (reagents drop in little clutches). */
   qty?: number;
+  /** Who dropped it from their inventory (their own vacuum leaves it be for
+   * a moment), and when it arrived here. */
+  by?: string;
+  born?: number;
   position: Vec3;
 }
 
@@ -61,15 +65,17 @@ let pushOrb: ((orb: Orb) => void) | null = null;
 let takeOrbLocal: ((orbId: string, by: string) => void) | null = null;
 let liveOrbs: (() => Orb[]) | null = null;
 
-const orbSpawned = hostEvent<{ orbId: string; defId: string | null; gold: number; qty?: number; pos: Vec3 }>(
+const orbSpawned = hostEvent<{ orbId: string; defId: string | null; gold: number; qty?: number; pos: Vec3; by?: string }>(
   "orbSpawned",
   (d) =>
     pushOrb?.({
       id: d.orbId,
       defId: d.defId ?? null,
       gold: d.gold ?? 0,
-      qty: Math.max(1, Math.min(10, Math.floor(d.qty ?? 1) || 1)),
+      qty: Math.max(1, Math.min(MAX_GRANT_QTY, Math.floor(d.qty ?? 1) || 1)),
       position: d.pos,
+      ...(typeof d.by === "string" ? { by: d.by } : {}),
+      born: performance.now(),
     }),
 );
 
@@ -98,7 +104,7 @@ const takeOrb = hostCommand<{ orbId: string }>("takeOrb", (d, meta) => {
 /** Player-dropped items become real orbs at the dropper's feet — anyone on
  * the floor can take them, which makes dropping double as gifting. The host
  * validates the position against the dropper like any pickup. */
-const dropOrb = hostCommand<{ defId: string; pos: Vec3 }>("dropOrb", (d, meta) => {
+const dropOrb = hostCommand<{ defId: string; pos: Vec3; qty?: number }>("dropOrb", (d, meta) => {
   if (typeof d.defId !== "string" || !Array.isArray(d.pos)) return;
   try {
     resolveItem(d.defId); // validates base AND affix
@@ -106,16 +112,18 @@ const dropOrb = hostCommand<{ defId: string; pos: Vec3 }>("dropOrb", (d, meta) =
     return; // unknown id from a hacked/newer client — refuse to spawn it
   }
   if (wizardDistSqTo(meta.from, d.pos[0], d.pos[1], d.pos[2]) > TAKE_RANGE_SQ) return;
-  announceOrb(d.defId, 0, d.pos);
+  const qty = Math.max(1, Math.min(MAX_GRANT_QTY, maxStackOf(d.defId), Math.floor(Number(d.qty)) || 1));
+  announceOrb(d.defId, 0, d.pos, qty, meta.from);
 });
 
-function announceOrb(defId: string | null, gold: number, pos: Vec3, qty = 1): void {
+function announceOrb(defId: string | null, gold: number, pos: Vec3, qty = 1, by?: string): void {
   orbSpawned.announce({
     orbId: `orb_${orbCounter++}_${Math.random().toString(36).slice(2, 6)}`,
     defId,
     gold,
     ...(qty > 1 ? { qty } : {}),
     pos,
+    ...(by ? { by } : {}),
   });
 }
 
@@ -150,13 +158,6 @@ export function dropUnique(position: Vec3, floor: number): void {
   if (!isHost()) return;
   const id = rollUnique(new Rng((Math.random() * 0xffffffff) >>> 0), floor);
   if (id) announceOrb(id, 0, position);
-}
-
-/** A reward roll (vaults, ward stones): always gear, juiced enchantments,
- * `legendary` odds of a named piece. Authority-only. */
-export function dropReward(position: Vec3, floor: number, legendary: number): void {
-  if (!isHost()) return;
-  announceOrb(rollReward(new Rng((Math.random() * 0xffffffff) >>> 0), floor, legendary), 0, position);
 }
 
 /** A clutch of one reagent (vault rewards, salvage on the floor). */
@@ -245,12 +246,15 @@ export function LootOrbs() {
         for (const orb of (data as Orb[]) ?? []) pushOrb?.(orb);
       },
     });
-    // Inventory drops: scatter the stack around the player's feet.
+    // Inventory drops: the whole stack, scattered round the player's feet in
+    // as few orbs as the per-orb cap allows (a 99-stack is ten orbs, not
+    // eight copies and the rest lost).
     const offDrop = gameEvents.on("dropItems", ({ defId, qty }) => {
-      for (let i = 0; i < Math.min(qty, 8); i++) {
+      for (const part of splitStack(qty)) {
         const a = Math.random() * Math.PI * 2;
         dropOrb.request({
           defId,
+          qty: part,
           pos: [
             playerPosition.x + Math.cos(a) * (0.6 + Math.random() * 0.4),
             Math.max(playerPosition.y - 0.5, 0.4),
@@ -354,9 +358,18 @@ function ItemOrb({ orb }: { orb: Orb }) {
   );
 }
 
+/** A stack split into orb-sized parts (each ≤ MAX_GRANT_QTY), summing to it. */
+export function splitStack(qty: number): number[] {
+  const n = Math.max(1, Math.floor(qty));
+  const orbs = Math.ceil(n / MAX_GRANT_QTY);
+  return Array.from({ length: orbs }, (_, i) => Math.floor(n / orbs) + (i < n % orbs ? 1 : 0));
+}
+
 /** Reagents gather themselves too — they hop toward you from a little
- * further than coins, glinting in their own colour. */
+ * further than coins, glinting in their own colour. What you just dropped
+ * yourself waits a moment before it comes back to you. */
 const REAGENT_VACUUM_RANGE_SQ = 2.2 * 2.2;
+const OWN_DROP_GRACE_MS = 4000;
 
 function ReagentOrb({ orb }: { orb: Orb }) {
   const group = useRef<Group>(null);
@@ -388,6 +401,7 @@ function ReagentOrb({ orb }: { orb: Orb }) {
     requested.current -= dt;
     const d2 = playerPosition.distanceToSquared(g.position);
     if (requested.current > 0 || d2 > REAGENT_VACUUM_RANGE_SQ) return;
+    if (orb.by && orb.by === (useNet.getState().playerId || "self") && performance.now() - (orb.born ?? 0) < OWN_DROP_GRACE_MS) return;
     if (!useGame.getState().canAcquire(orb.defId!)) {
       if (d2 < 3) offerInteraction(`Your pouch is full — ${def.name} stays`, d2, () => {}, [g.position.x, g.position.y + 0.6, g.position.z]);
       return;

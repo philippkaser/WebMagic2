@@ -2,7 +2,7 @@ import { gameEvents } from "../core/events";
 import { netBus } from "./bus";
 import { netClock } from "./clock";
 import { useNet } from "./netStore";
-import type { WireSlot } from "../items/crafting";
+import type { WireSlot } from "./protocol";
 import type { FloorAssignment, ServerMsg, WireInventory } from "./protocol";
 import { LocalTransport, WebSocketTransport, type Transport } from "./transport";
 
@@ -167,8 +167,8 @@ export class GameSession {
 
   /** Cauldron or forge — the server applies the recipe and answers with
    * `crafted` (netBus "crafted"). */
-  sendCraft(recipe: string, target?: WireSlot): void {
-    this.transport?.send({ t: "craft", recipe, ...(target ? { target } : {}) });
+  sendCraft(recipe: string, target?: WireSlot, expect?: string): void {
+    this.transport?.send({ t: "craft", recipe, ...(target ? { target } : {}), ...(expect !== undefined ? { expect } : {}) });
   }
 
   /** The run is lost — the server discards its grants. */

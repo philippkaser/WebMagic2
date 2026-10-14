@@ -8,7 +8,7 @@ import { KillCredit } from "../encounters/killCredit";
 import type { DamageSource } from "../game/damageSource";
 import { getFloorRules } from "../game/floorRules";
 import { computeStats, getItemDef, hasProc, resolveItem } from "../items/catalog";
-import { GAMBLE_PRICE, merchantPrice, multisetOf, sellValue } from "../items/economy";
+import { gamblePrice, merchantPrice, multisetOf, sellValue } from "../items/economy";
 import {
   addToGrid,
   clearSlot,
@@ -21,7 +21,8 @@ import {
   type SlotRef,
 } from "../items/inventory";
 import { addBuff, getBuffDef, liveBuffs, withBlessings, type ActiveBuff } from "../items/buffs";
-import { applyCraft, describeOutcome, type CraftOutcome, type WireSlot } from "../items/crafting";
+import { applyCraft, describeOutcome, type CraftOutcome } from "../items/crafting";
+import type { WireSlot } from "../net/protocol";
 import { rollGamble } from "../items/loot";
 import type { DerivedStats, Equipment } from "../items/types";
 import { netBus } from "../net/bus";
@@ -247,7 +248,10 @@ let pendingGamble = false;
 /** The floor (instance:floor) the Phoenix last refused a death on. */
 let phoenixFloor = "";
 /** A craft is in the server's hands (its recipe id). */
-let pendingCraft: string | null = null;
+/** A craft sent to the server and not yet answered (one at a time: a second
+ * press would be judged against the same stale inventory). */
+let craftInFlight = false;
+let craftTimeout: ReturnType<typeof setTimeout> | null = null;
 
 export const useGame = create<GameState>((set, get) => ({
   phase: "menu",
@@ -355,12 +359,14 @@ export const useGame = create<GameState>((set, get) => ({
     });
   },
 
-  canAcquire: (defId) => routeAcquire(carriedOf(get()), defId, get().phase === "dungeon") !== null,
+  // Whether a pickup is at risk depends on whether a run is open — not on
+  // the phase (a grant can land mid-journey, while the phase is "loading").
+  canAcquire: (defId) => routeAcquire(carriedOf(get()), defId, get().run !== null) !== null,
 
   acquireItem: (defId) => {
     const state = get();
     const item = resolveItem(defId);
-    const routed = routeAcquire(carriedOf(state), defId, state.phase === "dungeon");
+    const routed = routeAcquire(carriedOf(state), defId, state.run !== null);
     if (!routed) {
       // Pickups are gated on canAcquire before the grant, so this only
       // happens on a rare co-op race (bag filled while the request flew).
@@ -382,7 +388,7 @@ export const useGame = create<GameState>((set, get) => ({
     let got = 0;
     let to = "";
     for (let i = 0; i < qty; i++) {
-      const routed = routeAcquire(carried, defId, get().phase === "dungeon");
+      const routed = routeAcquire(carried, defId, get().run !== null);
       if (!routed) break;
       carried = routed.next;
       to = routed.to;
@@ -402,7 +408,7 @@ export const useGame = create<GameState>((set, get) => ({
 
   addGold: (amount) => {
     if (amount <= 0) return;
-    if (get().phase === "dungeon") {
+    if (get().run !== null) {
       set({ runGold: get().runGold + amount });
     } else {
       set({ gold: get().gold + amount });
@@ -477,12 +483,17 @@ export const useGame = create<GameState>((set, get) => ({
   gamble: () => {
     const state = get();
     if (state.phase !== "village") return;
-    if (state.gold < GAMBLE_PRICE) {
+    const price = gamblePrice(state.deepest);
+    if (state.gold < price) {
       gameEvents.emit("message", "Not enough gold");
       return;
     }
     if (!state.bag.includes(null)) {
       gameEvents.emit("message", "No bag room for what fortune brings");
+      return;
+    }
+    if (useNet.getState().mode === "connecting") {
+      gameEvents.emit("message", "Maro waits — the camp's ledger is still opening");
       return;
     }
     if (useNet.getState().mode === "online") {
@@ -495,7 +506,7 @@ export const useGame = create<GameState>((set, get) => ({
     // Offline: the local save is the record — same shared roll, local dice.
     const rolled = rollGamble(new Rng((Math.random() * 0xffffffff) >>> 0), state.deepest);
     const bag = addToGrid(state.bag, rolled, false)!;
-    set({ gold: state.gold - GAMBLE_PRICE, bag });
+    set({ gold: state.gold - price, bag });
     playPickup();
     gameEvents.emit("message", `The orb reveals: ${resolveItem(rolled).name}`);
     persistCurrent(get());
@@ -548,7 +559,14 @@ export const useGame = create<GameState>((set, get) => ({
       gameEvents.emit("message", "The cauldron and the forge are back in the camp");
       return;
     }
+    const mode = useNet.getState().mode;
+    if (mode === "connecting") {
+      gameEvents.emit("message", "The forge is still cold — the camp's ledger is opening");
+      return;
+    }
+    if (craftInFlight) return; // the last work is still on the anvil
     const wireTarget = target ? toWireSlot(target) : undefined;
+    const expect = target ? readSlot(carriedOf(state), target)?.defId : undefined;
     // A local dry run answers "can I?" at once (and is the whole craft
     // offline, where the local save is the record).
     const local = applyCraft(toWireInventory(state), { recipe, target: wireTarget }, new Rng((Math.random() * 0xffffffff) >>> 0), {
@@ -559,9 +577,11 @@ export const useGame = create<GameState>((set, get) => ({
       gameEvents.emit("crafted", { ok: false, recipe, text: local.reason });
       return;
     }
-    if (useNet.getState().mode === "online") {
-      pendingCraft = recipe;
-      session.sendCraft(recipe, wireTarget);
+    if (mode === "online") {
+      craftInFlight = true;
+      // A lost reply mustn't lock the forge for good.
+      craftTimeout = setTimeout(() => (craftInFlight = false), 10_000);
+      session.sendCraft(recipe, wireTarget, expect);
       return;
     }
     const inv = fromWireInventory(local.inventory);
@@ -893,6 +913,10 @@ function die(
   persistCurrent({ ...state, ...outcome.kept });
   session.sendDied(); // the server discards this run's grants
   session.leaveDungeon();
+  // …and learns what survived: the banked kit as it stands now (draughts
+  // drunk, gifts given away, cells moved) — a sub-multiset of its bank, so
+  // the server's copy can't hand back what the run spent.
+  session.sendStash(toWireInventory({ ...state, ...outcome.kept }));
   killCredit.reset();
   set({
     phase: "dead",
@@ -918,7 +942,7 @@ function die(
 // player keeps their in-run gear; the server still validates at the bank.
 netBus.on("serverSave", (save) => {
   const state = useGame.getState();
-  if (state.phase === "dungeon" || state.phase === "loading") return;
+  if (state.run || state.phase === "dungeon" || state.phase === "loading") return;
   // Gamble reveal: whatever the authoritative save gained over local state
   // is what the orb produced (nothing gained = the server refused).
   if (pendingGamble) {
@@ -945,10 +969,12 @@ netBus.on("serverSave", (save) => {
 
 // The server worked (or refused) a craft: its save is the truth either way.
 netBus.on("crafted", (msg) => {
+  craftInFlight = false;
+  if (craftTimeout) clearTimeout(craftTimeout);
   const state = useGame.getState();
-  if (state.phase === "dungeon" || state.phase === "loading") return;
-  const recipe = pendingCraft ?? "";
-  pendingCraft = null;
+  // Mid-run the local inventory holds the run; the bank settles it later.
+  if (state.run) return;
+  const recipe = msg.recipe;
   const inv = fromWireInventory(msg.save.inventory);
   useGame.setState({ deepest: msg.save.deepest, ...inv, health: clampedHealth({ ...useGame.getState(), ...inv }) });
   persistCurrent({ deepest: msg.save.deepest, ...inv });

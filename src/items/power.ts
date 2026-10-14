@@ -1,4 +1,4 @@
-import { STAT_SPECS } from "./stats";
+import { isBoon, STAT_SPECS } from "./stats";
 import type { ItemDef, Passives } from "./types";
 
 /** Item power — how an item's LEVEL and ENHANCEMENT turn into strength. The
@@ -71,13 +71,7 @@ export function amplifyPassives(block: Partial<Passives>, enhance: number): Part
   for (const s of STAT_SPECS) {
     const v = block[s.key];
     if (v === undefined) continue;
-    const boon = (v - s.neutral) * s.better > 0;
-    out[s.key] = boon && !s.integer ? s.neutral + (v - s.neutral) * k : v;
+    out[s.key] = isBoon(s.key, v) && !s.integer ? s.neutral + (v - s.neutral) * k : v;
   }
   return out;
-}
-
-/** How an item level reads in the UI ("Lv 12"). */
-export function levelLabel(level: number): string {
-  return level > 0 ? `Lv ${level}` : "";
 }

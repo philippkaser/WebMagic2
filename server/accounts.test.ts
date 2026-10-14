@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { SAVE_FEATHER_ID } from "../src/items/catalog";
 import { MERCHANT_STOCK } from "../src/items/economy";
 import type { WireInventory } from "../src/net/protocol";
-import { GAMBLE_PRICE, sellValue } from "../src/items/economy";
+import { gamblePrice, sellValue } from "../src/items/economy";
 import { AccountStore, defaultWireInventory, sanitizeInventory } from "./accounts";
 
 /** Convenience: a full inventory payload with overrides. */
@@ -23,7 +23,7 @@ describe("AccountStore", () => {
 
   test("serializes through persist and restores from that JSON", () => {
     let json = "";
-    const store = new AccountStore((j) => (json = j));
+    const store = new AccountStore((s) => (json = s()));
     const acc = store.login(undefined, "Dana");
     acc.deepest = 10;
     store.startRun(acc, 11);
@@ -306,7 +306,8 @@ describe("AccountStore", () => {
     store.grantGold(acc, 200);
     store.bank(acc, 5, inv({ gold: 200 }));
     const save = store.gamble(acc, "void_staff+keen");
-    expect(save!.inventory.gold).toBe(200 - GAMBLE_PRICE);
+    // Banked at floor 5: the orb is priced by that depth.
+    expect(save!.inventory.gold).toBe(200 - gamblePrice(5));
     expect(save!.inventory.bag[0]).toEqual({ id: "void_staff+keen", qty: 1 });
     // …and the won item is now bankable/sellable like anything owned.
     expect(

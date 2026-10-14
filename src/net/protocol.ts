@@ -1,13 +1,13 @@
-import type { PartyError } from "./party";
-import type { WireSlot } from "../items/crafting";
-
 /** Wire protocol between client and the relay server.
  *
- * The server is deliberately GAMEPLAY-BLIND. It handles matchmaking, host
- * designation, clock pongs and relaying of opaque channel envelopes — it
- * never learns what an "enemy" or an "orb" is. All gameplay messages are
- * defined client-side (net/channels.ts), so adding a networked feature never
- * touches the server or this file.
+ * The server is BLIND TO THE WORLD: it never learns what an "enemy" or an
+ * "orb" is, and every gameplay message about the floor is defined
+ * client-side (net/channels.ts) and relayed as an opaque envelope — so a new
+ * networked feature on the floor never touches the server or this file.
+ * What it does know is the BANK: accounts, provenance, and the shared pure
+ * economy rules it runs on banked inventories (prices, the gamble, the
+ * cauldron and the forge — the same functions the client runs offline),
+ * plus the social rooms (the camp, chat, fellowships).
  *
  * The entire authorization model is the channel-name prefix:
  *
@@ -17,6 +17,7 @@ import type { WireSlot } from "../items/crafting";
  *   "p:"  peer      — anyone may send; broadcast to the rest of the instance.
  */
 import type { AuthErrorReason } from "./credentials";
+import type { PartyError } from "./party";
 
 export interface MemberInfo {
   id: string;
@@ -72,6 +73,25 @@ export interface WireEquipment {
   amulet: string | null;
   cloak: string | null;
   boots: string | null;
+}
+
+/** Where an item sits in a wire inventory: an equipment slot, or a grid
+ * cell (the forge's anvil target). */
+export type WireSlot =
+  | { c: "equipment"; s: keyof WireEquipment }
+  | { c: "bag" | "belt" | "pouch" | "chest"; i: number };
+
+/** The largest grid (the chest) bounds every cell index. */
+const MAX_GRID_CELLS = 30;
+
+export function isWireSlot(raw: unknown): raw is WireSlot {
+  const s = raw as Partial<{ c: unknown; s: unknown; i: unknown }> | null;
+  if (!s || typeof s !== "object") return false;
+  if (s.c === "equipment") return s.s === "staff" || s.s === "amulet" || s.s === "cloak" || s.s === "boots";
+  if (s.c === "bag" || s.c === "belt" || s.c === "pouch" || s.c === "chest") {
+    return typeof s.i === "number" && Number.isInteger(s.i) && s.i >= 0 && s.i < MAX_GRID_CELLS;
+  }
+  return false;
 }
 
 /** One inventory cell on the wire (consumables stack). */
@@ -171,8 +191,10 @@ export type ClientMsg =
   | { t: "gamble" }
   /** Wenna's cauldron or Brannoc's forge (items/crafting.ts): the SERVER
    * applies the shared pure recipe to the banked inventory with its own
-   * dice and answers with `crafted`. Village only. */
-  | { t: "craft"; recipe: string; target?: WireSlot }
+   * dice and answers with `crafted`. Village only. `expect` is the item id
+   * the client saw at `target`: if the server's banked inventory holds
+   * something else there, it refuses rather than work the wrong piece. */
+  | { t: "craft"; recipe: string; target?: WireSlot; expect?: string }
   /** The run is lost — the server discards this run's grants. */
   | { t: "died" }
   /** HOST attestation: `playerId` legitimately picked up `itemId`. The only
@@ -201,6 +223,8 @@ export type ServerMsg =
   /** A craft's result: the authoritative save, and what happened. */
   | {
       t: "crafted";
+      /** The recipe asked for (so a reply can never be mislabelled). */
+      recipe: string;
       save: ServerSave;
       ok: boolean;
       reason?: string;

@@ -610,11 +610,6 @@ export function itemSummary(item: ResolvedItem): string {
   return [...item.affixes.map((a) => a.desc), item.def.desc].filter(Boolean).join(" · ");
 }
 
-/** True for gear (anything that can carry a level, affixes, enhancement). */
-export function isGear(item: ResolvedItem): boolean {
-  return isGearSlot(item.def.slot);
-}
-
 export function allItemDefs(): readonly ItemDef[] {
   return defs;
 }
@@ -644,7 +639,25 @@ function baseStats(): DerivedStats {
  * enhancement), its level's power (staff potency, gear ward) and its
  * enhancement's raw power (items/power.ts) into one stat block. Timed
  * blessings fold in on top (items/buffs.ts → state/gameStore getStats). */
+/** Gear changes rarely; stats are read every frame (the player, every
+ * sleeping enemy's senses). Equipment objects are immutable store values, so
+ * the last answer is reused for the same object. Treat the result as
+ * read-only — callers spread it before changing anything. */
+let lastEquipment: Equipment | null = null;
+let lastStats: DerivedStats | null = null;
+
 export function computeStats(equipment: Equipment): DerivedStats {
+  if (equipment === lastEquipment && lastStats) return lastStats;
+  const stats = foldGear(equipment);
+  lastEquipment = equipment;
+  lastStats = stats;
+  return stats;
+}
+
+/** Max health never falls below this, however banes and bargains stack. */
+export const MIN_MAX_HEALTH = 10;
+
+function foldGear(equipment: Equipment): DerivedStats {
   const stats = baseStats();
   const items = [equipment.staff, equipment.amulet, equipment.cloak, equipment.boots];
   for (const inst of items) {
@@ -661,6 +674,7 @@ export function computeStats(equipment: Equipment): DerivedStats {
     if (item.def.dash) stats.dash = true;
     if (item.def.proc && !stats.procs.includes(item.def.proc)) stats.procs.push(item.def.proc);
   }
+  stats.maxHealth = Math.max(MIN_MAX_HEALTH, stats.maxHealth);
   return stats;
 }
 
