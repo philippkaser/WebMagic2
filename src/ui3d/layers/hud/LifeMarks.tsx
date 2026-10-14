@@ -22,11 +22,11 @@ import { emitUiSparks } from "../../UiSparks";
 import { ink } from "../../theme";
 import { useStepFade } from "./fade";
 import { makeGauge, resetGauge, stepGauge, type Gauge } from "./gauge";
-import { artPixel, MARK, markAlpha, markHold, markLife, Nearest, rattleBpm } from "./lifeMarks";
+import { artPixel, MARK, markAlpha, markHold, markLife, Nearest, rattleBpm } from "./markRules";
 import { forEachPeerMark, type PeerMark } from "../../../net/peerVitals";
 
 /** Life marks: the small pixel bars that hang over creatures you've hurt
- * (lifeMarks.ts has the rules) — and the pixel hearts over floor-mates in
+ * (markRules.ts has the rules) — and the pixel hearts over floor-mates in
  * their last stand (net/peerVitals), beating at their heart's rate.
  *
  * Drawn in the UI canvas so they stay crisp, as ONE instanced quad: every

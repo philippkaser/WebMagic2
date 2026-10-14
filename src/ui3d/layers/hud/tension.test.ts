@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { WARDEN } from "../../../enemies/brains/warden";
 import { KNEE, shownFrac } from "../../../game/vitality";
-import { artPixel, MARK, markAlpha, markHold, markLife, Nearest, rattleBpm } from "./lifeMarks";
+import { artPixel, MARK, markAlpha, markHold, markLife, Nearest, rattleBpm } from "./markRules";
 import { discBelow, heightForFill, levelToHeight } from "./orbMaterials";
 
 describe("the boss bar's knee", () => {
