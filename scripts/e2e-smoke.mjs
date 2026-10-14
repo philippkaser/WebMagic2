@@ -1,7 +1,10 @@
 // End-to-end smoke test for WebMagic: one solo run (the Weighing → five
 // floors → walk home), then two wizards meeting on a floor (PvP, pact,
-// death → grave → plunder, and the server honoring the plunder). Drives the
-// game through its dev-only window hooks (__game, __castAt, __pact, …).
+// death → grave → plunder, and the server honoring the plunder), then the
+// camp (two wizards home: chat, a fellowship by its runes) and a bout in the
+// Proving Ground (the obelisk's line, yields, Varr's ledger, home again).
+// Drives the game through its dev-only window hooks (__game, __castAt,
+// __pact, __session, __arena, …).
 //
 // Needs a dev client and a game server with forced encounters and a known
 // data file (so the script can inspect server-side grants):
@@ -55,9 +58,30 @@ const game = (w) => w.page.evaluate(() => {
   return { phase: s.phase, floor: s.floor, run: s.run, deepest: s.deepest, health: s.health,
     instanceId: s.instanceId, equipment: s.equipment, lastDeath: s.lastDeath };
 });
+/** Strike a wizard down: a killing blow from half health or more only
+ * leaves them at the Brink (lethal grace, game/vitality), so a second blow
+ * follows once the Brink's moment has passed. */
+async function strikeDown(w, killerId) {
+  const blow = (id) => window.__game.getState().takeDamage(10_000, { kind: "wizard", id });
+  await w.page.evaluate(blow, killerId);
+  await sleep(900);
+  if ((await game(w)).phase === "dungeon") await w.page.evaluate(blow, killerId);
+}
+
+/** Poll from node (a page busy rendering in software can starve the
+ * page-side polling of waitForFunction). */
+async function until(w, fn, arg, timeout = 30000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeout) {
+    if (await w.page.evaluate(fn, arg)) return;
+    await sleep(250);
+  }
+  throw new Error("timed out");
+}
+
 async function waitPhase(w, phase, timeout = 30000) {
   try {
-    await w.page.waitForFunction((p) => window.__game.getState().phase === p, phase, { timeout, polling: 250 });
+    await until(w, (p) => window.__game.getState().phase === p, phase, timeout);
   } catch (err) {
     // Say where the wizard got stuck, not just that it did.
     const where = await w.page.evaluate(() => {
@@ -182,7 +206,7 @@ async function waitPhase(w, phase, timeout = 30000) {
   const mira = await game(b);
   check("the fallen-to-be picks up host-granted loot", mira.equipment.amulet?.defId === "amulet_vigor@3",
     JSON.stringify(mira.equipment.amulet));
-  await b.page.evaluate((killer) => window.__game.getState().takeDamage(10_000, { kind: "wizard", id: killer }), idA);
+  await strikeDown(b, idA);
   await waitPhase(b, "dead", 60000); // the death dissolve plays first (slow under load)
   const death = (await game(b)).lastDeath;
   check("death names the killer and leaves a grave", death?.killer === "Oswin" && death?.grave === true,
@@ -220,6 +244,78 @@ async function waitPhase(w, phase, timeout = 30000) {
   }
   check("encounter had no page errors (A)", a.errors.length === 0, a.errors.slice(0, 3).join(" | "));
   check("encounter had no page errors (B)", b.errors.length === 0, b.errors.slice(0, 3).join(" | "));
+}
+
+// ── The camp: two wizards home ──────────────────────────────────────────────
+{
+  const a = await newWizard("Hesk");
+  const b = await newWizard("Ilse");
+  await sleep(2500);
+  const idA = await state(a, () => window.__session.playerId);
+  const idB = await state(b, () => window.__session.playerId);
+  const social = (w) => w.page.evaluate(async () => {
+    const s = (await import("/src/social/social.ts")).useSocial.getState();
+    return { party: s.party, lines: s.lines.map((l) => [l.name, l.text, l.party]) };
+  });
+  // The camp is everyone who's home: A hears B.
+  await b.page.evaluate(() => window.__session.sendChat("well met at the fire"));
+  await sleep(1200);
+  const heard = (await social(a)).lines;
+  check("the camp hears what's said in it", heard.some(([n, t]) => n === "Ilse" && t === "well met at the fire"), JSON.stringify(heard));
+  // A fellowship, by its runes.
+  await a.page.evaluate(() => window.__session.partyCreate());
+  await sleep(1000);
+  const code = (await social(a)).party?.code;
+  check("founding a fellowship gives six runes", /^[A-Z0-9]{6}$/.test(code ?? ""), String(code));
+  await b.page.evaluate((c) => window.__session.partyJoin(c), code);
+  await sleep(1200);
+  const partyB = (await social(b)).party;
+  check("speaking the runes joins the fellowship", partyB?.members.map((m) => m.id).sort().join() === [idA, idB].sort().join(),
+    JSON.stringify(partyB));
+  await a.page.evaluate(() => window.__session.sendChat("down together", true));
+  await sleep(1000);
+  check("fellowship chat reaches the fellowship", (await social(b)).lines.some(([, t, p]) => t === "down together" && p));
+  await b.page.evaluate(() => window.__session.partyLeave());
+  check("camp had no page errors", a.errors.length + b.errors.length === 0, [...a.errors, ...b.errors].slice(0, 3).join(" | "));
+
+  // ── The Proving Ground ─────────────────────────────────────────────────────
+  await a.page.evaluate(() => window.__game.getState().setOverlay("arena"));
+  await sleep(800);
+  await a.page.screenshot({ path: `${SP}/shot-obelisk.png` });
+  await a.page.evaluate(() => window.__game.getState().setOverlay("none"));
+  await a.page.evaluate(() => window.__session.arenaJoin());
+  await sleep(800);
+  const queued = await state(a, () => window.__arena.getState().queue);
+  check("the obelisk takes you into the line", queued?.position === 1, JSON.stringify(queued));
+  await b.page.evaluate(() => window.__session.arenaJoin());
+  await waitPhase(a, "dungeon", 40000);
+  await waitPhase(b, "dungeon", 40000);
+  const boutA = await state(a, () => window.__arena.getState().bout);
+  const boutB = await state(b, () => window.__arena.getState().bout);
+  check("both are dealt into one bout", !!boutA && boutA.instanceId === boutB?.instanceId, `${boutA?.instanceId}/${boutB?.instanceId}`);
+  await sleep(2500);
+  await a.page.screenshot({ path: `${SP}/shot-arena.png` });
+  // Ilse falls ten times to Hesk: each a yield, never a death.
+  for (let i = 0; i < 10; i++) {
+    await waitPhase(b, "dungeon", 30000);
+    await strikeDown(b, idA);
+    await sleep(300);
+    if (i === 0) {
+      const g = await game(b);
+      check("a fall in the hall is a yield, not a death", g.phase === "loading" && g.lastDeath === null, JSON.stringify({ phase: g.phase }));
+    }
+  }
+  await until(a, () => !!window.__arena.getState().bout?.ended, undefined, 30000).catch(() => {});
+  const ended = await state(a, () => window.__arena.getState().bout?.ended ?? null);
+  check("ten yields win the hall", ended?.winner === idA, JSON.stringify(ended?.winner));
+  await waitPhase(a, "village", 40000);
+  await waitPhase(b, "village", 40000);
+  const record = await state(a, () => window.__arena.getState().record);
+  check("Varr writes the bout in the ledger", record?.wins >= 1 && record?.yields >= 10, JSON.stringify(record));
+  check("the hall sends everyone home", !(await state(b, () => !!window.__arena.getState().bout)));
+  check("Proving Ground had no page errors", a.errors.length + b.errors.length === 0, [...a.errors, ...b.errors].slice(0, 3).join(" | "));
+  await a.page.context().close();
+  await b.page.context().close();
 }
 
 await browser.close();

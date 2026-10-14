@@ -28,7 +28,13 @@ export default defineConfig({
     proxy: {
       "/ws": { target: `ws://localhost:${process.env.WM_SERVER_PORT ?? 3001}`, ws: true },
     },
+    // Agent worktrees and server data live under the root but aren't the
+    // app: a worktree coming or going must never reload a running client.
+    watch: { ignored: ["**/.claude/**", "**/backups/**", "**/server-data*.json", "**/e2e-output/**"] },
   },
+  // Only the app's own page seeds the dependency scan (a worktree's copy of
+  // index.html under .claude/ would otherwise be crawled too).
+  optimizeDeps: { entries: ["index.html"] },
   build: {
     target: "esnext",
     chunkSizeWarningLimit: 1500,
