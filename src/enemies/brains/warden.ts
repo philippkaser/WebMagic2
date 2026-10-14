@@ -8,15 +8,18 @@ import { blendFactor, blendVelocity, type Move, type RandomSource, type Vec } fr
  *  - attacks: a cooldown clock that, when up and a wizard is in range, picks
  *    an attack by distance (slams and rings up close, charges and volleys at
  *    range). A slam is telegraphed: it arms, and only detonates ("boom") once
- *    the wind-up has elapsed; nothing else fires in between.
+ *    the wind-up has elapsed; nothing else fires in between. A charge is
+ *    telegraphed too: it braces (brakes, crouches — every client poses it
+ *    from the replicated act) and only launches ("launch") after the brace.
  *
  * Below half health it is enraged: faster, shorter cooldowns, denser volleys
  * and rings. Dice come from an injected source so fights are testable. */
 
 export type WardenAttack = "volley" | "ring" | "charge" | "slam";
-/** What the component must do this frame: launch an attack, detonate an
- * armed slam, or nothing. */
-export type WardenAction = WardenAttack | "boom" | null;
+/** What the component must do this frame: start an attack (a "charge"
+ * starts its brace), detonate an armed slam, launch a braced charge, or
+ * nothing. */
+export type WardenAction = WardenAttack | "boom" | "launch" | null;
 
 export const WARDEN = {
   /** Wakes (roars, raises its HP bar) when a wizard comes this close. */
@@ -46,6 +49,8 @@ export const WARDEN = {
   chargeSpeed: 13,
   chargeLift: 0.5,
   chargeTime: 0.7,
+  /** The brace before a charge launches (the tell). */
+  chargeWindup: 0.45,
   slamTelegraph: 0.6,
   volleySpeed: 14,
   /** Seconds of target motion the volley aims ahead by. */
@@ -67,11 +72,13 @@ export interface WardenBrain {
   charging: number;
   /** Seconds until an armed slam detonates (0 = none armed). */
   slamTelegraph: number;
+  /** Seconds of brace left before a charge launches (0 = none braced). */
+  chargeWindup: number;
   rand: RandomSource;
 }
 
 export function createWardenBrain(rand: RandomSource = Math.random): WardenBrain {
-  return { attackTimer: WARDEN.firstAttack, charging: 0, slamTelegraph: 0, rand };
+  return { attackTimer: WARDEN.firstAttack, charging: 0, slamTelegraph: 0, chargeWindup: 0, rand };
 }
 
 export function isEnraged(hp: number, maxHp: number): boolean {
@@ -123,11 +130,20 @@ export function wardenRangeFactor(dist: number): number {
 }
 
 /** One frame of Warden movement. Mid-charge it only runs down the charge
- * clock and leaves the body to its launch velocity. */
+ * clock and leaves the body to its launch velocity; braced for one, it
+ * brakes to a hover. */
 export function tickWardenMove(b: WardenBrain, i: WardenMoveInput, out: Move): Move {
   if (b.charging > 0) {
     b.charging -= i.dt;
     out.apply = false;
+    return out;
+  }
+  if (b.chargeWindup > 0) {
+    out.vel.x = 0;
+    out.vel.y = (i.homeY - i.pos.y) * WARDEN.climbGain;
+    out.vel.z = 0;
+    blendVelocity(i.vel, out.vel, blendFactor(WARDEN.steerRate * 3, i.dt), out.vel);
+    out.apply = true;
     return out;
   }
   let hx = i.aim.x;
@@ -150,8 +166,8 @@ export function tickWardenMove(b: WardenBrain, i: WardenMoveInput, out: Move): M
 
 /** One frame of the attack clock. Returns what to launch (the component owns
  * the effects: announcing bolts/booms, flashes, shakes). Picking "charge" or
- * "slam" arms the matching brain timer here, so movement and the telegraph
- * pick it up on the following frames. */
+ * "slam" arms the matching brain timer here (the brace, the telegraph), so
+ * movement and the tell pick it up on the following frames. */
 export function tickWardenAttack(
   b: WardenBrain,
   dist: number,
@@ -162,12 +178,19 @@ export function tickWardenAttack(
     b.slamTelegraph -= dt;
     return b.slamTelegraph <= 0 ? "boom" : null;
   }
+  if (b.chargeWindup > 0) {
+    b.chargeWindup -= dt;
+    if (b.chargeWindup > 0) return null;
+    b.chargeWindup = 0;
+    b.charging = WARDEN.chargeTime;
+    return "launch";
+  }
   b.attackTimer -= dt;
   if (b.attackTimer > 0 || dist > WARDEN.attackRange) return null;
   b.attackTimer = enraged ? WARDEN.enragedCooldown : WARDEN.cooldown;
   const attack = pickWardenAttack(dist, b.rand);
   if (attack === "slam") b.slamTelegraph = WARDEN.slamTelegraph;
-  else if (attack === "charge") b.charging = WARDEN.chargeTime;
+  else if (attack === "charge") b.chargeWindup = WARDEN.chargeWindup;
   return attack;
 }
 

@@ -39,7 +39,9 @@ export interface Hittable {
   getPosition(): Vec3Tuple;
   /** Its weak point right now (an eye, a core, a crystal head), if it has
    * one: a hit landing within `r` of it is a precision hit (HitInfo.crit). */
-  weakSpot?(): { x: number; y: number; z: number; r: number } | null;
+  /** A weak point (world centre, radius) and, if it isn't the usual 1.5×,
+   * what a precision hit there multiplies by (weapons/precision). */
+  weakSpot?(): { x: number; y: number; z: number; r: number; mult?: number } | null;
   /** Apply damage plus a physical impulse (world-space). */
   hit(damage: number, impulse: Vec3Tuple, info?: HitInfo): void;
 }

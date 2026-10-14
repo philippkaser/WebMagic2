@@ -1,18 +1,20 @@
 import { useFrame } from "@react-three/fiber";
 import { BallCollider, RigidBody } from "@react-three/rapier";
-import { useMemo, useRef } from "react";
-import type { Mesh, MeshStandardMaterial } from "three";
-import { ENEMY_GLOW, SlimeModel } from "../../render/models/enemies";
+import { useEffect, useMemo, useRef } from "react";
+import type { MeshStandardMaterial } from "three";
+import { ACCENT_GLOW, makeEnemyMaterial, SlimeModel } from "../../render/models/enemies";
 import type { Vec3 } from "../../world/types";
 import { createChaseInput, createSteering, type Vec } from "../brains/common";
 import { createSlimeBrain, SLIME_MAX_GEN, slimeSquash, tickSlime } from "../brains/slime";
+import { SQ } from "../puppet";
 import { spawnEnemy } from "../spawnedStore";
 import { ENEMY_GROUPS, ENEMY_LOOT_CHANCE, useContactDamage, useEnemy } from "../useEnemy";
 
 /** Slime — a gelatinous melee blob that hops toward its prey and, on death,
  * SPLITS into two smaller, faster copies (down to a terminal generation; see
  * SLIME_GENERATIONS in brains/slime.ts). Children are spawned
- * host-authoritatively via spawnEnemy() and rendered by <SpawnedEnemies>.
+ * host-authoritatively via spawnEnemy() and rendered by <SpawnedEnemies>;
+ * they squeeze out of the parent's splat (they mount small and spring up).
  * Unlike the fliers it lives on the floor (gravity on). */
 export function Slime({
   position,
@@ -32,8 +34,11 @@ export function Slime({
   const cfg = brain.gen;
   const radius = 0.5 * cfg.size;
   const last = gen >= SLIME_MAX_GEN;
-  const mesh = useRef<Mesh>(null);
   const mat = useRef<MeshStandardMaterial>(null);
+  const eyeMat = useMemo(() => makeEnemyMaterial("slimeEye"), []);
+  useEffect(() => () => eyeMat.dispose(), [eyeMat]);
+  // Vertical speed last frame: the jelly's squash and stretch.
+  const vy = useRef(0);
 
   const e = useEnemy({
     kind: "slime",
@@ -57,7 +62,13 @@ export function Slime({
       spawnEnemy("slime", gen + 1, [t.x + 0.7, t.y + 0.2, t.z], floor);
     },
     onKilled: onDeath,
-    hitColor: "#a8f06a",
+    // Squash & stretch from vertical motion — a kick on the jelly's springs,
+    // so a hop and a hit wobble together instead of fighting.
+    posture: (p) => {
+      p.t[SQ] += slimeSquash(vy.current) - 1;
+    },
+    emerge: gen > 0,
+    size: cfg.size,
   });
   const touch = useContactDamage({
     range: radius + 0.8,
@@ -71,17 +82,15 @@ export function Slime({
   useFrame((_, dt) => {
     const b = e.beginFrame(dt);
     if (!b) return;
-    if (mat.current) mat.current.emissiveIntensity = ENEMY_GLOW.slime + e.flash.current * 6;
+    e.paint(mat.current);
+    const w = e.live.wound;
+    // Its eyes dim as it fades.
+    eyeMat.emissiveIntensity = ACCENT_GLOW.slimeEye * (w.stage >= 2 ? 0.35 + 0.65 * w.glow : 1);
 
     const t = b.translation();
     const v = b.linvel();
-    // Squash & stretch from vertical motion — reads as a bouncing blob.
-    if (mesh.current) {
-      const sy = slimeSquash(v.y);
-      const sxz = 1 / Math.sqrt(sy);
-      mesh.current.scale.set(cfg.size * sxz, cfg.size * sy, cfg.size * sxz);
-    }
-    touch(t, dt);
+    vy.current = v.y;
+    touch(t, dt, e.armed());
 
     if (!e.net.isAuthority) return;
     e.steer(b, tickSlime(brain, e.sense(senses, b, t, 0, dt, v), steering));
@@ -99,7 +108,9 @@ export function Slime({
       enabledRotations={[false, false, false]}
     >
       <BallCollider args={[radius]} mass={1.2 * cfg.size} collisionGroups={ENEMY_GROUPS} />
-      <SlimeModel size={cfg.size} meshRef={mesh} materialRef={mat} />
+      <group ref={e.view}>
+        <SlimeModel size={cfg.size} materialRef={mat} eyeMaterial={eyeMat} />
+      </group>
     </RigidBody>
   );
 }

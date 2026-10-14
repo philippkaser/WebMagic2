@@ -91,10 +91,26 @@ describe("warden attack clock", () => {
     expect(b.attackTimer).toBe(-5); // …the clock was frozen during the wind-up
   });
 
-  test("a charge suspends steering for its duration", () => {
+  test("a charge braces first — braking, nothing else fires — then launches", () => {
     const b = createWardenBrain(dice(0)); // far → charge
     b.attackTimer = 0;
     expect(tickWardenAttack(b, 15, false, 0.01)).toBe("charge");
+    expect(b.chargeWindup).toBe(WARDEN.chargeWindup);
+    const out = createMove();
+    tickWardenMove(b, sense(15, { vel: { x: 4, y: 0, z: 0 }, dt: 0.05 }), out);
+    expect(out.apply).toBe(true);
+    expect(out.vel.x).toBeLessThan(4); // braking into the brace
+    b.attackTimer = -5;
+    expect(tickWardenAttack(b, 15, false, WARDEN.chargeWindup / 2)).toBeNull();
+    expect(tickWardenAttack(b, 15, false, WARDEN.chargeWindup / 2 + 0.01)).toBe("launch");
+    expect(b.charging).toBe(WARDEN.chargeTime);
+  });
+
+  test("a launched charge suspends steering for its duration", () => {
+    const b = createWardenBrain(dice(0)); // far → charge
+    b.attackTimer = 0;
+    tickWardenAttack(b, 15, false, 0.01);
+    expect(tickWardenAttack(b, 15, false, WARDEN.chargeWindup + 0.01)).toBe("launch");
     const out = createMove();
     tickWardenMove(b, sense(15, { dt: WARDEN.chargeTime / 2 }), out);
     expect(out.apply).toBe(false);

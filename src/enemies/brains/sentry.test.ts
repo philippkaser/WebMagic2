@@ -5,6 +5,7 @@ import {
   createSentryTick,
   SENTRY,
   sentryCooldown,
+  sentryWindup,
   sentryLead,
   sentryYaw,
   tickSentry,
@@ -91,5 +92,22 @@ describe("sentry brain", () => {
     // Halfway there after half the easing: still behind, never swung forward.
     const half = sentryYaw(facing, HEAD, player, 0.5 / SENTRY.turnRate);
     expect(Math.cos(half)).toBeLessThan(-0.99);
+  });
+});
+
+describe("sentry at death's door", () => {
+  test("overcharges: reloads faster once past the knee", () => {
+    const calm = { fireTimer: 0 };
+    const cracked = { fireTimer: 0 };
+    tickSentry(calm, 0.01, 1, createSentryTick(), 1);
+    tickSentry(cracked, 0.01, 1, createSentryTick(), 0.3);
+    expect(calm.fireTimer).toBeCloseTo(sentryCooldown(1), 6);
+    expect(cracked.fireTimer).toBeCloseTo(sentryCooldown(1) * SENTRY.overcharge, 6);
+  });
+
+  test("its wind-up runs 0 → 1 through the charge window", () => {
+    expect(sentryWindup({ fireTimer: SENTRY.chargeWindow + 1 })).toBe(0);
+    expect(sentryWindup({ fireTimer: SENTRY.chargeWindow / 2 })).toBeCloseTo(0.5, 6);
+    expect(sentryWindup({ fireTimer: 0 })).toBe(1);
   });
 });

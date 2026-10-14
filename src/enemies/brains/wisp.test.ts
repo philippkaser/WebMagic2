@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createChaseInput, createSteering, type ChaseInput } from "./common";
-import { tickWisp, WISP, wispSpeed } from "./wisp";
+import { createWispJink, tickWisp, WISP, wispSpeed } from "./wisp";
 
 /** Long enough that the velocity easing fully converges — isolates the
  * desired-velocity math from the blend. */
@@ -70,5 +70,34 @@ describe("wisp brain", () => {
     const out = tickWisp(0, sense({ aggro: true, knocked: true }), createSteering());
     expect(out.apply).toBe(false);
     expect(out.aggro).toBe(true);
+  });
+
+  test("at death's door it chases faster and jinks sideways across its line", () => {
+    const calm = tickWisp(0, sense({ aggro: true, dt: SETTLED_DT }), createSteering());
+    const jink = createWispJink(() => 0);
+    const out = createSteering();
+    let maxSide = 0;
+    let darts = 0;
+    let was = false;
+    for (let t = 0; t < 3; t += 1 / 60) {
+      tickWisp(0, sense({ aggro: true, vigor: 0.3 }), out, jink);
+      maxSide = Math.max(maxSide, Math.abs(out.vel.z)); // target is along +x
+      if (jink.left > 0 && !was) darts++;
+      was = jink.left > 0;
+    }
+    expect(maxSide).toBeGreaterThan(WISP.jinkSpeed * 0.9);
+    expect(darts).toBeGreaterThanOrEqual(3); // every 0.6–1.0 s
+    const fast = tickWisp(0, sense({ aggro: true, dt: SETTLED_DT, vigor: 0.3 }), createSteering());
+    expect(fast.vel.x).toBeCloseTo(calm.vel.x * WISP.desperateSpeed, 4);
+  });
+
+  test("a healthy wisp never jinks", () => {
+    const jink = createWispJink(() => 0);
+    const out = createSteering();
+    for (let t = 0; t < 3; t += 1 / 60) {
+      tickWisp(0, sense({ aggro: true }), out, jink);
+      expect(jink.left).toBe(0);
+      expect(Math.abs(out.vel.z)).toBeLessThan(1e-9);
+    }
   });
 });

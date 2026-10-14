@@ -1,4 +1,4 @@
-import { clamp, type ChaseInput, type RandomSource, type Steering } from "./common";
+import { clamp, desperate, type ChaseInput, type RandomSource, type Steering } from "./common";
 
 /** Slime brain — the hopper. Unlike the fliers it lives on the floor with
  * gravity on: it sits still until woken, then bounds toward its prey in short
@@ -7,7 +7,10 @@ import { clamp, type ChaseInput, type RandomSource, type Steering } from "./comm
  *
  * The per-generation table lives here too: each split makes a smaller,
  * faster, weaker slime, and the hop brain and the component both key off the
- * same row. */
+ * same row.
+ *
+ * At death's door (past the knee, once its body has visibly broken) it hops
+ * frantically: quicker, lower springs. */
 
 /** Deepest split: a generation-2 slime dies for good instead of splitting. */
 export const SLIME_MAX_GEN = 2;
@@ -45,6 +48,9 @@ export const SLIME = {
   groundedVy: 0.9,
   /** First hop within this many seconds of waking (desyncs a fresh split). */
   firstHopSpread: 0.6,
+  /** Death's door: hop interval and hop height multipliers. */
+  franticInterval: 0.7,
+  franticHop: 0.8,
   /** Squash & stretch: vertical scale per m/s of vertical speed, and limits. */
   squashPerVy: 0.03,
   squashMin: 0.72,
@@ -87,8 +93,9 @@ export function tickSlime(b: SlimeBrain, i: ChaseInput, out: Steering): Steering
   let vy = i.vel.y;
   b.hopTimer -= i.dt;
   if (b.hopTimer <= 0 && Math.abs(i.vel.y) < SLIME.groundedVy) {
-    b.hopTimer = SLIME.hopIntervalMin + b.rand() * SLIME.hopIntervalSpread;
-    vy = b.gen.hop; // a spring off the floor
+    const frantic = desperate(i.vigor);
+    b.hopTimer = (SLIME.hopIntervalMin + b.rand() * SLIME.hopIntervalSpread) * (frantic ? SLIME.franticInterval : 1);
+    vy = b.gen.hop * (frantic ? SLIME.franticHop : 1); // a spring off the floor
   }
   out.vel.x = (tx / planar) * speed;
   out.vel.y = vy;
