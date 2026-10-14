@@ -1,5 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import { WARDEN } from "../../../enemies/brains/warden";
+import { KNEE, shownFrac } from "../../../game/vitality";
 import { discBelow, heightForFill, levelToHeight } from "./orbMaterials";
+
+describe("the boss bar's knee", () => {
+  test("the Warden enrages exactly where its bar crosses the notch", () => {
+    // The last third of the bar IS the enraged half of its life: they can
+    // never drift apart.
+    expect(WARDEN.enrageFrac).toBe(KNEE.real);
+    expect(shownFrac(WARDEN.enrageFrac)).toBeCloseTo(KNEE.shown, 9);
+  });
+});
 
 describe("the orb tells the truth", () => {
   test("a disc's area below a chord: ends, middle, monotonic", () => {

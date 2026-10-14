@@ -15,7 +15,11 @@ import { unitQuad } from "./PixelSprite";
  * The fill is still a liquid: its leading edge leans as you turn and run
  * (the slosh spring), ripples when you're struck, flashes white on a blow,
  * and mana fizzes with rising bright pixels while it refills. The owner
- * writes all of that into `state` each frame; the bar only draws it. */
+ * writes all of that into `state` each frame; the bar only draws it.
+ *
+ * A bar can carry a knee (game/vitality): a two-pixel brass notch struck
+ * through its track and frame where the last stretch of life begins. At or
+ * under it the fill burns ember red. */
 
 export interface BarState {
   /** Displayed fill and the ghost behind it, 0..1. */
@@ -31,10 +35,14 @@ export interface BarState {
   bubbles: number;
   /** Fill brightness multiplier (low-health throb). */
   bright: number;
+  /** Where the notch stands, 0..1 of the track (0: no notch). */
+  knee: number;
+  /** 0..1: the fill turned ember (past the knee). */
+  low: number;
 }
 
 export function makeBarState(level = 0): BarState {
-  return { level, ghost: level, flash: 0, lean: 0, wave: 0, bubbles: 0, bright: 1 };
+  return { level, ghost: level, flash: 0, lean: 0, wave: 0, bubbles: 0, bright: 1, knee: 0, low: 0 };
 }
 
 const VERT = /* glsl */ `
@@ -55,6 +63,8 @@ uniform float uLean;
 uniform float uWave;
 uniform float uBubbles;
 uniform float uBright;
+uniform float uKnee;
+uniform float uLow;
 uniform float uTime;
 uniform float uShow;
 uniform float uReveal;
@@ -64,6 +74,8 @@ uniform vec3 uHot;
 uniform vec3 uTrack;
 uniform vec3 uOutline;
 uniform vec3 uInk;
+uniform vec3 uEmber;
+uniform vec3 uBrass;
 varying vec2 vUv;
 
 float hash(float n) { return fract(sin(n * 91.3458) * 47453.5453); }
@@ -75,7 +87,11 @@ void main() {
   // Builds in from the left, in whole steps.
   if (p.x >= floor(uReveal * W)) discard;
   vec3 col;
-  if (p.x < 1.0 || p.y < 1.0 || p.x > W - 2.0 || p.y > H - 2.0) {
+  // The knee: a two-pixel brass notch struck through the frame and track.
+  float notch = uKnee > 0.0 ? 1.0 - step(1.0, abs(p.x - 2.5 - floor(uKnee * (W - 6.0) + 0.5))) : 0.0;
+  if (notch > 0.5 && (p.y < 3.0 || p.y > H - 4.0)) {
+    col = uBrass * (p.y < 1.0 || p.y > H - 2.0 ? 0.7 : 1.15);
+  } else if (p.x < 1.0 || p.y < 1.0 || p.x > W - 2.0 || p.y > H - 2.0) {
     col = uOutline;
   } else if (p.x < 3.0 || p.y < 3.0 || p.x > W - 4.0 || p.y > H - 4.0) {
     col = uInk;
@@ -91,7 +107,7 @@ void main() {
     float gEdge = floor(uGhost * iw + 0.5);
     col = uTrack * (row < 2.0 ? 0.45 : 1.0);
     if (q.x < edge) {
-      vec3 f = uFill * uBright;
+      vec3 f = mix(uFill, uEmber, uLow) * uBright;
       if (row < 2.0) f = mix(f, vec3(1.0), 0.28);
       else if (row >= 6.0) f *= 0.7;
       // Rising sparks in the liquid (mana refilling).
@@ -108,6 +124,7 @@ void main() {
     float k = floor((q.x + 0.5) / segW);
     float segEnd = floor((k + 1.0) * segW + 0.5);
     if (q.x >= segEnd - 2.0 && q.x < iw - 0.5) col *= 0.45;
+    if (notch > 0.5) col = mix(col, uBrass, q.x < edge ? 0.55 : 0.8);
   }
   gl_FragColor = vec4(col * uShow, uShow);
   #include <colorspace_fragment>
@@ -148,6 +165,8 @@ export function PixelBar({ width, height, unit, fill, segments, state, showRef, 
           uWave: { value: 0 },
           uBubbles: { value: 0 },
           uBright: { value: 1 },
+          uKnee: { value: 0 },
+          uLow: { value: 0 },
           uTime: { value: 0 },
           uShow: { value: 0 },
           uReveal: { value: 0 },
@@ -157,6 +176,8 @@ export function PixelBar({ width, height, unit, fill, segments, state, showRef, 
           uTrack: { value: new Color("#07050a") },
           uOutline: { value: new Color(ink.brassDark) },
           uInk: { value: new Color(ink.ink) },
+          uEmber: { value: new Color("#ff5136") },
+          uBrass: { value: new Color(ink.brass) },
         },
         vertexShader: VERT,
         fragmentShader: FRAG,
@@ -183,6 +204,8 @@ export function PixelBar({ width, height, unit, fill, segments, state, showRef, 
     u.uWave!.value = s.wave;
     u.uBubbles!.value = s.bubbles;
     u.uBright!.value = s.bright;
+    u.uKnee!.value = s.knee;
+    u.uLow!.value = s.low;
     u.uTime!.value = uiNow();
     u.uShow!.value = showRef.current;
     u.uReveal!.value = revealRef ? revealRef.current : showRef.current;
