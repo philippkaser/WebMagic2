@@ -10,6 +10,7 @@ import { getItemDef, hasProc } from "../items/catalog";
 import type { ItemDef } from "../items/types";
 import { peerMessage } from "../net/channels";
 import { estimatePeer } from "../net/players";
+import { cameraFacingSet } from "../player/CameraKick";
 import { input } from "../player/input";
 import { getStats, useGame } from "../state/gameStore";
 import { castFeel, newCastFeel, READY_COOLDOWN } from "./castFeel";
@@ -229,12 +230,16 @@ export function CastingSystem() {
       const abilityId = staff[which];
       if (!abilityId) return false;
       camera.lookAt(x, y, z);
+      cameraFacingSet();
       const left = castFromStaff(abilityId, staff, camera);
       slots[which].left = slots[which].total = left;
       return true;
     };
     // Point the camera without casting (screenshot scripts).
-    w.__lookAt = (x: number, y: number, z: number) => camera.lookAt(x, y, z);
+    w.__lookAt = (x: number, y: number, z: number) => {
+      camera.lookAt(x, y, z);
+      cameraFacingSet();
+    };
     return () => {
       delete w.__castAt;
       delete w.__lookAt;

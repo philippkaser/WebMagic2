@@ -33,9 +33,13 @@ export const damageNumbers: NumberPool = createNumbers();
 /** Gold: a weak point's sparks. */
 const CRIT_SPARK = "#ffd27a";
 
+/** Dev: the marks and numbers held still at this moment (screenshots on a
+ * machine too slow to catch a 0.1 s tick), or null. */
+let heldAt: number | null = null;
+
 /** The crosshair's marks right now. */
 export function hitMarks(out: Marks): Marks {
-  return marksAt(confirm, nowS(), out);
+  return marksAt(confirm, heldAt ?? nowS(), out);
 }
 
 /** How hot the staff burns from your streak, 0…1. */
@@ -45,7 +49,7 @@ export function streakHeat(): number {
 
 /** Age the numbers (the numbers layer calls this each frame). */
 export function stepDamageNumbers(dt: number): void {
-  stepNumbers(damageNumbers, dt);
+  if (heldAt === null) stepNumbers(damageNumbers, dt);
 }
 
 function playConfirm(s: ConfirmSound): void {
@@ -157,4 +161,8 @@ if (typeof window !== "undefined" && import.meta.env?.DEV) {
     marks: { ...hitMarks(newMarks()) },
     heat: streakHeat(),
   });
+  // Hold the marks and numbers still (true) or let them run again (false).
+  (window as unknown as Record<string, unknown>).__combatHold = (on: boolean) => {
+    heldAt = on ? nowS() : null;
+  };
 }

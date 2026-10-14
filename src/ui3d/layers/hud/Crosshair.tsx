@@ -77,8 +77,8 @@ vec2 fold(vec2 p) {
 bool diag(vec2 q, float a, float b) {
   return abs(q.x - q.y) <= 1.0 && min(q.x, q.y) >= a && max(q.x, q.y) <= b;
 }
-// Hit ticks: 2×2 blocks (heavier shots: a longer stroke) out on the
-// diagonals.
+// Hit ticks: short two-pixel strokes out on the diagonals (heavier shots:
+// a longer stroke).
 bool tick(vec2 p) {
   return uTick > 0.0 && diag(fold(p), uTickR, uTickR + uTickLen);
 }
@@ -170,7 +170,7 @@ export function Crosshair() {
     hitMarks(marks);
     u.uTick!.value = marks.tick > 0 ? 1 : 0;
     u.uTickR!.value = 6 + marks.spread;
-    u.uTickLen!.value = marks.heavy ? 2 : 1;
+    u.uTickLen!.value = marks.heavy ? 3 : 2;
     u.uKill!.value = marks.kill;
     u.uCrit!.value = marks.crit ? 1 : 0;
     u.uShow!.value = fade.current;

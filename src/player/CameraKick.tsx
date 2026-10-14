@@ -25,10 +25,20 @@ const UP = new Vector3(0, 1, 0);
 const qPitch = new Quaternion();
 const qYaw = new Quaternion();
 
+/** What this frame laid on the camera (there is one eye). */
+const laidOn = { pitch: 0, yaw: 0, fov: false, baseFov: 0 };
+
+/** Something just SET the camera's facing outright (a dev script's lookAt):
+ * there's no kick left on it to take off. */
+export function cameraFacingSet(): void {
+  laidOn.pitch = 0;
+  laidOn.yaw = 0;
+}
+
 export function CameraKick() {
   const camera = useThree((s) => s.camera) as PerspectiveCamera;
   const k = useMemo(createKick, []);
-  const laid = useRef({ pitch: 0, yaw: 0, fov: false, baseFov: 0 });
+  const laid = useRef(laidOn);
 
   useEffect(() => gameEvents.on("castKick", (e) => kickCamera(k, e.pitch, e.yaw, e.fov)), [k]);
 
