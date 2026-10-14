@@ -232,6 +232,45 @@ export function playEnemyWindup(kind: EnemyVoice, at: At, seconds: number): void
   }, 1.2, ENEMY_SIZE[kind]);
 }
 
+/** A corpse's beat (enemies/corpses): the wisp's pop, the slime's splat,
+ * the shadow coming apart, the sentry's crystal shattering on the stone —
+ * or, for `bounce`, its head striking the floor first. */
+export function playCorpseBeat(kind: EnemyVoice, beat: "main" | "bounce", at: At): void {
+  atPoint(at, 0.8, () => {
+    if (beat === "bounce") {
+      // Crystal on stone: a clink and a ring.
+      noise({ dur: 0.03, vol: 0.08, filterFreq: jitter(3600), type: "bandpass", q: 2 });
+      tone({ type: "sine", freq: jitter(2093, 0.03), dur: 0.35, vol: 0.03 });
+      tone({ type: "sine", freq: jitter(3136, 0.03), dur: 0.2, vol: 0.015 });
+      return;
+    }
+    switch (kind) {
+      case "wisp":
+        // It pops: a bright snap and a sucked-in chirp.
+        noise({ dur: 0.05, vol: 0.12, filterFreq: 4200, filterEnd: 1500, type: "bandpass", q: 0.8 });
+        tone({ type: "sine", freq: 1900, freqEnd: 600, dur: 0.12, vol: 0.06 });
+        break;
+      case "slime":
+        // A wet slap on the stone.
+        noise({ dur: 0.18, vol: 0.12, filterFreq: 900, filterEnd: 240, type: "bandpass", q: 1.6 });
+        tone({ type: "sine", freq: 130, freqEnd: 55, dur: 0.16, vol: 0.1 });
+        break;
+      case "shadow":
+        noise({ dur: 0.6, vol: 0.05, filterFreq: 1800, filterEnd: 500, type: "bandpass", q: 1.2, attack: 0.05 });
+        break;
+      case "sentry":
+        // The crystal shatters: a burst of glassy pings.
+        noise({ dur: 0.08, vol: 0.12, filterFreq: 5200, type: "bandpass", q: 1 });
+        for (let i = 0; i < 5; i++) {
+          tone({ type: "sine", freq: jitter(1800 + i * 520, 0.08), dur: 0.25 + Math.random() * 0.3, vol: 0.018, delay: i * 0.025 + Math.random() * 0.03 });
+        }
+        break;
+      case "boss":
+        break; // it goes critical with a blast (playExplosion)
+    }
+  }, 1.2, ENEMY_SIZE[kind]);
+}
+
 // ── Lasting sounds: torches, rifts ─────────────────────────────────────────
 
 export interface Loop {

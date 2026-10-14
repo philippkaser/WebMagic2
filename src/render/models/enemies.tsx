@@ -90,6 +90,22 @@ const wardenBody = new IcosahedronGeometry(1.15, 1);
 const wardenShard = new OctahedronGeometry(0.22);
 const wardenCore = new SphereGeometry(0.42, 10, 10);
 
+/** The shared geometry, for things built from the same parts (the corpse
+ * layer's pre-mounted bodies). Never dispose these. */
+export const ENEMY_GEOMETRY = {
+  wispBody,
+  wispCore,
+  sentryPlinth,
+  sentryHead,
+  shadowBody,
+  shadowEye,
+  slimeBody,
+  slimeEye,
+  wardenBody,
+  wardenShard,
+  wardenCore,
+} as const;
+
 // ── Shared static materials ──────────────────────────────────────────────────
 /** A self-lit accent (eye, core, shard): dark base, bright unclamped emissive
  * so bloom picks it up. */
@@ -171,8 +187,8 @@ export function makeEnemyMaterial(part: EnemyPart): MeshStandardMaterial {
 }
 
 /** Paired eyes sit symmetrically about the face. */
-const SHADOW_EYE_X = [0.13, -0.13] as const;
-const SLIME_EYE_X = [0.16, -0.16] as const;
+export const SHADOW_EYE_X = [0.13, -0.13] as const;
+export const SLIME_EYE_X = [0.16, -0.16] as const;
 
 /** The Warden's three orbiting shards, evenly spaced and staggered in height. */
 export const WARDEN_SHARDS = [0, 1, 2].map(

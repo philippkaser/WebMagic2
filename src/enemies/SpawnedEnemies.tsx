@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { registerSyncProvider } from "../net/entities";
 import { useGame } from "../state/gameStore";
+import { Corpses } from "./corpses/Corpses";
 import { Slime } from "./kinds/Slime";
 import { getEnemyDef } from "./registry";
 import { despawnSpawned, spawnHandlers, type SpawnedEnemy } from "./spawnedStore";
@@ -40,6 +41,9 @@ export function SpawnedEnemies() {
 
   return (
     <>
+      {/* The dead linger a moment where they fell (corpses/) — mounted here
+          because this is mounted wherever enemies can die. */}
+      <Corpses />
       {spawns.map((s) =>
         s.kind === "slime" ? (
           <Slime

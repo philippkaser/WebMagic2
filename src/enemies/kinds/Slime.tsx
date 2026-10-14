@@ -68,6 +68,7 @@ export function Slime({
       p.t[SQ] += slimeSquash(vy.current) - 1;
     },
     emerge: gen > 0,
+    size: cfg.size,
   });
   const touch = useContactDamage({
     range: radius + 0.8,

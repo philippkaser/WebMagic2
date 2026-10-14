@@ -27,6 +27,7 @@ import type { ChaseInput, Steering, Vec } from "./brains/common";
 import { encodeDeath, readDeath, type DeathNote } from "./deathNote";
 import { ack, createLedger, noteMine, predictedHp, type DoomLedger } from "./doom";
 import { createStagger, dirOf, NO_DIR, quantDir, readHitExtras, staggerFor } from "./hitFx";
+import { playCorpse } from "./corpses/Corpses";
 import { createBlow, LiveBody, type Blow } from "./liveBody";
 import type { Puppet } from "./puppet";
 import { getEnemyStats, type EnemyId } from "./roster";
@@ -146,6 +147,10 @@ export interface UseEnemyOptions {
   onAct?: (code: number, progress: number, at: Vec) => void;
   /** Born out of something (a slime's split): spring up from small. */
   emerge?: boolean;
+  /** Body scale (a slime generation's size) — its corpse is drawn at it. */
+  size?: number;
+  /** Which way it faces when it dies, if not the puppet's (the sentry's head). */
+  faceYaw?: () => number;
 }
 
 export interface EnemyShell {
@@ -277,7 +282,31 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
         scale: o.deathFx?.scale ?? (o.kind === "boss" ? 2.6 : 1),
       });
       const fx = o.deathFx;
-      if (fx) {
+      // The body lingers a moment as a corpse (corpses/): it implodes,
+      // unravels, splats, loses its head — and its burst, soul, light and
+      // floor splat land on the corpse's own beat. The collider, hittable
+      // and net registration still go this frame.
+      const pose = live.pose;
+      const played = playCorpse(
+        {
+          kind: o.kind,
+          x: t.x + pose.x,
+          y: t.y + pose.y,
+          z: t.z + pose.z,
+          yaw: o.faceYaw?.() ?? pose.yaw,
+          size: o.size ?? 1,
+          dir: note?.dir ?? null,
+          over: note?.over ?? 0,
+          seed: live.seed,
+        },
+        {
+          fx: fx ?? null,
+          soul: fx?.soul ?? fx?.light.color ?? live.look.soul,
+          scale: fx?.scale ?? (o.kind === "boss" ? 2.6 : 1),
+          light: fx?.light.intensity ?? 60,
+        },
+      );
+      if (fx && !played) {
         const at: Vec3 = [t.x, t.y + (fx.lift ?? 0), t.z];
         spawnBurst({ ...fx.burst, position: at });
         soulDissolveFx(at, fx.soul ?? fx.light.color, fx.scale ?? 1);

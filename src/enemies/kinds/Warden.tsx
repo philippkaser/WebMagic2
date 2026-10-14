@@ -42,6 +42,7 @@ import {
   wardenVolleyCount,
   type WardenBrain,
 } from "../brains/warden";
+import { corpsesMounted } from "../corpses/Corpses";
 import { OY } from "../puppet";
 import { ENEMY_GROUPS, useContactDamage, useEnemy } from "../useEnemy";
 
@@ -111,18 +112,22 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
       );
     },
     onDeathFx: (t) => {
-      // The boss comes apart in stages: a rolling chain of blasts through
-      // its shell, then its soul tears loose and rises.
-      const at: Vec3 = [t.x, t.y, t.z];
-      soulDissolveFx(at, WARDEN_COLOR, 2.6);
-      for (let i = 0; i < 3; i++) {
-        const p: Vec3 = [t.x + (Math.random() - 0.5) * 1.6, t.y + (Math.random() - 0.5) * 1.2, t.z + (Math.random() - 0.5) * 1.6];
-        setTimeout(() => {
-          explosionFx(p, 2.4, i === 1 ? "#ffd9a8" : WARDEN_COLOR, 1.2);
-          flashLight(p, WARDEN_COLOR, 30);
-        }, i * 170);
+      // The boss comes apart in stages — its corpse hangs, sheds its shards
+      // in blasts, then its core goes critical (corpses/corpseScripts.ts,
+      // on the presentation clock). Without the corpse layer: the old
+      // rolling chain of blasts.
+      if (!corpsesMounted()) {
+        const at: Vec3 = [t.x, t.y, t.z];
+        soulDissolveFx(at, WARDEN_COLOR, 2.6);
+        for (let i = 0; i < 3; i++) {
+          const p: Vec3 = [t.x + (Math.random() - 0.5) * 1.6, t.y + (Math.random() - 0.5) * 1.2, t.z + (Math.random() - 0.5) * 1.6];
+          setTimeout(() => {
+            explosionFx(p, 2.4, i === 1 ? "#ffd9a8" : WARDEN_COLOR, 1.2);
+            flashLight(p, WARDEN_COLOR, 30);
+          }, i * 170);
+        }
+        flashLight([t.x, t.y, t.z], WARDEN_COLOR, 60);
       }
-      flashLight([t.x, t.y, t.z], WARDEN_COLOR, 60);
       playBossRoar([t.x, t.y + 1.5, t.z]);
       // Guaranteed rich drops for the whole party (host-rolled).
       dropLoot([t.x - 0.7, Math.max(t.y, 0.8), t.z + 0.6], floor + 2);
@@ -135,7 +140,7 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
       // The Warden hoards escapes too — a feather drop is a real prize.
       if (Math.random() < 0.35) dropItem(SAVE_FEATHER_ID, [t.x, Math.max(t.y, 0.8), t.z + 1.4]);
       gameEvents.emit("message", "The Warden falls. The seal breaks.");
-      gameEvents.emit("shake", 0.8);
+      gameEvents.emit("shake", corpsesMounted() ? 0.4 : 0.8); // the big one comes when it goes critical
     },
     onKilled: () => {
       gameEvents.emit("bossHp", null);

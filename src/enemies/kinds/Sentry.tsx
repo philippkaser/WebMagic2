@@ -60,6 +60,8 @@ export function Sentry({ position, floor, entityId }: { position: Vec3; floor: n
     drops: DROPS,
     // The burning crystal head is what to aim for.
     weakSpot: { y: SENTRY.headHeight, r: 0.32 },
+    // Its head comes off facing wherever it was tracking.
+    faceYaw: () => head.current?.rotation.y ?? 0,
     act: () => {
       const w = sentryWindup(brain);
       return w > 0 ? encodeAct(ACT.aim, w) : 0;
