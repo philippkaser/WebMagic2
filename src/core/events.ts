@@ -112,6 +112,15 @@ export interface GameEvents extends Record<string, unknown> {
     /** Size (1 = a wisp). */
     scale: number;
   };
+  /** The local wizard is at the Brink: lethal grace refused a killing blow
+   * and left them standing on 1 (state/gameStore). `from` is the health the
+   * blow landed on. Local to the victim: slow motion, a ring in the ears, a
+   * red flash and a moment's window to get away answer it. */
+  wizardBrink: { from: number; max: number };
+  /** The local wizard was healed (a potion, the fountain, lifesteal):
+   * health `from` → `to` of `max`. A real heal back over the last-stand
+   * line is a second wind (game/heart releaseOf). */
+  wizardHealed: { from: number; to: number; max: number };
 }
 
 export const gameEvents = new Emitter<GameEvents>();
