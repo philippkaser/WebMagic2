@@ -345,8 +345,7 @@ class Context {
     const ty = Math.floor(p[2] / TILE + input.grid.size / 2);
     if (!input.grid.isFloor(tx, ty)) return false;
     if (room === this.arena && (spot.mount === "floor" || def.collider)) return false;
-    // (The exit's rift is the floor's one way out — home or down — so the
-    // old way-home spot, pois.leave, is deliberately not consulted.)
+    // (The exit's rift is the floor's one way out — home or down.)
     if (!far(pois.spawn, c.spawn + r) || !far(pois.exit, c.portal + r)) return false;
     if (!far(pois.treasure, c.treasure + r)) return false;
     if (pois.boss && !far(pois.boss, c.boss + r)) return false;

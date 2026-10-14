@@ -56,7 +56,7 @@ describe("lore rune placement", () => {
       for (const torch of layout.torches) {
         expect(worldToTile(torch, layout.size)).not.toEqual([tx, ty]);
       }
-      const landmarks = [layout.exit, layout.leave, layout.treasure, layout.spawn];
+      const landmarks = [layout.exit, layout.treasure, layout.spawn];
       if (layout.boss) landmarks.push(layout.boss);
       for (const p of landmarks) {
         const [lx, ly] = worldToTile(p, layout.size);

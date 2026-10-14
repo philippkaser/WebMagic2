@@ -63,41 +63,17 @@ describe("generateFloor", () => {
       const layout = generateFloor(seed, floor);
       expect(isReachable(layout, layout.spawn, layout.exit)).toBe(true);
       expect(isReachable(layout, layout.spawn, layout.treasure)).toBe(true);
-      expect(isReachable(layout, layout.spawn, layout.leave)).toBe(true);
     }
   });
 
-  test("exit, way home, treasure and every lore rune are reachable at every depth", () => {
+  test("the rift, treasure and every lore rune are reachable at every depth", () => {
     for (const layout of sampleFloors(160)) {
       expect(isReachable(layout, layout.spawn, layout.exit)).toBe(true);
-      expect(isReachable(layout, layout.spawn, layout.leave)).toBe(true);
       expect(isReachable(layout, layout.spawn, layout.treasure)).toBe(true);
       if (layout.boss) expect(isReachable(layout, layout.spawn, layout.boss)).toBe(true);
       for (const rune of layout.lore) {
         expect(isReachable(layout, layout.spawn, rune.pos)).toBe(true);
       }
-    }
-  });
-
-  test("the way home never crowds the descent portal", () => {
-    for (let seed = 1; seed <= 150; seed++) {
-      for (const floor of [1, 4, 10, 17, 30, 60]) {
-        const l = generateFloor(seed * 7919, floor);
-        const dx = Math.abs(l.leave[0] - l.exit[0]);
-        const dz = Math.abs(l.leave[2] - l.exit[2]);
-        // Portals are 3.4 m wide (x) and 1.6 m deep (z): side by side they
-        // need ≥ 4 m between centres, in line ≥ 4 m for the prompts to part.
-        expect(dx >= 4 || dz >= 4).toBe(true);
-      }
-    }
-  });
-
-  test("every floor has a way home beside the exit, reachable from the spawn", () => {
-    for (const floor of [1, 3, 5, 7, 10, 23, 50, 99, 100]) {
-      const layout = generateFloor(99, floor);
-      expect(isReachable(layout, layout.spawn, layout.leave)).toBe(true);
-      expect(layout.leave).not.toEqual(layout.exit);
-      expect(roomAt(layout, layout.leave)).toBe(roomAt(layout, layout.exit));
     }
   });
 
@@ -263,7 +239,6 @@ describe("generateFloor", () => {
     for (const layout of found.values()) {
       expect(layout.omen).not.toBeNull();
       expect(isReachable(layout, layout.spawn, layout.exit)).toBe(true);
-      expect(isReachable(layout, layout.spawn, layout.leave)).toBe(true);
       expect(isReachable(layout, layout.spawn, layout.treasure)).toBe(true);
       expect(layout.torches.length).toBeGreaterThanOrEqual(2);
       expect(layout.props.length).toBeGreaterThan(0);

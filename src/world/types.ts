@@ -195,9 +195,6 @@ export interface FloorLayout {
   lore: LoreSpawn[];
   spawn: Vec3;
   exit: Vec3;
-  /** The way home, beside the exit. Every floor has one; whether it OPENS
-   * for a given wizard is a run rule (floors played), not a layout rule. */
-  leave: Vec3;
   /** Guaranteed loot pedestal. */
   treasure: Vec3;
   /** Vaults, ward circles, shrines, fountains (world/gen/eventPlacement.ts). */

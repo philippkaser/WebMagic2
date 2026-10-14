@@ -84,7 +84,7 @@ describe("architecture", () => {
         if (before[i] && !blocked.has(i)) expect(after[i]).toBe(1);
       }
       // No landmark tile is under a pillar.
-      const landmarks: Vec3[] = [l.spawn, l.exit, l.leave, l.treasure, ...l.lore.map((r) => r.pos)];
+      const landmarks: Vec3[] = [l.spawn, l.exit, l.treasure, ...l.lore.map((r) => r.pos)];
       if (l.boss) landmarks.push(l.boss);
       for (const p of landmarks) {
         const [x, y] = worldToTile(p, l.size);
@@ -105,7 +105,6 @@ describe("architecture", () => {
         if (l.boss) expect(room).not.toBe(roomAt(l, l.exit));
         expect(d(pos, l.spawn)).toBeGreaterThanOrEqual(c.spawn);
         expect(d(pos, l.exit)).toBeGreaterThanOrEqual(c.portal);
-        expect(d(pos, l.leave)).toBeGreaterThanOrEqual(c.portal);
         expect(d(pos, l.treasure)).toBeGreaterThanOrEqual(c.treasure);
         for (const r of l.lore) expect(d(pos, r.pos)).toBeGreaterThanOrEqual(c.lore);
         for (const t of l.torches) expect(d(pos, t)).toBeGreaterThanOrEqual(c.torch);
@@ -165,7 +164,6 @@ describe("architecture", () => {
         const [x, y] = worldToTile(s.pos, l.size);
         expect(l.tiles[y * l.size + x]).toBe(FLOOR);
         expect(Math.hypot(s.pos[0] - l.exit[0], s.pos[2] - l.exit[2])).toBeGreaterThanOrEqual(3);
-        expect(Math.hypot(s.pos[0] - l.leave[0], s.pos[2] - l.leave[2])).toBeGreaterThanOrEqual(3);
         expect(s.radius).toBeGreaterThan(0.5);
         expect(s.radius).toBeLessThan(TILE);
       }

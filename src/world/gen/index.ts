@@ -119,7 +119,6 @@ export function generateFloor(seed: number, floor: number): FloorLayout {
     lore,
     spawn: pois.spawn,
     exit: pois.exit,
-    leave: pois.leave,
     treasure: pois.treasure,
     events,
     boss: pois.boss,

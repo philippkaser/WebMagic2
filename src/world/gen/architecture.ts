@@ -217,7 +217,7 @@ function pillarFits(input: ArchitectureInput, p: Vec3): boolean {
   const c = PILLAR_CLEARANCE;
   const far = (q: Vec3, d: number) => dist2World(p, q) >= d * d;
   if (!far(pois.spawn, c.spawn)) return false;
-  if (!far(pois.exit, c.portal) || !far(pois.leave, c.portal)) return false;
+  if (!far(pois.exit, c.portal)) return false;
   if (!far(pois.treasure, c.treasure)) return false;
   if (!input.lore.every((r) => far(r.pos, c.lore))) return false;
   if (!input.torches.every((t) => far(t, c.torch))) return false;
@@ -244,7 +244,6 @@ function placeShafts(rng: Rng, input: ArchitectureInput, ribs: RibSpawn[], pilla
     const [tx, ty] = worldToTile(p, grid.size);
     if (!grid.isFloor(tx, ty)) return false;
     if (dist2World(p, pois.exit) < SHAFT_PORTAL_CLEARANCE ** 2) return false;
-    if (dist2World(p, pois.leave) < SHAFT_PORTAL_CLEARANCE ** 2) return false;
     if (pillars.some((q) => dist2World(p, q.pos) < SHAFT_PILLAR_CLEARANCE ** 2)) return false;
     const topRadius = radius * 0.45;
     return !ribs.some((r) => {
@@ -299,7 +298,7 @@ function nearLeaf(d: DoorwaySpawn, p: Vec3): boolean {
 function placeCrystals(rng: Rng, input: ArchitectureInput): CrystalSpawn[] {
   const { grid, pois } = input;
   const crystals: CrystalSpawn[] = [];
-  const landmarks = [pois.spawn, pois.exit, pois.leave, pois.treasure];
+  const landmarks = [pois.spawn, pois.exit, pois.treasure];
   for (const room of input.rooms) {
     if (crystals.length >= CRYSTAL_CAP) break;
     const corners: { tile: [number, number]; out: [number, number] }[] = [

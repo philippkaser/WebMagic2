@@ -86,7 +86,7 @@ export function placeLore({ grid, seed, floor, rooms, pois, torchTiles }: LoreIn
 function runeSpots(grid: Grid, rooms: Rect[], pois: Pois, torchTiles: Tile[]): RuneSpot[] {
   const reach = floodFill(grid.tiles, grid.size, pois.spawnTile);
   const blocked = new Set(torchTiles.map(([x, y]) => y * grid.size + x));
-  const landmarks = [pois.spawnTile, pois.exitTile, pois.leaveTile, pois.treasureTile];
+  const landmarks = [pois.spawnTile, pois.exitTile, pois.treasureTile];
   if (pois.bossTile) landmarks.push(pois.bossTile);
   const nearLandmark = (x: number, y: number) =>
     landmarks.some(
