@@ -12,7 +12,7 @@ import { spawnBurst, type BurstOptions } from "../fx/Particles";
 import { ENEMY_SOURCE } from "../game/damageSource";
 import { getFloorRules } from "../game/floorRules";
 import { getPlayerBody, playerPosition } from "../game/player-state";
-import { allocId, registerHittable } from "../game/registry";
+import { allocId, registerHittable, type HitInfo } from "../game/registry";
 import { nearestWizardTo } from "../game/targets";
 import { GOLD_DROPS } from "../items/economy";
 import { dropGold, dropLoot, dropMaterials } from "../items/LootOrbs";
@@ -20,8 +20,12 @@ import { isHost } from "../net/netStore";
 import { useNetBody, type NetBody } from "../net/NetSystems";
 import { combatActive, getStats, useGame } from "../state/gameStore";
 import { sanitizeHit, type HitData } from "../weapons/damage";
+import { localWizardId } from "../weapons/localWizard";
 import type { Vec3 } from "../world/types";
 import type { ChaseInput, Steering, Vec } from "./brains/common";
+import { encodeDeath, readDeath, type DeathNote } from "./deathNote";
+import { ack, createLedger, noteMine, predictedHp, type DoomLedger } from "./doom";
+import { readHitExtras } from "./hitFx";
 import { getEnemyStats, type EnemyId } from "./roster";
 
 /** The shared enemy shell: everything an enemy is that isn't its brain or its
@@ -107,8 +111,18 @@ export interface UseEnemyOptions {
   /** How fast the hit flash fades (per second). */
   flashDecay?: number;
   /** Authoritative hp changed while alive — applied damage on the authority,
-   * a snapshot on a replica. */
+   * a snapshot on a replica. Fires only when it really changed. */
   onHp?: (hp: number, maxHp: number) => void;
+  /** Its weak point, for precision hits (HitInfo.crit). */
+  weakSpot?: WeakSpot;
+}
+
+/** A sphere of radius `r` at height `y` above the body origin, `fwd` ahead
+ * of it along the way the body faces (the shadow's eyes). */
+export interface WeakSpot {
+  y: number;
+  r: number;
+  fwd?: number;
 }
 
 export interface EnemyShell {
@@ -164,12 +178,23 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
   // Its voice: woken once, a footfall every stride it walks.
   const voice = useRef({ woke: false, cried: -Infinity, x: NaN, z: NaN, walked: 0 });
 
-  const kill = useCallback((silent = false) => {
+  const kill = useCallback((silent = false, note: DeathNote | null = null) => {
     if (deadRef.current) return;
     deadRef.current = true;
     const o = opts.current;
     const t = body.current?.translation() ?? { x: o.position[0], y: o.position[1], z: o.position[2] };
     if (!silent) {
+      // Who, where, which way, how hard — on every client (a late joiner's
+      // silent catch-up excepted). The host's death note names the killer.
+      gameEvents.emit("enemyKilled", {
+        id: o.entityId,
+        kind: o.kind,
+        at: [t.x, t.y, t.z],
+        mine: !!note && note.by !== "" && note.by === localWizardId(),
+        dir: note?.dir ?? null,
+        over: note?.over ?? 0,
+        scale: o.deathFx?.scale ?? (o.kind === "boss" ? 2.6 : 1),
+      });
       const fx = o.deathFx;
       if (fx) {
         const at: Vec3 = [t.x, t.y + (fx.lift ?? 0), t.z];
@@ -223,6 +248,33 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
     [maxHp],
   );
 
+  // A hit as this machine sees it (the shooter's own, the host's view of a
+  // remote one, a replica's hp drop): the shared contract's enemyHit.
+  const announceHit = useCallback(
+    (at: Vec | null, damage: number, lifeAfter: number, mine: boolean, crit: boolean) => {
+      const o = opts.current;
+      const t = at ?? body.current?.translation() ?? { x: o.position[0], y: o.position[1], z: o.position[2] };
+      gameEvents.emit("enemyHit", {
+        id: o.entityId,
+        kind: o.kind,
+        at: [t.x, t.y, t.z],
+        damage,
+        frac: Math.max(0, lifeAfter / maxHp),
+        mine,
+        crit,
+        lethal: lifeAfter <= 0,
+      });
+    },
+    [maxHp],
+  );
+
+  const weakSpot = useCallback((): { x: number; y: number; z: number; r: number } | null => {
+    const w = opts.current.weakSpot;
+    const t = body.current?.translation();
+    if (!w || !t) return null;
+    return { x: t.x, y: t.y + w.y, z: t.z + (w.fwd ?? 0), r: w.r };
+  }, []);
+
   // Its life on the board (life marks, the boss bar, wound looks read it).
   useEffect(() => {
     if (dead) return;
@@ -243,6 +295,7 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
     entityId: options.entityId,
     body,
     hp,
+    maxHp,
     deadRef,
     flash,
     dead,
@@ -254,6 +307,8 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
     hitFeedback,
     onDamaged,
     onHp,
+    announceHit,
+    weakSpot: options.weakSpot ? weakSpot : undefined,
   });
 
   return {
@@ -403,6 +458,7 @@ export function useEnemyNet(opts: {
   entityId: string;
   body: RefObject<RapierRigidBody | null>;
   hp: RefObject<number>;
+  maxHp: number;
   deadRef: RefObject<boolean>;
   flash: RefObject<number>;
   dead: boolean;
@@ -411,13 +467,18 @@ export function useEnemyNet(opts: {
   knockTimer?: RefObject<number>;
   /** Fraction of knockback impulses that actually applies (bosses resist). */
   knockbackScale?: number;
-  /** silent = late-join catch-up: apply the death without VFX. */
-  onKill: (silent?: boolean) => void;
+  /** silent = late-join catch-up: apply the death without VFX. `note` is
+   * the host's word on the kill (who, which way, how hard). */
+  onKill: (silent?: boolean, note?: DeathNote | null) => void;
   hitFeedback?: () => void;
   /** Authority: damage landed (from anyone) — wake up and fight back. */
   onDamaged?: () => void;
   /** Authoritative hp changed (applied here, or a snapshot on a replica). */
   onHp?: (hp: number) => void;
+  /** A hit as this machine saw it (the enemyHit contract). */
+  announceHit?: (at: Vec | null, damage: number, lifeAfter: number, mine: boolean, crit: boolean) => void;
+  /** Its weak point right now, if it has one. */
+  weakSpot?: () => { x: number; y: number; z: number; r: number } | null;
   /** Body radius hitscan spells aim at. */
   radius?: number;
 }): NetBody {
@@ -425,6 +486,7 @@ export function useEnemyNet(opts: {
     entityId,
     body,
     hp,
+    maxHp,
     deadRef,
     flash,
     dead,
@@ -435,17 +497,29 @@ export function useEnemyNet(opts: {
     hitFeedback,
     onDamaged,
     onHp,
+    announceHit,
+    weakSpot,
     radius,
   } = opts;
 
   const netRef = useRef<NetBody | null>(null);
+  // Host: who struck last and which way — the death note. ("" = nobody's
+  // own magic: a barrel, a trap.)
+  const lastBlow = useRef({ by: "", x: 0, z: 0 });
+  // Shooter: blows sent and not yet seen land (doom.ts).
+  const ledger = useRef<DoomLedger | null>(null);
+  const seenFields = useRef(false);
 
   const applyDamage = useCallback(
-    (damage: number, impulse: { x: number; y: number; z: number }) => {
+    (damage: number, impulse: { x: number; y: number; z: number }, by: string) => {
       if (deadRef.current) return;
       hp.current -= damage;
       flash.current = 1;
       if (knockTimer) knockTimer.current = 0.4;
+      const blow = lastBlow.current;
+      blow.by = by;
+      blow.x = impulse.x;
+      blow.z = impulse.z;
       body.current?.applyImpulse(
         {
           x: impulse.x * knockbackScale,
@@ -457,11 +531,12 @@ export function useEnemyNet(opts: {
       onHp?.(hp.current);
       onDamaged?.();
       if (hp.current <= 0) {
-        onKill();
-        netRef.current?.despawn();
+        const wire = encodeDeath(blow.by, blow.x, blow.z, -hp.current / maxHp);
+        onKill(false, readDeath(wire));
+        netRef.current?.despawn(wire);
       }
     },
-    [body, deadRef, flash, hp, knockTimer, knockbackScale, onKill, onDamaged, onHp],
+    [body, deadRef, flash, hp, maxHp, knockTimer, knockbackScale, onKill, onDamaged, onHp],
   );
 
   const net = useNetBody({
@@ -471,19 +546,35 @@ export function useEnemyNet(opts: {
     enabled: !dead,
     fields: () => ({ hp: hp.current }),
     onFields: (f) => {
-      if (f.hp !== undefined) {
-        hp.current = f.hp;
-        onHp?.(f.hp);
+      if (f.hp === undefined || !Number.isFinite(f.hp)) return;
+      const before = hp.current;
+      // The first snapshot (a late join, a fresh mount) is the state of
+      // things, not a blow landing.
+      const first = !seenFields.current;
+      seenFields.current = true;
+      if (f.hp === before) return;
+      hp.current = f.hp;
+      const drop = before - f.hp;
+      if (!first && drop > 0.01) {
+        // A teammate's blow (or the dungeon's) reads here. Our own already
+        // showed on the frame it landed — the ledger knows which is which.
+        const ours = ledger.current ? ack(ledger.current, drop, performance.now() / 1000) : 0;
+        if (drop - ours > 0.01) announceHit?.(null, drop - ours, f.hp, false, false);
       }
+      onHp?.(f.hp);
     },
-    onCommand: (cmd, data) => {
-      if (cmd === "hit") {
-        // Capped by the depth we're on: staff levels scale legit damage.
-        const d = sanitizeHit(data, useGame.getState().floor);
-        if (d) applyDamage(d.damage, d.impulse);
-      }
+    onCommand: (cmd, data, from) => {
+      if (cmd !== "hit") return;
+      // Capped by the depth we're on: staff levels scale legit damage.
+      const d = sanitizeHit(data, useGame.getState().floor);
+      if (!d || deadRef.current) return;
+      const x = readHitExtras(data);
+      const at = x.at ? { x: x.at[0], y: x.at[1], z: x.at[2] } : null;
+      if (!x.quiet) announceHit?.(at, d.damage, hp.current - d.damage, false, x.crit);
+      // Only a wizard's own magic earns them the kill.
+      applyDamage(d.damage, d.impulse, x.mine ? from : "");
     },
-    onDespawn: (_data, catchup) => onKill(catchup),
+    onDespawn: (data, catchup) => onKill(catchup, catchup ? null : readDeath(data)),
   });
   netRef.current = net;
 
@@ -494,25 +585,43 @@ export function useEnemyNet(opts: {
       team: "enemy",
       radius,
       getPosition: () => body.current?.translation() ?? { x: 0, y: -999, z: 0 },
-      hit: (damage, impulse) => {
+      weakSpot,
+      hit: (damage, impulse, info?: HitInfo) => {
         if (deadRef.current) return;
+        const mine = info?.mine === true;
+        const quiet = info?.quiet === true;
+        const crit = info?.crit === true;
+        const at = info?.at ? { x: info.at[0], y: info.at[1], z: info.at[2] } : null;
         flash.current = 1;
-        const at = body.current?.translation();
-        playHit(at ? [at.x, at.y, at.z] : undefined);
+        const t = body.current?.translation();
+        playHit(t ? [t.x, t.y, t.z] : undefined);
         hitFeedback?.();
         // Shooter-favored: our shots apply where we saw them land — locally
         // on the authority, via a command to it otherwise (with the physical
         // knockback predicted immediately, so the reaction never waits on
         // the round trip).
         if (isHost()) {
-          applyDamage(damage, impulse);
-        } else {
-          netRef.current?.command("hit", { damage, impulse } satisfies HitData);
-          netRef.current?.predictImpulse(impulse, knockbackScale);
+          if (!quiet) announceHit?.(at, damage, hp.current - damage, mine, crit);
+          applyDamage(damage, impulse, mine ? localWizardId() : "");
+          return;
         }
+        const now = performance.now() / 1000;
+        const l = (ledger.current ??= createLedger());
+        noteMine(l, damage, now);
+        if (!quiet) announceHit?.(at, damage, predictedHp(hp.current, l, now), mine, crit);
+        // Beside the damage: where it landed (the host's sparks), whose magic
+        // it was (the kill's credit), a quiet tug, a precision hit — all
+        // read back through hitFx#readHitExtras.
+        const cmd: HitData & { at?: [number, number, number]; m?: 1; q?: 1; c?: 1 } = { damage, impulse };
+        if (info?.at) cmd.at = info.at;
+        if (mine) cmd.m = 1;
+        if (quiet) cmd.q = 1;
+        if (crit) cmd.c = 1;
+        netRef.current?.command("hit", cmd);
+        netRef.current?.predictImpulse(impulse, knockbackScale);
       },
     });
-  }, [dead, applyDamage, body, deadRef, flash, hitFeedback, knockbackScale]);
+  }, [dead, applyDamage, announceHit, body, deadRef, flash, hitFeedback, hp, knockbackScale, radius, weakSpot]);
 
   return net;
 }

@@ -36,6 +36,8 @@ export function Wisp({ position, floor, entityId }: { position: Vec3; floor: num
     deathFx: DEATH_FX,
     drops: DROPS,
     hitColor: "#d9a9ff",
+    // Its white-hot core: dead centre.
+    weakSpot: { y: 0, r: 0.18 },
   });
   const touch = useContactDamage({
     range: 1.45,

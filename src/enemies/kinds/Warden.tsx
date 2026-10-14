@@ -66,6 +66,8 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
     position,
     floor,
     hitColor: "#ff8a5a",
+    // The blazing core, through the shell.
+    weakSpot: { y: 0, r: 0.5 },
     knockbackScale: 0.25,
     flashDecay: 4,
     onDeathFx: (t) => {

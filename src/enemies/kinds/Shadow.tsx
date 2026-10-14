@@ -37,6 +37,8 @@ export function Shadow({ position, floor, entityId }: { position: Vec3; floor: n
     deathFx: DEATH_FX,
     drops: DROPS,
     hitColor: "#8a5cc0",
+    // Between its eyes.
+    weakSpot: { y: 0.06, r: 0.2, fwd: 0.34 },
   });
   // Contact strike — lands mostly on a lunge; local, like the wisp's burn.
   const touch = useContactDamage({

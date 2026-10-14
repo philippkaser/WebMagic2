@@ -40,6 +40,8 @@ export function Sentry({ position, floor, entityId }: { position: Vec3; floor: n
     deathFx: DEATH_FX,
     drops: DROPS,
     hitColor: "#ff9a5a",
+    // The burning crystal head is what to aim for.
+    weakSpot: { y: SENTRY.headHeight, r: 0.32 },
   });
   const brain = useMemo(() => createSentryBrain(), []);
   const tick = useMemo(createSentryTick, []);
