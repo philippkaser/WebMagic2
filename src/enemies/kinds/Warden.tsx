@@ -44,7 +44,7 @@ import {
 } from "../brains/warden";
 import { corpsesMounted } from "../corpses/Corpses";
 import { OY } from "../puppet";
-import { ENEMY_GROUPS, useContactDamage, useEnemy } from "../useEnemy";
+import { ENEMY_GROUPS, enemiesCalmed, useContactDamage, useEnemy } from "../useEnemy";
 
 /** The boss is a singleton: its net id and HUD bar are fixed. */
 const BOSS_ID = "boss";
@@ -209,7 +209,8 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
     touch(t, dt, awake && e.armed());
 
     // Replicas are moved by the net layer; only the authority thinks.
-    if (!e.net.isAuthority) return;
+    // (Dev: a calmed brain holds whatever it was doing — a tell, for a camera.)
+    if (!e.net.isAuthority || enemiesCalmed()) return;
 
     // Authority brain: fight the nearest wizard on the floor.
     const target = nearestWizardTo(t.x, t.y + WARDEN.aimLift, t.z);

@@ -218,8 +218,18 @@ if (typeof window !== "undefined" && import.meta.env?.DEV) {
   // What this client shows of a body (replication checks in scenarios).
   w.__enemyLook = (id: string) => {
     const b = devBodies.get(id);
+    const p = getLife(id)?.pos();
     return b
-      ? { act: b.act.code, progress: b.act.progress, stage: b.wound.stage, broke: b.broke, doomed: b.doomed, life: b.life, yaw: b.puppet.yaw }
+      ? {
+          act: b.act.code,
+          progress: b.act.progress,
+          stage: b.wound.stage,
+          broke: b.broke,
+          doomed: b.doomed,
+          life: b.life,
+          yaw: b.puppet.yaw,
+          pos: p ? { x: p.x, y: p.y, z: p.z } : null,
+        }
       : null;
   };
   w.__hurtEnemy = (id: string, damage: number, ix = 0, iz = 4, mine = true) =>
