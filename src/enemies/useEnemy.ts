@@ -1,3 +1,4 @@
+import { publishLife, updateLife } from "./lifeBoard";
 import { interactionGroups, type RapierRigidBody } from "@react-three/rapier";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { playHit } from "../audio/sound";
@@ -216,10 +217,27 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
 
   const onHp = useCallback(
     (current: number) => {
+      updateLife(opts.current.entityId, current);
       if (!deadRef.current) opts.current.onHp?.(current, maxHp);
     },
     [maxHp],
   );
+
+  // Its life on the board (life marks, the boss bar, wound looks read it).
+  useEffect(() => {
+    if (dead) return;
+    const stats = getEnemyStats(options.kind);
+    return publishLife({
+      id: options.entityId,
+      kind: options.kind,
+      maxHp,
+      hp: hp.current,
+      pos: () => body.current?.translation() ?? null,
+      top: stats.hitRadius * Math.sqrt(options.healthScale ?? 1) * 1.6,
+      hurtAt: 0,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dead, maxHp]);
 
   const net = useEnemyNet({
     entityId: options.entityId,

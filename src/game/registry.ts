@@ -17,6 +17,19 @@ export interface PhysBody {
 
 export type HitTeam = "enemy" | "prop";
 
+/** What a hit knows besides its damage — for feedback, never for authority
+ * (the host still decides damage and death). */
+export interface HitInfo {
+  /** The local wizard's own magic (drives hit confirms, numbers, hitstop). */
+  mine?: boolean;
+  /** Where it landed (sparks fly from here, numbers pop here). */
+  at?: [number, number, number];
+  /** A precision hit (a weak point). */
+  crit?: boolean;
+  /** A ceaseless tug or tick that shouldn't confirm or flinch (singularity). */
+  quiet?: boolean;
+}
+
 export interface Hittable {
   id: number;
   team: HitTeam;
@@ -24,8 +37,11 @@ export interface Hittable {
    * unset. */
   radius?: number;
   getPosition(): Vec3Tuple;
+  /** Its weak point right now (an eye, a core, a crystal head), if it has
+   * one: a hit landing within `r` of it is a precision hit (HitInfo.crit). */
+  weakSpot?(): { x: number; y: number; z: number; r: number } | null;
   /** Apply damage plus a physical impulse (world-space). */
-  hit(damage: number, impulse: Vec3Tuple): void;
+  hit(damage: number, impulse: Vec3Tuple, info?: HitInfo): void;
 }
 
 let nextId = 1;

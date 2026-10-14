@@ -55,6 +55,33 @@ export interface GameEvents extends Record<string, unknown> {
   phoenix: undefined;
   /** An elixir's blessing took hold (HUD shows it ticking down). */
   buff: { id: import("../items/types").BuffId; seconds: number };
+  /** An enemy was hit (on the shooter's machine for their own hits; on every
+   * other machine when its hp drops in a snapshot, with mine = false).
+   * `frac` is its real life left after the hit (0…1); `lethal` = this hit
+   * killed it (as far as this machine knows). */
+  enemyHit: {
+    id: string;
+    kind: string;
+    at: import("../world/types").Vec3;
+    damage: number;
+    frac: number;
+    mine: boolean;
+    crit: boolean;
+    lethal: boolean;
+  };
+  /** An enemy died for real, on every client. `mine` = the local wizard
+   * landed the killing blow (the host's death note names the killer);
+   * `dir` is the killing blow's xz direction (null if unknown); `over` is
+   * overkill as a share of max hp; `scale` its size (1 = a wisp). */
+  enemyKilled: {
+    id: string;
+    kind: string;
+    at: import("../world/types").Vec3;
+    mine: boolean;
+    dir: [number, number] | null;
+    over: number;
+    scale: number;
+  };
   /** A room event changed phase (roomEvents/net.ts) — views flash, sounds play. */
   roomEvent: { id: string; kind: import("../world/types").RoomEventKind; phase: string; at: import("../world/types").Vec3 };
   /** A blast went off (weapons/explosions.ts#explode — on every client,
