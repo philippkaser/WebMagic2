@@ -49,6 +49,9 @@ export function PlayerController({ spawn }: { spawn: Vec3 }) {
   const lastStep = useRef(0);
   const trauma = useRef(0);
   const hoverClock = useRef(0);
+  // The Brink (lethal grace caught a killing blow): the blink is yours again
+  // at once — the window to get away in (state/gameStore BRINK_WINDOW_S).
+  useEffect(() => gameEvents.on("wizardBrink", () => void (dashCooldown.current = 0)), []);
 
   const fwd = useMemo(() => new Vector3(), []);
   const right = useMemo(() => new Vector3(), []);

@@ -30,7 +30,7 @@ import { POST_GLSL } from "./glsl";
  *    smoothly, so a flame, a blast or the moon keeps its shape and
  *    gradient instead of a flat clipped blot.
  *  - **The body**: a blow drains the colour for a moment, nearing death greys
- *    the world, a near blast flashes the exposure. */
+ *    the world all but its reds, a near blast flashes the exposure. */
 
 /** Meter size (a power of two: its mip chain ends in the 1×1 average). */
 const METER = 32;
@@ -100,6 +100,7 @@ uniform vec3 uHighlights;
 uniform float uSaturation;
 uniform float uContrast;
 uniform float uDrain;
+uniform float uBleed;
 
 #define KNEE 0.72
 
@@ -135,6 +136,11 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   c = shoulder(c);
   // A blow, or death near: the colour drains out of the world.
   c = mix(vec3(postLuma(c)), c, 1.0 - uDrain);
+  // Near death it bleeds out of everything but the reds — blood, fire, the
+  // Warden's eye stay lit in a grey world. Below zero (a second wind) the
+  // colour floods back richer than it was, for a moment.
+  float red = smoothstep(0.08, 0.3, c.r - max(c.g, c.b));
+  c = mix(vec3(postLuma(c)), c, max(1.0 - uBleed, red));
   outputColor = vec4(c, inputColor.a);
 }
 `;
@@ -160,6 +166,7 @@ export class GradeEffect extends Effect {
         ["uSaturation", new Uniform(start.saturation)],
         ["uContrast", new Uniform(start.contrast)],
         ["uDrain", new Uniform(0)],
+        ["uBleed", new Uniform(0)],
       ]),
     });
     this.meter = new WebGLRenderTarget(METER, METER, {
@@ -199,6 +206,10 @@ export class GradeEffect extends Effect {
   }
   set drain(v: number) {
     this.uniforms.get("uDrain")!.value = v;
+  }
+  /** Colour bled from all but the reds (0…1; negative oversaturates). */
+  set bleed(v: number) {
+    this.uniforms.get("uBleed")!.value = v;
   }
   /** The log2 luminance the eye settles the view toward. */
   set key(v: number) {

@@ -269,6 +269,7 @@ export function WizardModel({
   aura = null,
   eyeColor = "#bfe8ff",
   motion,
+  dying,
 }: {
   robeColor: string;
   /** The staff crystal's colour; picks the staff model when `staffId` is
@@ -285,6 +286,10 @@ export function WizardModel({
   eyeColor?: string;
   /** Optional cast pose driver (see WizardMotion). */
   motion?: { current: WizardMotion };
+  /** How near death they are, 0…1 (a floor-mate in their last stand,
+   * beating with their heart: net/RemoteWizards). Embers sputter in a
+   * shell round them. Omitted = never. */
+  dying?: { current: number };
 }) {
   const rig = useMemo(
     () =>
@@ -301,6 +306,7 @@ export function WizardModel({
   const staff = staffId ?? staffKindForColor(staffColor);
   const auraRing = useRef<MeshBasicMaterial>(null);
   const auraShell = useRef<MeshBasicMaterial>(null);
+  const dyingShell = useRef<Mesh>(null);
   // Desync idle motion between wizards standing together.
   const anim = useMemo(
     () => ({ phase: Math.random() * 10, stride: 0, blink: 3 + Math.random() * 3, speed: 0, pos: new Vector3(), init: false }),
@@ -354,6 +360,14 @@ export function WizardModel({
 
     if (auraRing.current) auraRing.current.opacity = 0.42 + Math.sin(t * 2.4) * 0.14;
     if (auraShell.current) auraShell.current.opacity = 0.08 + Math.sin(t * 2.4) * 0.03;
+    // Near death the glow round them sputters like a dying ember.
+    const ds = dyingShell.current;
+    if (ds && dying) {
+      const v = dying.current;
+      ds.visible = v > 0.01;
+      const sputter = Math.sin(t * 23) * Math.sin(t * 7.3 + 1) > 0.15 ? 1 : 0.35;
+      (ds.material as MeshBasicMaterial).opacity = v * (0.06 + 0.16 * sputter);
+    }
   });
 
   const g = G();
@@ -369,6 +383,19 @@ export function WizardModel({
       {/* Aura: a breathing ring at the feet and a faint additive haze. The
           haze is back-faces only, so it glows around the silhouette rather
           than fogging the wizard's front. */}
+      {dying && (
+        <mesh ref={dyingShell} geometry={g.auraShell} position={[0, 0.15, 0]} scale={[0.68, 1.26, 0.68]} visible={false}>
+          <meshBasicMaterial
+            color="#ff5a2a"
+            transparent
+            opacity={0}
+            blending={AdditiveBlending}
+            depthWrite={false}
+            side={BackSide}
+            toneMapped={false}
+          />
+        </mesh>
+      )}
       {aura && (
         <>
           <mesh geometry={g.auraRing} position={[0, FEET + 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>

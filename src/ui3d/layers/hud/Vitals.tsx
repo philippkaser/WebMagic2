@@ -1,12 +1,15 @@
 import { useStats } from "../../../state/useStats";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
-import type { Group } from "three";
+import { Color, Vector3, type Group } from "three";
 import { PLAYER } from "../../../core/config";
 import { gameEvents } from "../../../core/events";
+import { heart, releaseOf } from "../../../game/heart";
+import { LAST_STAND } from "../../../game/vitality";
 import { useGame } from "../../../state/gameStore";
 import { uiNow } from "../../clock";
 import { RuneText } from "../../text/RuneText";
+import { emitUiSparks } from "../../UiSparks";
 import { ink } from "../../theme";
 import { apx, fontPx } from "./ap";
 import { HUD_COLORS } from "./copy";
@@ -16,19 +19,25 @@ import { HudAnchor, Undistort } from "./HudAnchor";
 import { HUD_LAYOUT, VITALS } from "./layout";
 import { Materialize } from "./Materialize";
 import { useCarrierMotion, type CarrierMotion } from "./motion";
-import { levelToHeight, makeGlassMaterial, makeLiquidMaterial, orbGeometry } from "./orbMaterials";
+import { heightForFill, makeGlassMaterial, makeLiquidMaterial, orbGeometry } from "./orbMaterials";
 import { useEntryDelay, useSettled } from "./useSettled";
 
 /** Health and mana as two glass orbs carried at the lower left — real
  * spheres lit by the UI's torch (orbMaterials.ts), their glowing liquid
- * standing exactly as high as the value. Carry them and they slosh: the
- * surface leans as you turn and run, ripples when you land, bubbles
- * (mana churns while it refills), pours in as you heal. The glass turns
- * slowly, and its little facets catch the torch one pixel at a time. A
- * blow jars the health orb, blanches its liquid white-hot and leaves a pale
- * ghost of what it took, fizzing away a moment later; under 30 % the liquid
- * throbs like a pulse. The numbers stand beside each orb, the max dim
- * beneath. */
+ * covering exactly as much of the orb as the value (heightForFill: a
+ * sphere is narrow at the bottom, so 30 % health holds 30 % of the glass,
+ * not a quarter). Carry them and they slosh: the surface leans as you turn
+ * and run, ripples when you land, bubbles (mana churns while it refills),
+ * pours in as you heal. The glass turns slowly, and its little facets catch
+ * the torch one pixel at a time. A blow jars the health orb, blanches its
+ * liquid white-hot and leaves a pale ghost of what it took, fizzing away a
+ * moment later.
+ *
+ * A brass line is etched round the health orb at the last stand (30 %).
+ * Below it the liquid burns a brighter red and throbs with your one heart
+ * (game/heart), in time with the vignette, the image and the thud in your
+ * ears; heal back over it (a second wind) and the orb pours bright, sparks
+ * ringing it. The numbers stand beside each orb, the max dim beneath. */
 
 const L = HUD_LAYOUT.vitals;
 const A = apx(L.distance);
@@ -61,6 +70,10 @@ export function Vitals() {
   );
 }
 
+/** The last stand's red (copy.ts: the brighter fill under 30 %). */
+const LOW_RED = new Color(HUD_COLORS.healthLow);
+const sparkAt = new Vector3();
+
 /** Max health follows worn gear and blessings; mana's is fixed. */
 function useMax(kind: Kind): number {
   const stats = useStats();
@@ -85,7 +98,7 @@ function OrbBlock({
   // re-renders (and re-writes its last digit) when the integer changes.
   const raw = useGame((s) => Math.max(0, Math.ceil((kind === "health" ? s.health : s.mana) - 1e-6)));
   const value = useSettled(raw, 750);
-  const low = kind === "health" && value / max < 0.3;
+  const low = kind === "health" && value / max < LAST_STAND.below;
   const d = useEntryDelay(0.35);
 
   const look = LOOK[kind];
@@ -112,14 +125,33 @@ function OrbBlock({
   const spin = useRef<Group>(null);
   const facing = useRef<Group>(null);
 
+  // A second wind: the orb pours bright.
+  const pour = useRef({ at: -10, amp: 0, sparks: false });
+  const baseColor = useMemo(() => new Color(look.color), [look]);
+
   useEffect(() => {
     if (kind !== "health") return;
-    return gameEvents.on("playerHurt", ({ amount }) => {
-      const amp = Math.min(1, 0.35 + amount / 30);
-      const side = Math.random() < 0.5 ? -1 : 1;
-      kickSlosh(slosh.current, side * (2 + amp * 5), (Math.random() - 0.5) * 4, 0.6 * amp + 0.2);
-    });
-  }, [kind]);
+    const offs = [
+      gameEvents.on("playerHurt", ({ amount }) => {
+        const amp = Math.min(1, 0.35 + amount / 30);
+        const side = Math.random() < 0.5 ? -1 : 1;
+        kickSlosh(slosh.current, side * (2 + amp * 5), (Math.random() - 0.5) * 4, 0.6 * amp + 0.2);
+      }),
+      gameEvents.on("wizardHealed", ({ from, to, max }) => {
+        const r = releaseOf(from / max, to / max);
+        if (r <= 0) return;
+        pour.current = { at: uiNow(), amp: r, sparks: true };
+        kickSlosh(slosh.current, 0, 0, 0.7);
+      }),
+    ];
+    // The last-stand line, etched on the glass where the liquid stands at 30 %.
+    const line = heightForFill(LAST_STAND.below);
+    for (const m of [glass, glassBack]) {
+      m.uniforms.uMark.value = line;
+      m.uniforms.uMarkOn.value = 1;
+    }
+    return () => offs.forEach((off) => off());
+  }, [kind, glass, glassBack]);
 
   useFrame(({ camera }, dt) => {
     // Held square to the eye: the orb (and its liquid's "up") faces the
@@ -145,22 +177,39 @@ function OrbBlock({
     const now = uiNow();
     const u = liquid.uniforms;
     u.uTime.value = now;
-    u.uLevel.value = levelToHeight(gauge.current.level);
-    u.uGhost.value = levelToHeight(gauge.current.ghost);
+    u.uLevel.value = heightForFill(gauge.current.level);
+    u.uGhost.value = heightForFill(gauge.current.ghost);
     u.uTilt.value.set(slosh.current.x, slosh.current.z);
     u.uWave.value = slosh.current.wave;
+    const isHealth = kind === "health";
+    // A second wind pouring in: bright, churning, a ring of sparks.
+    const sincePour = now - pour.current.at;
+    const poured = isHealth && sincePour < 1.2 ? Math.exp(-sincePour * 3) * pour.current.amp : 0;
     // Mana is a living thing: it churns while it refills.
-    u.uBubbles.value = kind === "mana" ? (frac < 0.999 ? 0.9 : 0.35) : 0.2 + (gauge.current.ghost - gauge.current.level) * 2;
+    u.uBubbles.value =
+      kind === "mana" ? (frac < 0.999 ? 0.9 : 0.35) : 0.2 + (gauge.current.ghost - gauge.current.level) * 2 + poured * 1.6;
 
     // Damage: a flare and a shudder, both decaying fast.
     const since = now - hit.current.at;
-    const flare = kind === "health" && since < 0.6 ? Math.exp(-since * 7) * hit.current.amp : 0;
-    // Low health: the liquid's glow beats like a pulse.
-    const lowBeat = kind === "health" && frac < 0.3 ? Math.max(0, Math.sin(now * 7)) ** 6 * 0.35 * (1 - frac / 0.3) : 0;
-    u.uFlash.value = Math.max(flare, lowBeat);
-    glass.uniforms.uFlash.value = flare;
+    const flare = isHealth && since < 0.6 ? Math.exp(-since * 7) * hit.current.amp : 0;
+    // The last stand: the liquid's glow beats with the one heart, and it
+    // burns a brighter red the nearer death.
+    const lowBeat = isHealth ? heart.beat * (0.12 + 0.3 * heart.felt) : 0;
+    if (isHealth) u.uColor.value.lerpColors(baseColor, LOW_RED, heart.low > 0 ? 0.45 + 0.55 * heart.low : 0);
+    u.uFlash.value = Math.max(flare, lowBeat, poured * 0.65);
+    glass.uniforms.uFlash.value = Math.max(flare, poured * 0.5);
     glass.uniforms.uTime.value = now;
-    halo.uniforms.uIntensity.value = 0.04 + gauge.current.level * 0.1 + flare * 0.7 + lowBeat;
+    halo.uniforms.uIntensity.value = 0.04 + gauge.current.level * 0.1 + flare * 0.7 + lowBeat + poured * 0.6;
+    const sh0 = shaker.current;
+    if (pour.current.sparks && sh0) {
+      pour.current.sparks = false;
+      for (let i = 0; i < 14; i++) {
+        const a = (i / 14) * Math.PI * 2;
+        sparkAt.set(Math.cos(a) * 1.15, Math.sin(a) * 1.15, 0.2);
+        sh0.localToWorld(sparkAt);
+        emitUiSparks({ position: [sparkAt.x, sparkAt.y, sparkAt.z], color: i % 2 ? "#ff9a7a" : "#ffe0c0", count: 2, speed: 0.05, up: 0.04, size: R * 0.14, spread: R * 0.1, ttl: 0.9 });
+      }
+    }
     const sh = shaker.current;
     if (sh) {
       const a = since < 0.5 ? Math.exp(-since * 9) * hit.current.amp : 0;

@@ -1,3 +1,4 @@
+import { LIFE_STEPS, readLifeByte } from "../game/heart";
 import { netBus } from "./bus";
 import { peerMessage } from "./channels";
 import { netClock } from "./clock";
@@ -27,6 +28,10 @@ export interface PoseMsg {
   /** yaw, pitch */
   a: [number, number];
   staffId: string;
+  /** Health, as one small integer (game/heart lifeByte): 0…15, plus 16 at
+   * the Brink. Shown to floor-mates only — health is still decided on its
+   * owner's machine. Absent from older clients. */
+  h?: number;
 }
 
 export interface PeerWizard {
@@ -35,6 +40,14 @@ export interface PeerWizard {
   staffId: string;
   /** Server time of the newest pose — used to expire ghosts. */
   lastSeen: number;
+  /** Their share of health (0…1), or −1 if they've never said. */
+  life: number;
+  /** Inside their Brink's window. */
+  brink: boolean;
+}
+
+function newPeer(id: string, staffId = ""): PeerWizard {
+  return { id, buffer: new SnapshotBuffer(), staffId, lastSeen: 0, life: -1, brink: false };
 }
 
 const peers = new Map<string, PeerWizard>();
@@ -42,11 +55,14 @@ const peers = new Map<string, PeerWizard>();
 const pose = peerMessage<PoseMsg>("pose", (msg, meta) => {
   let peer = peers.get(meta.from);
   if (!peer) {
-    peer = { id: meta.from, buffer: new SnapshotBuffer(), staffId: msg.staffId, lastSeen: 0 };
+    peer = newPeer(meta.from, msg.staffId);
     peers.set(meta.from, peer);
   }
   peer.staffId = msg.staffId;
   peer.lastSeen = meta.serverTime;
+  const life = readLifeByte(msg.h);
+  peer.life = life ? life.frac : -1;
+  peer.brink = life ? life.brink : false;
   peer.buffer.push({ t: meta.serverTime, p: msg.p, v: msg.v, a: msg.a });
 });
 
@@ -55,13 +71,13 @@ netBus.on("assigned", (a) => {
   peers.clear();
   for (const m of a.members) {
     if (m.id === selfId) continue;
-    peers.set(m.id, { id: m.id, buffer: new SnapshotBuffer(), staffId: "", lastSeen: 0 });
+    peers.set(m.id, newPeer(m.id));
   }
 });
 
 netBus.on("peerJoined", (m) => {
   if (!peers.has(m.id)) {
-    peers.set(m.id, { id: m.id, buffer: new SnapshotBuffer(), staffId: "", lastSeen: 0 });
+    peers.set(m.id, newPeer(m.id));
   }
 });
 
@@ -90,6 +106,16 @@ export function peerName(id: string): string {
   return useNet.getState().roster[id] ?? "";
 }
 
+/** A floor-mate's share of health as they last told it (0…1), or −1. */
+export function peerLife(id: string): number {
+  return peers.get(id)?.life ?? -1;
+}
+
+/** Is a floor-mate inside their Brink's window? */
+export function peerAtBrink(id: string): boolean {
+  return peers.get(id)?.brink ?? false;
+}
+
 /** Smooth delayed pose for rendering. False until the first pose arrives. */
 export function samplePeer(id: string, renderTime: number, out: SampledPose): boolean {
   const peer = peers.get(id);
@@ -110,6 +136,13 @@ export function estimatePeer(id: string): SampledPose | null {
 
 const PUBLISH_INTERVAL_S = 1 / 20;
 let publishClock = 0;
+/** Our own life byte (game/heart lifeByte), kept fresh by the HUD. */
+let localLife = LIFE_STEPS;
+
+/** What our pose says of our health (the HUD writes it every frame). */
+export function setLocalLife(byte: number): void {
+  localLife = byte;
+}
 
 /** Called every frame by the player controller; throttles itself. */
 export function publishLocalPose(
@@ -129,5 +162,6 @@ export function publishLocalPose(
     v: [q2(v.x), q2(v.y), q2(v.z)],
     a: [q3(yaw), q3(pitch)],
     staffId,
+    h: localLife,
   });
 }

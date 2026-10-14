@@ -7,6 +7,7 @@ import { Rng } from "../core/rng";
 import { KillCredit } from "../encounters/killCredit";
 import type { DamageSource } from "../game/damageSource";
 import { getFloorRules } from "../game/floorRules";
+import { harmWizard } from "../game/vitality";
 import { computeStats, getItemDef, hasProc, resolveItem } from "../items/catalog";
 import { gamblePrice, merchantPrice, multisetOf, sellValue } from "../items/economy";
 import {
@@ -254,6 +255,25 @@ export function setFallRule(rule: ((killerId: string | null) => boolean) | null)
 let pendingGamble = false;
 /** The floor (instance:floor) the Phoenix last refused a death on. */
 let phoenixFloor = "";
+/** Lethal grace (game/vitality): when it can next catch a killing blow,
+ * and the end of the Brink's window it opened — seconds, performance clock.
+ * Module-level like the Phoenix's floor: rules state, not something the
+ * HUD re-renders on. A fresh run (or a death) starts them over. */
+let graceReadyAt = 0;
+let brinkUntil = 0;
+/** After the Brink, nothing lands for this long: a moment to dash, to run,
+ * to drink — the world slowed around you (the Brink's slow motion). */
+export const BRINK_WINDOW_S = 0.6;
+
+/** Seconds left of the Brink's window (0 outside it). */
+export function brinkLeft(now = performance.now() / 1000): number {
+  return Math.max(0, brinkUntil - now);
+}
+
+function resetGrace(): void {
+  graceReadyAt = 0;
+  brinkUntil = 0;
+}
 /** A craft is in the server's hands (its recipe id). */
 /** A craft sent to the server and not yet answered (one at a time: a second
  * press would be judged against the same stale inventory). */
@@ -311,6 +331,7 @@ export const useGame = create<GameState>((set, get) => ({
       const assignment = await session.requestFloor(entry, true);
       const stats = getStats();
       killCredit.reset();
+      resetGrace();
       set({
         phase: "dungeon",
         floor: assignment.floor,
@@ -633,12 +654,33 @@ export const useGame = create<GameState>((set, get) => ({
     const state = get();
     if (state.phase !== "dungeon" && state.phase !== "village") return;
     if (import.meta.env.DEV && devInvuln) return; // dev-room god mode
+    const now = performance.now() / 1000;
+    // The Brink's window: nothing lands while you get away.
+    if (now < brinkUntil) return;
     killCredit.record(source, performance.now(), useNet.getState().playerId || "self");
     const stats = getStats();
-    const dealt = amount * stats.damageTakenMult;
-    let health = Math.max(0, state.health - dealt);
-    // Heart of the Phoenix: once a floor, a killing blow is refused.
-    if (health <= 0 && state.phase === "dungeon" && hasProc(stats, "phoenix") && phoenixFloor !== `${state.instanceId}:${state.floor}`) {
+    // The blow as your gear takes it, then the wizard's own rules
+    // (game/vitality): below the last-stand line harm is halved, and a
+    // killing blow taken from half health or more leaves you on 1 — the
+    // Brink — once a while. Every blow counts, a wizard's spell as much as a
+    // monster's: the rule is the victim's, the same for every wizard, so it
+    // is as fair in PvP as in co-op (and the attacker sees the Brink coming:
+    // net/players carries it).
+    const harm = harmWizard(state.health, stats.maxHealth, amount * stats.damageTakenMult, now, graceReadyAt);
+    // What you really lost (overkill included): the hurt, the shake and the
+    // HUD's flash report this, not the blow's face value.
+    const dealt = state.health - harm.health;
+    let health = Math.max(0, harm.health);
+    if (harm.brink) {
+      graceReadyAt = harm.graceReadyAt;
+      brinkUntil = now + BRINK_WINDOW_S;
+    }
+    // A venue's own rule takes the fall before the Phoenix is asked (the
+    // Proving Ground's yield costs nothing, so it mustn't spend the save).
+    const yielded = health <= 0 && !!fallRule?.(killCredit.killer(performance.now()));
+    // Heart of the Phoenix: once a floor, a killing blow is refused — the
+    // true-death save, past grace (which, caught first, leaves it unspent).
+    if (!yielded && health <= 0 && state.phase === "dungeon" && hasProc(stats, "phoenix") && phoenixFloor !== `${state.instanceId}:${state.floor}`) {
       phoenixFloor = `${state.instanceId}:${state.floor}`;
       health = Math.round(stats.maxHealth * 0.35);
       gameEvents.emit("phoenix", undefined);
@@ -647,7 +689,8 @@ export const useGame = create<GameState>((set, get) => ({
     playHurt();
     gameEvents.emit("playerHurt", { amount: dealt });
     gameEvents.emit("shake", Math.min(dealt / 40, 1));
-    if (health <= 0 && fallRule?.(killCredit.killer(performance.now()))) {
+    if (harm.brink) gameEvents.emit("wizardBrink", { from: state.health, max: stats.maxHealth });
+    if (yielded) {
       killCredit.reset();
       set({ health: 0 });
     } else if (health <= 0) {
@@ -663,7 +706,12 @@ export const useGame = create<GameState>((set, get) => ({
   },
 
   heal: (amount) => {
-    set({ health: Math.min(get().health + amount, getStats().maxHealth) });
+    const from = get().health;
+    const max = getStats().maxHealth;
+    const to = Math.min(from + amount, max);
+    set({ health: to });
+    // Heard by the second wind (game/heart releaseOf) and the orb.
+    if (to > from) gameEvents.emit("wizardHealed", { from, to, max });
   },
 
   spendMana: (cost) => {
@@ -695,6 +743,7 @@ export const useGame = create<GameState>((set, get) => ({
     // stays up under the tunnel instead of the lost floor remounting.
     set({ phase: "loading", floor: 0, prompt: null, overlay: "none" });
     await travel("respawn", () => {
+      resetGrace();
       set({
         phase: "village",
         floor: 0,
@@ -841,6 +890,7 @@ function homeSwitch(set: (partial: Partial<GameState>) => void, get: () => GameS
   // anything didn't check out. Offline this is a no-op (local save rules).
   session.sendBank(toWireInventory({ ...banked, chest: state.chest }));
   session.leaveDungeon();
+  resetGrace();
   set({
     phase: "village",
     ...banked,
@@ -875,6 +925,7 @@ function escapeByFeather(
   persistCurrent({ ...state, ...banked });
   session.sendEscape(toWireInventory({ ...banked, chest: state.chest }));
   session.leaveDungeon();
+  resetGrace();
   set({
     phase: "village",
     ...banked,
@@ -928,6 +979,7 @@ function die(
   // the server's copy can't hand back what the run spent.
   session.sendStash(toWireInventory({ ...state, ...outcome.kept }));
   killCredit.reset();
+  resetGrace();
   set({
     phase: "dead",
     ...outcome.kept,

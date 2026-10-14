@@ -2,6 +2,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import { useEffect, useMemo } from "react";
 import { gameEvents } from "../core/events";
+import { heart, kickBrink, kickRelease, releaseOf } from "../game/heart";
 import { getStats, useGame, type Overlay, type Phase } from "../state/gameStore";
 import { useTravel } from "../transition/store";
 import type { Air, Grade } from "../world/biomes";
@@ -41,7 +42,8 @@ export function Effects() {
   const film = useMemo(() => new FilmEffect(), []);
   const lens = useMemo(() => new LensEffect(camera), [camera]);
   const rays = useMemo(() => new GodRaysEffect(camera), [camera]);
-  const feel = useMemo(newFeel, []);
+  // The wizard's one heart is stepped here, once a frame (game/heart).
+  const feel = useMemo(() => newFeel(heart), []);
   const air = useMemo(() => ({ ...VILLAGE_AIR }), []);
   const clock = useMemo(() => ({ t: 0 }), []);
 
@@ -51,6 +53,15 @@ export function Effects() {
       gameEvents.on("playerHurt", ({ amount }) => kickHurt(feel, amount)),
       gameEvents.on("dash", () => kickDash(feel)),
       gameEvents.on("killPunch", (v) => kickKill(feel, v)),
+    ];
+    return () => offs.forEach((off) => off());
+  }, [feel]);
+
+  // The Brink slams the heart; a real heal back over the line releases it.
+  useEffect(() => {
+    const offs = [
+      gameEvents.on("wizardBrink", () => kickBrink(feel.heart)),
+      gameEvents.on("wizardHealed", ({ from, to, max }) => kickRelease(feel.heart, releaseOf(from / max, to / max))),
     ];
     return () => offs.forEach((off) => off());
   }, [feel]);
@@ -94,15 +105,25 @@ export function Effects() {
     lens.soft += ((wantsFocus(s.phase, s.overlay) ? 1 : 0) - lens.soft) * (1 - Math.exp(-dt * 6));
     if (lens.soft < 0.005) lens.soft = 0;
     lens.haze = air.haze;
-    lens.zoom = feel.impact * 0.5 + feel.dash * 0.55 + feel.hurt * 0.2 + rush + feel.kill * 0.22;
+    // Death near, on the one heart (game/heart): the world bleeds grey but
+    // for its reds and the light dips with each beat. The Brink punches the
+    // lens in and the light out and slams the rim shut; a second wind floods
+    // the colour back over-rich and throws the rim open.
+    const brink = feel.brink * feel.brink;
+    lens.zoom = feel.impact * 0.5 + feel.dash * 0.55 + feel.hurt * 0.2 + rush + feel.brink * 0.85 + feel.kill * 0.22;
     lens.dispersion =
-      air.dispersion + feel.impact * 2.5 + feel.hurt * 3 + feel.dash * 1.5 + feel.low * feel.beat * 2 + rush * 3 + feel.kill * 2.5;
-    grade.exposure = (1 + Math.max(0, feel.impact - 0.2) * 0.45 + feel.kill * 0.3) * (1 - lens.soft * 0.2);
-    grade.drain = Math.min(0.85, feel.hurt * 0.4 + feel.low * 0.6);
+      air.dispersion + feel.impact * 2.5 + feel.hurt * 3 + feel.dash * 1.5 + feel.low * feel.beat * 2 + rush * 3 + feel.brink * 4 + feel.kill * 2.5;
+    grade.exposure =
+      (1 + Math.max(0, feel.impact - 0.2) * 0.45 + feel.kill * 0.3) * (1 - lens.soft * 0.2) * (1 - 0.07 * feel.low * feel.beat) * (1 - 0.45 * brink);
+    grade.drain = Math.min(0.85, feel.hurt * 0.4);
+    grade.bleed = feel.low * 0.8 + feel.brink * 0.2 - feel.release * 0.35;
     film.vignette = air.vignette;
     film.grain = air.grain * (1 + feel.low * 0.6);
     const breath = 0.5 + 0.5 * Math.sin(clock.t * 1.1) * Math.sin(clock.t * 0.37 + 1);
-    film.close = feel.low * (0.4 + 0.6 * feel.beat) + air.breath * 0.12 * breath + feel.hurt * 0.12;
+    film.close = Math.max(
+      0,
+      feel.low * (0.4 + 0.6 * feel.beat) + air.breath * 0.12 * breath + feel.hurt * 0.12 + feel.brink * 0.6 - feel.release * 0.5,
+    );
     // The rim takes the place's own darks (as a hue: strongest channel 1).
     const sh = grade.shadows;
     film.tint.copy(sh).multiplyScalar(1 / Math.max(sh.r, sh.g, sh.b, 1e-3));

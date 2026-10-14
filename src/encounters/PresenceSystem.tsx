@@ -2,6 +2,7 @@ import { useFrame } from "@react-three/fiber";
 import { useRef } from "react";
 import { playHeartbeat, playPresence } from "../audio/sound";
 import { gameEvents } from "../core/events";
+import { heart } from "../game/heart";
 import { playerPosition } from "../game/player-state";
 import { isHostileWizard } from "../game/hostility";
 import { netBus } from "../net/bus";
@@ -80,10 +81,12 @@ export function PresenceSystem() {
       }
     }
 
-    // Heartbeat: quickens and hardens as a hostile wizard closes in.
+    // Heartbeat: quickens and hardens as a hostile wizard closes in — unless
+    // your own heart is already pounding in the last stand (game/heart): a
+    // wizard has one heart, and it doesn't beat twice.
     const d = hostileDist.current;
     beatClock.current -= dt;
-    if (inDungeon && d !== null && d < HEARTBEAT_RANGE && beatClock.current <= 0) {
+    if (inDungeon && d !== null && d < HEARTBEAT_RANGE && beatClock.current <= 0 && heart.felt < 0.05) {
       const closeness = 1 - d / HEARTBEAT_RANGE; // 0 at the edge, 1 face to face
       beatClock.current = 1.5 - closeness * 1.05;
       playHeartbeat(closeness);

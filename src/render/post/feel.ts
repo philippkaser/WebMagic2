@@ -1,13 +1,23 @@
+import { heartbeat, lowOf, newHeart, stepHeart, type Heart } from "../../game/heart";
+
 /** What the body feels, pushed into the image: the short-lived kicks the
  * post chain (render/Effects) answers with — a blast's punch (a zoom-blur
  * kick, the lens splitting colour, a flash of exposure), a blow taken (the
  * colour drained for a moment, the lens split), a blink-dash's rush — and
- * the long state of a wizard near death (the world greying, the rim of sight
- * closing in with the pulse).
+ * the long state of a wizard near death (the world greying but for its
+ * reds, the rim of sight closing in with the pulse), the Brink's slam and a
+ * second wind's release.
+ *
+ * The near-death part is the wizard's one heart (game/heart): Effects hands
+ * its Feel the shared heart, so the image beats in time with the orb, the
+ * vignette and the thud in your ears. A Feel made bare gets a heart of its
+ * own (tests).
  *
  * Pure numbers, no three.js: the event wiring lives in Effects, and this
  * module only keeps the levels and lets them fall away, so it can be tested
  * on its own. Every level is 0…1. */
+
+export { heartbeat, lowOf };
 
 export interface Feel {
   /** A blast, a cast's recoil, a boss's stomp (the `shake` event). */
@@ -16,7 +26,7 @@ export interface Feel {
   hurt: number;
   /** A blink-dash. */
   dash: number;
-  /** How near death: 0 above a third of your health, 1 at none. */
+  /** How near death: 0 above the last-stand line, 1 at none. */
   low: number;
   /** The heart: 0…1, beating faster the nearer death. */
   beat: number;
@@ -24,10 +34,16 @@ export interface Feel {
   phase: number;
   /** A kill of ours landing (the `killPunch` event; stepKill). */
   kill: number;
+  /** The Brink (a killing blow refused): 1 → 0. */
+  brink: number;
+  /** A second wind (healed back over the line): 1 → 0. */
+  release: number;
+  /** The heart all of the above is read from. */
+  heart: Heart;
 }
 
-export function newFeel(): Feel {
-  return { impact: 0, hurt: 0, dash: 0, low: 0, beat: 0, phase: 0, kill: 0 };
+export function newFeel(heart: Heart = newHeart()): Feel {
+  return { impact: 0, hurt: 0, dash: 0, low: 0, beat: 0, phase: 0, kill: 0, brink: 0, release: 0, heart };
 }
 
 /** How fast each kick falls away (per second, exponential): a blast's punch
@@ -57,25 +73,14 @@ export function stepFeel(f: Feel, dt: number, frac: number): void {
   if (f.impact < 1e-3) f.impact = 0;
   if (f.hurt < 1e-3) f.hurt = 0;
   if (f.dash < 1e-3) f.dash = 0;
-  const target = lowOf(frac);
-  // Eases in and out over about half a second: healing lifts the grey.
-  f.low += (target - f.low) * (1 - Math.exp(-dt * 2.5));
-  // 70 bpm calm, 140 at the end; a lub-dub (two bumps) per beat.
-  f.phase = (f.phase + (dt * (70 + 70 * f.low)) / 60) % 1;
-  f.beat = f.low > 0.001 ? heartbeat(f.phase) : 0;
-}
-
-/** How near death at `frac` of full health: nothing above a third, all of it
- * at zero, eased so the last stretch is felt most. */
-export function lowOf(frac: number): number {
-  const t = Math.min(1, Math.max(0, (0.34 - frac) / 0.34));
-  return t * t * (3 - 2 * t);
-}
-
-/** A lub-dub at phase p (0…1): a strong bump, then a softer one. */
-export function heartbeat(p: number): number {
-  const bump = (c: number, w: number) => Math.exp(-(((p - c) / w) ** 2));
-  return Math.min(1, bump(0.08, 0.05) + 0.6 * bump(0.26, 0.05));
+  // The heart: stepped here, once a frame, for everyone who reads it.
+  const h = f.heart;
+  stepHeart(h, dt, frac);
+  f.low = h.low;
+  f.beat = h.beat;
+  f.phase = h.phase;
+  f.brink = h.brink;
+  f.release = h.release;
 }
 
 // ── The kill punch ───────────────────────────────────────────────────────────

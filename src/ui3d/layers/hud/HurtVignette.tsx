@@ -1,15 +1,15 @@
-import { useStats } from "../../../state/useStats";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { Mesh, PlaneGeometry, ShaderMaterial, Vector2 } from "three";
 import { gameEvents } from "../../../core/events";
+import { heart } from "../../../game/heart";
 import { useGame } from "../../../state/gameStore";
-import { uiNow } from "../../clock";
 
 /** Getting hurt, felt at the edge of sight (artpass hud/Vignettes): every
  * blow bites a red rim in from the edges of the view — ragged, heaviest
- * where it landed — that drains away in hard steps; near death a darker
- * stain stays, throbbing with your pulse.
+ * where it landed — that drains away in hard steps; in the last stand a
+ * darker stain stays, throbbing with your one heart (game/heart). The
+ * Brink cracks the whole pane and flashes it red.
  *
  * Drawn the grimoire way: in coarse square blocks (about the world's own
  * pixel size) and a handful of flat alpha bands, never a smooth gradient.
@@ -31,6 +31,8 @@ const FRAG = /* glsl */ `
 uniform float uHurt;
 uniform float uLow;
 uniform float uBeat;
+uniform float uCrack;
+uniform float uFlash;
 uniform float uSeed;
 uniform float uAspect;
 uniform vec2 uRes;
@@ -57,7 +59,8 @@ void main() {
   // A blow bites deeper where it landed.
   float near = exp(-pow(length(p - uImpact) / 0.32, 2.0));
   float n = noise(cell * 0.22 + uSeed) * 0.6 + noise(cell * 0.07 - uSeed) * 0.4;
-  float hurtReach = uHurt * (0.09 + near * 0.08);
+  // The Brink cracks the bite far across the pane.
+  float hurtReach = uHurt * (0.09 + near * 0.08) + uCrack * 0.24;
   float lowReach = uLow * (0.2 + uBeat * 0.05);
   float edgeIn = 1.0 - s4;
   float hurt = clamp(1.0 - (edgeIn - (n - 0.5) * 0.08) / max(0.001, hurtReach), 0.0, 1.0) * step(0.001, uHurt);
@@ -70,9 +73,11 @@ void main() {
   // (colours in linear light: the output is converted to sRGB below).
   float aH = hurt * 0.42;
   float aL = low * 0.55;
-  float a = max(aH, aL);
+  // The Brink: the whole pane flashes red, draining in hard steps.
+  float aF = uFlash * 0.5;
+  float a = max(max(aH, aL), aF);
   if (a < 0.01) discard;
-  vec3 col = aH >= aL ? vec3(0.515, 0.008, 0.008) : vec3(0.188, 0.0, 0.0);
+  vec3 col = aF >= max(aH, aL) ? vec3(0.6, 0.012, 0.004) : aH >= aL ? vec3(0.515, 0.008, 0.008) : vec3(0.188, 0.0, 0.0);
   gl_FragColor = vec4(col * a, a);
   #include <colorspace_fragment>
 }
@@ -91,6 +96,8 @@ export function HurtVignette() {
           uHurt: { value: 0 },
           uLow: { value: 0 },
           uBeat: { value: 0 },
+          uCrack: { value: 0 },
+          uFlash: { value: 0 },
           uSeed: { value: 0 },
           uAspect: { value: 1 },
           uRes: { value: new Vector2(1, 1) },
@@ -120,11 +127,9 @@ export function HurtVignette() {
     [mesh, material],
   );
   const hurt = useRef(0);
+  const brink = useRef(0);
   const aspectRef = useRef(aspect);
   aspectRef.current = aspect;
-  const maxHealth = useStats().maxHealth;
-  const maxRef = useRef(maxHealth);
-  maxRef.current = maxHealth;
 
   useEffect(
     () =>
@@ -143,29 +148,36 @@ export function HurtVignette() {
       }),
     [material],
   );
+  useEffect(
+    () =>
+      gameEvents.on("wizardBrink", () => {
+        hurt.current = 1;
+        brink.current = 1;
+      }),
+    [],
+  );
 
   useFrame((_, rawDt) => {
     // A frame hitch mustn't swallow the flash: decay at most a frame's worth.
     const dt = Math.min(rawDt, 1 / 20);
     hurt.current *= Math.exp(-dt * 1.6);
     if (hurt.current < 0.002) hurt.current = 0;
+    brink.current = Math.max(0, brink.current - dt / 0.45);
     const s = useGame.getState();
     const playing = s.phase === "dungeon" || s.phase === "village";
-    const frac = s.health / Math.max(1, maxRef.current);
-    // Below a third of your health the stain stays, deepening toward death.
-    const low = playing && frac > 0 ? Math.max(0, Math.min(1, (0.34 - frac) / 0.24)) : 0;
-    // Lub-dub, quickening as health drains.
-    const period = 1.05 - low * 0.4;
-    const ph = (uiNow() % period) / period;
-    const beat = Math.exp(-(((ph - 0.08) / 0.06) ** 2)) + 0.6 * Math.exp(-(((ph - 0.3) / 0.06) ** 2));
+    // In the last stand the stain stays, deepening toward death, beating
+    // with the one heart.
+    const low = playing && s.health > 0 ? heart.low : 0;
     const u = material.uniforms;
     // Stepped like artpass's steps(6) fade: the bite drains in hard steps.
     u.uHurt!.value = Math.ceil(hurt.current * 6) / 6;
     u.uLow!.value = low;
-    u.uBeat!.value = Math.round(beat * 3) / 3;
+    u.uBeat!.value = Math.round(heart.beat * 3) / 3;
+    u.uCrack!.value = Math.ceil(brink.current * 3) / 3;
+    u.uFlash!.value = brink.current > 0.55 ? Math.ceil(((brink.current - 0.55) / 0.45) * 3) / 3 : 0;
     (u.uRes!.value as Vector2).set(sizeRef.current.width * gl.getPixelRatio(), sizeRef.current.height * gl.getPixelRatio());
     u.uAspect!.value = aspectRef.current;
-    mesh.visible = hurt.current > 0 || low > 0;
+    mesh.visible = hurt.current > 0 || low > 0 || brink.current > 0;
   });
 
   return <primitive object={mesh} />;

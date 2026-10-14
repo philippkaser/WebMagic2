@@ -1,4 +1,5 @@
 import { audioCtx, ensureContext, masterBus, noiseBuf, whenAudio } from "./context";
+import { worldBus } from "./muffle";
 import { ambientAirOut, oneShotAt, selfOut, type At } from "./spatial";
 
 /** Procedural WebAudio — every sound is synthesized, keeping the zero-asset
@@ -458,7 +459,8 @@ export function startAmbient(kind: "village" | "dungeon", mood?: AmbientMood): v
   const bed = ctx.createGain();
   bed.gain.value = 0;
   bed.gain.linearRampToValueAtTime(1, ctx.currentTime + 2);
-  bed.connect(master);
+  // The place's drone is the world's: it goes under near death (audio/muffle).
+  bed.connect(worldBus() ?? master);
   // The wind is the place's air: it goes out through the acoustics, which
   // fill it out in big spaces and lean it toward the open sky.
   const airBed = ctx.createGain();
