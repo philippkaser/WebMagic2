@@ -14,12 +14,13 @@
  * Fixed-size and allocation-free after creation; pure, tested in
  * doom.test.ts. Times are seconds on the caller's clock. */
 
-/** How long an unacknowledged blow stays on the books (≈ a bad round trip
- * plus a snapshot): past this the host never saw it, or saw it as less. */
-export const LEDGER_TTL = 0.7;
+/** How long an unacknowledged blow stays on the books (a bad round trip, a
+ * snapshot, and a hitching host's late frame): past this the host never
+ * saw it, or saw it as less. Too short and our own blow flinches twice. */
+export const LEDGER_TTL = 1.2;
 /** How long death throes wait for the despawn before giving up (the host
  * clamped the damage, or a heal we didn't know about). */
-export const DOOM_TTL = 0.9;
+export const DOOM_TTL = 1.2;
 
 const SLOTS = 16;
 

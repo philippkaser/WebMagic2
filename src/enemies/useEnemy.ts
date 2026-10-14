@@ -200,6 +200,7 @@ const dirScratch = { x: 0, z: 0 };
 /** Dev: every live enemy's own hit, by entity id (screenshot scenarios land
  * exact blows with __hurtEnemy). */
 let devCalm = false;
+const devBodies = new Map<string, LiveBody>();
 /** Dev: brains hold still for a screenshot (__calmEnemies). */
 export const enemiesCalmed = (): boolean => devCalm;
 const devHits = new Map<string, (damage: number, impulse: { x: number; y: number; z: number }, info?: HitInfo) => void>();
@@ -213,6 +214,13 @@ if (typeof window !== "undefined" && import.meta.env?.DEV) {
   w.__enemyLife = (id: string) => {
     const l = getLife(id);
     return l ? { hp: l.hp, maxHp: l.maxHp } : null;
+  };
+  // What this client shows of a body (replication checks in scenarios).
+  w.__enemyLook = (id: string) => {
+    const b = devBodies.get(id);
+    return b
+      ? { act: b.act.code, progress: b.act.progress, stage: b.wound.stage, broke: b.broke, doomed: b.doomed, life: b.life, yaw: b.puppet.yaw }
+      : null;
   };
   w.__hurtEnemy = (id: string, damage: number, ix = 0, iz = 4, mine = true) =>
     devHits.get(id)?.(damage, { x: ix, y: 1, z: iz }, { mine });
@@ -338,9 +346,12 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
     setDead(true);
   }, []);
 
+  /** Authoritative hp changed. The life board shows `shown` — the shooter's
+   * belief, its own unconfirmed blows included — so marks drop on the frame
+   * of the blow, not a round trip later. */
   const onHp = useCallback(
-    (current: number) => {
-      updateLife(opts.current.entityId, current);
+    (current: number, shown = current) => {
+      updateLife(opts.current.entityId, Math.max(0, shown));
       if (!deadRef.current) opts.current.onHp?.(current, maxHp);
     },
     [maxHp],
@@ -352,7 +363,8 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
   const blowLanded = useCallback(
     (b: Blow, lifeAfter: number, mine: boolean, crit: boolean) => {
       const t = body.current?.translation();
-      if (!t || b.quiet) return;
+      // A quiet tug confirms nothing — unless it's the one that kills.
+      if (!t || (b.quiet && lifeAfter > 0)) return;
       const o = opts.current;
       const at = b.at ?? t;
       gameEvents.emit("enemyHit", {
@@ -467,7 +479,7 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
         blowFromWire(drop, f.k, f.hp);
       }
       live.lifeTo(believed, t, false, first);
-      onHp(f.hp);
+      onHp(f.hp, believed);
     },
     onCommand: (cmd, data, from) => {
       if (cmd !== "hit") return;
@@ -543,6 +555,8 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
         const believed = predictedHp(hp.current, l, now);
         blowLanded(b, believed, mine, crit);
         live.lifeTo(believed, body.current?.translation() ?? null, mine);
+        // Life marks drop on the frame of the blow, not a round trip later.
+        updateLife(opts.current.entityId, Math.max(0, believed));
         // Zero-ping kill: we know this was lethal before the host does.
         if (believed <= 0) live.doom();
         // Beside the damage: where it landed (the host's sparks), whose magic
@@ -561,9 +575,11 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
     if (!import.meta.env?.DEV) return unregister;
     const hit = hittable.hit;
     devHits.set(id, hit);
+    devBodies.set(id, live);
     return () => {
       unregister();
       if (devHits.get(id) === hit) devHits.delete(id);
+      if (devBodies.get(id) === live) devBodies.delete(id);
     };
   }, [dead, applyDamage, blowLanded, knockbackScale, live, radius]);
 
