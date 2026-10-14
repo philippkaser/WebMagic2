@@ -32,6 +32,7 @@ import {
 } from "./puppet";
 import type { EnemyId } from "./roster";
 import { createWoundLook, woundLook } from "./wounds";
+import { woundUniforms } from "./woundShader";
 
 /** The living body: everything a client SHOWS of an enemy, from what it
  * knows — its own blows, the host's word on everyone else's (an hp drop in
@@ -345,6 +346,8 @@ export class LiveBody {
     let white = this.white > WHITE_S * 0.5 ? 1 : this.white > 0 ? 0.5 : 0;
     if (this.doomed) white = Math.max(white, 0.8);
     hitFlash(mat, this.look.hue, glow, this.flash.current, white, gain);
+    // Cracks open across the shell as its life runs out (they gutter with it).
+    woundUniforms(mat, this.look.soul).wound.value = this.wound.crack * (this.wound.stage >= 2 ? 0.5 + 0.5 * this.wound.glow : 1);
   }
 
   /** The weak spot's world position, `fwd` metres ahead along its facing. */
