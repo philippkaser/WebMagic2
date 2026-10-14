@@ -31,7 +31,7 @@ export const CRIT = {
 
 /** The multiplier `spot` grants: its own if it names one, else CRIT.mult —
  * never below 1, never past CRIT.maxMult. */
-export function critMult(spot: { mult?: unknown } | null | undefined): number {
+export function critMult(spot: WeakSpot | null | undefined): number {
   const m = spot && typeof spot.mult === "number" && Number.isFinite(spot.mult) ? spot.mult : CRIT.mult;
   return Math.min(CRIT.maxMult, Math.max(1, m));
 }

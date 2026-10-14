@@ -27,10 +27,13 @@ import { playRicochet } from "../audio/spellSounds";
 import { GROUPS } from "../core/config";
 import { hitSparksFx } from "../fx/effects";
 import { lightningFx, ricochetFx } from "../fx/spellFx";
-import { forEachHittable, type Hittable } from "../game/registry";
+import { forEachHittable, type Hittable, type Vec3Tuple } from "../game/registry";
+import { hitWeight } from "./castFeel";
 import { explode } from "./explosions";
 import { chainPath, lightningPoints, sweptHits, type HitTarget } from "./hitscan";
+import { land, struckBy, weakOf } from "./land";
 import { localWizardId } from "./localWizard";
+import { critMult, pathCrit, sweptCrit, type WeakSpot } from "./precision";
 import { reportLocalHit } from "./procs";
 import { SingularitySeed } from "./singularity";
 
@@ -92,6 +95,11 @@ export interface ProjectileSpec {
   chain: number;
   /** Fired by a legendary power — its hits don't roll powers again. */
   noProc: boolean;
+  /** How heavy its hits land, 0…1 (weapons/castFeel hitWeight). */
+  weight: number;
+  /** The local wizard's own magic, landing for real (not a replay): its
+   * hits confirm, pop numbers and catch the frame. */
+  mine: boolean;
 }
 
 export interface FireOptions {
@@ -115,6 +123,8 @@ export interface FireOptions {
   splitShards?: number;
   chain?: number;
   noProc?: boolean;
+  /** How heavy its hits land (default: judged from `damage`). */
+  weight?: number;
 }
 
 const MAX_LIVE = 80;
@@ -179,6 +189,8 @@ export function fireProjectile(opts: FireOptions): void {
     splitShards: Math.max(0, Math.round(opts.splitShards ?? 0)),
     chain: Math.max(0, Math.round(opts.chain ?? 0)),
     noProc: opts.noProc ?? false,
+    weight: opts.weight ?? hitWeight(opts.damage),
+    mine: !opts.cosmetic && relation === "own",
   });
 }
 
@@ -241,48 +253,58 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
   const struck = useRef(new Set<Hittable>());
   const speed = useRef(Math.hypot(spec.velocity[0], spec.velocity[1], spec.velocity[2]));
 
-  const detonate = useCallback(() => {
-    if (detonated.current) return;
-    detonated.current = true;
-    const b = body.current;
-    const at: [number, number, number] = b
-      ? [b.translation().x, b.translation().y, b.translation().z]
-      : spec.position;
-    explode({
-      position: at,
-      radius: spec.blastRadius,
-      damage: spec.damage,
-      impulse: spec.blastImpulse,
-      team: spec.team,
-      source: spec.source,
-      color: spec.color,
-      particles: 14,
-      light: 14,
-      remote: spec.cosmetic,
-      noProc: spec.noProc,
-    });
-    if (spec.team === "player") {
-      if (spec.splitShards > 0) splinter(spec, at, b);
-      if (spec.chain > 0) arc(spec, at, struck.current);
-    }
-    remove(spec.id);
-  }, [remove, spec]);
+  /** Burst where it is — on `on`, if it burst on a creature or a crate:
+   * that body takes the full blow, a precision one if the bolt was flying
+   * through its weak point. */
+  const detonate = useCallback(
+    (on?: Hittable | null) => {
+      if (detonated.current) return;
+      detonated.current = true;
+      const b = body.current;
+      const at: [number, number, number] = b
+        ? [b.translation().x, b.translation().y, b.translation().z]
+        : spec.position;
+      explode({
+        position: at,
+        radius: spec.blastRadius,
+        damage: spec.damage,
+        impulse: spec.blastImpulse,
+        team: spec.team,
+        source: spec.source,
+        color: spec.color,
+        particles: 14,
+        light: 14,
+        remote: spec.cosmetic,
+        noProc: spec.noProc,
+        weight: spec.weight,
+        direct: on && !spec.cosmetic ? { target: on, crit: boltCrit(on, at, prev.current, b, spec.size) } : undefined,
+      });
+      if (spec.team === "player") {
+        if (spec.splitShards > 0) splinter(spec, at, b);
+        if (spec.chain > 0) arc(spec, at, struck.current);
+      }
+      remove(spec.id);
+    },
+    [remove, spec],
+  );
 
-  /** Walls ricochet a bolt with bounces left; anything else bursts it. */
+  /** Walls ricochet a bolt with bounces left; anything else bursts it —
+   * a sentry too, though it's as rooted as a wall. */
   const onContact = useCallback(
-    (other: { rigidBody?: { isFixed(): boolean } | null }) => {
-      if (bounces.current > 0 && other.rigidBody?.isFixed()) {
+    (other: { rigidBody?: { isFixed(): boolean; translation(): Vec3Tuple } | null }) => {
+      const t = body.current?.translation();
+      const on = spec.team === "player" && t ? struckBy(other.rigidBody?.translation() ?? null, t, spec.size + 0.05) : null;
+      if (bounces.current > 0 && other.rigidBody?.isFixed() && !on) {
         bounces.current--;
-        const t = body.current?.translation();
         if (t) {
           ricochetFx(t, spec.color);
           playRicochet([t.x, t.y, t.z]);
         }
         return;
       }
-      detonate();
+      detonate(on);
     },
-    [detonate, spec.color],
+    [detonate, spec.color, spec.size, spec.team],
   );
 
   useEffect(() => {
@@ -360,7 +382,7 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
         if (struck.current.has(h)) continue;
         struck.current.add(h);
         if (pierce.current <= 0) {
-          detonate();
+          detonate(h);
           return;
         }
         pierce.current--;
@@ -369,8 +391,12 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
           const k = spec.blastImpulse * 0.4;
           const v = b.linvel();
           const vl = Math.hypot(v.x, v.y, v.z) || 1;
-          h.hit(spec.damage * PIERCE_SHARE, { x: (v.x / vl) * k, y: k * 0.3, z: (v.z / vl) * k });
-          if (!spec.noProc) reportLocalHit(target.pos, spec.damage * PIERCE_SHARE);
+          const spot = weakOf(h);
+          const crit = spot && sweptCrit(prev.current, t, spot, spec.size) ? spot : null;
+          const dmg = spec.damage * PIERCE_SHARE * (crit ? critMult(crit) : 1);
+          const at: [number, number, number] = [target.pos.x, target.pos.y, target.pos.z];
+          land(h, dmg, { x: (v.x / vl) * k, y: k * 0.3, z: (v.z / vl) * k }, { mine: spec.mine, at, crit: crit !== null }, spec.weight);
+          if (!spec.noProc) reportLocalHit(target.pos, dmg);
         }
       }
     }
@@ -427,8 +453,43 @@ function splinter(spec: ProjectileSpec, at: [number, number, number], b: RapierR
       blastImpulse: spec.blastImpulse * 0.4,
       cosmetic: spec.cosmetic,
       noProc: spec.noProc,
+      weight: spec.weight * SHARD_SHARE,
     });
   }
+}
+
+const flight = { x: 0, y: 0, z: 0 };
+
+/** The weak point a bolt that burst on `h` at `at` was flying through, or
+ * null. Its line is the way it came this frame (from `from`), followed as
+ * deep as the body goes. */
+function boltCrit(
+  h: Hittable,
+  at: [number, number, number],
+  from: { x: number; y: number; z: number },
+  b: RapierRigidBody | null,
+  size: number,
+): WeakSpot | null {
+  const spot = weakOf(h);
+  if (!spot) return null;
+  flight.x = at[0] - from.x;
+  flight.y = at[1] - from.y;
+  flight.z = at[2] - from.z;
+  let len = Math.hypot(flight.x, flight.y, flight.z);
+  if (len < 1e-3 && b) {
+    // It barely moved this frame: go by its velocity instead.
+    const v = b.linvel();
+    flight.x = v.x;
+    flight.y = v.y;
+    flight.z = v.z;
+    len = Math.hypot(v.x, v.y, v.z);
+  }
+  if (len < 1e-6) return null;
+  flight.x /= len;
+  flight.y /= len;
+  flight.z /= len;
+  const p = { x: at[0], y: at[1], z: at[2] };
+  return pathCrit(p, flight, spot, size, h.radius ?? 0.5) ? spot : null;
 }
 
 /** Arcing: the landing leaps on to the nearest creatures nearby. */
@@ -442,7 +503,7 @@ function arc(spec: ProjectileSpec, at: [number, number, number], already: Set<Hi
     lightningFx(lightningPoints(from, to.pos, 6, 0.35), spec.color);
     if (!spec.cosmetic && to.ref) {
       const damage = spec.damage * ARC_SHARE;
-      to.ref.hit(damage, { x: 0, y: 2, z: 0 });
+      land(to.ref, damage, { x: 0, y: 2, z: 0 }, { mine: spec.mine, at: [to.pos.x, to.pos.y, to.pos.z] }, spec.weight * ARC_SHARE);
       if (!spec.noProc) reportLocalHit(to.pos, damage);
     }
   }

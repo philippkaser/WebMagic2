@@ -10,10 +10,13 @@ import { castWorldRay, clearLine } from "../game/worldRay";
 import type { ItemDef } from "../items/types";
 import { useGame } from "../state/gameStore";
 import { localBlastEffect } from "./allegiance";
+import { spellHitWeight } from "./castFeel";
 import type { CastStats } from "./castMessage";
 import { explode } from "./explosions";
 import { chainPath, coneHits, lightningPoints, rayHits, type HitTarget } from "./hitscan";
+import { land, weakOf } from "./land";
 import { localWizardId } from "./localWizard";
+import { critMult, rayCrit, type WeakSpot } from "./precision";
 import { reportLocalHit } from "./procs";
 import { fireProjectile } from "./projectiles";
 import { activateSingularities } from "./singularity";
@@ -122,6 +125,7 @@ function castBolt(def: Readonly<BoltSpell>, ctx: AbilityContext): void {
       pierce: s.pierce ?? 0,
       splitShards: s.splitShards ?? 0,
       chain: s.chain ?? 0,
+      weight: spellHitWeight(def),
       // A peer's replayed bolt is visual: their own client requests the damage.
       cosmetic: ctx.remote ?? false,
     });
@@ -147,6 +151,7 @@ function burst(
     light: def.light,
     remote: ctx.remote,
     vfx,
+    weight: spellHitWeight(def),
   });
 }
 
@@ -181,6 +186,7 @@ function castSeed(def: Readonly<SeedSpell>, ctx: AbilityContext): void {
     size: def.size,
     gravityScale: def.gravityScale,
     singularity: true,
+    weight: spellHitWeight(def),
     cosmetic: ctx.remote ?? false,
   });
 }
@@ -210,19 +216,40 @@ function hostileToMe(ctx: AbilityContext): boolean {
   return localBlastEffect("player", wizardSource(ctx.caster), localWizardId(), isHostileWizard).damageMult > 0;
 }
 
-/** One hit from a hitscan spell. */
-function strike(target: HitTarget<Struck>, damage: number, push: { x: number; y: number; z: number }, ctx: AbilityContext): void {
+/** One hit from a hitscan spell: `weight` its heft (weapons/castFeel),
+ * `crit` the weak point it went through (the multiplier is the shooter's to
+ * apply — the host's cap allows for it), `at` where it touched. */
+function strike(
+  target: HitTarget<Struck>,
+  damage: number,
+  push: { x: number; y: number; z: number },
+  ctx: AbilityContext,
+  weight: number,
+  crit: WeakSpot | null = null,
+  at: { x: number; y: number; z: number } = target.pos,
+): void {
   if (target.ref === "me") {
     const effect = localBlastEffect("player", wizardSource(ctx.caster), localWizardId(), isHostileWizard);
     if (effect.damageMult > 0) useGame.getState().takeDamage(damage * effect.damageMult, effect.source);
     return;
   }
   if (ctx.remote) return; // the caster's own machine requests the damage
-  target.ref.hit(damage, push);
-  if (target.ref.team === "enemy" && !ctx.noProc) reportLocalHit(target.pos, damage);
+  const dealt = crit ? damage * critMult(crit) : damage;
+  land(target.ref, dealt, push, { mine: true, at: [at.x, at.y, at.z], crit: crit !== null }, weight);
+  if (target.ref.team === "enemy" && !ctx.noProc) reportLocalHit(target.pos, dealt);
+}
+
+/** The weak point a hitscan line through `t` (entering its body at
+ * `enter`) went through, or null. Only the body's near half counts: no
+ * crits on eyes facing away. */
+function lineCrit(t: HitTarget<Struck>, ctx: AbilityContext, enter: number, slack: number): WeakSpot | null {
+  if (t.ref === "me" || ctx.remote) return null;
+  const spot = weakOf(t.ref);
+  return spot && rayCrit(ctx.origin, ctx.dir, spot, enter + t.radius + slack) ? spot : null;
 }
 
 const end = new Vector3();
+const touch = { x: 0, y: 0, z: 0 };
 
 function castRay(def: Readonly<RaySpell>, ctx: AbilityContext): void {
   const wall = castWorldRay(ctx.origin, ctx.dir, def.range);
@@ -232,7 +259,14 @@ function castRay(def: Readonly<RaySpell>, ctx: AbilityContext): void {
   const damage = def.damage * ctx.stats.damageMult;
   const kb = def.impulse * (ctx.stats.knockbackMult ?? 1);
   const push = { x: ctx.dir.x * kb, y: kb * 0.25, z: ctx.dir.z * kb };
-  for (const h of struck) strike(h.target, damage, push, ctx);
+  const weight = spellHitWeight(def);
+  for (const h of struck) {
+    // Where the line touched it (numbers and sparks pop there).
+    touch.x = ctx.origin.x + ctx.dir.x * h.t;
+    touch.y = ctx.origin.y + ctx.dir.y * h.t;
+    touch.z = ctx.origin.z + ctx.dir.z * h.t;
+    strike(h.target, damage, push, ctx, weight, lineCrit(h.target, ctx, h.t, def.width), touch);
+  }
   // Stopped by the last body it could burn through, or by stone.
   const dist = struck.length === maxStruck ? struck[struck.length - 1]!.t : wall;
   end.copy(ctx.dir).multiplyScalar(dist).add(ctx.origin);
@@ -247,7 +281,7 @@ function castRay(def: Readonly<RaySpell>, ctx: AbilityContext): void {
   const chain = Math.round(ctx.stats.chain ?? 0);
   const last = struck[struck.length - 1];
   if (chain > 0 && last && (def.cooldown >= 0.25 || Math.random() < 0.25)) {
-    leap(last.target, chain, 6, damage * 0.45, 0.8, ctx);
+    leap(last.target, chain, 6, damage * 0.45, 0.8, ctx, weight * 0.6);
   }
 }
 
@@ -266,11 +300,15 @@ function castChain(def: Readonly<ChainSpell>, ctx: AbilityContext): void {
   const damage = def.damage * ctx.stats.damageMult;
   lightningFx(lightningPoints(ctx.origin, first.target.pos, 9, 0.45), ctx.staff.color);
   const kb = def.impulse * (ctx.stats.knockbackMult ?? 1);
-  strike(first.target, damage, { x: ctx.dir.x * kb, y: kb * 0.3, z: ctx.dir.z * kb }, ctx);
+  const weight = spellHitWeight(def);
+  // The aim forgives (it finds its mark); a precision strike doesn't —
+  // the bare line has to go through the weak point.
+  const crit = lineCrit(first.target, ctx, first.t, 0.9);
+  strike(first.target, damage, { x: ctx.dir.x * kb, y: kb * 0.3, z: ctx.dir.z * kb }, ctx, weight, crit);
   hitSparksFx(first.target.pos, ctx.staff.color);
   flashLight([first.target.pos.x, first.target.pos.y, first.target.pos.z], ctx.staff.color, 22, 7);
   const jumps = def.jumps + Math.max(0, Math.round(ctx.stats.chain ?? 0));
-  leap(first.target, jumps, def.jumpRange, damage * def.falloff, def.falloff, ctx, targets);
+  leap(first.target, jumps, def.jumpRange, damage * def.falloff, def.falloff, ctx, weight * def.falloff, targets);
 }
 
 /** Lightning leaping on from `from`: nearest creature (or, for a hostile
@@ -282,19 +320,22 @@ function leap(
   damage: number,
   falloff: number,
   ctx: AbilityContext,
+  weight: number,
   targets: HitTarget<Struck>[] = hitTargets(ctx),
 ): void {
   const living = targets.filter((t) => t.ref === "me" || (t.ref as Hittable).team === "enemy");
   const path = chainPath(from, living, jumps, range);
   let dmg = damage;
+  let w = weight;
   for (let i = 1; i < path.length; i++) {
     const a = path[i - 1]!.pos;
     const t = path[i]!;
     if (!clearLine(a, t.pos)) break; // lightning doesn't pass through rock
     lightningFx(lightningPoints(a, t.pos, 7, 0.4), ctx.staff.color);
-    strike(t, dmg, { x: 0, y: 2, z: 0 }, ctx);
+    strike(t, dmg, { x: 0, y: 2, z: 0 }, ctx, w);
     hitSparksFx(t.pos, ctx.staff.color, 0.8);
     dmg *= falloff;
+    w *= falloff;
   }
 }
 
@@ -305,10 +346,11 @@ function castCone(def: Readonly<ConeSpell>, ctx: AbilityContext): void {
   flashLight([end.x, end.y, end.z], ctx.staff.color, 6, 5);
   const damage = def.damage * ctx.stats.damageMult;
   const kb = def.impulse * (ctx.stats.knockbackMult ?? 1);
+  const weight = spellHitWeight(def);
   for (const h of coneHits(ctx.origin, ctx.dir, def.range, half, hitTargets(ctx))) {
     if (!clearLine(ctx.origin, h.target.pos, h.target.radius)) continue;
     // The heart of the cone burns hottest.
     const k = 0.6 + 0.4 * h.centred;
-    strike(h.target, damage * k, { x: ctx.dir.x * kb, y: kb * 0.2, z: ctx.dir.z * kb }, ctx);
+    strike(h.target, damage * k, { x: ctx.dir.x * kb, y: kb * 0.2, z: ctx.dir.z * kb }, ctx, weight);
   }
 }

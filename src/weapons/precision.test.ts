@@ -47,10 +47,10 @@ describe("precision hits", () => {
 
   test("the multiplier: the standard, a spot's own, never past the cap or below 1", () => {
     expect(critMult(head)).toBe(CRIT.mult);
-    expect(critMult({ mult: 2 })).toBe(2);
-    expect(critMult({ mult: 9 })).toBe(CRIT.maxMult);
-    expect(critMult({ mult: 0.2 })).toBe(1);
-    expect(critMult({ mult: Number.NaN })).toBe(CRIT.mult);
+    expect(critMult({ ...head, mult: 2 })).toBe(2);
+    expect(critMult({ ...head, mult: 9 })).toBe(CRIT.maxMult);
+    expect(critMult({ ...head, mult: 0.2 })).toBe(1);
+    expect(critMult({ ...head, mult: Number.NaN })).toBe(CRIT.mult);
     expect(critMult(null)).toBe(CRIT.mult);
   });
 });

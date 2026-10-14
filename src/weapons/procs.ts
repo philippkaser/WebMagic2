@@ -9,6 +9,8 @@ import { forEachHittable, type Hittable } from "../game/registry";
 import { hasProc } from "../items/catalog";
 import { peerMessage } from "../net/channels";
 import { getStats, useGame } from "../state/gameStore";
+import { hitWeight } from "./castFeel";
+import { land } from "./land";
 import { localWizardId } from "./localWizard";
 import { fireProjectile } from "./projectiles";
 
@@ -76,7 +78,13 @@ export function reportLocalHit(at: V, damage: number): void {
       setTimeout(() => {
         strikeFx(strikeAt);
         procFx.send({ kind: "storm", at: [strikeAt.x, strikeAt.y, strikeAt.z] });
-        target.hit(STORM.damage * getStats().damageMult, { x: 0, y: -4, z: 0 });
+        land(
+          target,
+          STORM.damage * getStats().damageMult,
+          { x: 0, y: -4, z: 0 },
+          { mine: true, at: [strikeAt.x, strikeAt.y, strikeAt.z] },
+          hitWeight(STORM.damage),
+        );
       }, 120);
     }
   }
@@ -117,6 +125,7 @@ function fireShard(at: V, dir: [number, number, number], damage: number, replayO
     homing: 1.6,
     cosmetic,
     noProc: true,
+    weight: hitWeight(SHARDS.damage),
   });
 }
 
@@ -144,6 +153,7 @@ gameEvents.on("phoenix", () => {
     particles: 70,
     light: 70,
     noProc: true,
+    weight: hitWeight(60),
   });
   gameEvents.emit("shake", 0.8);
 });

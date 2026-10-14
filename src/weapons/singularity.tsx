@@ -212,6 +212,8 @@ export function SingularitySeed({
 const BH_RADIUS = 4.5;
 const BH_DURATION = 1.3;
 const BH_PULL = 11;
+/** The implosion lands like a lance (weapons/castFeel hitWeight). */
+const IMPLOSION_WEIGHT = 0.8;
 
 /** Seconds between event-horizon rings contracting into the core. */
 const BH_RING_EVERY = 0.16;
@@ -253,6 +255,7 @@ function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void 
       particles: 34,
       light: 30,
       remote: !isHost(),
+      weight: IMPLOSION_WEIGHT,
     });
   }, [hole]);
 
@@ -282,7 +285,9 @@ function BlackHole({ hole, remove }: { hole: Hole; remove: (id: number) => void 
           const inv = (BH_PULL * (1 - dist / BH_RADIUS)) / dist;
           // Tiny tick damage + inward impulse: the hit also refreshes the
           // enemy's knockback timer, which suppresses its AI so the pull sticks.
-          h.hit(1.5, { x: dx * inv, y: dy * inv + 1, z: dz * inv });
+          // Quiet: a ten-a-second tug never confirms, flinches or pops a
+          // number, whoever's hole it is.
+          h.hit(1.5, { x: dx * inv, y: dy * inv + 1, z: dz * inv }, { quiet: true });
         });
       }
       forEachDynamicBody((b) => {
