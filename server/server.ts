@@ -150,4 +150,7 @@ Bun.serve<SocketData>({
   },
 });
 
+// The relay's heartbeat: the Proving Ground's queue and bout clocks.
+setInterval(() => relay.tick(), 250);
+
 log(`listening on :${PORT} (ws at /ws)`);

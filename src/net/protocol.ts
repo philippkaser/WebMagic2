@@ -7,7 +7,9 @@
  * What it does know is the BANK: accounts, provenance, and the shared pure
  * economy rules it runs on banked inventories (prices, the gamble, the
  * cauldron and the forge — the same functions the client runs offline),
- * plus the social rooms (the camp, chat, fellowships).
+ * plus the social rooms (the camp, chat, fellowships) and the Proving
+ * Ground's queue and scoreboard (a bout's score is the server's, not any
+ * client's).
  *
  * The entire authorization model is the channel-name prefix:
  *
@@ -16,6 +18,7 @@
  *   "h:"  to-host   — anyone may send; delivered to the current host only.
  *   "p:"  peer      — anyone may send; broadcast to the rest of the instance.
  */
+import type { ArenaRecord, ArenaScore } from "../arena/rules";
 import type { AuthErrorReason } from "./credentials";
 import type { PartyError } from "./party";
 
@@ -49,6 +52,20 @@ export interface CampAssignment {
   hostId: string;
   epoch: number;
   members: MemberInfo[];
+}
+
+/** A bout in the Proving Ground (arena/): a room like a camp's, with a
+ * seed for the hall and the server's clock for the sands. */
+export interface ArenaAssignment {
+  instanceId: string;
+  seed: number;
+  hostId: string;
+  epoch: number;
+  /** Everyone in the bout, in the order their spawn stones are dealt. */
+  members: MemberInfo[];
+  /** When the sands run out (server time, ms). */
+  endsAt: number;
+  killsToWin: number;
 }
 
 /** A fellowship as its members see it (net/party.ts). */
@@ -118,6 +135,8 @@ export interface ServerSave {
   /** Deepest floor ever walked home from (0 = never). */
   deepest: number;
   inventory: WireInventory;
+  /** Standing in the Proving Ground (absent: never fought there). */
+  arena?: ArenaRecord;
 }
 
 export type ClientMsg =
@@ -164,6 +183,14 @@ export type ClientMsg =
   /** Invite a wizard who shares your room; they get `partyInvited`. */
   | { t: "partyInvite"; to: string }
   | { t: "partyAccept" }
+  /** The obelisk: wait for a bout in the Proving Ground (home only), or stop
+   * waiting. Answered with `arenaQueue`; a bout starts with `arenaAssigned`.
+   * Going home (`enterCamp`) or into the dungeon leaves a bout or the queue. */
+  | { t: "arenaJoin" }
+  | { t: "arenaLeave" }
+  /** In a bout: I've fallen, and `by` (a wizard in the bout) took the yield.
+   * Only the fallen can say so, once per rising. */
+  | { t: "arenaFell"; by: string | null }
   /** Walk home through a way-home portal. Refused until the run has played
    * RUN.floorsBeforeExit floors; the server validates every item against what
    * was actually granted this run (host-attested) and answers with `saved`. */
@@ -238,6 +265,14 @@ export type ServerMsg =
   | { t: "party"; party: PartyInfo | null }
   | { t: "partyInvited"; from: string; name: string }
   | { t: "partyError"; reason: PartyError }
+  /** Your place at the obelisk (0: not waiting) and how many wait. */
+  | { t: "arenaQueue"; position: number; waiting: number }
+  | { t: "arenaAssigned"; assignment: ArenaAssignment }
+  /** The scoreboard after a fall (`fell` says who yielded to whom). */
+  | { t: "arenaScore"; board: ArenaScore[]; fell: { victim: string; by: string | null } }
+  /** The bout is over: the final board (best first), the winner (if anyone
+   * scored) and your standing with Varr now. */
+  | { t: "arenaEnded"; board: ArenaScore[]; winner: string | null; record: ArenaRecord }
   | { t: "peerJoined"; member: MemberInfo }
   | { t: "peerLeft"; playerId: string }
   | { t: "hostChanged"; hostId: string; epoch: number }

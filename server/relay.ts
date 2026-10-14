@@ -1,7 +1,9 @@
+import { ARENA, boutOver, newScoreboard, ranked, recordFall, winnerOf, type Scoreboard } from "../src/arena/rules";
 import { DUNGEON } from "../src/core/config";
 import { Rng } from "../src/core/rng";
 import { MAX_GRANT_QTY } from "../src/items/economy";
 import { rollGamble } from "../src/items/loot";
+import { ArenaQueue } from "../src/net/arenaQueue";
 import { FloorDirectory, type FloorInstanceRecord, type JoinOptions } from "../src/net/matchmaking";
 import { isPartyCode, normalizePartyCode, PartyDirectory, type Party, type PartyError } from "../src/net/party";
 import {
@@ -33,6 +35,9 @@ import { AccountAuth, argon2Hasher, type AuthDeps } from "./auth";
  *    where everyone meets), routed exactly like a floor
  *  - fellowships (net/party.ts): codes, invites, and keeping a party in one
  *    instance; room and party chat, trimmed and rate-limited
+ *  - the Proving Ground (arena/): the obelisk's queue, each bout's room,
+ *    clock and scoreboard, and each wizard's record with Varr — `tick()`
+ *    starts and ends bouts on the server's clock
  *  - host designation + migration (epoch bumps on every change)
  *  - clock pongs (one shared timeline for interpolation)
  *  - relaying opaque envelopes by channel-prefix rule:
@@ -71,6 +76,20 @@ export function cleanChat(raw: unknown): string | null {
   return text ? text.slice(0, CHAT_MAX) : null;
 }
 
+/** How long after a bout's farewell a wizard still in its hall keeps the
+ * seat (ms) — their client walks them home long before. */
+const BOUT_STRAGGLE_MS = 60_000;
+
+/** A bout under way (or just over) in the Proving Ground. */
+interface Bout {
+  board: Scoreboard;
+  startedAt: number;
+  /** When it ended (null: still fighting). */
+  endedAt: number | null;
+  /** When each wizard last fell (one fall per rising). */
+  lastFall: Map<string, number>;
+}
+
 export class Relay {
   private peers = new Map<string, RelayPeer>();
   private epochs = new Map<string, number>();
@@ -91,6 +110,11 @@ export class Relay {
   private parties: PartyDirectory;
   /** peerId → when their recent chat lines were sent (rate limit). */
   private chatTimes = new Map<string, number[]>();
+  /** The Proving Ground: who waits at the obelisk, the bouts' rooms, and
+   * each bout's score and sands (by room id). */
+  private arenaQueue = new ArenaQueue();
+  private arenas: FloorDirectory;
+  private bouts = new Map<string, Bout>();
 
   constructor(
     private directory: FloorDirectory,
@@ -111,6 +135,39 @@ export class Relay {
       "camp",
     );
     this.parties = new PartyDirectory(Math.random, now);
+    // A bout's room is made whole (never by chance meetings), and goes when
+    // its last wizard does.
+    this.arenas = new FloorDirectory(
+      ARENA.maxPlayers,
+      () => (Math.random() * 0xffffffff) >>> 0,
+      now,
+      () => 1,
+      { baseChance: 0, perSoloFloor: 0, maxChance: 0 },
+      0,
+      "arena",
+    );
+  }
+
+  /** The server's heartbeat (a few times a second): bouts start when the
+   * obelisk has gathered enough challengers, and end on the score or the
+   * sands. */
+  tick(): void {
+    const now = this.now();
+    for (let ids = this.arenaQueue.take(now); ids; ids = this.arenaQueue.take(now)) this.startBout(ids);
+    for (const [id, bout] of this.bouts) {
+      const room = this.arenas.instanceById(id);
+      if (!room) this.bouts.delete(id);
+      else if (bout.endedAt === null && boutOver(bout.board, bout.startedAt, now)) this.endBout(id, bout);
+      else if (bout.endedAt !== null && now - bout.endedAt > ARENA.afterMs + BOUT_STRAGGLE_MS) {
+        // Everyone walks home on their own; a straggler's seat is let go.
+        for (const pid of [...room.players]) {
+          const p = this.peers.get(pid);
+          if (p) this.leaveRoom(p, this.arenas);
+          else this.arenas.leave(pid);
+        }
+        this.bouts.delete(id);
+      }
+    }
   }
 
   connect(peer: RelayPeer): void {
@@ -124,11 +181,14 @@ export class Relay {
     // runFloor/runGrants stay on the account so a reconnect resumes the run
     // (and lastInstance remembers where, for the same world).
     this.leaveInstance(peer);
+    this.leaveArena(peer);
     this.directory.forget(peerId);
     this.camp.forget(peerId);
     const party = this.parties.forget(peerId);
     if (party) this.tellParty(party);
     this.chatTimes.delete(peerId);
+    this.arenaQueue.leave(peerId);
+    this.tellQueue();
     this.peers.delete(peerId);
     this.tokens.delete(peerId);
     this.auth.forget(peerId);
@@ -185,6 +245,18 @@ export class Relay {
         break;
       case "chat":
         this.chat(peer, msg.text, msg.party === true);
+        break;
+      case "arenaJoin":
+        // From home only: a wizard mid-run (or mid-bout) can't queue.
+        if (this.directory.instanceOf(peer.id) || this.arenas.instanceOf(peer.id)) break;
+        this.arenaQueue.join(peer.id, this.now());
+        this.tellQueue();
+        break;
+      case "arenaLeave":
+        this.leaveQueue(peer.id);
+        break;
+      case "arenaFell":
+        this.arenaFell(peer, msg.by);
         break;
       case "partyCreate":
         this.tellParty(this.parties.create(peer.id));
@@ -482,6 +554,8 @@ export class Relay {
     }
     this.leaveInstance(peer);
     this.leaveCamp(peer);
+    this.leaveArena(peer);
+    this.leaveQueue(peer.id);
     opts.companions = this.parties.companionsOf(peer.id);
     const inst = this.directory.join(peer.id, floor, opts);
     this.lastInstance.set(account.token, inst.id);
@@ -526,6 +600,7 @@ export class Relay {
   private enterCamp(peer: RelayPeer): void {
     if (this.directory.instanceOf(peer.id)) return; // mid-run: not home yet
     this.leaveCamp(peer);
+    this.leaveArena(peer); // home from the Proving Ground
     const inst = this.camp.join(peer.id, 0, { companions: this.parties.companionsOf(peer.id) });
     if (!this.epochs.has(inst.id)) this.epochs.set(inst.id, 1);
     peer.send({
@@ -561,6 +636,106 @@ export class Relay {
       for (const m of remaining) m.send({ t: "hostChanged", hostId, epoch });
       this.log(`host of ${inst.id} -> ${hostId} (epoch ${epoch})`);
     }
+  }
+
+  // ── The Proving Ground ─────────────────────────────────────────────────────
+
+  private leaveQueue(peerId: string): void {
+    if (!this.arenaQueue.has(peerId)) return;
+    this.arenaQueue.leave(peerId);
+    this.peers.get(peerId)?.send({ t: "arenaQueue", position: 0, waiting: this.arenaQueue.size });
+    this.tellQueue();
+  }
+
+  /** Everyone at the obelisk learns their place in line. */
+  private tellQueue(): void {
+    for (const p of this.peers.values()) {
+      const position = this.arenaQueue.position(p.id);
+      if (position > 0) p.send({ t: "arenaQueue", position, waiting: this.arenaQueue.size });
+    }
+  }
+
+  private startBout(ids: string[]): void {
+    // Whoever's still home (and still here) goes in; the rest wait again.
+    const fighters = ids
+      .map((id) => this.peers.get(id))
+      .filter((p): p is RelayPeer => !!p && !this.directory.instanceOf(p.id) && !this.arenas.instanceOf(p.id));
+    if (fighters.length < ARENA.minPlayers) {
+      for (const p of fighters) this.arenaQueue.join(p.id, this.now());
+      return;
+    }
+    const now = this.now();
+    let inst: FloorInstanceRecord | null = null;
+    for (const p of fighters) {
+      this.leaveCamp(p);
+      inst = this.arenas.join(p.id, 0, inst ? { companions: [fighters[0]!.id] } : {});
+    }
+    const room = inst!;
+    this.epochs.set(room.id, 1);
+    this.bouts.set(room.id, { board: newScoreboard(fighters), startedAt: now, endedAt: null, lastFall: new Map() });
+    const members = this.membersOf(room);
+    for (const p of fighters) {
+      p.send({
+        t: "arenaAssigned",
+        assignment: {
+          instanceId: room.id,
+          seed: room.seed,
+          hostId: this.hostOf(p.id),
+          epoch: 1,
+          members,
+          endsAt: now + ARENA.durationMs,
+          killsToWin: ARENA.killsToWin,
+        },
+      });
+    }
+    this.tellQueue();
+    this.log(`bout ${room.id}: ${fighters.map((p) => p.name).join(" vs ")}`);
+  }
+
+  /** Only the fallen say they fell (they know who struck last), once per
+   * rising; the yield goes to a wizard who's really in the bout. */
+  private arenaFell(peer: RelayPeer, by: unknown): void {
+    const room = this.arenas.instanceOf(peer.id);
+    const bout = room && this.bouts.get(room.id);
+    if (!room || !bout || bout.endedAt !== null) return;
+    const now = this.now();
+    if (now - (bout.lastFall.get(peer.id) ?? -Infinity) < ARENA.respawnMs) return;
+    bout.lastFall.set(peer.id, now);
+    const killer = typeof by === "string" && by !== peer.id && room.players.has(by) ? by : null;
+    bout.board = recordFall(bout.board, peer.id, killer, now);
+    for (const id of room.players) {
+      this.peers.get(id)?.send({ t: "arenaScore", board: bout.board, fell: { victim: peer.id, by: killer } });
+    }
+    if (boutOver(bout.board, bout.startedAt, now)) this.endBout(room.id, bout);
+  }
+
+  private endBout(roomId: string, bout: Bout): void {
+    const room = this.arenas.instanceById(roomId);
+    if (!room || bout.endedAt !== null) return;
+    bout.endedAt = this.now();
+    const winner = winnerOf(bout.board, room.players);
+    const board = ranked(bout.board);
+    for (const id of room.players) {
+      const peer = this.peers.get(id);
+      if (!peer) continue;
+      const yields = bout.board.find((s) => s.id === id)?.kills ?? 0;
+      const record = this.accounts.recordBout(this.accountOf(peer), id === winner, yields);
+      peer.send({ t: "arenaEnded", board, winner, record });
+    }
+    this.log(`bout ${roomId} over: ${winner ? this.peers.get(winner)?.name : "nobody"} wins`);
+  }
+
+  /** Out of a bout (home, into the dungeon, or gone). A bout left with one
+   * wizard ends: the hall is theirs if they took a yield. */
+  private leaveArena(peer: RelayPeer): void {
+    const room = this.arenas.instanceOf(peer.id);
+    if (!room) return;
+    const bout = this.bouts.get(room.id);
+    this.leaveRoom(peer, this.arenas);
+    if (bout && bout.endedAt === null && room.players.size < ARENA.minPlayers && room.players.size > 0) {
+      this.endBout(room.id, bout);
+    }
+    if (!this.arenas.instanceById(room.id)) this.bouts.delete(room.id);
   }
 
   // ── Envelope routing ───────────────────────────────────────────────────────
@@ -620,13 +795,13 @@ export class Relay {
     }
   }
 
-  /** The room a wizard is in: a floor instance, or a camp. */
+  /** The room a wizard is in: a floor instance, a camp, or a bout. */
   private roomOf(playerId: string): FloorInstanceRecord | null {
-    return this.directory.instanceOf(playerId) ?? this.camp.instanceOf(playerId);
+    return this.directory.instanceOf(playerId) ?? this.camp.instanceOf(playerId) ?? this.arenas.instanceOf(playerId);
   }
 
   private roomById(id: string): FloorInstanceRecord | null {
-    return this.directory.instanceById(id) ?? this.camp.instanceById(id);
+    return this.directory.instanceById(id) ?? this.camp.instanceById(id) ?? this.arenas.instanceById(id);
   }
 
   private membersOf(inst: FloorInstanceRecord): MemberInfo[] {

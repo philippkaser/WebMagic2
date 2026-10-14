@@ -9,6 +9,7 @@ import {
   sellValue,
   MAX_GRANT_QTY,
 } from "../src/items/economy";
+import type { ArenaRecord } from "../src/arena/rules";
 import type { Rng } from "../src/core/rng";
 import { applyCraft, type CraftOutcome, type CraftRequest } from "../src/items/crafting";
 import { BAG_SLOTS, BELT_SLOTS, CHEST_SLOTS, POUCH_SLOTS } from "../src/items/inventory";
@@ -63,6 +64,8 @@ export interface AccountRecord {
   /** Floors entered during the current run, counting the one it's on. The
    * way home only opens at RUN.floorsBeforeExit (the Tithe of Five). */
   runFloors: number;
+  /** Standing in the Proving Ground (absent: never fought there). */
+  arena?: ArenaRecord;
 
   // Sign-in (auth.ts). Absent on guests — and on every pre-ledger record.
   /** Sign-in name, spelled as chosen (unique ignoring case). */
@@ -159,6 +162,7 @@ export class AccountStore {
               runGold: clampGold(raw.runGold, GOLD_RULES.perRunCap),
               runFloor: clampFloor(raw.runFloor),
               runFloors: clampFloor(raw.runFloors),
+              ...(raw.arena ? { arena: cleanArenaRecord(raw.arena) } : {}),
             });
             restoreSignIn(this.accounts.get(raw.token)!, raw);
           }
@@ -211,7 +215,19 @@ export class AccountStore {
   }
 
   saveOf(account: AccountRecord): ServerSave {
-    return { deepest: account.deepest, inventory: cloneInventory(account.inventory) };
+    return {
+      deepest: account.deepest,
+      inventory: cloneInventory(account.inventory),
+      ...(account.arena ? { arena: { ...account.arena } } : {}),
+    };
+  }
+
+  /** A bout in the Proving Ground is over: Varr writes it down. */
+  recordBout(account: AccountRecord, won: boolean, yields: number): ArenaRecord {
+    const r = account.arena ?? { bouts: 0, wins: 0, yields: 0 };
+    account.arena = { bouts: r.bouts + 1, wins: r.wins + (won ? 1 : 0), yields: r.yields + Math.max(0, Math.floor(yields) || 0) };
+    this.flush();
+    return { ...account.arena };
   }
 
   /** Host attested that this account picked up an item this run. Duplicates
@@ -440,6 +456,13 @@ const MAX_FLOOR_FIELD = 1000;
 function clampFloor(raw: unknown): number {
   const n = Math.floor(Number(raw));
   return Number.isFinite(n) ? Math.max(0, Math.min(n, MAX_FLOOR_FIELD)) : 0;
+}
+
+/** A stored arena record, every count a sane whole number. */
+function cleanArenaRecord(raw: unknown): ArenaRecord {
+  const r = (raw ?? {}) as Partial<Record<keyof ArenaRecord, unknown>>;
+  const count = (v: unknown) => clampGold(v, 1_000_000);
+  return { bouts: count(r.bouts), wins: count(r.wins), yields: count(r.yields) };
 }
 
 function clampGold(raw: unknown, cap: number): number {
