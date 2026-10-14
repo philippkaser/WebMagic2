@@ -100,6 +100,9 @@ export interface ProjectileSpec {
   /** The local wizard's own magic, landing for real (not a replay): its
    * hits confirm, pop numbers and catch the frame. */
   mine: boolean;
+  /** From the bolt's line across to the crosshair's (castKinds), or null:
+   * its precision hits are judged on where it was aimed. */
+  aimOffset: [number, number, number] | null;
 }
 
 export interface FireOptions {
@@ -125,6 +128,8 @@ export interface FireOptions {
   noProc?: boolean;
   /** How heavy its hits land (default: judged from `damage`). */
   weight?: number;
+  /** Our own aimed bolts: the crosshair's line, beside the bolt's. */
+  aimOffset?: [number, number, number];
 }
 
 const MAX_LIVE = 80;
@@ -191,6 +196,7 @@ export function fireProjectile(opts: FireOptions): void {
     noProc: opts.noProc ?? false,
     weight: opts.weight ?? hitWeight(opts.damage),
     mine: !opts.cosmetic && relation === "own",
+    aimOffset: opts.aimOffset ?? null,
   });
 }
 
@@ -277,7 +283,7 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
         remote: spec.cosmetic,
         noProc: spec.noProc,
         weight: spec.weight,
-        direct: on && !spec.cosmetic ? { target: on, crit: boltCrit(on, at, prev.current, b, spec.size) } : undefined,
+        direct: on && !spec.cosmetic ? { target: on, crit: boltCrit(on, at, prev.current, b, spec.size, spec.aimOffset) } : undefined,
       });
       if (spec.team === "player") {
         if (spec.splitShards > 0) splinter(spec, at, b);
@@ -392,7 +398,14 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
           const v = b.linvel();
           const vl = Math.hypot(v.x, v.y, v.z) || 1;
           const spot = weakOf(h);
-          const crit = spot && sweptCrit(prev.current, t, spot, spec.size) ? spot : null;
+          const o = spec.aimOffset ?? NO_OFFSET;
+          sweepA.x = prev.current.x + o[0];
+          sweepA.y = prev.current.y + o[1];
+          sweepA.z = prev.current.z + o[2];
+          sweepB.x = t.x + o[0];
+          sweepB.y = t.y + o[1];
+          sweepB.z = t.z + o[2];
+          const crit = spot && sweptCrit(sweepA, sweepB, spot, spec.size) ? spot : null;
           const dmg = spec.damage * PIERCE_SHARE * (crit ? critMult(crit) : 1);
           const at: [number, number, number] = [target.pos.x, target.pos.y, target.pos.z];
           land(h, dmg, { x: (v.x / vl) * k, y: k * 0.3, z: (v.z / vl) * k }, { mine: spec.mine, at, crit: crit !== null }, spec.weight);
@@ -459,16 +472,22 @@ function splinter(spec: ProjectileSpec, at: [number, number, number], b: RapierR
 }
 
 const flight = { x: 0, y: 0, z: 0 };
+const NO_OFFSET: readonly [number, number, number] = [0, 0, 0];
+/** A piercing pass's sweep, moved onto the crosshair's line. */
+const sweepA = { x: 0, y: 0, z: 0 };
+const sweepB = { x: 0, y: 0, z: 0 };
 
 /** The weak point a bolt that burst on `h` at `at` was flying through, or
  * null. Its line is the way it came this frame (from `from`), followed as
- * deep as the body goes. */
+ * deep as the body goes — moved across onto the crosshair's line
+ * (`aimOffset`) for an aimed bolt, so a precision hit is where you aimed. */
 function boltCrit(
   h: Hittable,
   at: [number, number, number],
   from: { x: number; y: number; z: number },
   b: RapierRigidBody | null,
   size: number,
+  aimOffset: [number, number, number] | null,
 ): WeakSpot | null {
   const spot = weakOf(h);
   if (!spot) return null;
@@ -488,7 +507,8 @@ function boltCrit(
   flight.x /= len;
   flight.y /= len;
   flight.z /= len;
-  const p = { x: at[0], y: at[1], z: at[2] };
+  const o = aimOffset ?? NO_OFFSET;
+  const p = { x: at[0] + o[0], y: at[1] + o[1], z: at[2] + o[2] };
   return pathCrit(p, flight, spot, size, h.radius ?? 0.5) ? spot : null;
 }
 

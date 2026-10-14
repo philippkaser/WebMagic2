@@ -56,6 +56,10 @@ export interface AbilityContext {
   remote?: boolean;
   /** Cast by a legendary power: its hits don't roll powers again. */
   noProc?: boolean;
+  /** Our own casts: the eye the aim was taken from. Spells leave the staff
+   * tip, a hand's breadth beside the crosshair's line and parallel to it;
+   * a precision hit is judged on the crosshair's line — where you aimed. */
+  eye?: Vector3;
 }
 
 export function castSpell(def: Readonly<SpellDef>, ctx: AbilityContext): void {
@@ -100,6 +104,14 @@ function castBolt(def: Readonly<BoltSpell>, ctx: AbilityContext): void {
   const total = def.count + extra;
   const spread = total > 1 ? Math.max(def.spread, MULTISHOT_MIN_SPREAD) : def.spread;
   const speed = def.speed * (s.projectileSpeedMult ?? 1);
+  // How far the crosshair's line runs beside the bolt's (across it): its
+  // precision hits are judged on that line.
+  let aimOffset: [number, number, number] | undefined;
+  if (ctx.eye && !ctx.remote) {
+    at.copy(ctx.eye).sub(ctx.origin);
+    at.addScaledVector(ctx.dir, -at.dot(ctx.dir));
+    aimOffset = [at.x, at.y, at.z];
+  }
   for (let i = 0; i < total; i++) {
     jitter.set(
       (Math.random() - 0.5) * spread,
@@ -126,6 +138,7 @@ function castBolt(def: Readonly<BoltSpell>, ctx: AbilityContext): void {
       splitShards: s.splitShards ?? 0,
       chain: s.chain ?? 0,
       weight: spellHitWeight(def),
+      aimOffset,
       // A peer's replayed bolt is visual: their own client requests the damage.
       cosmetic: ctx.remote ?? false,
     });
@@ -245,7 +258,10 @@ function strike(
 function lineCrit(t: HitTarget<Struck>, ctx: AbilityContext, enter: number, slack: number): WeakSpot | null {
   if (t.ref === "me" || ctx.remote) return null;
   const spot = weakOf(t.ref);
-  return spot && rayCrit(ctx.origin, ctx.dir, spot, enter + t.radius + slack) ? spot : null;
+  if (!spot) return null;
+  const from = ctx.eye ?? ctx.origin;
+  const behind = ctx.eye ? ctx.eye.distanceTo(ctx.origin) : 0;
+  return rayCrit(from, ctx.dir, spot, enter + behind + t.radius + slack) ? spot : null;
 }
 
 const end = new Vector3();

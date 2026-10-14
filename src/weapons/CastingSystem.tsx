@@ -1,6 +1,7 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import { Vector3, type Camera } from "three";
+import { playFizzle, playSpellReady } from "../audio/combatSounds";
 import { playSpellCast } from "../audio/spellSounds";
 import { gameEvents } from "../core/events";
 import { castFlareFx } from "../fx/effects";
@@ -11,6 +12,7 @@ import { peerMessage } from "../net/channels";
 import { estimatePeer } from "../net/players";
 import { input } from "../player/input";
 import { getStats, useGame } from "../state/gameStore";
+import { castFeel, newCastFeel, READY_COOLDOWN } from "./castFeel";
 import { encodeCastMsg, sanitizeCastMsg, type CastMsg } from "./castMessage";
 import { localWizardId } from "./localWizard";
 import { getSpellDef } from "./spellCatalog";
@@ -30,6 +32,8 @@ const UP = new Vector3(0, 1, 0);
 const aim = new Vector3();
 const side = new Vector3();
 const muzzle = new Vector3();
+/** The eye the aim was taken from (precision hits are judged on its line). */
+const eye = new Vector3();
 const replayOrigin = new Vector3();
 const replayDir = new Vector3();
 /** Staff tip ≈ 0.7 m from the body; the slack covers a snapshot of movement
@@ -84,6 +88,45 @@ const BLOOD_PER_MANA = 0.6;
 
 let castCount = 0;
 
+/** A held button with too little mana sputters at most this often (s). */
+const FIZZLE_EVERY = 0.45;
+let lastFizzle = -Infinity;
+
+/** Each slot's cooldown, for the staff's gathering light: seconds left of
+ * how many. */
+const slots = {
+  primary: { left: 0, total: 0, readyAt: -Infinity },
+  secondary: { left: 0, total: 0, readyAt: -Infinity },
+};
+
+/** How strongly the staff gathers light for a heavy spell coming ready,
+ * 0…1: rising over the last 40% of any cooldown of READY_COOLDOWN or
+ * more, then a flash as it comes ready that fades in a third of a second
+ * (player/StaffView reads it). */
+export function readyGlow(now = performance.now() / 1000): number {
+  return Math.max(0, Math.min(1, Math.max(slotGlow(slots.primary, now), slotGlow(slots.secondary, now))));
+}
+
+function slotGlow(s: { left: number; total: number; readyAt: number }, now: number): number {
+  if (s.total < READY_COOLDOWN) return 0;
+  if (s.left > 0) return Math.max(0, (1 - s.left / s.total - 0.6) / 0.4) * 0.8;
+  return 1 - (now - s.readyAt) / 0.3;
+}
+
+/** A slot's cooldown ran down this frame: a heavy spell chimes ready —
+ * unless the button's still held, when it fires again at once. */
+function tickSlot(s: { left: number; total: number; readyAt: number }, dt: number, held: boolean, live: boolean): void {
+  const was = s.left;
+  s.left -= dt;
+  if (was > 0 && s.left <= 0 && s.total >= READY_COOLDOWN) {
+    s.readyAt = performance.now() / 1000;
+    if (live && !held) playSpellReady();
+  }
+}
+
+const kickScratch = newCastFeel();
+const eyeKick = { pitch: 0, yaw: 0, fov: 0 };
+
 /** Pay for a spell: mana, scaled by the kit's mana cost — or, wearing the
  * Bloodstone Pact with too little mana, the shortfall in blood. */
 function pay(cost: number, stats: ReturnType<typeof getStats>): boolean {
@@ -99,6 +142,7 @@ function pay(cost: number, stats: ReturnType<typeof getStats>): boolean {
 
 /** Where the staff tip is right now, and where it points. */
 function aimFrom(camera: Camera): void {
+  eye.copy(camera.position);
   camera.getWorldDirection(aim);
   side.crossVectors(aim, UP).normalize();
   muzzle
@@ -111,7 +155,7 @@ function aimFrom(camera: Camera): void {
 /** Loose one spell from the staff tip and tell the floor. */
 function loose(abilityId: string, staff: ItemDef, stats: ReturnType<typeof getStats>, juice: number): void {
   const ability = getAbility(abilityId);
-  ability.cast({ origin: muzzle, dir: aim, stats, staff, caster: localWizardId() });
+  ability.cast({ origin: muzzle, dir: aim, stats, staff, caster: localWizardId(), eye });
   peerCast.send(encodeCastMsg(ability.id, muzzle, aim, staff.id, stats));
   // Muzzle flare: rides with our own velocity so a strafing cast doesn't
   // leave its flash hanging in the air behind the staff.
@@ -124,7 +168,16 @@ function loose(abilityId: string, staff: ItemDef, stats: ReturnType<typeof getSt
 function castFromStaff(abilityId: string, staff: ItemDef, camera: Camera): number {
   const ability = getAbility(abilityId);
   const stats = getStats();
-  if (!pay(ability.mana * stats.manaCostMult, stats)) return DRY_FIRE_THROTTLE;
+  if (!pay(ability.mana * stats.manaCostMult, stats)) {
+    // Not silence: the spell sputters out at the staff.
+    const now = performance.now() / 1000;
+    if (now - lastFizzle >= FIZZLE_EVERY) {
+      lastFizzle = now;
+      playFizzle();
+      gameEvents.emit("fizzle", undefined);
+    }
+    return DRY_FIRE_THROTTLE;
+  }
   const stream = ability.cooldown < TICK_SPELL;
 
   aimFrom(camera);
@@ -147,8 +200,14 @@ function castFromStaff(abilityId: string, staff: ItemDef, camera: Camera): numbe
     }, ECHO_DELAY_MS);
   }
 
-  gameEvents.emit("staffKick", stream ? 0.25 : 0.9);
-  if (!stream) gameEvents.emit("shake", 0.05);
+  // Recoil by weight (weapons/castFeel): a rail is a cannon, a bolt a flick.
+  const feel = castFeel(getSpellDef(ability.id), kickScratch);
+  gameEvents.emit("staffKick", feel.kick);
+  if (feel.shake > 0) gameEvents.emit("shake", feel.shake);
+  eyeKick.pitch = feel.pitch;
+  eyeKick.yaw = feel.yaw * (Math.random() < 0.5 ? -1 : 1);
+  eyeKick.fov = feel.fov;
+  gameEvents.emit("castKick", eyeKick);
   // Fire-rate gear shortens the cooldown (higher mult = faster).
   return ability.cooldown / Math.max(MIN_FIRE_RATE, stats.fireRateMult);
 }
@@ -170,7 +229,8 @@ export function CastingSystem() {
       const abilityId = staff[which];
       if (!abilityId) return false;
       camera.lookAt(x, y, z);
-      castFromStaff(abilityId, staff, camera);
+      const left = castFromStaff(abilityId, staff, camera);
+      slots[which].left = slots[which].total = left;
       return true;
     };
     // Point the camera without casting (screenshot scripts).
@@ -186,15 +246,20 @@ export function CastingSystem() {
     cd.primary -= dt;
     cd.secondary -= dt;
     const state = useGame.getState();
-    if (state.phase !== "dungeon" && state.phase !== "village") return;
-    if (!document.pointerLockElement) return;
+    const live = state.phase === "dungeon" || state.phase === "village";
+    const locked = !!document.pointerLockElement;
+    tickSlot(slots.primary, dt, locked && input.mouseLeft, live);
+    tickSlot(slots.secondary, dt, locked && input.mouseRight, live);
+    if (!live || !locked) return;
 
     const staff = getItemDef(state.equipment.staff.defId);
     if (input.mouseLeft && staff.primary && cd.primary <= 0) {
       cd.primary = castFromStaff(staff.primary, staff, camera);
+      slots.primary.left = slots.primary.total = cd.primary;
     }
     if (input.mouseRight && staff.secondary && cd.secondary <= 0) {
       cd.secondary = castFromStaff(staff.secondary, staff, camera);
+      slots.secondary.left = slots.secondary.total = cd.secondary;
     }
   });
 
