@@ -46,9 +46,10 @@ export interface DamageNumber {
   bump: number;
   /** How big the last pop was. */
   popFrom: number;
-  /** Sideways nudge (metres, along the view's right) so numbers from
-   * neighbouring hits don't stack on one spot. */
-  side: number;
+  /** A nudge on screen (font pixels, x right / y up) so numbers from hits
+   * along one line of sight — a rail through a row — don't stack. */
+  dx: number;
+  dy: number;
 }
 
 export interface NumberPool {
@@ -60,12 +61,21 @@ export interface NumberPool {
 export function createNumbers(size: number = NUMBERS.size): NumberPool {
   const items: DamageNumber[] = [];
   for (let i = 0; i < size; i++) {
-    items.push({ live: false, target: "", value: 0, style: 0, x: 0, y: 0, z: 0, age: 0, bump: 0, popFrom: 1, side: 0 });
+    items.push({ live: false, target: "", value: 0, style: 0, x: 0, y: 0, z: 0, age: 0, bump: 0, popFrom: 1, dx: 0, dy: 0 });
   }
   return { items, turn: 0 };
 }
 
-const SIDES = [0, 0.18, -0.16, 0.1, -0.22, 0.24, -0.08];
+/** Screen nudges, in turn (font pixels): never two alike in a row. */
+const NUDGES: readonly (readonly [number, number])[] = [
+  [0, 0],
+  [14, -7],
+  [-14, -12],
+  [7, 11],
+  [-9, 6],
+  [18, 3],
+  [-18, -2],
+];
 
 /** Your hit on `target` dealt `damage` at (x, y, z). Returns the entry it
  * landed in (fresh, or the creature's number still pouring). */
@@ -111,7 +121,11 @@ export function addNumber(
   e.age = 0;
   e.bump = 0;
   e.popFrom = NUMBERS.pop;
-  e.side = SIDES[pool.turn++ % SIDES.length]!;
+  // A lone number sits where it hit; one that lands while others still
+  // show steps aside.
+  const nudge = pool.items.some((o) => o !== e && o.live) ? NUDGES[1 + (pool.turn++ % (NUDGES.length - 1))]! : NUDGES[0]!;
+  e.dx = nudge[0];
+  e.dy = nudge[1];
   return e;
 }
 

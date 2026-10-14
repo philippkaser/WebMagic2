@@ -6,6 +6,7 @@ import { Hud } from "./layers/hud/Hud";
 import { HudRig } from "./layers/hud/HudAnchor";
 import { Menus } from "./layers/menus/Menus";
 import { ForkChoice } from "./layers/ForkChoice";
+import { DamageNumbers } from "./layers/combat/DamageNumbers";
 import { InventoryLayer } from "./layers/inventory/InventoryLayer";
 import { WorldMessages } from "./layers/WorldMessages";
 import { WorldPrompts } from "./layers/WorldPrompts";
@@ -32,6 +33,7 @@ export function UiRoot() {
       <Menus />
       <InventoryLayer />
       <ForkChoice />
+      <DamageNumbers />
       {import.meta.env.DEV && <DevShowcase />}
     </>
   );

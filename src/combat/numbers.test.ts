@@ -70,6 +70,16 @@ describe("damage numbers", () => {
     expect(pool.items.map((x) => x.target).sort()).toEqual(["new", "t1", "t2", "t3"]);
   });
 
+  test("a lone number sits where it hit; a row of them steps apart on screen", () => {
+    const pool = createNumbers();
+    const a = addNumber(pool, "a", 0, 1, 5, 9, 0);
+    expect([a.dx, a.dy]).toEqual([0, 0]);
+    const b = addNumber(pool, "b", 0, 1, 7, 9, 0);
+    const c = addNumber(pool, "c", 0, 1, 9, 9, 0);
+    const spots = new Set([a, b, c].map((e) => `${e.dx},${e.dy}`));
+    expect(spots.size).toBe(3);
+  });
+
   test("text: whole points, never 0, and it fits its buffer", () => {
     const pool = createNumbers();
     expect(text(addNumber(pool, "a", 0, 0, 0, 0.2, 0))).toBe("1");

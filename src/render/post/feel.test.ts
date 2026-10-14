@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { heartbeat, kickDash, kickHurt, kickImpact, lowOf, newFeel, stepFeel } from "./feel";
+import { heartbeat, kickDash, kickHurt, kickImpact, kickKill, lowOf, newFeel, stepFeel, stepKill } from "./feel";
 
 describe("post feel", () => {
   test("kicks land and fall away to nothing", () => {
@@ -67,5 +67,27 @@ describe("post feel", () => {
     }
     expect(peak).toBeGreaterThan(0.9);
     expect(heartbeat(0.6)).toBeLessThan(0.01);
+  });
+});
+
+describe("the kill punch", () => {
+  test("it pops, holds while the picture is held, then falls away", () => {
+    const f = newFeel();
+    kickKill(f, 0.6);
+    expect(f.kill).toBeGreaterThan(0.6);
+    const peak = f.kill;
+    stepKill(f, 0); // a hitstop frame: the picture's dt is 0
+    expect(f.kill).toBe(peak);
+    for (let i = 0; i < 60; i++) stepKill(f, 1 / 60);
+    expect(f.kill).toBe(0);
+  });
+
+  test("stacked kills never pass the top, and it leaves the other channels be", () => {
+    const f = newFeel();
+    for (let i = 0; i < 10; i++) kickKill(f, 1);
+    expect(f.kill).toBe(1);
+    expect(f.impact + f.hurt + f.dash).toBe(0);
+    stepFeel(f, 0.1, 1);
+    expect(f.kill).toBe(1);
   });
 });
