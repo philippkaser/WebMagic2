@@ -92,8 +92,8 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
     entityId: BOSS_ID,
     position,
     floor,
-    // The blazing core, through the shell.
-    weakSpot: { y: 0, r: 0.5 },
+    // The blazing core, through the shell: the hardest-earned crit there is.
+    weakSpot: { y: 0, r: 0.5, mult: 2 },
     knockbackScale: 0.25,
     flashDecay: 4,
     act: () => wardenAct(brain),

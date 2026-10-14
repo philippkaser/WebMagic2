@@ -109,6 +109,8 @@ export interface WeakSpot {
   y: number;
   r: number;
   fwd?: number;
+  /** A precision hit's multiplier here, if not the usual (weapons/precision). */
+  mult?: number;
 }
 
 export interface UseEnemyOptions {
@@ -537,7 +539,7 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
             const t = body.current?.translation();
             if (!t) return null;
             const a = live.ahead(ws.fwd ?? 0);
-            return { x: t.x + a.x, y: t.y + ws.y + live.pose.y, z: t.z + a.z, r: ws.r };
+            return { x: t.x + a.x, y: t.y + ws.y + live.pose.y, z: t.z + a.z, r: ws.r, mult: ws.mult };
           }
         : undefined,
       hit: (damage, impulse, info?: HitInfo) => {
