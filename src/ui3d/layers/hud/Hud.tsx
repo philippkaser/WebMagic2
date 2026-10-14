@@ -11,6 +11,7 @@ import { LoreTablet } from "./LoreTablet";
 import { PactPrompt } from "./PactPrompt";
 import { PresenceEye } from "./PresenceEye";
 import { Purse } from "./Purse";
+import { Tension } from "./Tension";
 import { Vitals } from "./Vitals";
 
 /** The in-game HUD, rebuilt in the world: every piece is a physical thing
@@ -37,6 +38,7 @@ export function Hud() {
   return (
     <UiPresence show={playing} exit={HUD_EXIT}>
       <HurtVignette />
+      <Tension />
       <UiShow show={overlay === "none"}>
         <Crosshair />
         <BossBar />

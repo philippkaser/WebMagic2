@@ -2,6 +2,7 @@ import type { Quaternion, Vector3 } from "three";
 import { analyzeRoom, hearing, impulseResponse, zoneAt, zoneHearing, type AcousticGrid, type RoomAcoustics } from "./acoustics";
 import { airDb, decorrelator, ears, spread, SPEED_OF_SOUND } from "./binaural";
 import { audioCtx, masterBus } from "./context";
+import { worldBus } from "./muffle";
 
 /** Raytraced sound, in WebAudio.
  *
@@ -311,7 +312,9 @@ function makeTail(ctx: AudioContext, master: AudioNode, local: boolean): Tail {
 function buses(): Buses | null {
   if (B) return B;
   const ctx = audioCtx();
-  const master = masterBus();
+  // Everything out there goes through the world bus (the near-death muffle,
+  // audio/muffle); sounds in your head bypass it.
+  const master = worldBus() ?? masterBus();
   if (!ctx || !master) return null;
   const tails: Tail[] = [];
   for (let i = 0; i < TAILS; i++) tails.push(makeTail(ctx, master, i === 0));
