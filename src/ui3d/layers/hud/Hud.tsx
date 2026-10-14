@@ -6,6 +6,7 @@ import { Crosshair } from "./Crosshair";
 import "./devHooks";
 import { Equipment } from "./Equipment";
 import { HurtVignette } from "./HurtVignette";
+import { LifeMarks } from "./LifeMarks";
 import { Location } from "./Location";
 import { LoreTablet } from "./LoreTablet";
 import { PactPrompt } from "./PactPrompt";
@@ -41,6 +42,7 @@ export function Hud() {
       <Tension />
       <UiShow show={overlay === "none"}>
         <Crosshair />
+        <LifeMarks />
         <BossBar />
         <Location />
         <Vitals />
