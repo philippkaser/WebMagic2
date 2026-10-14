@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { kickBrink, kickRelease, newHeart } from "../../game/heart";
 import { heartbeat, kickDash, kickHurt, kickImpact, lowOf, newFeel, stepFeel } from "./feel";
 
 describe("post feel", () => {
@@ -55,6 +56,20 @@ describe("post feel", () => {
     expect(maxBeat).toBeGreaterThan(0.8);
     for (let i = 0; i < 240; i++) stepFeel(f, 1 / 60, 1);
     expect(f.low).toBeLessThan(0.01);
+  });
+
+  test("a feel on a shared heart steps it and reads the Brink and a second wind", () => {
+    const h = newHeart();
+    const f = newFeel(h);
+    for (let i = 0; i < 120; i++) stepFeel(f, 1 / 60, 0.05);
+    expect(f.low).toBe(h.low);
+    expect(f.beat).toBe(h.beat);
+    kickBrink(h);
+    stepFeel(f, 1 / 60, 0.01);
+    expect(f.brink).toBeGreaterThan(0.9);
+    kickRelease(h, 1);
+    stepFeel(f, 1 / 60, 0.8);
+    expect(f.release).toBeGreaterThan(0.9);
   });
 
   test("heartbeat is a lub-dub in 0…1", () => {

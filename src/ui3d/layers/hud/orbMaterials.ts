@@ -34,6 +34,31 @@ export function levelToHeight(level: number, bottom = -0.88, top = 0.86): number
   return l <= 0 ? bottom - 0.05 : bottom + (top - bottom) * l;
 }
 
+/** Share of a disc's area below a chord at height `h` (−1…1, unit radius). */
+export function discBelow(h: number): number {
+  const y = Math.min(1, Math.max(-1, h));
+  return (y * Math.sqrt(1 - y * y) + Math.asin(y) + Math.PI / 2) / Math.PI;
+}
+
+/** The orb tells the truth: a value `fill` (0…1) → the liquid's surface
+ * height such that the liquid covers that share of the orb as you see it
+ * (side-on, a disc). A sphere is narrow at the bottom, so a level drawn
+ * straight from the value made 30 % health LOOK like a quarter; this
+ * inverts the disc's area (12 bisection steps: well under a cell). */
+export function heightForFill(fill: number, bottom = -0.88, top = 0.86): number {
+  const f = Math.min(1, Math.max(0, fill));
+  if (f <= 0) return levelToHeight(0, bottom, top);
+  if (f >= 1) return levelToHeight(1, bottom, top);
+  let lo = -1;
+  let hi = 1;
+  for (let i = 0; i < 12; i++) {
+    const mid = (lo + hi) / 2;
+    if (discBelow(mid) < f) lo = mid;
+    else hi = mid;
+  }
+  return levelToHeight((lo + hi) / 4 + 0.5, bottom, top);
+}
+
 const VERT = /* glsl */ `
 varying vec3 vObj;
 varying vec3 vN;
@@ -176,6 +201,9 @@ uniform float uFlash;
 uniform float uBack;
 uniform float uCells;
 uniform float uTime;
+uniform float uMark;
+uniform float uMarkOn;
+uniform vec3 uMarkCol;
 varying vec3 vObj;
 varying vec3 vN;
 varying vec3 vView;
@@ -205,6 +233,11 @@ void main() {
   float lit = step(0.6, main) * 1.1 + main * 0.25 + g;
   vec3 col = uTint * (fr * 0.6 + frost) + vec3(1.0, 0.97, 0.92) * lit;
   float a = fr * 0.5 + frost + lit * 0.7 + 0.03;
+  // A line etched round the glass in brass, one cell tall (the health orb's
+  // last-stand line): it catches the torch like the rest of the glass.
+  float etched = uMarkOn * (1.0 - step(0.5, abs(cell.y - floor(uMark * uCells))));
+  col = mix(col, uMarkCol * (0.75 + lit * 0.6 + g * 0.5), etched * 0.85);
+  a = max(a, etched * 0.8);
   col *= uBack;
   a *= uBack;
   col += uTint * uFlash * 0.4;
@@ -214,13 +247,32 @@ void main() {
 `;
 
 export type GlassMaterial = ShaderMaterial & {
-  uniforms: { uTint: { value: Color }; uFlash: { value: number }; uBack: { value: number }; uCells: { value: number }; uTime: { value: number } };
+  uniforms: {
+    uTint: { value: Color };
+    uFlash: { value: number };
+    uBack: { value: number };
+    uCells: { value: number };
+    uTime: { value: number };
+    /** A brass line etched round the glass at this object-space height. */
+    uMark: { value: number };
+    uMarkOn: { value: number };
+    uMarkCol: { value: Color };
+  };
 };
 
 /** Front (`back` = false) or the fainter inner back wall (`back` = true). */
 export function makeGlassMaterial(tint: string, back: boolean): GlassMaterial {
   return new ShaderMaterial({
-    uniforms: { uTint: { value: new Color(tint) }, uFlash: { value: 0 }, uBack: { value: back ? 0.35 : 1 }, uCells: { value: 15 }, uTime: { value: 0 } },
+    uniforms: {
+      uTint: { value: new Color(tint) },
+      uFlash: { value: 0 },
+      uBack: { value: back ? 0.35 : 1 },
+      uCells: { value: 15 },
+      uTime: { value: 0 },
+      uMark: { value: 0 },
+      uMarkOn: { value: 0 },
+      uMarkCol: { value: new Color("#c99a4a") },
+    },
     vertexShader: VERT,
     fragmentShader: GLASS_FRAG,
     transparent: true,
