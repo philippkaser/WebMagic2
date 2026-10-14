@@ -1,5 +1,6 @@
 import { MAX_ITEM_LEVEL } from "../items/itemId";
 import { staffPotency } from "../items/power";
+import { CRIT } from "./precision";
 
 /** Networked hit commands — the one place a remote player's numbers enter an
  * entity's health. Pure (no three.js, no store) so the clamps are unit-tested. */
@@ -11,10 +12,15 @@ export interface HitData {
   impulse: { x: number; y: number; z: number };
 }
 
-/** Ceiling for a single networked hit at floor 1. The strongest legit
- * unleveled hit is ~50 (34 base × 1.3 fury × 1.12 keen); the headroom covers
- * item stacking without letting a hacked client one-shot everything. */
-const BASE_HIT_CAP = 100;
+/** Ceiling for a single plain networked hit at floor 1. The strongest legit
+ * unleveled hit is ~80 (the Starpierce's 55 base × 1.3 fury × 1.12 keen);
+ * the headroom covers item stacking without letting a hacked client
+ * one-shot everything. */
+export const PLAIN_HIT_CAP = 100;
+/** …and the cap itself: a precision hit (weapons/precision.ts) multiplies a
+ * legit blow by up to CRIT.maxMult on the shooter's machine, so the cap
+ * grows by exactly that much and no more. */
+const BASE_HIT_CAP = PLAIN_HIT_CAP * CRIT.maxMult;
 
 /** Staff levels multiply spell damage (items/power.ts), so the cap follows
  * depth: a floor's legit hits come from staffs found around that floor (a

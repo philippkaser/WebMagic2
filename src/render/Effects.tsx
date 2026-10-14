@@ -10,6 +10,8 @@ import { FilmEffect } from "./post/FilmEffect";
 import { GradeEffect } from "./post/GradeEffect";
 import { LensEffect } from "./post/LensEffect";
 import { kickDash, kickHurt, kickImpact, newFeel, stepFeel } from "./post/feel";
+import { kickKill, stepKill } from "./post/feel";
+import { presentDt } from "../core/presentTime";
 
 /** The gritty-pixel post chain. Three passes over the world's low-resolution
  * image (the canvas renders at dpr 0.35 and the browser upscales it with
@@ -48,6 +50,7 @@ export function Effects() {
       gameEvents.on("shake", (v) => kickImpact(feel, v)),
       gameEvents.on("playerHurt", ({ amount }) => kickHurt(feel, amount)),
       gameEvents.on("dash", () => kickDash(feel)),
+      gameEvents.on("killPunch", (v) => kickKill(feel, v)),
     ];
     return () => offs.forEach((off) => off());
   }, [feel]);
@@ -80,6 +83,10 @@ export function Effects() {
     const s = useGame.getState();
     const frac = s.health / Math.max(1, getStats().maxHealth);
     stepFeel(feel, dt, frac);
+    // The kill punch (combat/shooter) runs on the picture's clock: it holds
+    // through the hitstop, then the exposure pops, the lens splits colour
+    // and the view rushes in a touch (the `feel.kill` terms below).
+    stepKill(feel, presentDt(dt));
     const rush = travelRush();
 
     grade.key = air.eye;
@@ -87,10 +94,10 @@ export function Effects() {
     lens.soft += ((wantsFocus(s.phase, s.overlay) ? 1 : 0) - lens.soft) * (1 - Math.exp(-dt * 6));
     if (lens.soft < 0.005) lens.soft = 0;
     lens.haze = air.haze;
-    lens.zoom = feel.impact * 0.5 + feel.dash * 0.55 + feel.hurt * 0.2 + rush;
+    lens.zoom = feel.impact * 0.5 + feel.dash * 0.55 + feel.hurt * 0.2 + rush + feel.kill * 0.22;
     lens.dispersion =
-      air.dispersion + feel.impact * 2.5 + feel.hurt * 3 + feel.dash * 1.5 + feel.low * feel.beat * 2 + rush * 3;
-    grade.exposure = (1 + Math.max(0, feel.impact - 0.2) * 0.45) * (1 - lens.soft * 0.2);
+      air.dispersion + feel.impact * 2.5 + feel.hurt * 3 + feel.dash * 1.5 + feel.low * feel.beat * 2 + rush * 3 + feel.kill * 2.5;
+    grade.exposure = (1 + Math.max(0, feel.impact - 0.2) * 0.45 + feel.kill * 0.3) * (1 - lens.soft * 0.2);
     grade.drain = Math.min(0.85, feel.hurt * 0.4 + feel.low * 0.6);
     film.vignette = air.vignette;
     film.grain = air.grain * (1 + feel.low * 0.6);

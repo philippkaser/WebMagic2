@@ -7,6 +7,7 @@ import { Hud } from "./layers/hud/Hud";
 import { HudRig } from "./layers/hud/HudAnchor";
 import { Menus } from "./layers/menus/Menus";
 import { ForkChoice } from "./layers/ForkChoice";
+import { DamageNumbers } from "./layers/combat/DamageNumbers";
 import { InventoryLayer } from "./layers/inventory/InventoryLayer";
 import { SocialLayer } from "./layers/social/Social";
 import { WorldMessages } from "./layers/WorldMessages";
@@ -36,6 +37,7 @@ export function UiRoot() {
       <ForkChoice />
       <SocialLayer />
       <ArenaLayer />
+      <DamageNumbers />
       {import.meta.env.DEV && <DevShowcase />}
     </>
   );

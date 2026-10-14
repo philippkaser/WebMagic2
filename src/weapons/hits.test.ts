@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { hitCapForFloor, MAX_HIT_DAMAGE, MAX_HIT_IMPULSE, sanitizeHit } from "./hits";
+import { staffPotency } from "../items/power";
+import { hitCapForFloor, MAX_HIT_DAMAGE, MAX_HIT_IMPULSE, PLAIN_HIT_CAP, sanitizeHit } from "./hits";
+import { CRIT } from "./precision";
 
 describe("sanitizeHit", () => {
   test("a legit hit passes through unchanged (as a copy)", () => {
@@ -60,5 +62,22 @@ describe("depth-aware hit cap", () => {
     expect(sanitizeHit({ damage: 1e9, impulse: imp }, 1)!.damage).toBe(hitCapForFloor(1));
     expect(sanitizeHit({ damage: 1e9, impulse: imp }, 50)!.damage).toBe(hitCapForFloor(50));
     expect(hitCapForFloor(100)).toBeLessThanOrEqual(MAX_HIT_DAMAGE);
+  });
+});
+
+describe("precision hits and the cap", () => {
+  const imp = { x: 0, y: 0, z: 0 };
+  test("a legit crit Starpierce passes unclamped at its depth", () => {
+    // 55 base × fury × keen, through the Warden's open core, from a staff of
+    // the floor's own level.
+    for (const floor of [1, 10, 40]) {
+      const crit = 55 * 1.3 * 1.12 * staffPotency(floor) * CRIT.maxMult;
+      expect(sanitizeHit({ damage: crit, impulse: imp }, floor)!.damage).toBe(crit);
+    }
+  });
+
+  test("the cap grows by the crit ceiling and no more", () => {
+    expect(hitCapForFloor(1)).toBeCloseTo(PLAIN_HIT_CAP * CRIT.maxMult * staffPotency(5), 9);
+    expect(sanitizeHit({ damage: 1e9, impulse: imp }, 1)!.damage).toBeLessThan(PLAIN_HIT_CAP * (CRIT.maxMult + 0.5) * staffPotency(5));
   });
 });

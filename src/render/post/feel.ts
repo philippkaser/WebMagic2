@@ -22,10 +22,12 @@ export interface Feel {
   beat: number;
   /** Where in its beat the heart is (0…1). */
   phase: number;
+  /** A kill of ours landing (the `killPunch` event; stepKill). */
+  kill: number;
 }
 
 export function newFeel(): Feel {
-  return { impact: 0, hurt: 0, dash: 0, low: 0, beat: 0, phase: 0 };
+  return { impact: 0, hurt: 0, dash: 0, low: 0, beat: 0, phase: 0, kill: 0 };
 }
 
 /** How fast each kick falls away (per second, exponential): a blast's punch
@@ -74,4 +76,27 @@ export function lowOf(frac: number): number {
 export function heartbeat(p: number): number {
   const bump = (c: number, w: number) => Math.exp(-(((p - c) / w) ** 2));
   return Math.min(1, bump(0.08, 0.05) + 0.6 * bump(0.26, 0.05));
+}
+
+// ── The kill punch ───────────────────────────────────────────────────────────
+// A kill of ours (combat/shooter): the exposure pops and the lens splits
+// colour, then it all snaps back. Its own channel, stepped on its own, so
+// it rides on top of whatever else the body is feeling.
+
+/** How fast the punch falls away (per second): a pop, gone in a third of a
+ * second. */
+const KILL_DECAY = 7.5;
+
+/** A kill's punch (0…1): the strongest of those landing wins, stacked kills
+ * nudge it higher, never past the top. */
+export function kickKill(f: Feel, strength: number): void {
+  const s = Math.min(1, Math.max(0, strength));
+  f.kill = Math.min(1, Math.max(f.kill, s) + s * 0.15);
+}
+
+/** Let the punch fall away over `dt` — the picture's dt (core/presentTime),
+ * so it holds bright through the hitstop and pops as the frame lets go. */
+export function stepKill(f: Feel, dt: number): void {
+  f.kill *= Math.exp(-KILL_DECAY * dt);
+  if (f.kill < 1e-3) f.kill = 0;
 }

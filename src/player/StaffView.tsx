@@ -1,7 +1,9 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Group, MeshStandardMaterial, Object3D, PlaneGeometry, Vector3 } from "three";
+import { streakHeat } from "../combat/shooter";
 import { gameEvents } from "../core/events";
+import { presentDt } from "../core/presentTime";
 import { spawnBurst } from "../fx/Particles";
 import { createStaffGlowMaterial } from "../fx/staffGlow";
 import { playerVelocity } from "../game/player-state";
@@ -10,14 +12,20 @@ import { HandModel } from "../render/models/HandModel";
 import { shared } from "../render/models/shared";
 import { StaffModel, staffStyle, type StaffStyle } from "../render/models/StaffModel";
 import { useGame } from "../state/gameStore";
+import { readyGlow } from "../weapons/CastingSystem";
 import { biomeForFloor, getBiomeDef } from "../world/biomes";
+import { CameraKick } from "./CameraKick";
 
 /** First-person staff viewmodel: a gloved fist holding the equipped staff
  * (render/models/StaffModel — each staff its own build), following the camera
  * with look-lag, breathing sway, walk bob and cast recoil (`staffKick`). The
  * crystal pulses and sheds motes in the staff's own manner (drifting sparks,
  * rising embers, crackling arcs, sinking soul-light); the cast flare
- * (fx/staffGlow) sits on the staff's heart. It also carries the player's
+ * (fx/staffGlow) sits on the staff's heart. Recoil scales with the spell's
+ * weight and holds through a hitstop (the picture's clock); a heavy spell
+ * coming ready draws motes into the crystal and brightens it; a streak of
+ * kills makes it burn hotter. It mounts the eye's recoil (CameraKick). It
+ * also carries the player's
  * personal light — the only shadow-casting light in the dungeon — whose
  * colour and strength come from the depth band (world/biomes `lantern`). */
 
@@ -102,7 +110,8 @@ export function StaffView() {
     const r = rig.current;
     if (!g || !r) return;
     const t = clock.elapsedTime;
-    kick.current *= Math.exp(-dt * 11);
+    // The recoil pose holds while the picture is held (a hitstop).
+    kick.current *= Math.exp(-presentDt(dt) * 11);
 
     const hSpeed = Math.hypot(playerVelocity.x, playerVelocity.z);
     bobT.current += dt * (2.2 + hSpeed * 0.9);
@@ -146,53 +155,85 @@ export function StaffView() {
       0.2 + Math.sin(bobT.current * 0.5) * 0.03 * swayX.current + l.lagYaw * 0.6,
     );
 
-    const pulse = 0.85 + Math.sin(t * 2.6) * 0.15 + kick.current * 2.6;
+    // A heavy spell coming ready gathers light; a streak burns hotter.
+    const ready = readyGlow();
+    const heat = streakHeat();
+    const pulse = (0.85 + Math.sin(t * (2.6 + heat * 4)) * 0.15 + kick.current * 2.6 + ready * 1.8) * (1 + heat * 0.6);
     for (const m of glows.current) m.emissiveIntensity = (m.userData.baseIntensity ?? 2.5) * pulse;
     flare.current *= Math.exp(-dt * 13);
-    aura.uniforms.uFlash.value = flare.current;
+    aura.uniforms.uFlash.value = Math.max(flare.current, ready * 0.45, heat * 0.2);
 
-    // Idle motes shed from the crystal, in the staff's own manner.
+    // Idle motes shed from the crystal, in the staff's own manner — more of
+    // them on a streak, and drawn INTO it as a heavy spell gathers.
     moteClock.current -= dt;
     if (moteClock.current <= 0 && head.current) {
-      moteClock.current = 0.09 + Math.random() * 0.08;
+      moteClock.current = (0.09 + Math.random() * 0.08) / (1 + heat * 1.5 + ready * 2);
       head.current.getWorldPosition(headWorld);
-      spawnMote(headWorld, styleRef.current);
+      if (ready > 0.05 && Math.random() < 0.7) gatherMote(headWorld, styleRef.current);
+      else spawnMote(headWorld, styleRef.current);
     }
   }, -1);
 
   return (
-    <group ref={group}>
-      {/* Personal light — above the shoulder, a step behind the staff: close
-          enough to light the room like a lantern, far enough that the staff's
-          metal and crystal don't flare to white in its hot spot. */}
-      <pointLight
-        position={[-0.1, 0.55, 0.5]}
-        color={lantern?.color ?? "#ffb877"}
-        intensity={lantern?.intensity ?? 26}
-        distance={17}
-        decay={1.7}
-        castShadow={shadows}
-        shadow-mapSize={[512, 512]}
-        shadow-bias={-0.02}
-      />
-      <pointLight position={[0, 0.05, -0.3]} color={staff.color} intensity={1.6} distance={4} decay={2} />
-      <group ref={rig} position={[0, -0.05, 0]}>
-        <HandModel sleeveColor={sleeve} dim={VIEW_DIM} />
-        <group position={[0, -GRIP_Y * STAFF_SCALE, 0]} scale={STAFF_SCALE}>
-          <StaffModel key={staffId} itemId={staffId} ownGlow onGlow={onGlow} shadows={false} dim={VIEW_DIM} />
-          <object3D ref={head} position={[0, style.headY, 0]} />
-          {/* Cast flare on the crystal, facing the eye with the rig. */}
-          <mesh
-            geometry={flareGeo()}
-            material={aura}
-            position={[0, style.headY, 0.04]}
-            scale={FLARE_SIZE}
-            renderOrder={4}
-          />
+    <>
+      <CameraKick />
+      <group ref={group}>
+        {/* Personal light — above the shoulder, a step behind the staff: close
+            enough to light the room like a lantern, far enough that the staff's
+            metal and crystal don't flare to white in its hot spot. */}
+        <pointLight
+          position={[-0.1, 0.55, 0.5]}
+          color={lantern?.color ?? "#ffb877"}
+          intensity={lantern?.intensity ?? 26}
+          distance={17}
+          decay={1.7}
+          castShadow={shadows}
+          shadow-mapSize={[512, 512]}
+          shadow-bias={-0.02}
+        />
+        <pointLight position={[0, 0.05, -0.3]} color={staff.color} intensity={1.6} distance={4} decay={2} />
+        <group ref={rig} position={[0, -0.05, 0]}>
+          <HandModel sleeveColor={sleeve} dim={VIEW_DIM} />
+          <group position={[0, -GRIP_Y * STAFF_SCALE, 0]} scale={STAFF_SCALE}>
+            <StaffModel key={staffId} itemId={staffId} ownGlow onGlow={onGlow} shadows={false} dim={VIEW_DIM} />
+            <object3D ref={head} position={[0, style.headY, 0]} />
+            {/* Cast flare on the crystal, facing the eye with the rig. */}
+            <mesh
+              geometry={flareGeo()}
+              material={aura}
+              position={[0, style.headY, 0.04]}
+              scale={FLARE_SIZE}
+              renderOrder={4}
+            />
+          </group>
         </group>
       </group>
-    </group>
+    </>
   );
+}
+
+const gatherDir = new Vector3();
+
+/** A mote drawn into the crystal from just round it: a heavy spell
+ * gathering itself. */
+function gatherMote(at: Vector3, style: StaffStyle) {
+  gatherDir.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+  moteAt.copy(at).addScaledVector(gatherDir, 0.1);
+  gatherDir.negate();
+  spawnBurst({
+    position: moteAt,
+    count: 1,
+    color: style.motes,
+    speed: 0.45,
+    upward: 0,
+    ttl: 0.2,
+    size: 0.012,
+    gravity: 0,
+    drag: 0.5,
+    direction: gatherDir,
+    cone: 0.15,
+    inherit: playerVelocity,
+  });
 }
 
 function spawnMote(at: Vector3, style: StaffStyle) {

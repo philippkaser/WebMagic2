@@ -7,10 +7,12 @@ import type { DamageSource } from "../game/damageSource";
 import { getFloorRules } from "../game/floorRules";
 import { isHostileWizard } from "../game/hostility";
 import { getPlayerBody, playerPosition } from "../game/player-state";
-import { forEachHittable } from "../game/registry";
+import { forEachHittable, type Hittable } from "../game/registry";
 import { useGame } from "../state/gameStore";
 import { localBlastEffect, type DamageTeam } from "./allegiance";
+import { land } from "./land";
 import { localWizardId } from "./localWizard";
+import { critMult, type WeakSpot } from "./precision";
 import { reportLocalHit } from "./procs";
 
 export type { DamageTeam } from "./allegiance";
@@ -42,6 +44,14 @@ export interface ExplosionOptions {
   remote?: boolean;
   /** Made by a legendary power: its hits don't roll powers again. */
   noProc?: boolean;
+  /** How heavy each of its hits lands, 0…1 (weapons/castFeel hitWeight) —
+   * for the shooter's confirm and hitstop. Default: from `particles`. */
+  weight?: number;
+  /** What a bolt burst ON: that body takes the full blow (the blast
+   * measured to its centre would rob a direct hit of a third), times the
+   * precision multiplier if the bolt went through its weak point (`crit`,
+   * else null). */
+  direct?: { target: Hittable; crit: WeakSpot | null };
 }
 
 const tmp = new Vector3();
@@ -85,6 +95,8 @@ export function explode(opts: ExplosionOptions): void {
     // Our own magic's toll on creatures feeds lifesteal and the
     // legendaries' powers (weapons/procs.ts).
     const ours = team === "player" && opts.source?.kind === "wizard" && opts.source.id === localWizardId();
+    const weight = opts.weight ?? Math.min(1, particles / 36);
+    const direct = opts.direct;
     let dealt = 0;
     forEachHittable((h) => {
       const hurtEnemies = team === "player" || team === "neutral";
@@ -92,12 +104,18 @@ export function explode(opts: ExplosionOptions): void {
       const p = h.getPosition();
       tmp.set(p.x - center.x, p.y - center.y, p.z - center.z);
       const dist = tmp.length();
-      if (dist > radius) return;
-      const falloff = 1 - dist / radius;
+      const struck = direct?.target === h;
+      if (dist > radius && !struck) return;
+      const falloff = struck ? 1 : 1 - dist / radius;
+      const spot = struck ? direct.crit : null;
+      const dmg = damage * falloff * (spot ? critMult(spot) : 1);
       tmp.normalize().multiplyScalar(impulse * falloff);
       tmp.y += impulse * falloff * 0.35; // lift things — more satisfying
-      h.hit(damage * falloff, { x: tmp.x, y: tmp.y, z: tmp.z });
-      if (h.team === "enemy") dealt += damage * falloff;
+      // Numbers and sparks: the bolt's own point on what it burst on, the
+      // body for what the blast caught.
+      const at: [number, number, number] = struck ? [center.x, center.y, center.z] : [p.x, p.y, p.z];
+      land(h, dmg, { x: tmp.x, y: tmp.y, z: tmp.z }, { mine: ours, at, crit: spot !== null }, weight);
+      if (h.team === "enemy") dealt += dmg;
     });
     if (ours && !opts.noProc && dealt > 0) reportLocalHit(center, dealt);
   }

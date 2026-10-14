@@ -117,6 +117,16 @@ export interface GameEvents extends Record<string, unknown> {
     /** Size (1 = a wisp). */
     scale: number;
   };
+  /** The eye's recoil from the local wizard's cast (weapons/castFeel):
+   * degrees up and aside, and the share of the view punched in. */
+  castKick: { pitch: number; yaw: number; fov: number };
+  /** A kill of ours landed: the post chain's punch (exposure pops, the lens
+   * splits colour), 0…1. */
+  killPunch: number;
+  /** The local wizard's cast sputtered out for want of mana. */
+  fizzle: undefined;
+  /** A streak of ours earned a rune word (DOUBLE, TRIPLE, RAMPAGE…). */
+  multiKill: { multi: number; word: string };
 }
 
 export const gameEvents = new Emitter<GameEvents>();

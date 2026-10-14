@@ -1,4 +1,4 @@
-import { audioCtx, ensureContext, masterBus, noiseBuf } from "./context";
+import { audioCtx, ensureContext, masterBus, noiseBuf, whenAudio } from "./context";
 import { ambientAirOut, oneShotAt, selfOut, type At } from "./spatial";
 
 /** Procedural WebAudio — every sound is synthesized, keeping the zero-asset
@@ -525,4 +525,39 @@ export function stopAmbient(): void {
   pendingAmbient = null;
   ambientStop?.();
   ambientStop = null;
+}
+
+// ── The glue bus ─────────────────────────────────────────────────────────────
+
+/** Everything meets one gentle compressor and then a limiter on its way to
+ * the speakers: three blasts stacked on a kill chime squash together into
+ * one big sound instead of clipping into crackle. master → glue → limiter →
+ * speakers. A whole-mix effect (a muffle, a duck) belongs in front of it:
+ * connect it from the master bus into glueIn(). */
+let glue: DynamicsCompressorNode | null = null;
+
+whenAudio(() => {
+  const ctx = audioCtx();
+  const master = masterBus();
+  if (!ctx || !master) return;
+  glue = ctx.createDynamicsCompressor();
+  glue.threshold.value = -12;
+  glue.knee.value = 10;
+  glue.ratio.value = 3.5;
+  glue.attack.value = 0.004;
+  glue.release.value = 0.16;
+  const limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -1.5;
+  limiter.knee.value = 0;
+  limiter.ratio.value = 20;
+  limiter.attack.value = 0.001;
+  limiter.release.value = 0.08;
+  master.disconnect();
+  master.connect(glue);
+  glue.connect(limiter).connect(ctx.destination);
+});
+
+/** The glue bus's input (null before the first gesture). */
+export function glueIn(): AudioNode | null {
+  return glue;
 }
