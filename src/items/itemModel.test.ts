@@ -4,7 +4,7 @@ import { computeStats, MIN_MAX_HEALTH, resolveItem } from "./catalog";
 import { MAX_ENHANCE, splitItemId, withAffixes, withEnhance, withLevel } from "./itemId";
 import { amplifyPassives } from "./power";
 import { rarityOf } from "./rarity";
-import type { Equipment } from "./inventory";
+import type { Equipment } from "./types";
 
 /** The item model's sharp edges: what the forge amplifies, which ids are
  * refused, how rarity reads, what blessings do and don't touch. */
