@@ -137,6 +137,101 @@ export function playEnemyDeath(kind: EnemyVoice, at: At): void {
   }, 1.3, ENEMY_SIZE[kind]);
 }
 
+/** It's hurt: the blow's knock (a short dull transient) under the creature's
+ * own cry — a glass chirp from a wisp, a squelch from a slime, a hiss from a
+ * shadow, a crystal ting from a sentry, a grunt from the Warden. `weight`
+ * 0…1 is how hard it was hit (louder, lower, longer). The shell gates these
+ * per body, so a beam doesn't play one per tick. */
+export function playEnemyHurt(kind: EnemyVoice, at: At, weight: number): void {
+  const w = Math.min(1, Math.max(0, weight));
+  atPoint(at, 0.45, () => {
+    noise({ dur: 0.035, vol: 0.05 + 0.06 * w, filterFreq: jitter(1100), filterEnd: 300, type: "bandpass", q: 1 });
+    switch (kind) {
+      case "wisp": {
+        const f = jitter(2900 - 900 * w, 0.06);
+        tone({ type: "sine", freq: f, freqEnd: f * 1.25, dur: 0.07 + 0.05 * w, vol: 0.03 + 0.03 * w });
+        tone({ type: "triangle", freq: f * 0.62, freqEnd: f * 0.5, dur: 0.06, vol: 0.015 + 0.02 * w, delay: 0.015 });
+        break;
+      }
+      case "slime":
+        noise({ dur: 0.1 + 0.08 * w, vol: 0.05 + 0.05 * w, filterFreq: jitter(650), filterEnd: 220, type: "bandpass", q: 3.5 });
+        tone({ type: "sine", freq: jitter(170 - 40 * w), freqEnd: 85, dur: 0.12, vol: 0.05 + 0.05 * w });
+        break;
+      case "shadow":
+        noise({ dur: 0.14 + 0.12 * w, vol: 0.035 + 0.04 * w, filterFreq: jitter(3100), filterEnd: 1700, type: "bandpass", q: 2.2 });
+        tone({ type: "sine", freq: jitter(82), freqEnd: 55, dur: 0.18, vol: 0.03 + 0.04 * w });
+        break;
+      case "sentry": {
+        const f = [2349, 2637, 2960][Math.floor(Math.random() * 3)]!;
+        tone({ type: "sine", freq: f, dur: 0.18 + 0.2 * w, vol: 0.022 + 0.02 * w });
+        tone({ type: "sine", freq: f * 1.5, dur: 0.1, vol: 0.01 + 0.01 * w, delay: 0.005 });
+        noise({ dur: 0.02, vol: 0.04, filterFreq: 4200, type: "bandpass", q: 2 });
+        break;
+      }
+      case "boss":
+        tone({ type: "sawtooth", freq: jitter(105 - 25 * w), freqEnd: 62, dur: 0.16 + 0.12 * w, vol: 0.05 + 0.06 * w });
+        noise({ dur: 0.16, vol: 0.05 + 0.04 * w, filterFreq: 420, filterEnd: 120 });
+        break;
+    }
+  }, 0.9 + 0.5 * w, ENEMY_SIZE[kind]);
+}
+
+/** It breaks (crossed the knee — barely alive from here): a pained cry
+ * with a crack in it, bigger than any single hurt. */
+export function playEnemyBreak(kind: EnemyVoice, at: At): void {
+  atPoint(at, 1, () => {
+    // The crack: a bright snap of glass or bone.
+    noise({ dur: 0.06, vol: 0.09, filterFreq: jitter(5200), filterEnd: 2400, type: "bandpass", q: 1.2 });
+    switch (kind) {
+      case "wisp":
+        tone({ type: "sine", freq: jitter(3300), freqEnd: 1100, dur: 0.38, vol: 0.05 });
+        tone({ type: "sine", freq: jitter(2200), freqEnd: 700, dur: 0.42, vol: 0.03, delay: 0.03 });
+        break;
+      case "slime":
+        noise({ dur: 0.4, vol: 0.08, filterFreq: 900, filterEnd: 180, type: "bandpass", q: 2.5 });
+        tone({ type: "sine", freq: 240, freqEnd: 60, dur: 0.42, vol: 0.09 });
+        break;
+      case "shadow":
+        noise({ dur: 0.55, vol: 0.08, filterFreq: 4300, filterEnd: 900, type: "bandpass", q: 4, attack: 0.03 });
+        tone({ type: "sine", freq: 150, freqEnd: 48, dur: 0.5, vol: 0.07 });
+        break;
+      case "sentry":
+        tone({ type: "sawtooth", freq: 950, freqEnd: 280, dur: 0.3, vol: 0.04 });
+        tone({ type: "sine", freq: 1568, dur: 0.7, vol: 0.02, delay: 0.02 });
+        tone({ type: "sine", freq: 1568 * 1.06, dur: 0.6, vol: 0.012, delay: 0.02 });
+        break;
+      case "boss":
+        tone({ type: "sawtooth", freq: 92, freqEnd: 44, dur: 0.7, vol: 0.12, attack: 0.04 });
+        noise({ dur: 0.65, vol: 0.09, filterFreq: 650, filterEnd: 110, attack: 0.04 });
+        break;
+    }
+  }, 1.5, ENEMY_SIZE[kind]);
+}
+
+/** It's about to strike (a wind-up every player can hear coming): the
+ * sentry's crystal whines up, the shadow's hiss swells, the Warden groans. */
+export function playEnemyWindup(kind: EnemyVoice, at: At, seconds: number): void {
+  const d = Math.max(0.15, seconds);
+  atPoint(at, d + 0.3, () => {
+    switch (kind) {
+      case "sentry":
+        tone({ type: "sine", freq: 520, freqEnd: 1900, dur: d, vol: 0.035, attack: d * 0.8 });
+        tone({ type: "triangle", freq: 1040, freqEnd: 3800, dur: d, vol: 0.01, attack: d * 0.8 });
+        break;
+      case "shadow":
+        noise({ dur: d, vol: 0.06, filterFreq: 2300, filterEnd: 3800, type: "bandpass", q: 3, attack: d * 0.85 });
+        tone({ type: "sine", freq: 62, freqEnd: 90, dur: d, vol: 0.05, attack: d * 0.7 });
+        break;
+      case "boss":
+        tone({ type: "sawtooth", freq: 46, freqEnd: 82, dur: d, vol: 0.08, attack: d * 0.7 });
+        noise({ dur: d, vol: 0.05, filterFreq: 300, filterEnd: 900, type: "bandpass", q: 1.5, attack: d * 0.6 });
+        break;
+      default:
+        break;
+    }
+  }, 1.2, ENEMY_SIZE[kind]);
+}
+
 // ── Lasting sounds: torches, rifts ─────────────────────────────────────────
 
 export interface Loop {

@@ -1,3 +1,5 @@
+import { KNEE } from "../../game/vitality";
+
 /** Shared vocabulary for the enemy brains.
  *
  * Brains are the pure half of an enemy: given what the body senses this frame
@@ -43,6 +45,9 @@ export interface ChaseInput {
   floor: number;
   /** Floor-rule multiplier on every movement speed (enemySpeedMult). */
   speedMult: number;
+  /** Life left, 0…1 (hp / max hp). Below the knee a creature fights for
+   * its life (see desperate()). */
+  vigor: number;
 }
 
 /** A brain's movement decision. `apply` false means "don't touch the body"
@@ -72,7 +77,15 @@ export function createChaseInput(): ChaseInput {
     knocked: false,
     floor: 1,
     speedMult: 1,
+    vigor: 1,
   };
+}
+
+/** Death's door: past the knee (game/vitality.ts — the moment its body
+ * visibly breaks, so the change is always telegraphed by the wounds first)
+ * a creature fights for its life. */
+export function desperate(vigor: number): boolean {
+  return vigor <= KNEE.real;
 }
 
 export function createSteering(): Steering {

@@ -1,11 +1,12 @@
 import { useFrame } from "@react-three/fiber";
 import { BallCollider, RigidBody } from "@react-three/rapier";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { MeshStandardMaterial } from "three";
-import { ENEMY_GLOW, SHADOW_OPACITY, ShadowModel } from "../../render/models/enemies";
+import { ACCENT_GLOW, makeEnemyMaterial, SHADOW_OPACITY, ShadowModel } from "../../render/models/enemies";
 import type { Vec3 } from "../../world/types";
+import { ACT, encodeAct } from "../anticipation";
 import { createChaseInput, createSteering } from "../brains/common";
-import { createShadowBrain, tickShadow } from "../brains/shadow";
+import { createShadowBrain, SHADOW, tickShadow, type ShadowBrain } from "../brains/shadow";
 import {
   ENEMY_GROUPS,
   ENEMY_LOOT_CHANCE,
@@ -23,12 +24,32 @@ const DEATH_FX: EnemyDeathFx = {
 };
 const DROPS: EnemyDrops = { lootChance: ENEMY_LOOT_CHANCE, minY: 0.6 };
 
+/** What the shadow is doing, on the wire (anticipation.ts): every client
+ * sees it coil, strike and shrink back. */
+function shadowAct(b: ShadowBrain): number {
+  switch (b.mode) {
+    case "coil":
+      return encodeAct(ACT.coil, 1 - b.modeTimer / b.coilTime);
+    case "lunge":
+      return encodeAct(ACT.lunge, 1 - b.modeTimer / SHADOW.lungeTime);
+    case "recoil":
+      return encodeAct(ACT.recoil, 1 - b.modeTimer / SHADOW.recoilTime);
+    default:
+      return 0;
+  }
+}
+
 /** Shadow — a lurking stalker. Instead of the wisp's straight chase it plays
- * keep-away: prowls a ring around its target, then darts in for a strike and
- * recoils back into the dark (brains/shadow.ts). Floats like the wisp; the
- * authority runs the brain, replicas are driven by the net layer. */
+ * keep-away: prowls a ring around its target, then coils and darts in for a
+ * strike and recoils back into the dark (brains/shadow.ts). Floats like the
+ * wisp; the authority runs the brain, replicas are driven by the net layer
+ * and pose its wind-ups from the replicated act. */
 export function Shadow({ position, floor, entityId }: { position: Vec3; floor: number; entityId: string }) {
   const mat = useRef<MeshStandardMaterial>(null);
+  // Its own eyes, so they can flare as it coils (and gutter as it dies).
+  const eyeMat = useMemo(() => makeEnemyMaterial("shadowEye"), []);
+  useEffect(() => () => eyeMat.dispose(), [eyeMat]);
+  const brain = useMemo(() => createShadowBrain(), []);
   const e = useEnemy({
     kind: "shadow",
     entityId,
@@ -36,9 +57,9 @@ export function Shadow({ position, floor, entityId }: { position: Vec3; floor: n
     floor,
     deathFx: DEATH_FX,
     drops: DROPS,
-    hitColor: "#8a5cc0",
     // Between its eyes.
     weakSpot: { y: 0.06, r: 0.2, fwd: 0.34 },
+    act: () => shadowAct(brain),
   });
   // Contact strike — lands mostly on a lunge; local, like the wisp's burn.
   const touch = useContactDamage({
@@ -48,21 +69,28 @@ export function Shadow({ position, floor, entityId }: { position: Vec3; floor: n
     push: { force: 5, planar: 0.3, lift: 1.5 },
     burst: ["#2a1a44", "#6a3d9a"],
   });
-  const brain = useMemo(() => createShadowBrain(), []);
   const senses = useMemo(createChaseInput, []);
   const steering = useMemo(createSteering, []);
 
   useFrame(({ clock }, dt) => {
     const b = e.beginFrame(dt);
     if (!b) return;
+    e.paint(mat.current);
+    const { act, ant, wound } = e.live;
     if (mat.current) {
-      mat.current.emissiveIntensity = ENEMY_GLOW.shadow + e.flash.current * 6;
-      // It solidifies to strike (the brain's mode only advances on the authority).
-      mat.current.opacity = brain.mode === "lunge" ? SHADOW_OPACITY.lunging : SHADOW_OPACITY.lurking;
+      // It solidifies to strike — gathering itself through the coil.
+      mat.current.opacity =
+        act.code === ACT.lunge
+          ? SHADOW_OPACITY.lunging
+          : act.code === ACT.coil
+            ? SHADOW_OPACITY.lurking + (SHADOW_OPACITY.lunging - SHADOW_OPACITY.lurking) * act.progress * 0.8
+            : SHADOW_OPACITY.lurking;
     }
+    // Eyes flare as it coils; near death they gutter with its glow.
+    eyeMat.emissiveIntensity = ACCENT_GLOW.shadowEye * ant.eye * (wound.stage >= 2 ? 0.4 + 0.6 * wound.glow : 1);
 
     const t = b.translation();
-    touch(t, dt);
+    touch(t, dt, e.armed());
 
     if (!e.net.isAuthority) return;
     e.steer(b, tickShadow(brain, e.sense(senses, b, t, clock.elapsedTime, dt), steering));
@@ -80,7 +108,9 @@ export function Shadow({ position, floor, entityId }: { position: Vec3; floor: n
       enabledRotations={[false, false, false]}
     >
       <BallCollider args={[0.44]} mass={2} collisionGroups={ENEMY_GROUPS} />
-      <ShadowModel materialRef={mat} />
+      <group ref={e.view}>
+        <ShadowModel materialRef={mat} eyeMaterial={eyeMat} />
+      </group>
     </RigidBody>
   );
 }

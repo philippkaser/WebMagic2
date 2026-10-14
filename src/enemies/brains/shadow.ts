@@ -2,6 +2,7 @@ import {
   blendFactor,
   blendVelocity,
   clamp,
+  desperate,
   type ChaseInput,
   type RandomSource,
   type Steering,
@@ -9,15 +10,20 @@ import {
 
 /** Shadow brain — the lurker. Where the wisp charges straight in, the shadow
  * plays keep-away: it prowls a ring around its target (stalk), and once its
- * patience runs out AND the target is close enough it darts in (lunge), then
- * shrinks back into the dark (recoil) before prowling again.
+ * patience runs out AND the target is close enough it draws back to strike
+ * (coil — the tell every player sees: it backs off, swells, its eyes flare),
+ * darts in (lunge), then shrinks back into the dark (recoil) before
+ * prowling again.
  *
- *   stalk ──(lungeTimer ≤ 0 and dist < lungeRange)──▶ lunge
- *     ▲                                                 │ lungeTime
- *     └────────── recoilTime ◀──────── recoil ◀─────────┘
- */
+ *   stalk ──(lungeTimer ≤ 0 and dist < lungeRange)──▶ coil ──coilTime──▶ lunge
+ *     ▲                                                                   │ lungeTime
+ *     └──────────────── recoilTime ◀──────── recoil ◀─────────────────────┘
+ *
+ * At death's door (past the knee — its body has visibly broken first) a
+ * cornered shadow loses its patience: it strikes again within a moment,
+ * and swells longer before it does. */
 
-export type ShadowMode = "stalk" | "lunge" | "recoil";
+export type ShadowMode = "stalk" | "coil" | "lunge" | "recoil";
 
 export const SHADOW = {
   aggroRange: 15,
@@ -29,6 +35,9 @@ export const SHADOW = {
   stalkSpeedPerFloor: 0.03,
   /** Weight of the tangential (orbit) term against the radial (ring) term. */
   orbitWeight: 0.7,
+  /** The wind-up before a lunge, and how fast it backs off through it. */
+  coilTime: 0.35,
+  coilBackSpeed: 1.5,
   lungeSpeed: 11,
   lungeSpeedPerFloor: 0.12,
   lungeTime: 0.55,
@@ -37,6 +46,9 @@ export const SHADOW = {
   /** Stalk time before a lunge is allowed: min + random·spread seconds. */
   patienceMin: 2,
   patienceSpread: 2,
+  /** Death's door: patience is capped at this, and the coil swells longer. */
+  desperatePatience: 0.8,
+  desperateCoilTime: 0.5,
   idleBobFreq: 1.2,
   idleBobAmp: 0.4,
   hover: 0.3,
@@ -51,8 +63,10 @@ export const SHADOW = {
 
 export interface ShadowBrain {
   mode: ShadowMode;
-  /** Time left in the current lunge/recoil. */
+  /** Time left in the current coil/lunge/recoil. */
   modeTimer: number;
+  /** Length of the current coil (longer when desperate) — for its pose. */
+  coilTime: number;
   /** Stalk time left before a lunge is allowed. */
   lungeTimer: number;
   /** Fixed orbit direction, so a given shadow prowls one way, not jittering. */
@@ -66,6 +80,7 @@ export function createShadowBrain(rand: RandomSource = Math.random): ShadowBrain
   return {
     mode: "stalk",
     modeTimer: 0,
+    coilTime: SHADOW.coilTime,
     lungeTimer: patience(rand),
     spin: rand() < 0.5 ? 1 : -1,
     phase: rand() * Math.PI * 2,
@@ -104,9 +119,11 @@ export function tickShadow(b: ShadowBrain, i: ChaseInput, out: Steering): Steeri
   const targetY = i.target.y + SHADOW.hover + Math.sin(i.time * SHADOW.bobFreq + b.phase) * SHADOW.bobAmp;
   const climb = clamp((targetY - i.pos.y) * SHADOW.climbGain, -SHADOW.maxClimb, SHADOW.maxClimb);
   const d = out.vel;
+  const cornered = desperate(i.vigor);
 
   b.modeTimer -= i.dt;
   if (b.mode === "stalk") {
+    if (cornered) b.lungeTimer = Math.min(b.lungeTimer, SHADOW.desperatePatience);
     b.lungeTimer -= i.dt;
     // Radial term closes/opens toward the lurk ring; tangential term prowls
     // around it. The radial pull is clamped so it eases onto the ring.
@@ -122,6 +139,17 @@ export function tickShadow(b: ShadowBrain, i: ChaseInput, out: Steering): Steeri
     }
     d.y = climb;
     if (b.lungeTimer <= 0 && i.targetDist < SHADOW.lungeRange) {
+      b.mode = "coil";
+      b.coilTime = cornered ? SHADOW.desperateCoilTime : SHADOW.coilTime;
+      b.modeTimer = b.coilTime;
+    }
+  } else if (b.mode === "coil") {
+    // Draw back from the prey, gathering itself.
+    const speed = SHADOW.coilBackSpeed * i.speedMult;
+    d.x = -nx * speed;
+    d.y = climb;
+    d.z = -nz * speed;
+    if (b.modeTimer <= 0) {
       b.mode = "lunge";
       b.modeTimer = SHADOW.lungeTime;
     }

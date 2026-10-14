@@ -2,7 +2,7 @@ import { useFrame } from "@react-three/fiber";
 import { BallCollider, RigidBody } from "@react-three/rapier";
 import { useMemo, useRef } from "react";
 import type { MeshStandardMaterial } from "three";
-import { ENEMY_GLOW, WispModel } from "../../render/models/enemies";
+import { WispModel } from "../../render/models/enemies";
 import type { Vec3 } from "../../world/types";
 import { createChaseInput, createSteering } from "../brains/common";
 import { tickWisp } from "../brains/wisp";
@@ -35,7 +35,6 @@ export function Wisp({ position, floor, entityId }: { position: Vec3; floor: num
     floor,
     deathFx: DEATH_FX,
     drops: DROPS,
-    hitColor: "#d9a9ff",
     // Its white-hot core: dead centre.
     weakSpot: { y: 0, r: 0.18 },
   });
@@ -53,10 +52,10 @@ export function Wisp({ position, floor, entityId }: { position: Vec3; floor: num
   useFrame(({ clock }, dt) => {
     const b = e.beginFrame(dt);
     if (!b) return;
-    if (mat.current) mat.current.emissiveIntensity = ENEMY_GLOW.wisp + e.flash.current * 6;
+    e.paint(mat.current);
 
     const t = b.translation();
-    touch(t, dt);
+    touch(t, dt, e.armed());
 
     // Replicas are driven by the net layer; only the authority thinks.
     if (!e.net.isAuthority) return;
@@ -75,7 +74,9 @@ export function Wisp({ position, floor, entityId }: { position: Vec3; floor: num
       enabledRotations={[false, false, false]}
     >
       <BallCollider args={[0.42]} mass={2} collisionGroups={ENEMY_GROUPS} />
-      <WispModel materialRef={mat} />
+      <group ref={e.view}>
+        <WispModel materialRef={mat} />
+      </group>
     </RigidBody>
   );
 }
