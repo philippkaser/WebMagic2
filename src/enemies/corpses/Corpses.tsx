@@ -1,5 +1,5 @@
-import { useFrame } from "@react-three/fiber";
-import { useEffect, useMemo } from "react";
+import { useFrame, useThree } from "@react-three/fiber";
+import { useEffect, useMemo, useRef } from "react";
 import { Color, type Group, type Mesh, type MeshStandardMaterial } from "three";
 import { playExplosion } from "../../audio/sound";
 import { isEnemyVoice, playCorpseBeat } from "../../audio/voices";
@@ -395,6 +395,30 @@ function apply(c: CorpseState, v: View, dt: number): void {
 
 /** Mounted once wherever enemies live. */
 export function Corpses() {
+  const { gl, scene, camera } = useThree();
+  const all = useRef<Group>(null);
+
+  // Compile every slot's program now, at floor load, not on the frame of
+  // the first kill (compile only walks visible things: show them for it).
+  useEffect(() => {
+    const root = all.current;
+    if (!root) return;
+    const shown: Group[] = [];
+    for (const kind in views) {
+      for (const v of views[kind as EnemyId]) {
+        if (v?.root && !v.root.visible) {
+          v.root.visible = true;
+          shown.push(v.root);
+        }
+      }
+    }
+    try {
+      gl.compile(root, camera, scene);
+    } finally {
+      for (const g of shown) g.visible = false;
+    }
+  }, [gl, scene, camera]);
+
   useEffect(() => {
     mounted = true;
     for (const l of lights) {
@@ -434,11 +458,11 @@ export function Corpses() {
   });
 
   return (
-    <>
+    <group ref={all}>
       {(Object.keys(SLOTS) as EnemyId[]).map((kind) => {
         const Slot = SLOT_OF[kind];
         return Array.from({ length: SLOTS[kind] }, (_, i) => <Slot key={`${kind}${i}`} i={i} />);
       })}
-    </>
+    </group>
   );
 }
