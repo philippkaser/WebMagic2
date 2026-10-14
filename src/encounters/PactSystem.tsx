@@ -11,6 +11,7 @@ import { useNet } from "../net/netStore";
 import { estimatePeer, peerIds, peerName } from "../net/players";
 import { input } from "../player/input";
 import { isPartyMember } from "../social/social";
+import { inArena, useArena } from "../arena/arenaStore";
 import { useGame } from "../state/gameStore";
 import { resetEncounters, useEncounters } from "./encounterStore";
 import {
@@ -73,8 +74,11 @@ function announce(notice: PactNotice, peerId: string): void {
 }
 
 // In the deep everyone starts hostile; only a sworn pact — or a fellowship —
-// makes a wizard safe. In the camp no one can be harmed.
+// makes a wizard safe. In the camp no one can be harmed. In the Proving
+// Ground everyone is fair game (your fellowship too) until Varr calls it.
 setRelationResolver((id) => {
+  const bout = useArena.getState().bout;
+  if (bout) return bout.ended ? "ally" : "stranger";
   if (useGame.getState().phase !== "dungeon") return "ally";
   if (isPartyMember(id)) return "ally";
   const rel = useEncounters.getState().relations[id];
@@ -113,7 +117,8 @@ export function PactSystem() {
   useFrame((_, dt) => {
     const state = useGame.getState();
     const net = useNet.getState();
-    const active = state.phase === "dungeon" && net.mode === "online";
+    // No pacts in the Proving Ground: there, everyone has already sworn.
+    const active = state.phase === "dungeon" && net.mode === "online" && !inArena();
     if (!active) {
       input.consume("KeyF");
       if (useEncounters.getState().pactPrompt !== null) useEncounters.setState({ pactPrompt: null });

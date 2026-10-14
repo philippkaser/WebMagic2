@@ -81,12 +81,20 @@ export function dungeonModel(layout: FloorLayout, seen: (tx: number, tz: number)
     return seen(tx, tz);
   };
   const markers: MapMarker[] = [];
+  const bounds = floor.length ? padBounds({ minX: minX - TILE, maxX: maxX + TILE, minZ: minZ - TILE, maxZ: maxZ + TILE }, MIN_SPAN) : null;
+  const spawns = (layout as { spawns?: Vec3[] }).spawns;
+  if (spawns) {
+    // The Proving Ground: no rift, no pedestal — its spawn stones, and
+    // Varr's sigil at the heart of the hall.
+    spawns.forEach((p, i) => markers.push({ key: `stone${i}`, at: p, color: "#ff9a3c", size: 0.7 }));
+    markers.push({ key: "sigil", at: layout.treasure, color: "#ff5a3c", size: 1.2 });
+    return { floor, raised, markers, bounds };
+  }
   // The floor's one rift: the way down, and (once the tithe is paid) home.
   if (known(layout.exit)) markers.push({ key: "exit", at: layout.exit, color: ink.arcane, size: 1.3 });
   if (known(layout.treasure)) markers.push({ key: "treasure", at: layout.treasure, color: ink.gold, size: 0.75 });
   if (layout.boss && known(layout.boss)) markers.push({ key: "boss", at: layout.boss, color: "#ff5a48", size: 1.4 });
   for (const e of layout.events) if (known(e.pos)) markers.push({ key: e.id, at: e.pos, color: roomEventDef(e.kind).color, size: 0.85 });
-  const bounds = floor.length ? padBounds({ minX: minX - TILE, maxX: maxX + TILE, minZ: minZ - TILE, maxZ: maxZ + TILE }, MIN_SPAN) : null;
   return { floor, raised, markers, bounds };
 }
 

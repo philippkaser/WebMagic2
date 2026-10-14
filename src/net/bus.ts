@@ -1,7 +1,7 @@
 import { Emitter } from "../core/events";
 import type { AuthErrorReason } from "./credentials";
 import type { PartyError } from "./party";
-import type { CampAssignment, FloorAssignment, MemberInfo, PartyInfo, ServerMsg, ServerSave } from "./protocol";
+import type { ArenaAssignment, CampAssignment, FloorAssignment, MemberInfo, PartyInfo, ServerMsg, ServerSave } from "./protocol";
 
 /** Internal networking event hub. The session publishes connection/relay
  * events here; channels, entities and players subscribe. Keeping this
@@ -36,6 +36,12 @@ export interface NetBusEvents extends Record<string, unknown> {
   party: PartyInfo | null;
   partyInvited: { from: string; name: string };
   partyError: PartyError;
+  /** The Proving Ground (arena/arenaStore.ts): the line at the obelisk, a
+   * bout begun, a fall scored, the bout's end. */
+  arenaQueue: { position: number; waiting: number };
+  arenaAssigned: ArenaAssignment;
+  arenaScore: Extract<ServerMsg, { t: "arenaScore" }>;
+  arenaEnded: Extract<ServerMsg, { t: "arenaEnded" }>;
 }
 
 export type LedgerEvent =

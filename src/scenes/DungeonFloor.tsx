@@ -177,14 +177,15 @@ export function DungeonFloor({ layout }: { layout: FloorLayout }) {
  * floor and ceiling world-mapped, the dressed stonework (pillars, ribs on
  * their piers, a frame round every doorway, crystal clusters in the Deep),
  * the set dressing (bones, candles, chains, webs, banners…), light shafts
- * falling through the vault, the arrival sigil at the spawn —
+ * falling through the vault, the arrival sigil at the spawn (unless the
+ * scene draws its own, like the Proving Ground's spawn stones) —
  * and every collider they need. The floor mirror only runs when the
  * `reflections` quality flag is on (default off). */
-function WallsAndFloor({ layout }: { layout: FloorLayout }) {
+export function WallsAndFloor({ layout, sigil = true }: { layout: FloorLayout; sigil?: boolean }) {
   const biome = getBiomeDef(layout.biome);
   const reflections = useGame((s) => s.reflections);
   const { shafts } = layout.architecture;
-  const sigilRadius = useMemo(() => arrivalSigilRadius(layout), [layout]);
+  const sigilRadius = useMemo(() => (sigil ? arrivalSigilRadius(layout) : 0), [layout, sigil]);
 
   return (
     <group>
@@ -256,7 +257,7 @@ function arrivalSigilRadius(layout: FloorLayout): number {
 /** A soft pooled light under each shaft, so the pool on the floor is real
  * light the painted stone picks up. Through fx/DynamicLights like torches —
  * never a real light of its own. */
-function ShaftLights({ layout }: { layout: FloorLayout }) {
+export function ShaftLights({ layout }: { layout: FloorLayout }) {
   const biome = getBiomeDef(layout.biome);
   useEffect(() => {
     const shaft = biome.look.shaft;

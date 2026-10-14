@@ -194,6 +194,13 @@ export class LocalTransport implements Transport {
         // Fellowships need a server to keep them.
         this.deliver({ t: "partyError", reason: "no-such-party" });
         break;
+      case "arenaJoin":
+      case "arenaLeave":
+        // A duel needs someone to duel: nobody waits at an offline obelisk.
+        this.deliver({ t: "arenaQueue", position: 0, waiting: 0 });
+        break;
+      case "arenaFell":
+        break;
       case "ping":
         // Zero-offset clock: local time IS server time offline.
         this.deliver({ t: "pong", sent: msg.sent, serverTime: performance.now() });

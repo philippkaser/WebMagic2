@@ -1,6 +1,7 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { Color, ShaderMaterial, type Group } from "three";
+import { useArena } from "../../../arena/arenaStore";
 import { useEncounters } from "../../../encounters/encounterStore";
 import { useGame } from "../../../state/gameStore";
 import { uiNow } from "../../clock";
@@ -104,6 +105,9 @@ void main() {
 
 export function PresenceEye() {
   const phase = useGame((s) => s.phase);
+  // The Proving Ground hides nobody: the eye stays shut (the bout's board
+  // stands where it would be).
+  const arena = useArena((s) => s.bout !== null);
   const others = useEncounters((s) => s.others);
   const nearestHostile = useEncounters((s) => s.nearestHostile);
   const dev = useSyncExternalStore(subscribeDevOverrides, () => devOverrides.presence);
@@ -113,7 +117,7 @@ export function PresenceEye() {
   if (line) lastLine.current = line;
 
   return (
-    <UiPresence show={phase === "dungeon"} exit={0.6}>
+    <UiPresence show={phase === "dungeon" && !arena} exit={0.6}>
       <HudAnchor h={L.h} v={L.v} inset={L.inset} distance={L.distance}>
         <Eye open={mood.open} threat={mood.threat} color={mood.color} />
         <RuneText text={lastLine.current} show={!!line} font="body" px={LINE_PX} color={mood.color} position={[0, -(EH * 3 + 8) * A, 0]} glow={0.7} outline={0.6} delay={0.4} />

@@ -2,6 +2,9 @@ import { Environment, PointerLockControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { Suspense, useMemo } from "react";
+import { ArenaFloor } from "../arena/ArenaFloor";
+import { useArena } from "../arena/arenaStore";
+import { generateArena, type ArenaLayout } from "../arena/layout";
 import { AudioWorld } from "../audio/AudioWorld";
 import { BlackHoles } from "../weapons/singularity";
 import { CastingSystem } from "../weapons/CastingSystem";
@@ -38,9 +41,14 @@ export function GameScene() {
   const floorSeed = useGame((s) => s.floorSeed);
   const instanceId = useGame((s) => s.instanceId);
 
-  const inDungeon = phase === "dungeon" || (phase === "loading" && floor > 0);
+  // The Proving Ground, once its journey has switched us in (the bout is
+  // dealt a moment before: the camp stays up under ENTER).
+  const boutId = useArena((s) => s.bout?.instanceId ?? null);
+  const boutSeed = useArena((s) => s.bout?.seed ?? 0);
+  const inArena = boutId !== null && instanceId === boutId && (phase === "dungeon" || phase === "loading");
+  const inDungeon = !inArena && (phase === "dungeon" || (phase === "loading" && floor > 0));
   const layout = useMemo(() => {
-    const next = inDungeon && floorSeed ? generateFloor(floorSeed, floor) : null;
+    const next = inArena ? generateArena(boutSeed) : inDungeon && floorSeed ? generateFloor(floorSeed, floor) : null;
     // Floor rules (the omen's bends) must be live BEFORE the floor's enemies
     // render — they read enemyHealthMult as they initialize — so they're
     // installed here, with the layout, rather than in a mount effect (which
@@ -49,7 +57,7 @@ export function GameScene() {
     setCurrentLayout(next);
     if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__layout = next;
     return next;
-  }, [inDungeon, floorSeed, floor]);
+  }, [inArena, boutSeed, inDungeon, floorSeed, floor]);
   // Mouse-look stays live through a portal journey (phase "loading"): the
   // lock survives the tunnel, and a controls instance remounted mid-lock
   // would never see a pointerlockchange and ignore the mouse.
@@ -74,7 +82,9 @@ export function GameScene() {
             here — a long frame (floor load, shader compile) integrates gravity
             over the whole gap in one step and props tunnel through the floor. */}
         <Physics gravity={[0, GRAVITY * gravityMult, 0]}>
-          {inDungeon && layout ? (
+          {inArena && layout ? (
+            <ArenaFloor key={instanceId} layout={layout as ArenaLayout} />
+          ) : inDungeon && layout ? (
             <DungeonFloor key={`${instanceId}:${floor}`} layout={layout} />
           ) : (
             <Village />
@@ -88,7 +98,7 @@ export function GameScene() {
         <RemoteWizards />
         {/* The ears: raytraced room acoustics, placed sounds, the world's
             own voices (audio/). */}
-        <AudioWorld layout={inDungeon ? layout : null} />
+        <AudioWorld layout={inDungeon || inArena ? layout : null} />
         <Graves />
         <FloorMaps />
         <PactSystem />

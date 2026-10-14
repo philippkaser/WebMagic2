@@ -1,6 +1,7 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MeshStandardMaterial, OctahedronGeometry, type Mesh } from "three";
+import { useArena } from "../../../arena/arenaStore";
 import { playerPosition } from "../../../game/player-state";
 import { selectIsHost, useNet } from "../../../net/netStore";
 import { canLeave } from "../../../run/rules";
@@ -13,7 +14,7 @@ import { ink } from "../../theme";
 import { apx, fontPx } from "./ap";
 import { ArrivalBanner } from "./ArrivalBanner";
 import { FloorInfo } from "./FloorInfo";
-import { arrivalTitle, netStatus, titheLine, titheRunes } from "./copy";
+import { ARENA_TITLE, arrivalTitle, netStatus, titheLine, titheRunes } from "./copy";
 import { HudAnchor } from "./HudAnchor";
 import { HUD_LAYOUT } from "./layout";
 import { TitheStone } from "./TitheStone";
@@ -51,11 +52,14 @@ export function Location() {
   // The banner waits until the journey has fully arrived: the arrival moves
   // the camera, and the banner stays where it was first written.
   const arrived = useTravel((s) => s.stage === "idle");
-  const inDungeon = phase === "dungeon";
-  const key = inDungeon ? `floor:${floor}:${instanceId}` : "village";
+  // The Proving Ground isn't a depth: its own banner, and no tithe or floor
+  // stones (the bout's board stands in their place, ui3d/layers/arena).
+  const arena = useArena((s) => s.bout !== null);
+  const inDungeon = phase === "dungeon" && !arena;
+  const key = arena ? `arena:${instanceId}` : inDungeon ? `floor:${floor}:${instanceId}` : "village";
   // Keyed on the arrival only.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const title = useMemo(() => arrivalTitle(inDungeon, floor, floorSeed), [key]);
+  const title = useMemo(() => (arena ? ARENA_TITLE : arrivalTitle(inDungeon, floor, floorSeed)), [key]);
   // The arrival whose banner has already been read (the panel stands then).
   const [doneKey, setDoneKey] = useState<string | null>(null);
   const titleUp = arrived && doneKey !== key;
@@ -72,7 +76,7 @@ export function Location() {
       {entries.map((e) => (
         <ArrivalBanner key={e.id} title={e.value} shown={e.shown} onHidden={() => remove(e.id)} />
       ))}
-      <UiPresence show={doneKey === key && !traveling} exit={0.8}>
+      <UiPresence show={doneKey === key && !traveling && !arena} exit={0.8}>
         <TitheMarker key={key} inDungeon={inDungeon} />
         <FloorInfo key={`info:${key}`} inDungeon={inDungeon} />
       </UiPresence>

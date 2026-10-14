@@ -1,5 +1,7 @@
 import { GUILD_LANTERN, GuildBoardModel } from "../render/models/GuildBoardModel";
+import { OBELISK_BRAZIERS, ObeliskModel } from "../render/models/ObeliskModel";
 import { useFrame } from "@react-three/fiber";
+import { CuboidCollider, RigidBody } from "@react-three/rapier";
 import { useEffect, useRef } from "react";
 import { Group, Mesh, MeshStandardMaterial } from "three";
 import { playAnvil, playBellows, playBrewDone, playBubble } from "../audio/stationSounds";
@@ -14,6 +16,7 @@ import { offerInteraction } from "../game/interactions";
 import { playerPosition } from "../game/player-state";
 import { ChestModel, MerchantStallModel } from "../render/models/VillageModels";
 import { useGame } from "../state/gameStore";
+import { WORLD_GROUPS } from "../scenes/village/layout";
 import type { Vec3 } from "./types";
 
 /** Village-only fixtures: the player's storage chest and the merchant stall.
@@ -25,7 +28,7 @@ import type { Vec3 } from "./types";
 function useOverlayInteraction(
   position: Vec3,
   prompt: string,
-  overlay: "chest" | "merchant" | "cauldron" | "forge" | "guild",
+  overlay: "chest" | "merchant" | "cauldron" | "forge" | "guild" | "arena",
   reach = 7,
 ): void {
   useFrame(() => {
@@ -256,6 +259,28 @@ export function GuildBoard({ position, rotation = 0 }: { position: Vec3; rotatio
   return (
     <group position={position} rotation={[0, rotation, 0]}>
       <GuildBoardModel />
+    </group>
+  );
+}
+
+/** The obelisk to the Proving Ground: Varr's tablet (the line, the rules,
+ * your record) is read here; its runes burn brighter while you wait. */
+export function Obelisk({ position, rotation = 0 }: { position: Vec3; rotation?: number }) {
+  useOverlayInteraction(position, "E — The Proving Ground (duels to the yield)", "arena", 9);
+  useEffect(() => {
+    const lights = OBELISK_BRAZIERS.map((b) =>
+      addLightSource({ position: worldOf(position, rotation, [b[0], b[1] + 0.35, b[2]]), color: "#ff8a3c", intensity: 4, distance: 7, priority: 1 }),
+    );
+    return () => lights.forEach(removeLightSource);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <ObeliskModel />
+      {/* The plinth stands solid; the braziers are walked round. */}
+      <RigidBody type="fixed" colliders={false}>
+        <CuboidCollider args={[0.85, 1.2, 0.85]} position={[0, 1.2, 0]} collisionGroups={WORLD_GROUPS} />
+      </RigidBody>
     </group>
   );
 }

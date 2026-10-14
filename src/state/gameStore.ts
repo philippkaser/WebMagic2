@@ -49,7 +49,7 @@ export type Phase = "menu" | "village" | "weighing" | "loading" | "dungeon" | "d
  * keeps simulating (shared floors can't pause), so these are DOM layers, not
  * phases. "devroom" is a dev-only testing panel (see ui/DevRoom) reached from
  * the village dev slab. */
-export type Overlay = "none" | "inventory" | "chest" | "merchant" | "cauldron" | "forge" | "guild" | "codex" | "devroom";
+export type Overlay = "none" | "inventory" | "chest" | "merchant" | "cauldron" | "forge" | "guild" | "arena" | "codex" | "devroom";
 
 /** The current run, while in the dungeon. */
 export interface RunProgress {
@@ -242,6 +242,13 @@ export function setDevInvuln(on: boolean): boolean {
 }
 export function isDevInvuln(): boolean {
   return devInvuln;
+}
+/** A venue's own rule for a fall — in the Proving Ground you yield, you
+ * don't die (arena/arenaFlow.ts). Told who struck last; returns true when it
+ * took the fall, and the dungeon's death never runs. */
+let fallRule: ((killerId: string | null) => boolean) | null = null;
+export function setFallRule(rule: ((killerId: string | null) => boolean) | null): void {
+  fallRule = rule;
 }
 /** An Orb of Fortune is in the server's hands — reveal on the next save. */
 let pendingGamble = false;
@@ -640,7 +647,10 @@ export const useGame = create<GameState>((set, get) => ({
     playHurt();
     gameEvents.emit("playerHurt", { amount: dealt });
     gameEvents.emit("shake", Math.min(dealt / 40, 1));
-    if (health <= 0) {
+    if (health <= 0 && fallRule?.(killCredit.killer(performance.now()))) {
+      killCredit.reset();
+      set({ health: 0 });
+    } else if (health <= 0) {
       // "loading" at once so nothing can hurt (or move, or cast for) the
       // falling wizard while the world burns away; the death itself — losses,
       // the grave, leaving the floor — runs at the journey's switch, while

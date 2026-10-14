@@ -86,6 +86,15 @@ export const HOME_NAME = "Riftwatch";
 export const VILLAGE_LORE = "Tents and lamplight, pitched at the edge of a hole in the world.";
 
 /** What materializes ahead of you on arrival (artpass ArrivalBanner). */
+/** The Proving Ground's banner. */
+export const ARENA_TITLE: ArrivalTitle = {
+  label: "The obelisk opens on",
+  title: "The Proving Ground",
+  subtitle: "Varr's hall",
+  lore: "Duels to the yield, not the death.",
+  omen: null,
+};
+
 export function arrivalTitle(inDungeon: boolean, floor: number, seed: number): ArrivalTitle {
   if (!inDungeon) return { label: "Sanctuary", title: HOME_NAME, subtitle: null, lore: VILLAGE_LORE, omen: null };
   const omenId = seed ? rollOmen(seed, floor) : null;

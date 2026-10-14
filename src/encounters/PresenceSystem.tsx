@@ -7,6 +7,7 @@ import { isHostileWizard } from "../game/hostility";
 import { netBus } from "../net/bus";
 import { useNet } from "../net/netStore";
 import { estimatePeer, peerIds } from "../net/players";
+import { inArena } from "../arena/arenaStore";
 import { useGame } from "../state/gameStore";
 import { useEncounters } from "./encounterStore";
 
@@ -23,12 +24,14 @@ const HEARTBEAT_RANGE = 24;
 
 // Arrivals: only "someone", never who.
 netBus.on("peerJoined", () => {
-  if (useGame.getState().phase !== "dungeon") return;
+  if (useGame.getState().phase !== "dungeon" || inArena()) return;
   playPresence();
   gameEvents.emit("message", "A presence stirs. Another wizard walks this floor.");
 });
 netBus.on("peerLeft", ({ playerId, name }) => {
   if (useGame.getState().phase !== "dungeon") return;
+  // The Proving Ground has no strangers: everyone there was named.
+  if (inArena()) return void gameEvents.emit("message", `${name || "A wizard"} leaves the hall.`);
   // An ally's departure has a name; a stranger's is just a fading.
   const ally = !isHostileWizard(playerId) && name;
   gameEvents.emit("message", ally ? `${name} has left the floor.` : "The presence fades.");

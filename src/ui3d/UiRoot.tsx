@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import { ViewAnchor } from "./anchors";
 import { useFacesReady } from "./font/faces";
 import { ItemModel } from "./ItemModel";
+import { ArenaLayer } from "./layers/arena/ArenaLayer";
 import { Hud } from "./layers/hud/Hud";
 import { HudRig } from "./layers/hud/HudAnchor";
 import { Menus } from "./layers/menus/Menus";
@@ -34,6 +35,7 @@ export function UiRoot() {
       <InventoryLayer />
       <ForkChoice />
       <SocialLayer />
+      <ArenaLayer />
       {import.meta.env.DEV && <DevShowcase />}
     </>
   );

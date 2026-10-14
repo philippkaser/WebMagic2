@@ -21,7 +21,7 @@
  * this file can be unit-tested exhaustively (timeline.test.ts). The samplers
  * write into caller-owned objects so the frame loop allocates nothing. */
 
-export type TravelKind = "gate" | "descend" | "fork" | "home" | "feather" | "death" | "respawn";
+export type TravelKind = "gate" | "descend" | "fork" | "home" | "feather" | "death" | "respawn" | "arena";
 export type TravelStage = "idle" | "entering" | "tunnel" | "arriving";
 
 /** How ENTER looks. `portal`: the view is sucked into a vortex (centred on
@@ -72,7 +72,7 @@ export interface TravelStyle {
  * artpass warp's middle); the pull-in and the spit-out stay brisk. */
 const PORTAL_BEATS = { enterMs: 850, minTunnelMs: 450, arriveMs: 650 } as const;
 
-/** The six journeys. Colours follow the portals themselves: cyan descends,
+/** The journeys. Colours follow the portals themselves: cyan descends,
  * gold walks home; the feather is a paler, softer gold; death is black-red
  * and the way back from it a pale spirit-blue. */
 export const TRAVEL_STYLES: Record<TravelKind, TravelStyle> = {
@@ -185,6 +185,25 @@ export const TRAVEL_STYLES: Record<TravelKind, TravelStyle> = {
     speed: 0.25,
     streaks: 0,
     rings: 0,
+    feathers: 0,
+    drift: 1,
+  },
+  // The obelisk opens on the Proving Ground: Varr's ember-gold, the trial
+  // hall's glyph rings rushing past, and a level arrival — you land ready.
+  arena: {
+    color: "#ff9a3c",
+    hot: "#fff0c8",
+    deep: "#3a0a10",
+    look: "portal",
+    ...PORTAL_BEATS,
+    fovKick: 1.4,
+    roll: 0.35,
+    pull: 1.2,
+    lift: 0,
+    spin: 1.4,
+    speed: 1.4,
+    streaks: 0.9,
+    rings: 0.8,
     feathers: 0,
     drift: 1,
   },

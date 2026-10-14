@@ -85,6 +85,8 @@ export interface GameEvents extends Record<string, unknown> {
   /** A pact was sworn with another wizard on this floor (social/ makes the
    * pair a fellowship). */
   pactSworn: { with: string };
+  /** We took a yield in the Proving Ground (arena/arenaFlow.ts). */
+  arenaYield: { victim: string; name: string };
   /** A room event changed phase (roomEvents/net.ts) — views flash, sounds play. */
   roomEvent: { id: string; kind: import("../world/types").RoomEventKind; phase: string; at: import("../world/types").Vec3 };
   /** A blast went off (weapons/explosions.ts#explode — on every client,

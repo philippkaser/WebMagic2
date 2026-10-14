@@ -169,6 +169,21 @@ export class GameSession {
     this.transport?.send({ t: "partyAccept" });
   }
 
+  // ── The Proving Ground (answers arrive on the netBus) ─────────────────────
+
+  arenaJoin(): void {
+    this.transport?.send({ t: "arenaJoin" });
+  }
+
+  arenaLeave(): void {
+    this.transport?.send({ t: "arenaLeave" });
+  }
+
+  /** In a bout: we fell, and `by` took the yield. */
+  arenaFell(by: string | null): void {
+    this.transport?.send({ t: "arenaFell", by });
+  }
+
   /** Send a gameplay envelope. Channel semantics live in channels.ts. */
   sendEnvelope(ch: string, data: unknown, to?: string): void {
     this.transport?.send({ t: "msg", ch, data, to });
@@ -380,6 +395,23 @@ export class GameSession {
         break;
       case "partyError":
         netBus.emit("partyError", msg.reason);
+        break;
+      case "arenaQueue":
+        netBus.emit("arenaQueue", { position: msg.position, waiting: msg.waiting });
+        break;
+      case "arenaAssigned": {
+        const a = msg.assignment;
+        const roster: Record<string, string> = {};
+        for (const m of a.members) roster[m.id] = m.name;
+        useNet.setState({ hostId: a.hostId, epoch: a.epoch, roster });
+        netBus.emit("arenaAssigned", a);
+        break;
+      }
+      case "arenaScore":
+        netBus.emit("arenaScore", msg);
+        break;
+      case "arenaEnded":
+        netBus.emit("arenaEnded", msg);
         break;
       case "floorAssigned": {
         const a = msg.assignment;
