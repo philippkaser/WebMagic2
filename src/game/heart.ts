@@ -171,11 +171,17 @@ export const LIFE_STEPS = 15;
 /** Set while its owner is inside the Brink's window. */
 export const LIFE_BRINK = 16;
 
+/** The highest step that still reads back under the last-stand line. */
+const LAST_STAND_STEP = Math.ceil(LAST_STAND.below * LIFE_STEPS - 1e-9) - 1;
+
 /** Health as one small integer: 0…15 (a sliver still alive rounds up to 1),
- * plus LIFE_BRINK at the Brink. */
+ * plus LIFE_BRINK at the Brink. Rounding up never carries anyone over the
+ * last-stand line: at 28% you're in your last stand, and 5/15 (33%) would
+ * show your floor-mates nothing wrong with you. */
 export function lifeByte(health: number, max: number, brink: boolean): number {
   const f = max > 0 ? health / max : 0;
-  const steps = f <= 0 ? 0 : Math.max(1, Math.min(LIFE_STEPS, Math.ceil(f * LIFE_STEPS - 1e-9)));
+  let steps = f <= 0 ? 0 : Math.max(1, Math.min(LIFE_STEPS, Math.ceil(f * LIFE_STEPS - 1e-9)));
+  if (f < LAST_STAND.below) steps = Math.min(steps, LAST_STAND_STEP);
   return steps + (brink ? LIFE_BRINK : 0);
 }
 
