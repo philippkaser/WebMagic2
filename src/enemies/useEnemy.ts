@@ -26,7 +26,7 @@ import type { Vec3 } from "../world/types";
 import type { ChaseInput, Steering, Vec } from "./brains/common";
 import { encodeDeath, readDeath, type DeathNote } from "./deathNote";
 import { ack, createLedger, noteMine, predictedHp, type DoomLedger } from "./doom";
-import { createStagger, dirOf, NO_DIR, quantDir, readHitExtras, staggerFor } from "./hitFx";
+import { createQuietTally, createStagger, dirOf, NO_DIR, quantDir, quietSince, readHitExtras, staggerFor } from "./hitFx";
 import { playCorpse } from "./corpses/Corpses";
 import { createBlow, LiveBody, type Blow } from "./liveBody";
 import type { Puppet } from "./puppet";
@@ -42,7 +42,8 @@ import { getEnemyStats, type EnemyId } from "./roster";
  * sits on the shell's `view` group, which reacts to blows, breathes, faces
  * its prey, poses wind-ups and wounds — on every client, from what that
  * client knows (its own blows at once, everyone else's from the replicated
- * hp, a quantised blow direction `k`, the act code `a` and the wake bit `w`).
+ * hp less the quiet tugs `q`, a quantised blow direction `k`, the act code
+ * `a` and the wake bit `w`).
  *
  * Floor rules (game/floorRules.ts) are read live at the moment they matter:
  * health at spawn, damage when it's dealt, speed each frame (loot and gold
@@ -111,6 +112,11 @@ export interface WeakSpot {
   fwd?: number;
   /** A precision hit's multiplier here, if not the usual (weapons/precision). */
   mult?: number;
+  /** Only there to hit while this says so (the Warden's heart behind its
+   * shell); shut, the weak spot is null and a shot there is a plain hit.
+   * Read on the shooter's machine, so drive it from what every client
+   * agrees on (the replicated act), never the host's brain. */
+  open?: () => boolean;
 }
 
 export interface UseEnemyOptions {
@@ -172,6 +178,9 @@ export interface EnemyShell {
   /** Woken — set by damage from anyone, or by the brain's proximity check
    * (replicated: every client knows when it woke). */
   aggro: RefObject<boolean>;
+  /** Already awake when this client first heard of it (a late join
+   * mid-fight): its waking is old news, not a beat to play. */
+  wokeBefore: RefObject<boolean>;
   /** Knockback in flight (> 0) — brains leave the body to physics. */
   knockTimer: RefObject<number>;
   net: NetBody;
@@ -271,6 +280,7 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
   // Its voice: woken once, a footfall every stride it walks.
   const voice = useRef({ woke: false, cried: -Infinity, x: NaN, z: NaN, walked: 0 });
   const wasAwake = useRef(false);
+  const wokeBefore = useRef(false);
 
   const netRef = useRef<NetBody | null>(null);
   // Host: who struck last and which way — the death note ("" = nobody's own
@@ -278,6 +288,9 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
   // the stagger budget.
   const lastBlow = useRef({ by: "", x: 0, z: 0, k: NO_DIR });
   const stagger = useRef(createStagger());
+  // Quiet damage dealt so far — the authority's count, a replica's last
+  // read of it (field `q`): a tug's hp drop is never a blow anywhere.
+  const quietTally = useRef(createQuietTally());
   // Shooter: blows sent and not yet seen land (doom.ts).
   const ledger = useRef<DoomLedger | null>(null);
   const seenFields = useRef(false);
@@ -420,6 +433,7 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
       const now = performance.now() / 1000;
       if (quiet) {
         knockTimer.current = Math.max(knockTimer.current, TUG_HOLD);
+        quietTally.current.dealt += damage;
       } else {
         // A bolt knocks it off its stride; a stream of chip damage can't
         // hold it there (hitFx.ts#staggerFor). Breaking at the knee reels it.
@@ -461,11 +475,16 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
     enabled: !dead,
     fields: () => {
       const f: Record<string, number> = { hp: hp.current, k: lastBlow.current.k, w: aggro.current ? 1 : 0 };
+      // Only once something has tugged it: most bodies never are.
+      if (quietTally.current.dealt > 0) f.q = quietTally.current.dealt;
       const act = opts.current.act;
       if (act) f.a = act();
       return f;
     },
     onFields: (f) => {
+      // Already despawned: the host's last snapshot can trail its despawn
+      // by a frame, and the corpse is playing — nothing lands on it.
+      if (deadRef.current) return;
       // The first snapshot (a late join, a fresh mount) is the state of
       // things, not a blow landing.
       const first = !seenFields.current;
@@ -473,12 +492,16 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
       const t = body.current?.translation() ?? null;
       if (f.w === 1) aggro.current = true;
       // Already awake when we first saw it: no startle.
-      if (first) wasAwake.current = aggro.current;
+      if (first) wasAwake.current = wokeBefore.current = aggro.current;
       if (typeof f.a === "number") actWire.current = f.a;
+      // The tugs in this drop, read before anything else so the total
+      // never falls behind.
+      const quiet = quietSince(quietTally.current, f.q);
       if (f.hp === undefined || !Number.isFinite(f.hp) || f.hp === hp.current) return;
       const before = hp.current;
       hp.current = f.hp;
-      const drop = before - f.hp;
+      // What's left once the tugs are off it: blows somebody should see.
+      const drop = before - f.hp - quiet;
       const now = performance.now() / 1000;
       let believed = f.hp;
       if (ledger.current) {
@@ -537,7 +560,7 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
       weakSpot: ws
         ? () => {
             const t = body.current?.translation();
-            if (!t) return null;
+            if (!t || (ws.open && !ws.open())) return null;
             const a = live.ahead(ws.fwd ?? 0);
             return { x: t.x + a.x, y: t.y + ws.y + live.pose.y, z: t.z + a.z, r: ws.r, mult: ws.mult };
           }
@@ -605,6 +628,7 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
     deadRef,
     flash,
     aggro,
+    wokeBefore,
     knockTimer,
     net,
     damage: (base) => enemyDamage(base, floor),

@@ -45,6 +45,7 @@ import {
 import { corpsesMounted } from "../corpses/Corpses";
 import { OY } from "../puppet";
 import { ENEMY_GROUPS, enemiesCalmed, useContactDamage, useEnemy } from "../useEnemy";
+import { CORE, coreLinger, coreOpen, createCoreGate, opensCore, stepCore } from "../wardenCore";
 
 /** The boss is a singleton: its net id and HUD bar are fixed. */
 const BOSS_ID = "boss";
@@ -87,13 +88,18 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
   const dir = useMemo<Vec>(() => ({ x: 0, y: 0, z: 0 }), []);
   const bolt = useMemo<Vec>(() => ({ x: 0, y: 0, z: 0 }), []);
 
+  // Its heart is there to hit only while the shell stands open (wardenCore.ts).
+  const gate = useMemo(createCoreGate, []);
+
   const e = useEnemy({
     kind: "boss",
     entityId: BOSS_ID,
     position,
     floor,
-    // The blazing core, through the shell: the hardest-earned crit there is.
-    weakSpot: { y: 0, r: 0.5, mult: 2 },
+    // The blazing core, through the open shell: the hardest-earned crit
+    // there is — and only while it's open, or every shot at its middle
+    // would crit.
+    weakSpot: { y: 0, r: 0.5, mult: CORE.mult, open: () => coreOpen(gate, performance.now() / 1000) },
     knockbackScale: 0.25,
     flashDecay: 4,
     act: () => wardenAct(brain),
@@ -174,19 +180,28 @@ export function Warden({ position, floor, onDeath }: { position: Vec3; floor: nu
 
     // Woken (by a wizard coming close or by a blow — the host's call, sent
     // as the wake bit): it rises from below its hover and roars, everywhere.
+    // Joined mid-fight, it woke long before we got here: just its bar.
     if (awake && !woke.current) {
       woke.current = true;
-      e.live.puppet.x[OY] = RISE_FROM;
-      playBossRoar([t.x, t.y + 1.5, t.z]);
-      gameEvents.emit("message", `${BOSS_NAME} wakes`);
+      if (!e.wokeBefore.current) {
+        e.live.puppet.x[OY] = RISE_FROM;
+        playBossRoar([t.x, t.y + 1.5, t.z]);
+        gameEvents.emit("message", `${BOSS_NAME} wakes`);
+        gameEvents.emit("shake", 0.5);
+      }
       gameEvents.emit("bossHp", { name: BOSS_NAME, frac: Math.max(e.hp.current / e.maxHp, 0) });
-      gameEvents.emit("shake", 0.5);
     }
 
+    // The shell opens on the act this client shows (beginFrame just set it).
+    const now = performance.now() / 1000;
+    const { act, ant, wound } = e.live;
+    stepCore(gate, act.code, now);
+    // Once the act lets go its heat bleeds out of the shell as it closes,
+    // so the open heart reads for as long as it's there to hit.
+    const afterglow = opensCore(act.code) ? 0 : coreLinger(gate, now) * 2.4;
     const enraged = isEnraged(e.hp.current, e.maxHp);
     const pulse = Math.sin(time * 8);
-    const { ant, wound } = e.live;
-    e.paint(mat.current, enraged ? 0.8 + pulse * 0.4 : 0, 5);
+    e.paint(mat.current, (enraged ? 0.8 + pulse * 0.4 : 0) + afterglow, 5);
     // Its core heats through a wind-up and beats like a heart near the end.
     core.emissiveIntensity = (ACCENT_GLOW.wardenCore + ant.glow * 1.5) * (wound.stage >= 2 ? 0.5 + 0.5 * wound.glow : 1);
     const pdt = dt * presentScale();

@@ -100,11 +100,15 @@ export function tickWisp(phase: number, i: ChaseInput, out: Steering, jink?: Wis
       jink.side = jink.rand() < 0.5 ? 1 : -1;
     }
     if (jink.left > 0) {
-      // Darting sideways, across its own line of chase — unblended, so it snaps.
+      // Darting sideways, across its own line of chase — unblended, so it
+      // snaps. Written over the chase velocity it wants, never added to the
+      // blended one: that comes back next frame as the body's own velocity,
+      // last frame's dart and all, and the dart would pile up every frame
+      // into a 40–90 m/s bolt through the walls.
       jink.left -= i.dt;
       const j = WISP.jinkSpeed * i.speedMult * jink.side;
-      out.vel.x += -hz * j;
-      out.vel.z += hx * j;
+      out.vel.x = hx * speed - hz * j;
+      out.vel.z = hz * speed + hx * j;
     }
   } else if (jink) {
     jink.left = 0;

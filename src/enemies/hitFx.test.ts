@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   createHitGate,
+  createQuietTally,
   createStagger,
   dirOf,
   GATE_S,
@@ -9,6 +10,7 @@ import {
   NO_DIR,
   passGate,
   quantDir,
+  quietSince,
   readHitExtras,
   sparkScale,
   STAGGER,
@@ -127,5 +129,34 @@ describe("hit command extras", () => {
     expect(e.quiet).toBe(false);
     expect(readHitExtras({ at: [1e9, 0, 0] }).at).toBeNull();
     expect(readHitExtras({ at: [1, 2] }).at).toBeNull();
+  });
+});
+
+describe("quiet damage on the wire", () => {
+  test("a tug's share of a snapshot's drop is quiet; a real blow in the same snapshot is not", () => {
+    const t = createQuietTally();
+    expect(quietSince(t, 1.5)).toBe(1.5); // a tug alone: the whole drop
+    expect(quietSince(t, 3)).toBe(1.5); // a tug and a 10 hp bolt: of the 11.5 drop, the bolt shows
+    expect(quietSince(t, 3)).toBe(0); // a bolt alone: nothing quiet
+  });
+
+  test("no field (never tugged) or garbage reads as nothing quiet, and it never counts backwards", () => {
+    const t = createQuietTally();
+    expect(quietSince(t, undefined)).toBe(0);
+    expect(quietSince(t, Number.NaN)).toBe(0);
+    expect(quietSince(t, "4")).toBe(0);
+    expect(t.dealt).toBe(0);
+    quietSince(t, 6);
+    expect(quietSince(t, 4.5)).toBe(0);
+    expect(t.dealt).toBe(4.5);
+  });
+
+  test("a migrated host carries on from the last total it read as a replica", () => {
+    const host = createQuietTally();
+    const replica = createQuietTally();
+    quietSince(host, 9);
+    quietSince(replica, 9);
+    host.dealt += 1.5; // it holds the body now: one more tug
+    expect(quietSince(replica, host.dealt)).toBe(1.5);
   });
 });
