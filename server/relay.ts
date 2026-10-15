@@ -181,9 +181,13 @@ export class Relay {
     // runFloor/runGrants stay on the account so a reconnect resumes the run
     // (and lastInstance remembers where, for the same world).
     this.leaveInstance(peer);
+    // The camp as much as a floor: campmates see them go (or they'd keep a
+    // frozen ghost by the fire), and a host who's gone hands it on.
+    this.leaveCamp(peer);
     this.leaveArena(peer);
     this.directory.forget(peerId);
     this.camp.forget(peerId);
+    this.arenas.forget(peerId);
     const party = this.parties.forget(peerId);
     if (party) this.tellParty(party);
     this.chatTimes.delete(peerId);
@@ -253,7 +257,14 @@ export class Relay {
         this.tellQueue();
         break;
       case "arenaLeave":
-        this.leaveQueue(peer.id);
+        // Out of the line. One who wasn't in it hears so anyway: a client
+        // can think it's waiting after the relay let it go, and needs its
+        // place-in-line button back.
+        if (this.arenaQueue.has(peer.id)) this.leaveQueue(peer.id);
+        else peer.send({ t: "arenaQueue", position: 0, waiting: this.arenaQueue.size });
+        // And out of a bout just dealt that the client couldn't take: it was
+        // already on the road down (arena/arenaFlow.ts turns it down).
+        this.leaveArena(peer);
         break;
       case "arenaFell":
         this.arenaFell(peer, msg.by);
@@ -725,8 +736,8 @@ export class Relay {
     this.log(`bout ${roomId} over: ${winner ? this.peers.get(winner)?.name : "nobody"} wins`);
   }
 
-  /** Out of a bout (home, into the dungeon, or gone). A bout left with one
-   * wizard ends: the hall is theirs if they took a yield. */
+  /** Out of a bout (home, into the dungeon, turned down, or gone). A bout
+   * left with one wizard ends: the hall is theirs if they took a yield. */
   private leaveArena(peer: RelayPeer): void {
     const room = this.arenas.instanceOf(peer.id);
     if (!room) return;

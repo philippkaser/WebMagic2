@@ -171,7 +171,9 @@ rules (`Relay#roomOf` looks in all three directories):
 | Bout | `arenas` (`ARENA.maxPlayers` 6, chance 0 — filled by the queue) | the obelisk's queue, on `tick()` | `arenaAssigned` |
 
 Entering a floor leaves the camp, any bout and the obelisk's line; going
-home (`enterCamp`) leaves a bout. The social and arena messages:
+home (`enterCamp`) leaves a bout; a disconnect leaves all three, its
+roommates told (`peerLeft`, and `hostChanged` if it was the host) as for
+any going. The social and arena messages:
 
 - `chat { text, party? }` → `chat { from, name, text, party }`. `cleanChat`
   strips control, zero-width and bidi-override characters, folds
@@ -187,7 +189,9 @@ home (`enterCamp`) leaves a bout. The social and arena messages:
 - `arenaJoin` (home only — never mid-run or mid-bout) / `arenaLeave` →
   `arenaQueue { position, waiting }`; `arenaAssigned`, `arenaScore { board,
   fell }` and `arenaEnded { board, winner, record }` follow; `arenaFell { by }`
-  is the fallen's report (see The Proving Ground).
+  is the fallen's report (see The Proving Ground). `arenaLeave` is always
+  answered (`position` 0 to a wizard who wasn't waiting), and also leaves a
+  bout just dealt: it's how a client turns down a bout it can't take.
 
 `Relay#tick()` is the server's heartbeat (`server.ts` calls it every
 250 ms): it starts bouts the queue has gathered, ends them on the score or
@@ -517,9 +521,13 @@ wizard's health.
 - `arena/arenaStore.ts` mirrors the relay: our place in line, the bout (its
   board, who's down until when, a feed of falls, how it ended) and the
   record.
-- `arena/arenaFlow.ts` — the journeys and the yield. `arenaAssigned` →
-  `travel("arena", …)` into phase `dungeon`, floor 0, the bout's seed
-  (`GameScene` mounts `ArenaFloor` instead of a dungeon floor);
+- `arena/arenaFlow.ts` — the journeys and the yield. `arenaAssigned` is
+  taken (`arenaStore.takeBout`, and the hall's roster) only by a wizard
+  who's home and on no journey (`canTakeBout`); one already on the road
+  down turns it down with `arenaLeave`, and any `floorAssigned` clears a
+  stale bout. Taken → `travel("arena", …)` into phase `dungeon`, floor 0,
+  the bout's seed (`GameScene` mounts `ArenaFloor` instead of a dungeon
+  floor);
   `startingStone` deals each wizard their own stone by member order.
   **The yield is a pluggable fall rule** (`gameStore.setFallRule`, asked
   in `takeDamage` before the Phoenix — see Game feel): in a bout the rule
@@ -527,10 +535,13 @@ wizard's health.
   bout), drops us to phase `loading` (no input, casting or harm), burns us
   away in Varr's ember-gold, and after `respawnMs` rises us at
   `pickSpawn(spawns, foes)` — the stone farthest from every standing foe —
-  at full health and mana. Nothing is lost: no grave, no run; draughts
-  drunk in the hall are drunk (the walk home sends a `stash` the bank
-  checks). `arenaEnded` → `afterMs` later, `travel("home")` through the
-  tunnel; a reconnect mid-bout walks you home.
+  healed to full (a `heal`, so the heart hears a second wind and lets go)
+  with full mana. Nothing is lost: no grave, no run; draughts drunk in the
+  hall are drunk (the bout's end, and the walk home after it, each send a
+  `stash` the bank checks); the feather won't fly in the hall. `arenaEnded`
+  → `afterMs` later, `travel("home")` through the tunnel; a reconnect
+  mid-bout walks you home, and any reconnect forgets our place in line
+  (the relay already has).
 - Everyone is hostile in a bout, your fellowship too, until it ends (the
   hostility resolver, above); pacts are off in the hall.
 - `arena/layout.ts` — `generateArena(seed)`: one quadrant of a 44-tile

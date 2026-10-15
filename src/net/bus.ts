@@ -37,7 +37,8 @@ export interface NetBusEvents extends Record<string, unknown> {
   partyInvited: { from: string; name: string };
   partyError: PartyError;
   /** The Proving Ground (arena/arenaStore.ts): the line at the obelisk, a
-   * bout begun, a fall scored, the bout's end. */
+   * bout dealt (arena/arenaFlow.ts takes it or turns it down), a fall
+   * scored, the bout's end. */
   arenaQueue: { position: number; waiting: number };
   arenaAssigned: ArenaAssignment;
   arenaScore: Extract<ServerMsg, { t: "arenaScore" }>;

@@ -10,16 +10,17 @@ import { estimatePeer, peerIds, resetPeers } from "../net/players";
 import { session } from "../net/session";
 import { getStats, setFallRule, useGame } from "../state/gameStore";
 import { toWireInventory } from "../state/persistence";
-import { travel } from "../transition/travel";
+import { isTraveling, travel } from "../transition/travel";
 import { getCurrentLayout } from "../world/currentFloor";
 import type { Vec3 } from "../world/types";
-import { inArena, isFallen, leaveBout, useArena } from "./arenaStore";
+import { canTakeBout, inArena, isFallen, leaveBout, takeBout, useArena } from "./arenaStore";
 import type { ArenaLayout } from "./layout";
 import { pickSpawn } from "./layout";
 import { ARENA } from "./rules";
 
 /** The Proving Ground's journeys and its one rule of the body: dealt into a
- * bout, the obelisk takes you there (wherever you stand in the camp); in
+ * bout, the obelisk takes you there (wherever you stand in the camp — but
+ * not off the road down, if you've already stepped through the gate); in
  * the hall you never die — you YIELD, the one who struck last takes it,
  * and a few breaths later you rise at the spawn stone farthest from every
  * foe; when the bout is over, Varr reads the board and the hall sends you
@@ -41,7 +42,21 @@ function clearTimers(): void {
 // ── In ───────────────────────────────────────────────────────────────────────
 
 netBus.on("arenaAssigned", (a) => {
+  // Dealt in while already on the road somewhere else (the gate's ENTER, a
+  // message that crossed ours): turn it down, and tell the relay, so the
+  // hall doesn't keep a seat nobody fills. Taken anyway, the floor's
+  // assignment would land on top of it and leave us fighting a bout nobody
+  // else is in, with the fellowship for strangers.
+  if (!canTakeBout(useGame.getState().phase, isTraveling())) {
+    useArena.setState({ queue: null }); // the relay took us out of the line
+    session.arenaLeave();
+    return;
+  }
   clearTimers();
+  takeBout(a);
+  const roster: Record<string, string> = {};
+  for (const m of a.members) roster[m.id] = m.name;
+  useNet.setState({ hostId: a.hostId, epoch: a.epoch, roster });
   // A fresh hall: nobody's pose from the camp carries over.
   resetPeers();
   useGame.setState({ phase: "loading", prompt: null, overlay: "none" });
@@ -107,7 +122,11 @@ function rise(): void {
   } | null;
   body?.setTranslation({ x: at[0], y: at[1], z: at[2] }, true);
   body?.setLinvel({ x: 0, y: 0, z: 0 }, true);
-  useGame.setState({ phase: "dungeon", health: getStats().maxHealth, mana: PLAYER.maxMana });
+  // Back up from nothing to full is the biggest second wind there is: healed
+  // (not just set), so the heart hears it and lets go at once, instead of
+  // thudding at death's door into the next duel.
+  useGame.getState().heal(getStats().maxHealth);
+  useGame.setState({ phase: "dungeon", mana: PLAYER.maxMana });
   soulRiseFx([at[0], at[1] - 0.6, at[2]], VARR_GOLD, 26);
   flashLight(at, VARR_GOLD, 22, 8);
   playPickup();
@@ -140,6 +159,10 @@ netBus.on("arenaEnded", ({ winner }) => {
   const bout = useArena.getState().bout;
   const name = winner ? (bout?.members.find((m) => m.id === winner)?.name ?? "a wizard") : null;
   gameEvents.emit("message", winner === me ? "The hall is yours!" : name ? `${name} takes the hall` : "Nobody took a yield — the hall keeps its own counsel");
+  // Varr has written the bout down already: what was drunk is drunk as of
+  // now, not as of the walk home (a reload in the farewell mustn't hand the
+  // draughts back).
+  settleDraughts();
   if (homeTimer) clearTimeout(homeTimer);
   homeTimer = setTimeout(goHome, ARENA.afterMs);
 });
@@ -150,6 +173,14 @@ netBus.on("reconnected", () => {
   if (inArena()) void goHome();
 });
 
+// A floor's assignment only ever answers our own enterFloor, and the hall
+// never sends one (not even on a reconnect: no floor to re-enter). So
+// whatever bout we thought we were in, we're out of it.
+netBus.on("assigned", () => {
+  clearTimers();
+  leaveBout();
+});
+
 /** Home from the Proving Ground, through the tunnel. */
 export async function goHome(): Promise<void> {
   clearTimers();
@@ -157,7 +188,8 @@ export async function goHome(): Promise<void> {
   useGame.setState({ phase: "loading", prompt: null, overlay: "none" });
   await travel("home", () => {
     leaveBout();
-    const state = useGame.getState();
+    // Anything drunk in the farewell too.
+    settleDraughts();
     useGame.setState({
       phase: "village",
       floor: 0,
@@ -166,10 +198,13 @@ export async function goHome(): Promise<void> {
       prompt: null,
       overlay: "none",
     });
-    // What was drunk in the hall is drunk: the bank hears of it (a
-    // rearrangement it checks, never anything new).
-    session.sendStash(toWireInventory(state));
   });
+}
+
+/** What was drunk in the hall is drunk: the bank hears of it (a
+ * rearrangement it checks, never anything new). */
+function settleDraughts(): void {
+  session.sendStash(toWireInventory(useGame.getState()));
 }
 
 function listOf(names: string[]): string {
