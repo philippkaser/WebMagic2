@@ -28,8 +28,8 @@ The emotional loop we are chasing:
 - **Greed vs. fear.** Every floor you descend makes you richer and stronger,
   but **death in the dungeon takes everything you gathered on that run.** The
   deep only lets you go home after five floors; after that, every floor's
-  way-home portal is open, and the question "one more floor, or turn back?"
-  should be a genuine, tense choice.
+  rift forks as you step in — down, or home — and the question "one more
+  floor, or turn back?" is asked in the void, a genuine, tense choice.
 - **Mastery of movement and aim.** Combat rewards positioning, timing, and
   clever use of physics — not just clicking. A skilled wizard flows through a
   room; a clumsy one gets cornered.
@@ -37,7 +37,15 @@ The emotional loop we are chasing:
   real wizard onto your floor. You don't know who, or where — only that
   someone is there. Swear a pact and fight together, or kill them for what
   they carry. No lobby, no matchmaking menu — the world just, occasionally,
-  has someone else in it.
+  has someone else in it. Home is the opposite: the camp is shared, friends
+  swear fellowships by the fire and go down together, and the Proving
+  Ground behind the obelisk is where wizards fight each other for nothing
+  but the score.
+- **Barely alive.** The last third of every bar holds half the life. A
+  creature on its last sliver cracks, leaks and fights for its life, and
+  pulls you into finishing it; you on your last sliver hear your heart over
+  a muffled world, and a killing blow from healthy leaves you on the Brink
+  with a heartbeat to get away. The best moments are the close ones.
 
 ### Design pillars (use these to settle arguments)
 
@@ -98,8 +106,10 @@ The emotional loop we are chasing:
   in pixel fire and framed in runed stone, that quickens as you come close.
   Using one is a journey: the tear rips open over your view and you are
   sucked in, hover in a dark void of blocky stars while the next floor
-  loads, and are spat out through a tear onto the new place. Sealed rifts
-  are frozen, cracked glass.
+  loads, and are spat out through a tear onto the new place. A floor's rift
+  forks in that void — two tears, cyan down and gold home, standing where
+  they opened while you turn to choose. Sealed rifts are frozen, cracked
+  glass.
 - **The UI is physical and in the world.** No flat screens and no framed
   boxes: menus are tablets that build themselves out of worn, round-edged
   stones in front of you; prompts and messages are small slabs of slate
@@ -133,7 +143,8 @@ The emotional loop we are chasing:
   shoulder so flames and blasts keep their shape → film grain on the pixel
   grid → ordered dither → a heavy vignette tinted with each place's darks.
   The body is in the image too: a blow drains the colour, a blast punches,
-  near death the world greys and the rim of sight closes with your pulse.
+  your kill pops the exposure, near death the world greys — all but its
+  reds — and the rim of sight closes with your pulse.
   Each biome has its own air (the Hollow's dark breathes, the Crystal Deep
   splits light like a prism, the Drowned Halls breathe faintly with the tide). The pixelation itself is *free*: the
   world renders at ~1/3 resolution and the browser upscales it with
@@ -176,7 +187,11 @@ art is a new procedural painter function, not an asset pipeline.
   — or a blast you stand in — is all round you. The world has its own voices:
   footsteps on each ground (stone, wet stone, crystal, iron, ash, cobbles,
   grass), torches crackling, rifts humming, monsters waking, walking and
-  dying, and the small sounds each place makes by itself.
+  dying, and the small sounds each place makes by itself. Near death the
+  whole world goes under a muffle while your heart, the ring in your ears
+  and the UI stay clear; everything meets one gentle compressor and a
+  limiter on the way out, so three blasts on a kill chime land as one big
+  sound instead of crackle.
 
 ### Why this style
 
@@ -210,7 +225,9 @@ tuned via `core/config.ts`:
 - **Blast-jumping:** firing a Force Blast at your own feet launches you. This
   is intended tech, not an exploit — the caster takes reduced self-knockback.
 - Juice: view bob scaled to speed, landing dip, trauma-based camera shake,
-  staff viewmodel sway + recoil kick, dust puffs on jump/land.
+  staff viewmodel sway + recoil kick, dust puffs on jump/land, and the
+  eye's own kick by the weight of the spell you cast (a rail is a cannon,
+  a bolt a flick — and the kick never bends your aim).
 
 ### The physics sandbox
 
@@ -220,6 +237,64 @@ fire, and sometimes hide loot. **Barrels explode**, chain-reacting into nearby
 props and enemies. All explosions apply a **radial impulse** to everything
 in range — enemies, props, and the player — which is the heart of the sandbox
 feel. The village even starts you with a few crates to kick around.
+
+### Feel: the knee, barely living things, the Brink
+
+The fight's curve is Destiny's: **the last third of a bar holds half the
+life.** It's shown, never cheated — the life underneath is plain numbers,
+the same on every machine — but it shapes everything about a fight.
+
+- **The knee.** Your first good blows knock a creature's bar down fast to
+  a notch; past it, the sliver lasts as long as everything before it. That
+  sliver is the hook: the thing almost dead pulls you into finishing it.
+  The Warden's bar has the notch drawn in brass, the blow that crosses it
+  cracks the seal, and the Warden fights its last third enraged.
+- **Barely living things.** A creature shows its life without a bar.
+  Glowing cracks open across its shell from the first quarter lost;
+  crossing the knee breaks it — a crack of light, a ring, a stagger, a
+  yelp — and from then on it gutters like a failing lamp, leaks, lists and
+  breathes ragged, and at the very end its light beats like a heart. At
+  death's door it fights for its life: wisps jink, a shadow strikes again
+  at once, slimes hop frantically, sentries overcharge. What it's about to
+  do is readable by every wizard — the shadow coils with flaring eyes, the
+  Warden crouches and stills its shell, the sentry's crystal swells. And
+  once you've hurt something, a small pixel bar hangs over it: bone-white,
+  then an ember sliver throbbing like a death rattle, kept a while so a
+  dying thing can be hunted down, shattering on the kill.
+- **Hits that land.** Ticks flare round the crosshair and a dry "tk"
+  climbs in pitch as the creature weakens — the last half of its life is
+  an audible crescendo; the kill is a red X and a deep chime. Damage
+  numbers pop in the game's own pixel font — bone-white, gold for a
+  precision hit (the wisp's core, the shadow's eyes, the sentry's crystal,
+  the Warden's heart when its shell opens), red-hot for the kill — and a
+  beam pours into one climbing number instead of a cloud. Heavy hits catch
+  the frame for a blink (hitstop: 40 ms for a heavy hit, 80 for a kill,
+  120 for a precision kill, a quarter-second for the Warden's death; never
+  a beam's ticks), and only the picture stops — the world never pauses.
+  Kills chained close climb a pentatonic chime, burn rune words beside the
+  aim (DOUBLE, TRIPLE, RAMPAGE, MASSACRE, CATACLYSM) and pour a little mana
+  back, so aggression feeds itself.
+- **Deaths with weight.** Each creature dies its own way: the wisp swells
+  and implodes, the shadow unravels and leaves its eyes a heartbeat in the
+  air, the slime splats and its children squeeze out of the puddle, the
+  sentry's head flies off along the blow and shatters, the Warden sheds its
+  shards and goes critical. A big enough overkill blows a body apart.
+- **You, barely alive.** Below 30% health, harm is halved — your last 30%
+  lasts as long as the 60% before it — and that line is a place you can
+  hear: the world goes muffled and far away, the colour bleeds out of
+  everything but the reds, and a heart thuds in your head, racing toward
+  death. A killing blow taken from half health or more leaves you on one —
+  **the Brink**, at most once every 25 seconds: the picture slows, a thoom
+  and a ringing in your ears, a red flash, and your dash is back for the
+  breath in which nothing can touch you. You can never be one-shot from
+  healthy. Heal back over the line (a real heal, not a trickle) and it's a
+  second wind: colour floods back and the world opens up again. The orb
+  tells the truth — a third full looks a third full. These rules are the
+  wizard's own, decided on their own machine like all their health, so
+  they're as fair in a duel as in co-op.
+- **Others at death's door.** On a shared floor you see a floor-mate's
+  last stand too — a pixel heart beating over their head, embers leaking
+  from them — and you hear their Brink where they stand.
 
 ### Loot & builds
 
@@ -250,6 +325,9 @@ Picking up an item no longer replaces what you have. Every wizard carries:
 - A **2-slot consumable belt** mapped to **Q and E** — potions and feathers
   are drunk/spent straight from the belt mid-fight. (E prefers interactions:
   standing at a portal never wastes a draught.)
+- An **8-slot reagent pouch** — the materials the deep sheds (see Crafting),
+  in deep stacks. Like everything found below, they're run loot until
+  banked.
 - A **30-slot chest at home** in the village — banked storage. It never
   travels, so it's never at risk.
 
@@ -285,7 +363,7 @@ sheet):
 | Weak Healing Draught | +40 health | ~a third of an early banked run |
 | Weak Mana Draught | +60 mana | slightly cheaper than healing |
 | **Feather of Safe Passage** | exit the dungeon from ANY floor — even before the tithe of five is paid — banking your run loot | ~two banked early runs; insurance you feel |
-| **Orb of Fortune** (65g) | random GEAR rolled a couple floors past the deepest floor you've walked home from, ~45% enchanted | the gold sink: gambling IS affix hunting (and a way to nudge your resonance deeper) |
+| **Orb of Fortune** (65g + 1.25g per floor of your deepest) | random GEAR rolled a couple floors past the deepest floor you've walked home from, ~45% enchanted | a gold sink: gambling IS affix hunting (and a way to nudge your resonance deeper); the price climbs faster than the gear resells, so it's never a gold farm |
 
 Online, every trade is server-validated: purchases against the shared price
 table, sales against provable ownership, and the Orb of Fortune is rolled BY
@@ -293,20 +371,27 @@ the server so a client can't fish for outcomes.
 
 Potions also drop in the dungeon (uncommon); feathers essentially don't — the
 Warden sometimes drops one, and the balance intent is that they mostly come
-from Maro. The feather is the economy's keystone: it converts gold into a
-softer answer to "one more floor?", without ever granting progress.
+from Maro (or from Wenna's cauldron, for a piece of riftglass). The feather
+is the economy's keystone: it converts gold into a softer answer to "one
+more floor?", without ever granting progress. The forge is the other big
+gold sink.
 Balance rule of thumb: if consumables ever feel routine, raise prices before
 lowering drops — finding gold should stay exciting.
 
 ### Enchantments (rarity)
 
-Dropped gear can roll **enchanted** — one affix rider (Swift, Vigorous, Keen,
-Focused, Warded, Veiled) on top of its base stats, marked ✦ in violet
-everywhere. Enchant chance scales with depth (~14% on floor 1 up to 50%
-deep down); consumables never enchant. Technically an enchanted item is just
-an item id with a suffix (`"void_staff+keen"`), so the whole provenance /
-banking / trading stack handles rarities with zero server changes — see
-ARCHITECTURE.md. Adding an affix is one entry in `items/affixes.ts`.
+Dropped gear can roll **enchanted** — an affix rider (Swift, Vigorous, Keen,
+Focused, Warded, Veiled and more — two dozen in `items/affixes.ts`) on top
+of its base stats. Rarity reads at a glance in each item's colour: common
+(bone), **enchanted** (blue, one affix), **arcane** (violet, two) and
+**legendary** (amber: a named unique with a power of its own). Enchant
+chance scales with depth (~14% on floor 1 up to 50% deep down, and a
+deeper find more often carries a second); consumables and materials never
+enchant.
+Technically an enchanted item is just an item id with a suffix
+(`"void_staff+keen"`), so the whole provenance / banking / trading stack
+handles rarities with zero server changes — see ARCHITECTURE.md. Adding an
+affix is one entry in `items/affixes.ts`.
 
 ### Item levels
 
@@ -316,6 +401,47 @@ damage; every other piece adds a **health ward**. So gear found deep keeps
 you roughly on par with deep monsters, and an empty slot is a real weakness.
 Item levels are shown everywhere an item is ("Lv 12").
 
+### Crafting (kept simple)
+
+Crafting is a reason to walk back up, not a spreadsheet. The deep doesn't
+flood you with item types: **seven materials, no more.**
+
+- **One reagent per depth band** — Grave Moss in the Catacombs, Brine
+  Pearls in the Drowned Halls, Cinder Iron in the Ember Forge, Singing
+  Shards in the Crystal Deep, Hollow Ash in the Hollow — and a floor only
+  ever drops its own band's. However deep you go, a floor hands you one
+  kind.
+- **Riftglass** — a piece of the rift gone hard, and a glint: a rare kill,
+  a Warden, a vault or a won ward circle, or breaking down a legendary or
+  heavily forged piece (never more back than went in). The forge's finest
+  work runs on it.
+- **The Warden's Sigil** — only Wardens give them.
+
+**Each item tells you what it wants.** Every piece of gear hungers for one
+band reagent of its own, picked from its base and its enchantments (and
+only from bands its level has reached) — written on its plaque and over
+the anvil ("HUNGERS FOR GRAVE MOSS"). "What does this one need?" always
+has one answer. A deep wizard's fire staff may still hunger for Grave
+Moss, and back up to the Catacombs they go. That walk is the point.
+
+- **Old Wenna's cauldron** brews every draught on Grave Moss and at most
+  one other material: the plain potions on moss alone, the better ones and
+  the four elixirs on one deeper band's reagent each, and the Feather of
+  Safe Passage on a piece of riftglass.
+- **Brannoc's forge** works the piece on the anvil with its reagent:
+  **temper** (+1 level — never more than three past the deepest floor
+  you've walked home from: the forge only carries you a step past where
+  you've been), **enhance** (+1 to +5, more riftglass each step: its boons grow,
+  its banes don't), **imbue** (one more random enchantment, two at most),
+  **reforge** (re-roll them — which may change what it hungers for) and
+  **salvage** (break it into its reagent). Apart from the anvil, **the
+  Great Work**: three Warden's Sigils, five riftglass and 300 gold forge a
+  legendary.
+- **The server does the work.** Crafting touches only what's banked, in
+  the village; online the server runs the very same recipe with its own
+  dice (an imbue can't be fished for), and refuses outright if the anvil
+  holds something other than what you saw.
+
 ### The run structure & the central risk
 
 - **100 floors**, each harder (`floorScale` ramps enemy health, damage, and
@@ -323,17 +449,25 @@ Item levels are shown everywhere an item is ("Lv 12").
 - **The Weighing.** The village portal reads your gear: your **gear level**
   is the mean item level of the four gear slots (empty slots count as zero).
   It casts you to the floor that level belongs at (≈ 0.85 × gear level). You
-  never pick a floor — dress deeper to go deeper, strip down to go shallower.
-- **The Tithe of Five.** Every floor has a golden **way-home portal** beside
-  its exit, sealed until your run has played five floors. From your fifth
-  floor on, any way home banks everything you carry and returns you to the
-  village. The server enforces it.
+  never pick a floor — dress deeper to go deeper, strip down to go
+  shallower. (One exception: a fellowship. If a companion is already below,
+  no deeper than your gear allows, the Gate casts you to them.)
+- **One rift per floor, forking in the void.** Step into a floor's rift
+  and the journey hangs in the void while the tear forks ahead of you: the
+  way down in cyan on the right, the way home in gold on the left. Turn
+  toward one — it burns brighter — and take it, or wait and the way you
+  face takes you. You arrive in the colours of the way you chose.
+- **The Tithe of Five.** Until your run has played five floors, the way
+  home is there but sealed — a thin, cracked, dim slit that won't open —
+  and after a breath the rift takes you down: the rule shown, not told.
+  From your fifth floor on, the way home banks everything you carry and
+  returns you to the village. The server enforces it.
 - **Death is the whole tension.** Die before you get home and **all loot
   gathered during that run is lost** — gear you brought from home survives.
   Alone, the dungeon keeps it. On a shared floor it stays behind in a
   **grave chest** that anyone may plunder.
 - **Bosses every 10th floor.** The **Warden of the Deep** holds the exit room
-  and **seals both portals until it dies.**
+  and **seals the rift until it dies.**
 
 ### Omens
 
@@ -348,6 +482,26 @@ next floor will be. Once it's there, it's never a mystery what it does: the
 top-right corner of the HUD names it under the floor and its biome, and
 lists its effects line by line (▼ what hurts, ▲ what helps) when you arrive
 and again whenever a map is cast.
+
+### Room events
+
+Most floors keep a room apart — from floor 5, sometimes two, never the
+spawn, the exit or the treasure room — holding something besides monsters.
+The floor's host runs them, so everyone there sees the same thing, and
+the cast map marks each one in its colour once seen.
+
+- **Vault** — an iron-bound chest. Step into its room and its guardians
+  wake round the walls; when the last falls, the lid unseals: a piece of
+  gear, gold, a clutch of the band's reagent, often riftglass. It opens for
+  anyone — that's the trouble.
+- **Ward circle** — a ring of standing stones. Kindle it and hold the
+  circle for 35 seconds while the deep sends three waves at it. Step out
+  and it drains; leave it empty twelve seconds and it breaks. Held, it pays
+  the best of the room rewards, riftglass for certain.
+- **Shrine** — one of the old powers offers each wizard a bargain: a strong
+  blessing for a couple of minutes, and something taken back (+40% damage
+  for 30 of your max health; faster casting for taking more harm…).
+- **Fountain** — clear water that mends body and mana, once per wizard.
 
 ### The signature multiplayer mechanic: rare encounters
 
@@ -368,17 +522,76 @@ and again whenever a map is cast.
 - **Graves.** A wizard who dies on a shared floor leaves a grave holding
   exactly what the death took from them. The killer — or anyone — can
   plunder it (E), and what they take is theirs to lose again.
+- **A pact that holds becomes a fellowship.** Two strangers who swear a
+  pact below walk out of it a fellowship (below) — the deep's chance
+  meetings can turn into lasting company.
+
+### Home: the shared camp & fellowships
+
+Riftwatch isn't a menu; it's a place, and other wizards are in it.
+Everyone who's home shares a camp — up to twelve round one fire — walking
+it, reading the boards, speaking (Enter: the words hang over the
+speaker's head and run down a little scroll at your left). It's the
+opposite of the deep: nobody can be harmed here.
+
+- **Fellowships.** Found one at the guild board and it gets six runes from
+  an alphabet with nothing to misread — share them anywhere, and whoever
+  speaks them joins — or press F beside a wizard to invite them (the
+  invitation waits half a minute). Four at most. Speak to your fellowship
+  wherever it is (start the line with `/p `); its runes stand at the right
+  of your sight.
+- **A fellowship goes down together.** Its members skip the encounter dice
+  for each other and land in one another's world floor after floor; a
+  fresh run starts on a companion's floor if the Weighing lets you go that
+  deep. In the deep a fellow is never a stranger: your magic passes
+  harmlessly between you. For everyone else, encounters stay rare.
+
+### The Proving Ground
+
+North of the gate, before the forest, stands an obelisk between two
+braziers. Behind it Ysolde Varr keeps the Founders' old trial hall, where
+duels end at the yield because the hall gives back the blood spilled in
+it. It's PvP without the dungeon's stakes — a place to settle things,
+test a build, or show off.
+
+- **Step into the line** at Varr's tablet (her greeting, the rules, your
+  ledger). Once two are waiting the hall gathers a breath — eight seconds
+  — for more, and takes up to six (six go at once); then the obelisk
+  takes you, wherever you stand in the camp, through an ember-gold warp.
+- **Fair by construction.** The hall is four-fold symmetric — a great hall
+  in the middle, four alcoves on spokes into it, a ring round the back
+  through four corner chambers — so no spawn stone is better than another,
+  and there's always a way round behind someone. Each bout rolls a band's
+  look and how the hall breaks sightlines: open, four great blocks, or a
+  cut-cornered octagon with low walls across the spokes' mouths. The
+  Founders' inscription is carved on its north wall.
+- **To the yield.** First to ten yields, or the most when three minutes run
+  out; a tie goes to whoever fell less, then to whoever scored first; a
+  wizard who walks out keeps their row but can't win. In the hall nobody
+  dies: a killing blow is a yield to whoever struck last, you burn away in
+  ember-gold and rise three seconds later at the stone farthest from every
+  foe, whole. Nothing is lost — no grave, nothing carried at risk — though
+  a draught drunk in the hall stays drunk.
+- **Everyone is fair game**, your fellowship too, until Varr calls it.
+  Then she reads the board, writes the bout into her ledger on your
+  account (bouts, wins, yields), and the hall sends everyone home.
 
 ### Gameplay feel checklist (what "good" means here)
 
 - Can I cross a room in a way that feels cool, even with no enemies? ✔ dash,
   double-jump, hover, blast-jump.
-- Does hitting an enemy feel impactful? ✔ hit flash, knockback, hit sound,
-  particle spray.
+- Does hitting an enemy feel impactful? ✔ hit confirms and a climbing "tk",
+  numbers, hitstop, a flinch along the blow, sparks, knockback, a kill X
+  and chime, deaths with weight.
+- Can I tell how close to death it is without reading a number? ✔ the
+  knee, cracks and leaks, death's door, life marks, the Warden's notch.
+- Do I feel how close to death *I* am? ✔ the muffle, the grey, the heart,
+  the Brink.
 - Does the room react to me? ✔ props shove/shatter/explode, physics ragdolls.
 - Is the screen alive? ✔ torch flicker, drifting embers, ambient drone.
 - Do I feel the risk of going deeper? ✔ visible run-loot markers in the HUD,
-  the death screen listing what the dungeon kept.
+  the fork asking "deeper, or home?", the death screen listing what the
+  dungeon kept.
 
 ---
 
@@ -491,9 +704,14 @@ naturally the current systems support it.
 Current: **Wisp** (floating chaser, burns on contact), **Sentry** (fixed
 crystal turret, lobs dodgeable fire bolts with line-of-sight), **Shadow**
 (prowls a ring around you, then lunges from the dark), **Slime** (hops, and
-splits into smaller, faster slimes), plus the **Warden of the Deep** boss.
-Adding an enemy is deliberately cheap — a roster row, a pure brain, a model
-and a small kind file (see ARCHITECTURE.md "Extending"). Ideas:
+splits into smaller, faster slimes), plus the **Warden of the Deep** boss —
+each (the slime aside) with a weak point, each with its own fight at
+death's door and its own death; the shadow, the sentry and the Warden wind
+up where everyone can read it. Adding an enemy is deliberately
+cheap — a roster row, a pure brain, a model and a small kind file, plus
+how its body looks hurt and how it dies (see ARCHITECTURE.md "Extending").
+Every new one should be readable before it strikes and visibly barely alive
+before it dies. Ideas:
 
 - **Charger / brute** — melee rusher that telegraphs and can be sidestepped.
 - **Shielder** — must be flanked or blast-knocked to break its guard.
@@ -505,32 +723,36 @@ and a small kind file (see ARCHITECTURE.md "Extending"). Ideas:
 
 ### Biomes
 
-The generator and texture system already support swapping the visual + prop
-palette by floor range. Planned: distinct looks and hazards per 10–20 floor
-band (e.g. flooded catacombs, ember forge, void-touched depths), each with its
-own boss, enemy mix, and environmental gimmick.
+The five bands already have their own surfaces, light, drone, monster mix,
+dressing and reagent. Next: an environmental gimmick per band (rising
+water, forge vents, singing crystal that answers spells) and a boss of its
+own.
 
 ### Items & builds
 
 - More staffs = more playstyles (channeled beams, lobbed grenades, melee
   staves, summons). Each is one catalog entry + optionally one ability entry.
-- Deeper rarities: multi-affix items, suffixes, cursed trade-offs — the
-  affix layer ships with single-affix "enchanted" items today.
+- Deeper rarities: cursed trade-offs, suffixes — the affix layer already
+  carries up to two enchantments (arcane) and named legendaries.
 - Set bonuses across slots.
 - More consumables (scrolls, bombs, buffs) — each is one catalog entry; the
-  belt/merchant/provenance plumbing is already generic.
-- Richer merchant stock for deeper wizards; more gold sinks beyond the
-  Orb of Fortune (shrine offerings? stash upgrades?).
+  belt/merchant/provenance plumbing is already generic, and a brew is one
+  recipe row. Keep crafting's vocabulary at seven materials: a new recipe
+  should spend what the bands already give.
+- Richer merchant stock for deeper wizards.
 
 ### Systems
 
-- **Reconnect handling.** If the server restarts or a client drops mid-run,
-  rejoin the same instance and resync rather than falling back to offline.
-- **Social layer.** Lightweight in-world ping/emote and/or floor chat, so
-  strangers can coordinate without voice.
-- **Persistent meta.** Village upgrades, a bank/stash, cosmetic unlocks,
-  wizard identity beyond a name.
-- **Trading / gifting** loot between floor-mates.
+- **More room events** — each is a catalog row, a rule and a view: a
+  trapped corridor run, a caged prisoner (a wizard's echo) to free, a
+  wager stone.
+- **Pings and emotes** in the deep, so strangers can coordinate without
+  typing.
+- **More of the Proving Ground**: hall plans beyond the three, fellowship
+  against fellowship, a ladder read from Varr's ledger.
+- **Persistent meta.** Village upgrades, cosmetic unlocks, wizard identity
+  beyond a name.
+- **Trading** between wizards (dropping loot already gifts it).
 - **Full server authority** (see tech section) as the game scales.
 
 ### Audio
@@ -599,18 +821,25 @@ The whole codebase is organized around a few deliberate bets:
 
 ```
 src/
-  core/        config (all tuning numbers), seeded RNG, typed event bus
+  core/        config (all tuning numbers), seeded RNG, typed event bus,
+               the presentation clock (hitstop, slow motion)
   run/         run rules: the Weighing, the Tithe of Five, bank/death outcomes
   items/       catalog, item levels & power, affixes, loot tables, economy,
-               inventory grids, loot-orb manager
+               inventory grids, loot-orb manager, materials & crafting
   world/       gen/ (staged pure generator), biomes, omens, lore, props, traps
-  enemies/     roster data, shared enemy shell, pure brains/, kinds/
+  roomEvents/  vaults, ward circles, shrines, fountains (pure rules + net)
+  enemies/     roster data, shared enemy shell, pure brains/, kinds/, the
+               living body (puppet, wounds, wind-ups, doom), corpses/
   weapons/     spell catalog, cast kinds, projectiles, explosions, singularity,
-               allegiance (who may hurt whom), cast replay
+               allegiance (who may hurt whom), cast replay, precision hits
+  combat/      the shooter's feel: confirms, numbers, hitstop, momentum
   encounters/  pacts, presence sense, kill credit, grave chests
-  net/         protocol, matchmaking (tension clock), transport, session,
-               synced clock, snapshots, channels, entity replication,
-               wizard poses, remote wizards + collision capsules
+  social/      chat, fellowships, the camp seat
+  arena/       the Proving Ground: rules, the hall, the yield, the bout
+  net/         protocol, matchmaking (tension clock), fellowships, the
+               obelisk's queue, transport, session, synced clock,
+               snapshots, channels, entity replication, wizard poses,
+               remote wizards + collision capsules, peer vitals
   state/       zustand game store, codex, save persistence
   player/      input, first-person controller, staff viewmodel
   fx/          shader particle system + named effects, ambient air, torch
@@ -620,13 +849,16 @@ src/
   render/      textures/ (pure painters + normal/emissive/roughness maps),
                models/ (every mesh), post-processing
   scenes/      village, dungeon floor, floor atmosphere, canvas composition
-  transition/  portal journeys: enter pull, vortex tunnel, arrival
+  transition/  portal journeys: enter pull, vortex tunnel, the fork, arrival
   ui3d/        the in-world UI: pixel font, rune text, tablets, item models,
-               the HUD, menus and inventory as physical things
+               the HUD, menus, inventory, guild board and Varr's tablet as
+               physical things
   ui/          the DOM leftovers: perf overlay, build stamp, dev room
   game/        cross-system registries and seams (hostility, floor rules,
-               damage sources, interactions, player-state, targeting)
-server/        Bun WebSocket game server (relay, accounts, provenance)
+               damage sources, interactions, player-state, targeting), the
+               vitality rules and the one heart
+server/        Bun WebSocket game server (relay: floors, the camp, bouts;
+               accounts, provenance, crafting, the ledger)
 ```
 
 **Cross-system glue** avoids React prop-drilling and expensive scene queries:
@@ -640,19 +872,23 @@ registries; it never walks the scene graph.
 This is the most important networking decision, so it's worth stating plainly:
 
 - Each floor instance has a **simulation host** — its first joiner. The host's
-  simulation of **enemies, props, the boss, and loot** is the authoritative
-  truth. Everyone else runs **predicted replicas**: real dynamic bodies that
-  the framework steers toward timestamped snapshot buffers on a server-synced
-  clock (velocity-aware hermite interpolation, ~90 ms behind) — so your
+  simulation of **enemies, props, the boss, loot and room events** is the
+  authoritative truth. Everyone else runs **predicted replicas**: real
+  dynamic bodies that the framework steers toward timestamped snapshot
+  buffers on a server-synced clock (velocity-aware hermite interpolation,
+  ~90 ms behind) — so your
   blasts knock things back and your body shoves crates *instantly*, while
   authority reconciles underneath. Every wizard also has a collision capsule
   on every machine, so a joined player's pushes are real in the simulation
   that matters. Discrete events (deaths, breaks, boss attacks) replay as they
   arrive.
-- The **server is a gameplay-blind relay + matchmaker** that *enforces*
-  authority purely by channel-name prefix (`a:` host-only, `h:` to-host,
-  `p:` peer broadcast). It never learns what an enemy or an orb is, so new
-  gameplay features never touch it. It does not simulate the world (yet).
+- The **server is a relay + matchmaker blind to the floor's world** that
+  *enforces* authority purely by channel-name prefix (`a:` host-only, `h:`
+  to-host, `p:` peer broadcast). It never learns what an enemy or an orb
+  is, so new features on a floor (room events, the feel pass) never touch
+  it. It does not simulate the world (yet). What it does own is the bank
+  (accounts, provenance, the merchant, crafting), the social rooms (the
+  camp, chat, fellowships) and the Proving Ground's line, clock and score.
 - **Networking is declarative for game code.** A new entity calls
   `useNetBody(…)` once and gets replication, interpolation, damage routing,
   late-join and host migration for free; new messages are one
@@ -691,46 +927,71 @@ table, and the extension guide.
 **Working today:**
 
 - Full loop: village → the Weighing casts you by gear level → descend →
-  fight → loot → walk home after five floors, or die and lose (or, on a
-  shared floor, leave a grave).
+  fight → loot → the rift forks: deeper, or home once five floors are paid
+  — or die and lose (or, on a shared floor, leave a grave).
 - Item levels (gear potency and health wards scale with depth), gear-level
   entry, the Tithe of Five — enforced server-side.
+- Crafting: seven materials, per-item attunement, Wenna's cauldron (nine
+  brews) and Brannoc's forge (temper, enhance, imbue, reforge, salvage, the
+  Great Work), server-validated with the server's dice.
+- Room events: vaults, ward circles, shrines (five bargains) and fountains,
+  run by the floor's host and synced to late joiners.
+- The shared camp: up to twelve wizards a camp, chat (room and
+  fellowship, speech over heads), fellowships by runes or invitation that
+  travel together, pacts that become fellowships.
+- The Proving Ground: Varr's obelisk and line, bouts of 2–6 in a
+  symmetric hall built from the dungeon's own stone, to the yield (first to
+  ten, or three minutes), the server's clock and scoreboard, and the record
+  on your account.
+- The feel pass: the knee on every bar, last stand and the Brink; hit
+  confirms, hitstop, damage numbers, precision hits, rune-word streaks,
+  weighty casting; living bodies (springs, wounds, wind-ups, death's door,
+  zero-ping death throes) and per-kind deaths; the one heart, the muffled
+  world, the colour bleeding to red, the Destiny boss bar, life marks, and
+  floor-mates' last stands.
 - Five depth biomes (own surfaces, light, drone and monster mix), six omens,
   ~75 lore carvings and the codex, and the camp's voice lines.
 - 100-floor procedural generation with difficulty scaling and boss floors.
 - Movement, all four equipment slots, the full ability/enemy/boss/prop set
   listed above, procedural audio, the dynamic-light look.
-- The full inventory & economy layer: bag + Q/E belt + village chest, the
-  inventory screen (live 3D wizard, drag & drop, stat comparison arrows),
-  gold drops with auto-pickup, enchanted (affixed) gear, the village merchant
-  (buying AND selling), the Orb of Fortune gamble, potions, and the Feather
-  of Safe Passage.
+- The full inventory & economy layer: bag + reagent pouch + Q/E belt +
+  village chest, the inventory screen (live 3D wizard, drag & drop, stat
+  comparison arrows), gold drops with auto-pickup, enchanted, arcane and
+  legendary gear, the village merchant (buying AND selling), the Orb of
+  Fortune gamble, potions and elixirs, and the Feather of Safe Passage.
 - Real online multiplayer: rare same-floor encounters (tension clock),
   presence sense, pacts and wizard-vs-wizard combat, kill credit, grave
-  chests, host-authority replication of enemies/props/boss/loot/graves,
-  late-join sync, host migration, reconnect into the same instance.
+  chests, host-authority replication of enemies/props/boss/loot/graves/
+  room events, late-join sync, host migration, reconnect into the same
+  instance; accounts in the Wizard's Ledger (guests, or a username and
+  password that follow you to any browser).
 - The look ("gritty pixel-magic"): five biomes of painted pixel-art
   surfaces with their own colour grades, 6 m halls with arched doorways,
   ribs, pillars and set dressing, fog, light shafts and ambient air; pixel particles for every effect; rift portals and
   portal journeys for every scene switch; and the whole UI in the world in
   the grimoire style (rune text in pixel fonts, framed stone-tablet menus,
   the framed HUD, 3D items).
-- Persistence of the deepest floor, banked inventory + gold, player name,
-  and the shadows / reflections quality toggles (localStorage cache; server-authoritative
-  online — including gold provenance and merchant purchase validation).
+- Persistence of the deepest floor, banked inventory + gold, the Proving
+  Ground record, player name, and the shadows / reflections quality
+  toggles (localStorage cache; server-authoritative online — including gold
+  provenance, merchant purchase validation and crafting), in a data file
+  written atomically with rotating backups.
 
 **Not done yet / known gaps:**
 
-- Reconnect returns you to your old instance while it exists (it's gone if
-  everyone left); no session resume tokens yet.
+- Reconnect returns you to your old instance while it exists (an empty
+  instance lingers a minute, then it's gone).
 - No full server authority (host is a client; a laggy/cheating host affects
   its instance).
-- Content breadth is still modest: 7 staffs, ~20 items, 4 enemy types + 1
-  boss (the same Warden in every biome).
+- Content breadth is still modest: 16 staffs and 25 gear pieces in all (8
+  of them legendaries), 4 enemy types + 1 boss (the same Warden in every
+  biome), 4 room events.
 - PvP damage is decided on the victim's machine (like all player damage), so
-  a hacked client could ignore it; a cast's origin is sanity-checked against
-  the caster's pose.
-- No persistent meta-progression beyond banked gear, the deepest floor and the codex.
+  a hacked client could ignore it — and in the Proving Ground, refuse to
+  report its falls; a cast's origin is sanity-checked against the caster's
+  pose, and a yield can only be credited to a wizard in the bout.
+- No persistent meta-progression beyond banked gear, the deepest floor, the
+  codex and Varr's ledger.
 - Anti-cheat is foundation-level: server-side accounts/saves with
   host-attested item provenance and floor-entry validation exist, but the
   floor host is still a client (a cheating host can vouch for its
@@ -748,14 +1009,18 @@ table, and the extension guide.
 | Left / Right click | Staff primary / secondary ability |
 | Space | Jump (double-jump / hover with the right boots) |
 | Shift | Blink-dash (requires Cloak of Blinking) |
-| E | Interact (portals, loot, graves, lore carvings); otherwise use belt slot 2 |
-| F | Near another wizard: offer / accept / break a pact |
+| E | Interact (the rift, loot, graves, carvings, room events, the camp's stations); otherwise use belt slot 2 |
+| F | In the deep, near another wizard: offer / accept / break a pact. In the camp: invite the wizard beside you to your fellowship, or accept an invitation |
+| Enter | Speak to your room; `/p ` first speaks to your fellowship |
 | Q | Use belt slot 1 |
 | I (or Tab) | Inventory screen |
 | C | The codex (lore carvings read) |
 | M | Cast the map (on the ground, shared with the floor) |
 | P (or F3) | FPS / frame-time overlay |
 | O (or F4) | Toggle shadows (quality option, off by default) |
+
+In the fork of a rift: turn toward a way (or A/D), and click, E or Space to
+take it.
 
 The running build id (`b<commit count> · <short sha>`) is always shown in the
 bottom-right corner — check it against the latest commit when testing.
