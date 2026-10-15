@@ -44,3 +44,18 @@ export function struckBy(touched: Vec3Tuple | null, at: Vec3Tuple, slack: number
   });
   return exact ?? near;
 }
+
+/** What a bolt that touched a body burst ON (struckBy's pick) — unless
+ * that's a creature it already pierced. A piercing bolt's own body ignores
+ * creatures, so this is a wall or a prop it touched beside one: the
+ * creature had its pass, and the burst reaches it as blast like anything
+ * else, not as a second full, re-crit blow. */
+export function burstOn(
+  touched: Vec3Tuple | null,
+  at: Vec3Tuple,
+  slack: number,
+  pierced: ReadonlySet<Hittable>,
+): Hittable | null {
+  const h = struckBy(touched, at, slack);
+  return h && pierced.has(h) ? null : h;
+}

@@ -44,6 +44,19 @@ export function kickCamera(k: CameraKick, pitch: number, yaw: number, fov: numbe
   k.fovV += fov / PEAK_PER_VELOCITY;
 }
 
+const RAD_TO_DEG = 180 / Math.PI;
+
+/** How much of an up-kick of `pitch`° the eye can take while looking
+ * `eyePitch` radians up (− down). Never over the top: an eye kicked past
+ * straight up reads back (pointer-lock's mouse-look) as turned round and
+ * rolled onto its back — the world upside down. Pinned at the pole, the
+ * kick just doesn't go up. */
+export function laidPitch(pitch: number, eyePitch: number): number {
+  const toTop = 90 - eyePitch * RAD_TO_DEG;
+  const toBottom = -90 - eyePitch * RAD_TO_DEG;
+  return Math.min(Math.max(0, toTop), Math.max(Math.min(0, toBottom), pitch));
+}
+
 /** spring()'s result (no tuple per frame). */
 let sx = 0;
 let sv = 0;

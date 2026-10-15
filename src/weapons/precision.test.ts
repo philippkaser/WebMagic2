@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CRIT, critMult, pathCrit, rayCrit, sweptCrit } from "./precision";
+import { CRIT, critMult, onAimLine, pathCrit, rayCrit, sweptCrit } from "./precision";
 
 const head = { x: 0, y: 1.05, z: 5, r: 0.3 };
 const fwd = { x: 0, y: 0, z: 1 };
@@ -52,5 +52,38 @@ describe("precision hits", () => {
     expect(critMult({ ...head, mult: 0.2 })).toBe(1);
     expect(critMult({ ...head, mult: Number.NaN })).toBe(CRIT.mult);
     expect(critMult(null)).toBe(CRIT.mult);
+  });
+});
+
+describe("the crosshair's line", () => {
+  const out = { x: 0, y: 0, z: 0 };
+  /** The staff tip sits right of and below the eye: the crosshair's line
+   * runs this far across from the bolt's. */
+  const aimed = [-0.24, 0.16, 0] as const;
+
+  test("an aimed bolt is judged across on the crosshair's line; a turned one where it flies", () => {
+    const p = { x: 1, y: 2, z: 3 };
+    expect(onAimLine(p, aimed, out)).toEqual({ x: 0.76, y: 2.16, z: 3 });
+    expect(onAimLine(p, null, out)).toEqual(p);
+    expect(onAimLine(p, aimed, p)).toBe(p);
+  });
+
+  test("a ricochet coming back under a head isn't gold for where it was first aimed", () => {
+    // Off the wall behind the sentry, back along −z, 0.6 m under and aside
+    // of its crystal head: no precision hit on its own line, a false one on
+    // the stale crosshair's line, shifted across and up.
+    const burst = { x: 0.2, y: 0.5, z: 5.3 };
+    const back = { x: 0, y: 0, z: -1 };
+    expect(pathCrit(onAimLine(burst, null, out), back, head, 0.13, 0.5)).toBe(false);
+    expect(pathCrit(onAimLine(burst, aimed, out), back, head, 0.13, 0.5)).toBe(true);
+  });
+
+  test("a homing bolt bent through a core crits on its own line", () => {
+    // Steered at a wisp, through its core a hand's breadth off-centre: on
+    // its own line a precision hit, shifted 0.29 m across a miss.
+    const core = { x: 0, y: 1.6, z: 5, r: 0.18 };
+    const skin = { x: -0.1, y: 1.6, z: 4.45 };
+    expect(pathCrit(onAimLine(skin, null, out), fwd, core, 0.13, 0.45)).toBe(true);
+    expect(pathCrit(onAimLine(skin, aimed, out), fwd, core, 0.13, 0.45)).toBe(false);
   });
 });

@@ -36,6 +36,17 @@ export function critMult(spot: WeakSpot | null | undefined): number {
   return Math.min(CRIT.maxMult, Math.max(1, m));
 }
 
+/** `p` moved across onto the crosshair's line — `offset` from the bolt's
+ * own (castKinds' aimOffset) — into `out`. With no offset, `p` as it is: a
+ * bolt a wall turned or homing bent no longer flies the line it was aimed
+ * along, so it's judged on the line it really flies. */
+export function onAimLine(p: Point, offset: readonly [number, number, number] | null, out: Point): Point {
+  out.x = p.x + (offset ? offset[0] : 0);
+  out.y = p.y + (offset ? offset[1] : 0);
+  out.z = p.z + (offset ? offset[2] : 0);
+  return out;
+}
+
 /** Does the ray (origin `o`, unit `d`) pass through the weak point before
  * `maxDist`? Hitscan spells pass the far edge of the body's front half, so a
  * beam can't crit the eyes on the far side of a head it burned into from

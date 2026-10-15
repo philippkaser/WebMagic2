@@ -31,9 +31,9 @@ import { forEachHittable, type Hittable, type Vec3Tuple } from "../game/registry
 import { hitWeight } from "./castFeel";
 import { explode } from "./explosions";
 import { chainPath, lightningPoints, sweptHits, type HitTarget } from "./hitscan";
-import { land, struckBy, weakOf } from "./land";
+import { burstOn, land, weakOf } from "./land";
 import { localWizardId } from "./localWizard";
-import { critMult, pathCrit, sweptCrit, type WeakSpot } from "./precision";
+import { critMult, onAimLine, pathCrit, sweptCrit, type WeakSpot } from "./precision";
 import { reportLocalHit } from "./procs";
 import { SingularitySeed } from "./singularity";
 
@@ -257,6 +257,10 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
   const bounces = useRef(spec.bounces);
   const pierce = useRef(spec.pierce);
   const struck = useRef(new Set<Hittable>());
+  /** The crosshair's line beside the bolt's (spec.aimOffset) — only while
+   * the bolt flies the line it was aimed along. A wall that turns it or
+   * homing that bends it drops it: from then on it's judged on its own. */
+  const aimed = useRef(spec.aimOffset);
   const speed = useRef(Math.hypot(spec.velocity[0], spec.velocity[1], spec.velocity[2]));
 
   /** Burst where it is — on `on`, if it burst on a creature or a crate:
@@ -283,7 +287,7 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
         remote: spec.cosmetic,
         noProc: spec.noProc,
         weight: spec.weight,
-        direct: on && !spec.cosmetic ? { target: on, crit: boltCrit(on, at, prev.current, b, spec.size, spec.aimOffset) } : undefined,
+        direct: on && !spec.cosmetic ? { target: on, crit: boltCrit(on, at, prev.current, b, spec.size, aimed.current) } : undefined,
       });
       if (spec.team === "player") {
         if (spec.splitShards > 0) splinter(spec, at, b);
@@ -295,13 +299,16 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
   );
 
   /** Walls ricochet a bolt with bounces left; anything else bursts it —
-   * a sentry too, though it's as rooted as a wall. */
+   * a sentry too, though it's as rooted as a wall. A creature it already
+   * pierced isn't what it burst on (land.ts#burstOn). */
   const onContact = useCallback(
     (other: { rigidBody?: { isFixed(): boolean; translation(): Vec3Tuple } | null }) => {
       const t = body.current?.translation();
-      const on = spec.team === "player" && t ? struckBy(other.rigidBody?.translation() ?? null, t, spec.size + 0.05) : null;
+      const on =
+        spec.team === "player" && t ? burstOn(other.rigidBody?.translation() ?? null, t, spec.size + 0.05, struck.current) : null;
       if (bounces.current > 0 && other.rigidBody?.isFixed() && !on) {
         bounces.current--;
+        aimed.current = null;
         if (t) {
           ricochetFx(t, spec.color);
           playRicochet([t.x, t.y, t.z]);
@@ -364,6 +371,7 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
           const nz = v.z / speed + (tz / td - v.z / speed) * turn;
           const nl = Math.hypot(nx, ny, nz) || 1;
           b.setLinvel({ x: (nx / nl) * speed, y: (ny / nl) * speed, z: (nz / nl) * speed }, true);
+          aimed.current = null;
         }
       }
     }
@@ -398,14 +406,10 @@ function Bolt({ spec, remove }: { spec: ProjectileSpec; remove: (id: number) => 
           const v = b.linvel();
           const vl = Math.hypot(v.x, v.y, v.z) || 1;
           const spot = weakOf(h);
-          const o = spec.aimOffset ?? NO_OFFSET;
-          sweepA.x = prev.current.x + o[0];
-          sweepA.y = prev.current.y + o[1];
-          sweepA.z = prev.current.z + o[2];
-          sweepB.x = t.x + o[0];
-          sweepB.y = t.y + o[1];
-          sweepB.z = t.z + o[2];
-          const crit = spot && sweptCrit(sweepA, sweepB, spot, spec.size) ? spot : null;
+          const crit =
+            spot && sweptCrit(onAimLine(prev.current, aimed.current, sweepA), onAimLine(t, aimed.current, sweepB), spot, spec.size)
+              ? spot
+              : null;
           const dmg = spec.damage * PIERCE_SHARE * (crit ? critMult(crit) : 1);
           const at: [number, number, number] = [target.pos.x, target.pos.y, target.pos.z];
           land(h, dmg, { x: (v.x / vl) * k, y: k * 0.3, z: (v.z / vl) * k }, { mine: spec.mine, at, crit: crit !== null }, spec.weight);
@@ -472,7 +476,8 @@ function splinter(spec: ProjectileSpec, at: [number, number, number], b: RapierR
 }
 
 const flight = { x: 0, y: 0, z: 0 };
-const NO_OFFSET: readonly [number, number, number] = [0, 0, 0];
+/** Where a burst is judged from, moved onto the crosshair's line. */
+const judgedAt = { x: 0, y: 0, z: 0 };
 /** A piercing pass's sweep, moved onto the crosshair's line. */
 const sweepA = { x: 0, y: 0, z: 0 };
 const sweepB = { x: 0, y: 0, z: 0 };
@@ -480,7 +485,8 @@ const sweepB = { x: 0, y: 0, z: 0 };
 /** The weak point a bolt that burst on `h` at `at` was flying through, or
  * null. Its line is the way it came this frame (from `from`), followed as
  * deep as the body goes — moved across onto the crosshair's line
- * (`aimOffset`) for an aimed bolt, so a precision hit is where you aimed. */
+ * (`aimOffset`) for a bolt still flying where it was aimed, so a precision
+ * hit is where you aimed. */
 function boltCrit(
   h: Hittable,
   at: [number, number, number],
@@ -507,8 +513,7 @@ function boltCrit(
   flight.x /= len;
   flight.y /= len;
   flight.z /= len;
-  const o = aimOffset ?? NO_OFFSET;
-  const p = { x: at[0] + o[0], y: at[1] + o[1], z: at[2] + o[2] };
+  const p = onAimLine({ x: at[0], y: at[1], z: at[2] }, aimOffset, judgedAt);
   return pathCrit(p, flight, spot, size, h.radius ?? 0.5) ? spot : null;
 }
 
