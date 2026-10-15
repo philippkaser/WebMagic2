@@ -36,3 +36,8 @@ export function isHost(): boolean {
 export function selectIsHost(s: NetState): boolean {
   return s.mode !== "online" || s.hostId === "" || s.hostId === s.playerId;
 }
+
+// Dev-only hook for end-to-end scripts (who's in the room with us).
+if (typeof window !== "undefined" && import.meta.env?.DEV) {
+  (window as unknown as Record<string, unknown>).__net = useNet;
+}

@@ -87,7 +87,12 @@ async function waitPhase(w, phase, timeout = 30000) {
     const where = await w.page.evaluate(() => {
       const s = window.__game.getState();
       const t = window.__travel?.state?.();
-      return { phase: s.phase, health: s.health, overlay: s.overlay, floor: s.floor, travel: t && `${t.stage}/${t.kind}` };
+      const bout = window.__arena?.getState().bout;
+      return {
+        phase: s.phase, health: s.health, overlay: s.overlay, floor: s.floor, travel: t && `${t.stage}/${t.kind}`,
+        mode: window.__net?.getState().mode,
+        bout: bout && { ended: bout.ended?.winner ?? null, board: bout.board.map((b) => `${b.name}:${b.kills}/${b.falls}`).join(" "), sandsLeftS: Math.round((bout.endsAt - (window.__clock?.serverNow?.() ?? 0)) / 1000) },
+      };
     });
     throw new Error(`waiting for phase "${phase}": ${JSON.stringify(where)}`, { cause: err });
   }
@@ -250,9 +255,22 @@ async function waitPhase(w, phase, timeout = 30000) {
 {
   const a = await newWizard("Hesk");
   const b = await newWizard("Ilse");
-  await sleep(2500);
-  const idA = await state(a, () => window.__session.playerId);
-  const idB = await state(b, () => window.__session.playerId);
+  // Both seated in one camp (a slow first connection may retry under a new
+  // id, so the ids are read once the room agrees).
+  const seatedTogether = async () => {
+    const ia = await state(a, () => window.__session.playerId);
+    const ib = await state(b, () => window.__session.playerId);
+    const ra = await state(a, () => Object.keys(window.__net.getState().roster));
+    const rb = await state(b, () => Object.keys(window.__net.getState().roster));
+    return ia && ib && ra.includes(ib) && rb.includes(ia) ? [ia, ib] : null;
+  };
+  let ids = null;
+  for (let i = 0; i < 120 && !ids; i++) {
+    ids = await seatedTogether();
+    if (!ids) await sleep(500);
+  }
+  check("two wizards home share the camp", !!ids);
+  const [idA, idB] = ids ?? ["", ""];
   const social = (w) => w.page.evaluate(async () => {
     const s = (await import("/src/social/social.ts")).useSocial.getState();
     return { party: s.party, lines: s.lines.map((l) => [l.name, l.text, l.party]) };
@@ -293,6 +311,7 @@ async function waitPhase(w, phase, timeout = 30000) {
   const boutA = await state(a, () => window.__arena.getState().bout);
   const boutB = await state(b, () => window.__arena.getState().bout);
   check("both are dealt into one bout", !!boutA && boutA.instanceId === boutB?.instanceId, `${boutA?.instanceId}/${boutB?.instanceId}`);
+  console.log("  sands left on arrival:", await state(a, () => Math.round((window.__arena.getState().bout.endsAt - window.__clock.serverNow()) / 1000)), "s");
   await sleep(2500);
   await a.page.screenshot({ path: `${SP}/shot-arena.png` });
   // Ilse falls ten times to Hesk: each a yield, never a death.

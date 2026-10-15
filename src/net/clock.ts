@@ -53,3 +53,8 @@ export class NetClock {
 }
 
 export const netClock = new NetClock();
+
+// Dev-only hook for end-to-end scripts (the server's timeline).
+if (typeof window !== "undefined" && import.meta.env?.DEV) {
+  (window as unknown as Record<string, unknown>).__clock = netClock;
+}
