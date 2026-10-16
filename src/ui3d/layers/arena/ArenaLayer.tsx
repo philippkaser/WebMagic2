@@ -212,7 +212,7 @@ function CountIn() {
   const bout = useBoutView();
   const now = useNow(100);
   void now;
-  const toFight = bout?.fightAt != null ? bout.fightAt - netClock.serverNow() : Infinity;
+  const toFight = bout?.fightAt != null && !bout.ended ? bout.fightAt - netClock.serverNow() : Infinity;
   const word = toFight > 3000 || !Number.isFinite(toFight) ? null : toFight > 0 ? String(Math.ceil(toFight / 1000)) : toFight > -900 ? "FIGHT!" : null;
   const dist = 2;
   return (

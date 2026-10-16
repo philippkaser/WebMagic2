@@ -29,6 +29,8 @@ export interface Bout extends ArenaAssignment {
   /** When Varr's count ends and the fighting starts (server time, ms) —
    * null while the hall gathers. */
   fightAt: number | null;
+  /** When we told the hall we'd arrived (server time, ms; null: not yet). */
+  readyAt: number | null;
 }
 
 export interface ArenaState {
@@ -85,6 +87,7 @@ export function takeBout(a: ArenaAssignment): void {
       feed: [],
       ended: null,
       fightAt: null,
+      readyAt: null,
     },
   });
 }

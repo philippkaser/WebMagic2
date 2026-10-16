@@ -3,9 +3,10 @@ import { useEffect, useRef } from "react";
 import { Vector3, type Camera } from "three";
 import { playFizzle, playSpellReady } from "../audio/combatSounds";
 import { playSpellCast } from "../audio/spellSounds";
+import { EYE_HEIGHT } from "../core/config";
 import { gameEvents } from "../core/events";
 import { castFlareFx } from "../fx/effects";
-import { playerVelocity } from "../game/player-state";
+import { getPlayerBody, playerVelocity } from "../game/player-state";
 import { getItemDef, hasProc } from "../items/catalog";
 import type { ItemDef } from "../items/types";
 import { peerMessage } from "../net/channels";
@@ -145,6 +146,11 @@ function pay(cost: number, stats: ReturnType<typeof getStats>): boolean {
 
 /** Where the staff tip is right now, and where it points. */
 function aimFrom(camera: Camera): void {
+  // The facing as it is NOW: the world matrix is only rebuilt when a frame
+  // renders, and the look (pointer-lock, a script's lookAt) turns the camera
+  // between frames — read stale, every shot would fly along last frame's
+  // facing, recoil kick and all.
+  camera.updateMatrixWorld();
   eye.copy(camera.position);
   camera.getWorldDirection(aim);
   side.crossVectors(aim, UP).normalize();
@@ -233,11 +239,17 @@ export function CastingSystem() {
       const staff = getItemDef(useGame.getState().equipment.staff.defId);
       const abilityId = staff[which];
       if (!abilityId) return false;
+      // The eye from where the body really stands: a script's teleport lands
+      // between frames, and a page drawing a frame a second may not have
+      // moved the camera after it yet.
+      const body = getPlayerBody()?.translation();
+      if (body) camera.position.set(body.x, body.y + EYE_HEIGHT, body.z);
       camera.lookAt(x, y, z);
       cameraFacingSet();
       const left = castFromStaff(abilityId, staff, camera);
       slots[which].left = slots[which].total = left;
-      return true;
+      // What it aimed along, for the script to check.
+      return { eye: eye.toArray(), aim: aim.toArray(), muzzle: muzzle.toArray() };
     };
     // Point the camera without casting (screenshot scripts).
     w.__lookAt = (x: number, y: number, z: number) => {

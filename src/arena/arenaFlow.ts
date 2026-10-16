@@ -90,7 +90,10 @@ netBus.on("arenaAssigned", (a) => {
     gameEvents.emit("message", `The Proving Ground — you face ${listOf(foes)}. To the yield!`);
   }).then(() => {
     // Arrived (the journey's ARRIVE has played): the sands wait for us.
-    if (inArena()) session.arenaReady();
+    const bout = useArena.getState().bout;
+    if (!bout) return;
+    useArena.setState({ bout: { ...bout, readyAt: netClock.serverNow() } });
+    session.arenaReady();
   });
 });
 
@@ -107,7 +110,7 @@ netBus.on("arenaBegin", ({ fightAt }) => {
   }
   countTimers.push(
     setTimeout(() => {
-      if (!inArena()) return;
+      if (!inArena() || useArena.getState().bout?.ended) return;
       playStreak(4);
       gameEvents.emit("arenaFight", undefined);
     }, inMs(fightAt)),
@@ -196,6 +199,9 @@ netBus.on("arenaScore", ({ fell }) => {
 netBus.on("arenaEnded", ({ winner }) => {
   // A bout we turned down (or stepped back from) can still end on the relay.
   if (!inArena()) return;
+  // Over during Varr's count (the other wizard dropped): no FIGHT.
+  countTimers.forEach(clearTimeout);
+  countTimers = [];
   const me = useNet.getState().playerId;
   const bout = useArena.getState().bout;
   const name = winner ? (bout?.members.find((m) => m.id === winner)?.name ?? "a wizard") : null;

@@ -22,9 +22,11 @@ export const ARENA = {
   /** After the bout, the hall holds everyone this long before home. */
   afterMs: 6000,
   /** The hall gathers: the sands wait until every fighter has arrived (a
-   * slow journey in mustn't cost anyone their bout), but never longer than
-   * this after the bout is dealt. */
-  gatherMaxMs: 20_000,
+   * slow journey in mustn't cost anyone their bout — on a software renderer
+   * one has taken a minute), but never longer than this after the bout is
+   * dealt. A wizard who drops frees the hall at once; this only bounds one
+   * who's alive but stuck. */
+  gatherMaxMs: 90_000,
   /** Then Varr counts it in: no blow lands, no yield counts, until FIGHT. */
   countdownMs: 3000,
 } as const;

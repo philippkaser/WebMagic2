@@ -91,7 +91,7 @@ async function waitPhase(w, phase, timeout = 30000) {
       return {
         phase: s.phase, health: s.health, overlay: s.overlay, floor: s.floor, travel: t && `${t.stage}/${t.kind}`,
         mode: window.__net?.getState().mode,
-        bout: bout && { ended: bout.ended?.winner ?? null, board: bout.board.map((b) => `${b.name}:${b.kills}/${b.falls}`).join(" "), sandsLeftS: Math.round((bout.endsAt - (window.__clock?.serverNow?.() ?? 0)) / 1000) },
+        bout: bout && { ended: bout.ended?.winner ?? null, board: bout.board.map((b) => `${b.name}:${b.kills}/${b.falls}`).join(" "), sandsLeftS: bout.fightAt == null ? "gathering" : Math.round((bout.endsAt - (window.__clock?.serverNow?.() ?? 0)) / 1000), fightAt: bout.fightAt },
       };
     });
     throw new Error(`waiting for phase "${phase}": ${JSON.stringify(where)}`, { cause: err });
@@ -153,25 +153,23 @@ async function waitPhase(w, phase, timeout = 30000) {
   const seenByB = await b.page.evaluate(async () => (await import("/src/ui3d/layers/map/mapStore.ts")).useMapCast.getState().casts.map((c) => c.owner));
   check("a cast map is shared with the floor", seenByB.includes(idA), JSON.stringify(seenByB));
   await a.page.evaluate(async () => (await import("/src/ui3d/layers/map/mapStore.ts")).useMapCast.getState().toggle());
-  // PvP: A stands a few metres from B and shoots. A single fixed offset can
-  // put a wall or a prop in the line of fire: try the four sides until a
-  // volley lands (the check is about damage, not geometry).
+  // PvP: A steps up beside B and looses the Force Blast. (A bolt's flight
+  // is physics stepped once a frame, and a page drawing in software manages
+  // a frame or two a second: whether it meets B or the wall behind is luck.
+  // The blast has no flight — it's the victim-side damage that's checked.)
   const hpBefore = (await game(b)).health;
   const target = await b.page.evaluate(() => window.__playerPos?.());
   if (target) {
-    for (const [dx, dz] of [[4, 0], [-4, 0], [0, 4], [0, -4]]) {
-      await a.page.evaluate(([x, y, z]) => window.__teleport(x, y + 0.5, z), [target[0] + dx, target[1], target[2] + dz]);
-      await sleep(600);
-      for (let i = 0; i < 4; i++) {
-        await a.page.evaluate(([x, y, z]) => window.__castAt(x, y, z), target);
-        await sleep(350);
-      }
+    for (const [dx, dz] of [[1.4, 0], [-1.4, 0], [0, 1.4], [0, -1.4]]) {
+      await a.page.evaluate(([x, y, z]) => window.__teleport(x, y + 0.3, z), [target[0] + dx, target[1], target[2] + dz]);
       await sleep(1200);
+      await a.page.evaluate(([x, y, z]) => window.__castAt(x, y, z, "secondary"), target);
+      await sleep(1500);
       if ((await game(b)).health < hpBefore) break;
     }
   }
   const hpAfter = (await game(b)).health;
-  check("a stranger's bolts hurt (victim-side PvP damage)", hpAfter < hpBefore, `${hpBefore} → ${hpAfter}`);
+  check("a stranger's blast hurts (victim-side PvP damage)", hpAfter < hpBefore, `${hpBefore} → ${hpAfter}`);
 
   // Pact: A offers, B accepts → magic passes harmlessly.
   await a.page.evaluate((id) => window.__pact(id), idB);
@@ -182,13 +180,13 @@ async function waitPhase(w, phase, timeout = 30000) {
   const relB = await b.page.evaluate((id) => window.__relations?.()[id]?.state, idA);
   check("pact sworn on both sides", relA === "bound" && relB === "bound", `${relA}/${relB}`);
   const hpPact = (await game(b)).health;
+  // The same blast, from beside them: an ally's magic only nudges.
   const target2 = await b.page.evaluate(() => window.__playerPos?.());
   if (target2) {
-    for (let i = 0; i < 4; i++) {
-      await a.page.evaluate(([x, y, z]) => window.__castAt(x, y, z), target2);
-      await sleep(350);
-    }
+    await a.page.evaluate(([x, y, z]) => window.__teleport(x + 1.4, y + 0.3, z), target2);
     await sleep(1200);
+    await a.page.evaluate(([x, y, z]) => window.__castAt(x, y, z, "secondary"), target2);
+    await sleep(1500);
   }
   const hpPact2 = (await game(b)).health;
   check("sworn allies can't hurt each other", hpPact2 >= hpPact, `${hpPact} → ${hpPact2}`);
@@ -316,8 +314,13 @@ async function waitPhase(w, phase, timeout = 30000) {
     const b = window.__arena.getState().bout;
     return !!b?.fightAt && window.__clock.serverNow() >= b.fightAt;
   }, undefined, 40000);
-  const sandsLeft = await state(a, () => Math.round((window.__arena.getState().bout.endsAt - window.__clock.serverNow()) / 1000));
-  check("the sands start at FIGHT, however long the journey in", sandsLeft >= 175, `${sandsLeft} s left at FIGHT`);
+  // The sands run the whole bout from FIGHT, and FIGHT came after both of us
+  // had arrived (the hall waited for us, not for its patience to run out).
+  const timing = await state(a, () => {
+    const b = window.__arena.getState().bout;
+    return { span: b.endsAt - b.fightAt, waitedFor: b.readyAt != null && b.readyAt <= b.fightAt };
+  });
+  check("the sands start at FIGHT, after everyone has arrived", timing.span === 180_000 && timing.waitedFor, JSON.stringify(timing));
   await sleep(2500);
   await a.page.screenshot({ path: `${SP}/shot-arena.png` });
   // Ilse falls ten times to Hesk: each a yield, never a death.

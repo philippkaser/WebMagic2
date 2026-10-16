@@ -565,8 +565,9 @@ test a build, or show off.
   look and how the hall breaks sightlines: open, four great blocks, or a
   cut-cornered octagon with low walls across the spokes' mouths. The
   Founders' inscription is carved on its north wall.
-- **To the yield.** The hall waits until everyone has walked in (a slow
-  journey costs nobody their bout), then Varr counts it in — three bells,
+- **To the yield.** The hall waits until everyone has walked in (up to a
+  minute and a half: a slow journey costs nobody their bout), then Varr
+  counts it in — three bells,
   FIGHT — and the sands start. First to ten yields, or the most when three
   minutes run out; a tie goes to whoever fell less, then to whoever scored first; a
   wizard who walks out keeps their row but can't win. In the hall nobody

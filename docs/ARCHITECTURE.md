@@ -187,9 +187,10 @@ any going. The social and arena messages:
   left), `partyInvited { from, name }` to an invitee, or `partyError`. An
   invite needs the invitee in the inviter's room.
 - `arenaJoin` (home only — never mid-run or mid-bout) / `arenaLeave` →
-  `arenaQueue { position, waiting }`; `arenaAssigned`, `arenaScore { board,
-  fell }` and `arenaEnded { board, winner, record }` follow; `arenaFell { by }`
-  is the fallen's report (see The Proving Ground). `arenaLeave` is always
+  `arenaQueue { position, waiting }`; `arenaAssigned`, `arenaBegin { fightAt,
+  endsAt }`, `arenaScore { board, fell }` and `arenaEnded { board, winner,
+  record }` follow; `arenaReady` says a client has arrived in the hall, and
+  `arenaFell { by }` is the fallen's report (see The Proving Ground). `arenaLeave` is always
   answered (`position` 0 to a wizard who wasn't waiting), and also leaves a
   bout just dealt: it's how a client turns down a bout it can't take.
 
@@ -423,8 +424,9 @@ sanitization already run server-/authority-side.
 - **Hostility seam** (`game/hostility.ts`): `relationOf(id)` →
   stranger | ally | oathbreaker. `PactSystem.tsx` installs the resolver;
   everything else (weapons, peer capsules, name tags, presence) only asks.
-  The resolver, in order: in a bout every wizard is a stranger until it
-  ends (your fellowship too), then an ally; outside the dungeon (the camp)
+  The resolver, in order: in a bout every wizard is a stranger from Varr's
+  FIGHT until the bout ends (your fellowship too), and an ally while the
+  hall gathers, through the count and after the end (`boutLive`); outside the dungeon (the camp)
   everyone is an ally; a fellowship member is always an ally; then the
   pact's relation.
 - **Pacts** (`encounters/pacts.ts`, pure): wary → offered/invited → bound;
@@ -498,7 +500,7 @@ wizard's health.
 
 - `arena/rules.ts` (pure, shared): `ARENA` — 2–6 wizards, 3 minutes, 10
   yields to win, rise after 3 s, an 8 s gathering breath at the obelisk,
-  the hall waiting up to 20 s for its fighters to arrive and a 3 s count
+  the hall waiting up to 90 s for its fighters to arrive and a 3 s count
   in, the hall holding everyone 6 s after. `recordFall`, `ranked` (most yields, then fewest
   falls, then who scored first), `boutOver`, and `winnerOf(board,
   present)` — a deserter keeps their row but can't win, and nobody wins
@@ -514,7 +516,7 @@ wizard's health.
   ready (or `gatherMaxMs` after the deal, or when the one being waited for
   leaves) `beginBout` sends `arenaBegin { fightAt, endsAt }` — the fighting
   starts `countdownMs` later and the sands run from there, so a slow
-  journey in costs nobody their bout. `arenaFell` is honoured only from a
+  journey in (up to `gatherMaxMs`) costs nobody their bout. `arenaFell` is honoured only from a
   wizard in a live bout, after `fightAt`, once per rising (`respawnMs` since their last fall), and
   credits `by` only if it names another wizard in the room; it sends
   `arenaScore` and ends the bout when it's over. `endBout` ranks the board,
@@ -540,8 +542,8 @@ wizard's health.
   `startingStone` deals each wizard their own stone by member order.
   **The yield is a pluggable fall rule** (`gameStore.setFallRule`, asked
   in `takeDamage` before the Phoenix — see Game feel): in a bout the rule
-  reports `arenaFell(by)` (the last wizard who hurt us, if they're in the
-  bout), drops us to phase `loading` (no input, casting or harm), burns us
+  reports `arenaFell(by)` while the bout is live (`boutLive`; the last
+  wizard who hurt us, if they're in the bout), drops us to phase `loading` (no input, casting or harm), burns us
   away in Varr's ember-gold, and after `respawnMs` rises us at
   `pickSpawn(spawns, foes)` — the stone farthest from every standing foe —
   healed to full (a `heal`, so the heart hears a second wind and lets go)
@@ -551,8 +553,13 @@ wizard's health.
   → `afterMs` later, `travel("home")` through the tunnel; a reconnect
   mid-bout walks you home, and any reconnect forgets our place in line
   (the relay already has).
-- Everyone is hostile in a bout, your fellowship too, until it ends (the
-  hostility resolver, above); pacts are off in the hall.
+- Everyone is hostile in a bout from FIGHT until it ends, your fellowship
+  too (the hostility resolver, above); nobody can be harmed while the hall
+  gathers, through the count or after the end. Pacts are off in the hall.
+- `arenaReady` goes once the journey in has played its ARRIVE (the bout
+  remembers `readyAt`); `arenaBegin` schedules Varr's count — a rising
+  bell for each of the last three seconds, then FIGHT — cleared if the
+  bout ends first.
 - `arena/layout.ts` — `generateArena(seed)`: one quadrant of a 44-tile
   plan turned four ways, so the hall is four-fold rotationally symmetric
   and no spawn stone is better than another — a great hall in the middle,
