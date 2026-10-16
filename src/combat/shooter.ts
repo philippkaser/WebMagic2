@@ -32,6 +32,8 @@ export const damageNumbers: NumberPool = createNumbers();
 
 /** Gold: a weak point's sparks. */
 const CRIT_SPARK = "#ffd27a";
+/** The frame catching when your blow breaks a creature at the knee (s). */
+const BREAK_STOP = 0.06;
 
 /** Dev: the marks and numbers held still at this moment (screenshots on a
  * machine too slow to catch a 0.1 s tick), or null. */
@@ -125,6 +127,19 @@ function onHit(e: GameEvents["enemyHit"]): void {
   if (s) playConfirm(s);
   else scheduleFlush(now);
   hitstop(requestStop(stopper, now, hitstopFor({ weight, killed: false, crit: e.crit, boss: e.kind === "boss" })));
+}
+
+/** Your blow broke a creature at the knee (enemies/liveBody): the frame
+ * catches a beat. Through the one stopper every other stop goes through,
+ * so a beam's or a flame's tick that breaks one holds nothing, and a sweep
+ * that breaks a nest of them one after another is cut short instead of
+ * stammering — and the kill stops that follow know it ran. Returns the
+ * stop it got (s). */
+export function breakStop(now = nowS()): number {
+  const tick = Number.isFinite(landing.weight) && landing.weight < STOP.tickWeight;
+  const s = requestStop(stopper, now, tick ? 0 : BREAK_STOP);
+  hitstop(s);
+  return s;
 }
 
 function onKilled(e: GameEvents["enemyKilled"]): void {

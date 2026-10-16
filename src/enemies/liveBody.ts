@@ -1,6 +1,7 @@
 import { Euler, Quaternion, Vector3, type Group, type MeshStandardMaterial } from "three";
 import { isEnemyVoice, playEnemyBreak, playEnemyHurt, playEnemyWindup } from "../audio/voices";
-import { hitstop, presentScale } from "../core/presentTime";
+import { breakStop } from "../combat/shooter";
+import { presentScale } from "../core/presentTime";
 import { flashLight } from "../fx/DynamicLights";
 import { breakFx, hitSparksFx, leakFx, type LeakStyle } from "../fx/effects";
 import { nearestWizardTo } from "../game/targets";
@@ -248,8 +249,9 @@ export class LiveBody {
     this.white = WHITE_S * 2;
     this.flash.current = 1;
     if (isEnemyVoice(this.kind)) playEnemyBreak(this.kind, [pos.x, y, pos.z]);
-    // Our own blow broke it: hold the picture a beat.
-    if (mine) hitstop(0.06);
+    // Our own blow broke it: hold the picture a beat — the shooter's
+    // stopper decides how long (a stream's tick never stops it).
+    if (mine) breakStop();
   }
 
   /** Our blow was lethal (as far as we know): death throes until the despawn. */
@@ -312,7 +314,10 @@ export class LiveBody {
       faceToward(p, pos.x, pos.z, t.pos.x, t.pos.z);
     }
     stepPuppet(p, pdt);
-    puppetPose(p, this.pose, pdt > 0 ? w.breath : 0);
+    // Held by a hitstop: keep last frame's pose whole. Posing it again would
+    // drop the breath (a dying thing's height snaps ~15%) and re-roll the
+    // shiver, so a frozen body would twitch instead of hanging still.
+    if (pdt > 0) puppetPose(p, this.pose, w.breath);
     if (view) {
       const o = this.pose;
       view.position.set(o.x, o.y, o.z);

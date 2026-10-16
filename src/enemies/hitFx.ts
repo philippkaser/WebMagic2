@@ -153,3 +153,32 @@ export function readHitExtras(data: unknown): HitExtras {
   out.crit = d.c === 1;
   return out;
 }
+
+// ── Quiet damage on the wire ────────────────────────────────────────────────
+
+/** Quiet damage (a singularity's tug, HitInfo.quiet) confirms, flinches and
+ * cries nowhere — but it still takes hp, and a replica only ever sees hp
+ * fall. So the authority keeps a running total of what it dealt quietly and
+ * ships it beside hp (field `q`), and a replica takes the rise in that total
+ * off a snapshot's drop: only what's left is a blow anyone should see. A
+ * total, not a flag on the snapshot: a tug and a real blow can land inside
+ * the same 50 ms. */
+export interface QuietTally {
+  /** Quiet damage dealt to this body so far: the authority's own count, or
+   * the last total a replica read off the wire (so a migrated host carries
+   * on counting from it). */
+  dealt: number;
+}
+
+export function createQuietTally(): QuietTally {
+  return { dealt: 0 };
+}
+
+/** A snapshot carried quiet total `q` (absent or garbage: nothing new):
+ * returns how much of its hp drop was quiet. */
+export function quietSince(t: QuietTally, q: unknown): number {
+  if (typeof q !== "number" || !Number.isFinite(q)) return 0;
+  const d = q - t.dealt;
+  t.dealt = q;
+  return d > 0 ? d : 0;
+}

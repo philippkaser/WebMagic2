@@ -91,6 +91,29 @@ describe("wisp brain", () => {
     expect(fast.vel.x).toBeCloseTo(calm.vel.x * WISP.desperateSpeed, 4);
   });
 
+  test("a jink darts at jinkSpeed and no faster, however long it runs or how fast the host draws", () => {
+    // The body's velocity comes back each frame (sense() reads linvel()), so
+    // feed the brain's own output back in, through the body's damping.
+    for (const fps of [30, 60, 144, 240]) {
+      const dt = 1 / fps;
+      const jink = createWispJink(() => 0);
+      const out = createSteering();
+      const i = sense({ aggro: true, vigor: 0.3, dt, vel: { x: 0, y: 0, z: 0 } });
+      let maxSide = 0;
+      let maxSpeed = 0;
+      for (let t = 0; t < 4; t += dt) {
+        tickWisp(0, i, out, jink);
+        maxSide = Math.max(maxSide, Math.abs(out.vel.z)); // target is along +x
+        maxSpeed = Math.max(maxSpeed, Math.hypot(out.vel.x, out.vel.z));
+        const damp = 1 / (1 + 0.5 * dt); // the wisp's linearDamping
+        i.vel = { x: out.vel.x * damp, y: out.vel.y * damp, z: out.vel.z * damp };
+      }
+      expect(maxSide).toBeGreaterThan(WISP.jinkSpeed * 0.9);
+      expect(maxSide).toBeLessThanOrEqual(WISP.jinkSpeed + 1e-9);
+      expect(maxSpeed).toBeLessThanOrEqual(Math.hypot(wispSpeed(1, 1) * WISP.desperateSpeed, WISP.jinkSpeed) + 1e-9);
+    }
+  });
+
   test("a healthy wisp never jinks", () => {
     const jink = createWispJink(() => 0);
     const out = createSteering();
