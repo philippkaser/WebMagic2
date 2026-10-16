@@ -3,6 +3,7 @@ import { netBus } from "./bus";
 import { peerMessage } from "./channels";
 import { netClock } from "./clock";
 import { useNet } from "./netStore";
+import { readPose } from "./poseMessage";
 import {
   makeSampledPose,
   q2,
@@ -22,6 +23,8 @@ import {
  *    GAMEPLAY: enemy targeting, aim leading, aggro. This is why enemies
  *    threaten and lead every wizard on the floor, not just the host's. */
 
+/** What we send. What arrives is only what a peer claims it is: it goes
+ * through net/poseMessage readPose before anything keeps it. */
 export interface PoseMsg {
   p: [number, number, number];
   v: [number, number, number];
@@ -52,15 +55,19 @@ function newPeer(id: string, staffId = ""): PeerWizard {
 
 const peers = new Map<string, PeerWizard>();
 
-const pose = peerMessage<PoseMsg>("pose", (msg, meta) => {
+const pose = peerMessage<PoseMsg>("pose", (raw, meta) => {
+  // Untrusted: a pose that isn't plainly a wizard somewhere is dropped whole
+  // (net/poseMessage says what one bad pose in the buffer would break).
+  const msg = readPose(raw);
+  if (!msg) return;
   let peer = peers.get(meta.from);
   if (!peer) {
-    peer = newPeer(meta.from, msg.staffId);
+    peer = newPeer(meta.from, msg.staffId ?? "");
     peers.set(meta.from, peer);
   }
-  peer.staffId = msg.staffId;
+  if (msg.staffId !== null) peer.staffId = msg.staffId;
   peer.lastSeen = meta.serverTime;
-  const life = readLifeByte(msg.h);
+  const life = readLifeByte(raw.h);
   peer.life = life ? life.frac : -1;
   peer.brink = life ? life.brink : false;
   peer.buffer.push({ t: meta.serverTime, p: msg.p, v: msg.v, a: msg.a });

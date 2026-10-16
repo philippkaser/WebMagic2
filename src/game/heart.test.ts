@@ -146,6 +146,26 @@ describe("life on the wire", () => {
     expect(lifeByte(50, 100, false)).toBe(8);
   });
 
+  test("the last-stand line reads the same on both sides of the wire", () => {
+    // Just under the line used to round up to 5/15 — over it, so floor-mates
+    // saw no last stand from 26.7% to 30%.
+    const read = (health: number) => readLifeByte(lifeByte(health, 100, false))!.frac;
+    for (const health of [29.99, 29, 28, 27, 26.7, 20, 1]) {
+      expect(read(health)).toBeLessThan(LAST_STAND.below);
+      expect(lowOf(read(health))).toBeGreaterThan(0);
+    }
+    for (const health of [30, 31, 33.4, 50, 100]) {
+      expect(read(health)).toBeGreaterThanOrEqual(LAST_STAND.below);
+      expect(lowOf(read(health))).toBe(0);
+    }
+    // Across a whole pool, in fine steps: in the last stand here ⇔ there.
+    for (let hp = 1; hp <= 1000; hp++) {
+      expect(read(hp / 10) < LAST_STAND.below).toBe(hp / 10 / 100 < LAST_STAND.below);
+    }
+    // The Brink bit rides on top of the capped step.
+    expect(lifeByte(29, 100, true)).toBe(4 + LIFE_BRINK);
+  });
+
   test("reads back, and refuses what isn't one", () => {
     expect(readLifeByte(15)).toEqual({ frac: 1, brink: false });
     expect(readLifeByte(1 + LIFE_BRINK)).toEqual({ frac: 1 / 15, brink: true });
