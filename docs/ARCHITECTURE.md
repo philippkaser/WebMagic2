@@ -796,7 +796,10 @@ fields.
   (`CRIT.mult`) or by its own `mult`, up to 2 (`CRIT.maxMult`: the
   Warden's open core) — the sentry's crystal head, the shadow's eyes, the
   wisp's core. Judged on the crosshair's line, where you aimed, not the
-  bolt's (which leaves the staff a hand's breadth aside). The host's hit
+  bolt's (which leaves the staff a hand's breadth aside) — until a wall
+  turns the bolt or homing bends it; from then on, on its own line. A
+  piercing bolt that bursts on a wall beside a creature it already went
+  through doesn't land a second full blow on it, only blast. The host's hit
   cap (`weapons/hits.ts`) is the plain cap × `CRIT.maxMult`, so the trust
   model is the one it always was.
 - **The confirm** (`confirm.ts`, drawn by `hud/Crosshair.tsx`): ticks flare
@@ -822,8 +825,10 @@ fields.
   death note), but a kill seen landing counts for the chime at once.
 - **Weighty casting**: the staff recoils and the eye kicks by the cast's
   weight. `player/CameraKick.tsx` lays the kick on the camera after the
-  cast has read its aim and takes it off at the start of the next frame,
-  before the controller — recoil never bends a shot. Heavy spells
+  cast has read its aim and takes it off as soon as every canvas has drawn
+  the frame (an R3F after-effect), so mouse-look and timers between frames
+  only ever see the clean eye — recoil never bends a shot (an echo's
+  either) and never rolls the look over the top. Heavy spells
   (cooldown ≥ 0.6 s) gather light in the staff and chime when ready; a cast
   without the mana fizzles.
 

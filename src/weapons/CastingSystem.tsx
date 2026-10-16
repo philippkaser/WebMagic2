@@ -191,7 +191,9 @@ function castFromStaff(abilityId: string, staff: ItemDef, camera: Camera): numbe
     gameEvents.emit("shake", 0.2);
   }
   // Echoes: the spell rings out again a beat later, weaker, from wherever
-  // the staff points by then.
+  // the staff points by then. A timer lands between frames, where the eye
+  // is clean (player/CameraKick takes the recoil off once the frame's
+  // drawn), so the echo goes where you aim, not where the kick threw it.
   if (!stream && hasProc(stats, "echo")) {
     setTimeout(() => {
       const s = useGame.getState();
