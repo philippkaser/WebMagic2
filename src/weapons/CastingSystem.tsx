@@ -50,10 +50,12 @@ const peerCast = peerMessage<CastMsg>("cast", (raw, meta) => {
   const msg = sanitizeCastMsg(raw);
   if (!msg) return; // malformed, or a spell from a newer client
   // A spell must leave from where its caster actually stands — otherwise a
-  // hacked client could rain hostile magic on us from across the floor.
+  // hacked client could rain hostile magic on us from across the floor. A
+  // wizard we've never seen stand anywhere (no valid pose yet) casts nothing:
+  // their poses run at 20 Hz, so an honest caster loses at most a first beat.
   const est = estimatePeer(meta.from);
   if (
-    est &&
+    !est ||
     (msg.origin[0] - est.p[0]) ** 2 + (msg.origin[1] - est.p[1]) ** 2 + (msg.origin[2] - est.p[2]) ** 2 >
       MAX_CAST_OFFSET_SQ
   ) {
