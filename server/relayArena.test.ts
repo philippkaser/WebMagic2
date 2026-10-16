@@ -42,6 +42,10 @@ function startDuel(): string {
   relay.handle(b.id, { t: "arenaJoin" });
   now += ARENA.gatherMs;
   relay.tick();
+  // Both arrive in the hall; Varr counts it in.
+  relay.handle(a.id, { t: "arenaReady" });
+  relay.handle(b.id, { t: "arenaReady" });
+  now += ARENA.countdownMs;
   return lastOf(a, "arenaAssigned")!.assignment.instanceId;
 }
 
@@ -59,7 +63,7 @@ describe("the obelisk", () => {
     expect(bout.instanceId.startsWith("arena_")).toBe(true);
     expect(bout.members.map((m) => m.id)).toEqual([a.id, b.id]);
     expect(bout.hostId).toBe(a.id);
-    expect(bout.endsAt).toBe(now + ARENA.durationMs);
+    expect(bout.endsAt).toBe(0); // the sands wait for everyone
     expect(lastOf(b, "arenaAssigned")!.assignment.seed).toBe(bout.seed);
     // They left the camp: Cy saw them go.
     expect(c.inbox.filter((m) => m.t === "peerLeft").map((m) => (m as { playerId: string }).playerId)).toEqual([a.id, b.id]);
@@ -125,6 +129,73 @@ describe("turning a bout down", () => {
     relay.disconnect(a.id);
     relay.disconnect(b.id);
     expect(arenas.soloStreak.size).toBe(0);
+  });
+});
+
+describe("the gathering", () => {
+  function deal(): void {
+    relay.handle(a.id, { t: "arenaJoin" });
+    relay.handle(b.id, { t: "arenaJoin" });
+    now += ARENA.gatherMs;
+    relay.tick();
+  }
+
+  test("the sands wait until everyone has arrived, then Varr counts it in", () => {
+    deal();
+    relay.handle(a.id, { t: "arenaReady" });
+    now += 10_000; // Bo's journey in is slow
+    relay.tick();
+    expect(lastOf(a, "arenaBegin")).toBeUndefined();
+    relay.handle(b.id, { t: "arenaReady" });
+    const begin = lastOf(a, "arenaBegin")!;
+    expect(begin).toEqual({ t: "arenaBegin", fightAt: now + ARENA.countdownMs, endsAt: now + ARENA.countdownMs + ARENA.durationMs });
+    expect(lastOf(b, "arenaBegin")).toEqual(begin);
+  });
+
+  test("nothing counts before FIGHT", () => {
+    deal();
+    relay.handle(a.id, { t: "arenaReady" });
+    relay.handle(b.id, { t: "arenaReady" });
+    relay.handle(b.id, { t: "arenaFell", by: a.id });
+    expect(lastOf(a, "arenaScore")).toBeUndefined();
+    now += ARENA.countdownMs;
+    relay.handle(b.id, { t: "arenaFell", by: a.id });
+    expect(lastOf(a, "arenaScore")!.board.find((s) => s.id === a.id)?.kills).toBe(1);
+  });
+
+  test("a straggler can't hold the hall forever", () => {
+    deal();
+    relay.handle(a.id, { t: "arenaReady" });
+    now += ARENA.gatherMaxMs;
+    relay.tick();
+    expect(lastOf(a, "arenaBegin")?.fightAt).toBe(now + ARENA.countdownMs);
+  });
+
+  test("the sands run from FIGHT, not from the deal", () => {
+    deal();
+    now += 15_000;
+    relay.handle(a.id, { t: "arenaReady" });
+    relay.handle(b.id, { t: "arenaReady" });
+    now += ARENA.countdownMs + ARENA.durationMs - 1;
+    relay.tick();
+    expect(lastOf(a, "arenaEnded")).toBeUndefined();
+    now += 1;
+    relay.tick();
+    expect(lastOf(a, "arenaEnded")).toBeDefined();
+  });
+
+  test("the one we were waiting for leaving: the rest begin (or the bout ends)", () => {
+    // Three in the hall, one never arrives and walks away.
+    relay.handle(a.id, { t: "arenaJoin" });
+    relay.handle(b.id, { t: "arenaJoin" });
+    relay.handle(c.id, { t: "arenaJoin" });
+    now += ARENA.gatherMs;
+    relay.tick();
+    relay.handle(a.id, { t: "arenaReady" });
+    relay.handle(b.id, { t: "arenaReady" });
+    expect(lastOf(a, "arenaBegin")).toBeUndefined();
+    relay.handle(c.id, { t: "enterCamp" });
+    expect(lastOf(a, "arenaBegin")).toBeDefined();
   });
 });
 

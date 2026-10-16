@@ -63,7 +63,8 @@ export interface ArenaAssignment {
   epoch: number;
   /** Everyone in the bout, in the order their spawn stones are dealt. */
   members: MemberInfo[];
-  /** When the sands run out (server time, ms). */
+  /** When the sands run out (server time, ms) — 0 while the hall gathers
+   * (`arenaBegin` sets it). */
   endsAt: number;
   killsToWin: number;
 }
@@ -191,6 +192,8 @@ export type ClientMsg =
   /** In a bout: I've fallen, and `by` (a wizard in the bout) took the yield.
    * Only the fallen can say so, once per rising. */
   | { t: "arenaFell"; by: string | null }
+  /** In a bout: I've arrived in the hall (the sands wait for everyone). */
+  | { t: "arenaReady" }
   /** Walk home through a way-home portal. Refused until the run has played
    * RUN.floorsBeforeExit floors; the server validates every item against what
    * was actually granted this run (host-attested) and answers with `saved`. */
@@ -268,6 +271,9 @@ export type ServerMsg =
   /** Your place at the obelisk (0: not waiting) and how many wait. */
   | { t: "arenaQueue"; position: number; waiting: number }
   | { t: "arenaAssigned"; assignment: ArenaAssignment }
+  /** Everyone's in (or the gathering ran out): the fighting starts at
+   * `fightAt` and the sands run out at `endsAt` (server time, ms). */
+  | { t: "arenaBegin"; fightAt: number; endsAt: number }
   /** The scoreboard after a fall (`fell` says who yielded to whom). */
   | { t: "arenaScore"; board: ArenaScore[]; fell: { victim: string; by: string | null } }
   /** The bout is over: the final board (best first), the winner (if anyone

@@ -11,7 +11,7 @@ import { useNet } from "../net/netStore";
 import { estimatePeer, peerIds, peerName } from "../net/players";
 import { input } from "../player/input";
 import { isPartyMember } from "../social/social";
-import { inArena, useArena } from "../arena/arenaStore";
+import { boutLive, inArena, useArena } from "../arena/arenaStore";
 import { useGame } from "../state/gameStore";
 import { resetEncounters, useEncounters } from "./encounterStore";
 import {
@@ -78,7 +78,7 @@ function announce(notice: PactNotice, peerId: string): void {
 // Ground everyone is fair game (your fellowship too) until Varr calls it.
 setRelationResolver((id) => {
   const bout = useArena.getState().bout;
-  if (bout) return bout.ended ? "ally" : "stranger";
+  if (bout) return boutLive(bout) ? "stranger" : "ally";
   if (useGame.getState().phase !== "dungeon") return "ally";
   if (isPartyMember(id)) return "ally";
   const rel = useEncounters.getState().relations[id];

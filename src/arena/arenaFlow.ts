@@ -1,3 +1,4 @@
+import { playCritDing, playStreak } from "../audio/combatSounds";
 import { playPickup } from "../audio/sound";
 import { PLAYER } from "../core/config";
 import { gameEvents } from "../core/events";
@@ -5,6 +6,7 @@ import { flashLight } from "../fx/DynamicLights";
 import { soulDissolveFx, soulRiseFx } from "../fx/effects";
 import { getPlayerBody, playerPosition } from "../game/player-state";
 import { netBus } from "../net/bus";
+import { netClock } from "../net/clock";
 import { useNet } from "../net/netStore";
 import { estimatePeer, peerIds, resetPeers } from "../net/players";
 import { session } from "../net/session";
@@ -13,7 +15,7 @@ import { toWireInventory } from "../state/persistence";
 import { isTraveling, travel } from "../transition/travel";
 import { getCurrentLayout } from "../world/currentFloor";
 import type { Vec3 } from "../world/types";
-import { canTakeBout, inArena, isFallen, leaveBout, takeBout, useArena } from "./arenaStore";
+import { boutLive, canTakeBout, inArena, isFallen, leaveBout, takeBout, useArena } from "./arenaStore";
 import type { ArenaLayout } from "./layout";
 import { pickSpawn } from "./layout";
 import { ARENA } from "./rules";
@@ -32,11 +34,15 @@ export const VARR_GOLD = "#ff9a3c";
 
 let riseTimer: ReturnType<typeof setTimeout> | null = null;
 let homeTimer: ReturnType<typeof setTimeout> | null = null;
+/** Varr's count: a bell for each of the last three seconds, then FIGHT. */
+let countTimers: ReturnType<typeof setTimeout>[] = [];
 
 function clearTimers(): void {
   if (riseTimer) clearTimeout(riseTimer);
   if (homeTimer) clearTimeout(homeTimer);
   riseTimer = homeTimer = null;
+  countTimers.forEach(clearTimeout);
+  countTimers = [];
 }
 
 // ── In ───────────────────────────────────────────────────────────────────────
@@ -82,7 +88,30 @@ netBus.on("arenaAssigned", (a) => {
     });
     const foes = a.members.filter((m) => m.id !== useNet.getState().playerId).map((m) => m.name);
     gameEvents.emit("message", `The Proving Ground — you face ${listOf(foes)}. To the yield!`);
+  }).then(() => {
+    // Arrived (the journey's ARRIVE has played): the sands wait for us.
+    if (inArena()) session.arenaReady();
   });
+});
+
+// Everyone's in: Varr counts it in. A bell each second, rising, and FIGHT.
+netBus.on("arenaBegin", ({ fightAt }) => {
+  if (!inArena()) return;
+  countTimers.forEach(clearTimeout);
+  countTimers = [];
+  const inMs = (at: number) => Math.max(0, at - netClock.serverNow());
+  for (let k = 3; k >= 1; k--) {
+    const at = fightAt - k * 1000;
+    if (at < netClock.serverNow() - 200) continue;
+    countTimers.push(setTimeout(() => playCritDing(1 + (3 - k) * 0.12), inMs(at)));
+  }
+  countTimers.push(
+    setTimeout(() => {
+      if (!inArena()) return;
+      playStreak(4);
+      gameEvents.emit("arenaFight", undefined);
+    }, inMs(fightAt)),
+  );
 });
 
 /** Where this wizard first stands: their own stone, dealt in member order. */
@@ -102,7 +131,9 @@ setFallRule((killerId) => {
   if (useGame.getState().phase !== "dungeon") return true;
   const me = useNet.getState().playerId;
   const by = killerId && killerId !== me && bout.members.some((m) => m.id === killerId) ? killerId : null;
-  if (!bout.ended) session.arenaFell(by);
+  // Only a fall in the fighting counts (Varr's count and the farewell
+  // harm nobody, but a fall from anything else still goes down and rises).
+  if (boutLive(bout)) session.arenaFell(by);
   // Down at once (no input, no casting, no more harm) while the hall holds
   // its breath; the server's score marks us fallen for everyone.
   useGame.setState({ phase: "loading", prompt: null, overlay: "none" });

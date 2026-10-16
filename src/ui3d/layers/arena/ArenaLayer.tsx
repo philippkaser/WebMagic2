@@ -27,6 +27,7 @@ export function ArenaLayer() {
       <ProvingGroundTablet />
       <QueueRune />
       <BoutBoard />
+      <CountIn />
       <YieldVeil />
       <YieldTaken />
       <BoutEnd />
@@ -177,8 +178,10 @@ function BoutBoard() {
   const me = useNet((s) => s.playerId);
   useNow(250);
   const px = typePx(1, STEP.text, "label");
-  const left = bout ? Math.max(0, bout.endsAt - netClock.serverNow()) : 0;
-  const sands = `${Math.floor(left / 60_000)}:${String(Math.floor((left % 60_000) / 1000)).padStart(2, "0")}`;
+  // While the hall gathers the sands haven't started; through Varr's count
+  // they stand full.
+  const left = !bout ? 0 : bout.fightAt === null ? ARENA.durationMs : Math.min(ARENA.durationMs, Math.max(0, bout.endsAt - netClock.serverNow()));
+  const sands = bout && bout.fightAt === null ? "the hall gathers" : `${Math.floor(left / 60_000)}:${String(Math.floor((left % 60_000) / 1000)).padStart(2, "0")}`;
   // The board's runes only rewrite when the score does.
   const boardKey = bout ? `${me}|${bout.board.map((s) => `${s.id}:${s.name}:${s.kills}:${s.falls}`).join("|")}` : "";
   const fighters = useMemo(
@@ -201,6 +204,38 @@ function BoutBoard() {
         <RuneText text={`first to ${bout?.killsToWin ?? ARENA.killsToWin} yields`} font="label" px={px * 0.8} color={ink.faded} position={[0, -px * 22, 0]} />
       </HudAnchor>
     </UiShow>
+  );
+}
+
+/** Varr counts it in: 3, 2, 1 — and FIGHT, held a breath. */
+function CountIn() {
+  const bout = useBoutView();
+  const now = useNow(100);
+  void now;
+  const toFight = bout?.fightAt != null ? bout.fightAt - netClock.serverNow() : Infinity;
+  const word = toFight > 3000 || !Number.isFinite(toFight) ? null : toFight > 0 ? String(Math.ceil(toFight / 1000)) : toFight > -900 ? "FIGHT!" : null;
+  const dist = 2;
+  return (
+    <UiPresence show={!!word} exit={0.3}>
+      <ViewAnchor offset={[0, 0.16, -dist]}>
+        {word && (
+          <group key={word}>
+            <RuneText
+              text={word}
+              font="heading"
+              px={typePx(dist, word === "FIGHT!" ? 4 : 5, "heading")}
+              color={word === "FIGHT!" ? RED : ink.gold}
+              glow={1.3}
+              inDuration={0.12}
+              stagger={0}
+            />
+            {word !== "FIGHT!" && (
+              <RuneText text="Varr counts it in" font="label" px={typePx(dist, STEP.text, "label")} color={ink.faded} position={[0, -0.2, 0]} />
+            )}
+          </group>
+        )}
+      </ViewAnchor>
+    </UiPresence>
   );
 }
 

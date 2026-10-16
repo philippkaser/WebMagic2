@@ -41,6 +41,7 @@ export interface NetBusEvents extends Record<string, unknown> {
    * scored, the bout's end. */
   arenaQueue: { position: number; waiting: number };
   arenaAssigned: ArenaAssignment;
+  arenaBegin: { fightAt: number; endsAt: number };
   arenaScore: Extract<ServerMsg, { t: "arenaScore" }>;
   arenaEnded: Extract<ServerMsg, { t: "arenaEnded" }>;
 }

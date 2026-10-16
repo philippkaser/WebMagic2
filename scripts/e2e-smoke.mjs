@@ -311,7 +311,13 @@ async function waitPhase(w, phase, timeout = 30000) {
   const boutA = await state(a, () => window.__arena.getState().bout);
   const boutB = await state(b, () => window.__arena.getState().bout);
   check("both are dealt into one bout", !!boutA && boutA.instanceId === boutB?.instanceId, `${boutA?.instanceId}/${boutB?.instanceId}`);
-  console.log("  sands left on arrival:", await state(a, () => Math.round((window.__arena.getState().bout.endsAt - window.__clock.serverNow()) / 1000)), "s");
+  // The sands wait for both of us; then Varr counts it in.
+  await until(a, () => {
+    const b = window.__arena.getState().bout;
+    return !!b?.fightAt && window.__clock.serverNow() >= b.fightAt;
+  }, undefined, 40000);
+  const sandsLeft = await state(a, () => Math.round((window.__arena.getState().bout.endsAt - window.__clock.serverNow()) / 1000));
+  check("the sands start at FIGHT, however long the journey in", sandsLeft >= 175, `${sandsLeft} s left at FIGHT`);
   await sleep(2500);
   await a.page.screenshot({ path: `${SP}/shot-arena.png` });
   // Ilse falls ten times to Hesk: each a yield, never a death.

@@ -3,7 +3,9 @@
  * them. Duels to the yield, not the death: a wizard who falls rises again at
  * a spawn stone a few breaths later, and loses nothing.
  *
- * A bout ends when someone reaches KILLS_TO_WIN or when the sands run out;
+ * A bout gathers first — the sands wait until everyone has arrived, then
+ * Varr counts it in — and ends when someone reaches KILLS_TO_WIN or when
+ * the sands run out;
  * the most yields taken wins (a tie goes to whoever fell least, then to
  * whoever reached the score first). */
 
@@ -19,6 +21,12 @@ export const ARENA = {
   gatherMs: 8000,
   /** After the bout, the hall holds everyone this long before home. */
   afterMs: 6000,
+  /** The hall gathers: the sands wait until every fighter has arrived (a
+   * slow journey in mustn't cost anyone their bout), but never longer than
+   * this after the bout is dealt. */
+  gatherMaxMs: 20_000,
+  /** Then Varr counts it in: no blow lands, no yield counts, until FIGHT. */
+  countdownMs: 3000,
 } as const;
 
 export interface ArenaScore {

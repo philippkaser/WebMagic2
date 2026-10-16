@@ -194,8 +194,9 @@ any going. The social and arena messages:
   bout just dealt: it's how a client turns down a bout it can't take.
 
 `Relay#tick()` is the server's heartbeat (`server.ts` calls it every
-250 ms): it starts bouts the queue has gathered, ends them on the score or
-the sands, and lets go of a finished bout's stragglers.
+250 ms): it starts bouts the queue has gathered, begins a gathering that's
+waited `gatherMaxMs` for a straggler, ends bouts on the score or the
+sands, and lets go of a finished bout's stragglers.
 
 ### Host-authority replication
 
@@ -496,8 +497,9 @@ wizard's health.
 **Server.**
 
 - `arena/rules.ts` (pure, shared): `ARENA` — 2–6 wizards, 3 minutes, 10
-  yields to win, rise after 3 s, an 8 s gathering breath, the hall holding
-  everyone 6 s after. `recordFall`, `ranked` (most yields, then fewest
+  yields to win, rise after 3 s, an 8 s gathering breath at the obelisk,
+  the hall waiting up to 20 s for its fighters to arrive and a 3 s count
+  in, the hall holding everyone 6 s after. `recordFall`, `ranked` (most yields, then fewest
   falls, then who scored first), `boutOver`, and `winnerOf(board,
   present)` — a deserter keeps their row but can't win, and nobody wins
   without a yield.
@@ -507,8 +509,13 @@ wizard's health.
 - `server/relay.ts`: `tick()` → `startBout` seats the fighters still home
   (too few go back in line) in one `arenas` room with a fresh seed and a
   `newScoreboard`, and deals `arenaAssigned { seed, members (spawn order),
-  endsAt, killsToWin }`. `arenaFell` is honoured only from a wizard in a
-  live bout, once per rising (`respawnMs` since their last fall), and
+  endsAt: 0, killsToWin }`. The sands wait: each client sends `arenaReady`
+  once its journey in has arrived, and when everyone still in the hall is
+  ready (or `gatherMaxMs` after the deal, or when the one being waited for
+  leaves) `beginBout` sends `arenaBegin { fightAt, endsAt }` — the fighting
+  starts `countdownMs` later and the sands run from there, so a slow
+  journey in costs nobody their bout. `arenaFell` is honoured only from a
+  wizard in a live bout, after `fightAt`, once per rising (`respawnMs` since their last fall), and
   credits `by` only if it names another wizard in the room; it sends
   `arenaScore` and ends the bout when it's over. `endBout` ranks the board,
   picks the winner among those still present, writes each wizard's
@@ -519,8 +526,10 @@ wizard's health.
 **Client.**
 
 - `arena/arenaStore.ts` mirrors the relay: our place in line, the bout (its
-  board, who's down until when, a feed of falls, how it ended) and the
-  record.
+  board, who's down until when, a feed of falls, when the fighting starts,
+  how it ended) and the record. `boutLive(bout)` — after `fightAt`, before
+  the end — is what the relation resolver reads: before Varr's FIGHT and
+  after the farewell, nobody in the hall can be harmed.
 - `arena/arenaFlow.ts` — the journeys and the yield. `arenaAssigned` is
   taken (`arenaStore.takeBout`, and the hall's roster) only by a wizard
   who's home and on no journey (`canTakeBout`); one already on the road

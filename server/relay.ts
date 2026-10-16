@@ -83,7 +83,13 @@ const BOUT_STRAGGLE_MS = 60_000;
 /** A bout under way (or just over) in the Proving Ground. */
 interface Bout {
   board: Scoreboard;
-  startedAt: number;
+  /** When it was dealt (the gathering's own clock). */
+  dealtAt: number;
+  /** Who has arrived in the hall. */
+  ready: Set<string>;
+  /** When the fighting starts (after Varr's count) — null while the hall
+   * gathers. The sands run from here. */
+  startedAt: number | null;
   /** When it ended (null: still fighting). */
   endedAt: number | null;
   /** When each wizard last fell (one fall per rising). */
@@ -157,7 +163,8 @@ export class Relay {
     for (const [id, bout] of this.bouts) {
       const room = this.arenas.instanceById(id);
       if (!room) this.bouts.delete(id);
-      else if (bout.endedAt === null && boutOver(bout.board, bout.startedAt, now)) this.endBout(id, bout);
+      else if (bout.endedAt === null && bout.startedAt === null && now - bout.dealtAt >= ARENA.gatherMaxMs) this.beginBout(id, bout);
+      else if (bout.endedAt === null && bout.startedAt !== null && boutOver(bout.board, bout.startedAt, now)) this.endBout(id, bout);
       else if (bout.endedAt !== null && now - bout.endedAt > ARENA.afterMs + BOUT_STRAGGLE_MS) {
         // Everyone walks home on their own; a straggler's seat is let go.
         for (const pid of [...room.players]) {
@@ -269,6 +276,14 @@ export class Relay {
       case "arenaFell":
         this.arenaFell(peer, msg.by);
         break;
+      case "arenaReady": {
+        const room = this.arenas.instanceOf(peer.id);
+        const bout = room && this.bouts.get(room.id);
+        if (!room || !bout) break;
+        bout.ready.add(peer.id);
+        this.beginIfGathered(room.id, bout);
+        break;
+      }
       case "partyCreate":
         this.tellParty(this.parties.create(peer.id));
         break;
@@ -683,7 +698,7 @@ export class Relay {
     }
     const room = inst!;
     this.epochs.set(room.id, 1);
-    this.bouts.set(room.id, { board: newScoreboard(fighters), startedAt: now, endedAt: null, lastFall: new Map() });
+    this.bouts.set(room.id, { board: newScoreboard(fighters), dealtAt: now, ready: new Set(), startedAt: null, endedAt: null, lastFall: new Map() });
     const members = this.membersOf(room);
     for (const p of fighters) {
       p.send({
@@ -694,7 +709,7 @@ export class Relay {
           hostId: this.hostOf(p.id),
           epoch: 1,
           members,
-          endsAt: now + ARENA.durationMs,
+          endsAt: 0, // the sands wait for everyone (arenaBegin)
           killsToWin: ARENA.killsToWin,
         },
       });
@@ -703,13 +718,32 @@ export class Relay {
     this.log(`bout ${room.id}: ${fighters.map((p) => p.name).join(" vs ")}`);
   }
 
+  /** Everyone still in the hall has arrived: Varr counts it in. */
+  private beginIfGathered(roomId: string, bout: Bout): void {
+    const room = this.arenas.instanceById(roomId);
+    if (!room || bout.startedAt !== null || bout.endedAt !== null) return;
+    if ([...room.players].every((id) => bout.ready.has(id))) this.beginBout(roomId, bout);
+  }
+
+  /** The count begins: the fighting (and the sands) start once it's done. */
+  private beginBout(roomId: string, bout: Bout): void {
+    const room = this.arenas.instanceById(roomId);
+    if (!room || bout.startedAt !== null) return;
+    const fightAt = this.now() + ARENA.countdownMs;
+    bout.startedAt = fightAt;
+    const endsAt = fightAt + ARENA.durationMs;
+    for (const id of room.players) this.peers.get(id)?.send({ t: "arenaBegin", fightAt, endsAt });
+  }
+
   /** Only the fallen say they fell (they know who struck last), once per
-   * rising; the yield goes to a wizard who's really in the bout. */
+   * rising; the yield goes to a wizard who's really in the bout. Nothing
+   * counts before Varr's FIGHT. */
   private arenaFell(peer: RelayPeer, by: unknown): void {
     const room = this.arenas.instanceOf(peer.id);
     const bout = room && this.bouts.get(room.id);
     if (!room || !bout || bout.endedAt !== null) return;
     const now = this.now();
+    if (bout.startedAt === null || now < bout.startedAt) return;
     if (now - (bout.lastFall.get(peer.id) ?? -Infinity) < ARENA.respawnMs) return;
     bout.lastFall.set(peer.id, now);
     const killer = typeof by === "string" && by !== peer.id && room.players.has(by) ? by : null;
@@ -745,6 +779,9 @@ export class Relay {
     this.leaveRoom(peer, this.arenas);
     if (bout && bout.endedAt === null && room.players.size < ARENA.minPlayers && room.players.size > 0) {
       this.endBout(room.id, bout);
+    } else if (bout && room.players.size > 0) {
+      // The one we were waiting for has gone: the rest may be ready.
+      this.beginIfGathered(room.id, bout);
     }
     if (!this.arenas.instanceById(room.id)) this.bouts.delete(room.id);
   }

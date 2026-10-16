@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { netBus } from "../net/bus";
+import { netClock } from "../net/clock";
 import type { ArenaAssignment } from "../net/protocol";
 import type { Phase } from "../state/gameStore";
 import { ARENA, type ArenaRecord, type ArenaScore } from "./rules";
@@ -25,6 +26,9 @@ export interface Bout extends ArenaAssignment {
   feed: FeedLine[];
   /** Set once the bout is over: the final board, best first. */
   ended: { board: ArenaScore[]; winner: string | null; at: number } | null;
+  /** When Varr's count ends and the fighting starts (server time, ms) —
+   * null while the hall gathers. */
+  fightAt: number | null;
 }
 
 export interface ArenaState {
@@ -42,6 +46,12 @@ export const useArena = create<ArenaState>(() => ({ queue: null, bout: null, rec
 /** In a bout (from the moment it's dealt until we're home again). */
 export function inArena(): boolean {
   return useArena.getState().bout !== null;
+}
+
+/** Is the fighting on? Not while the hall gathers or Varr counts it in, and
+ * not once it's over: until then, and after, nobody can be harmed. */
+export function boutLive(bout: Bout | null, serverNow = netClock.serverNow()): boolean {
+  return !!bout && !bout.ended && bout.fightAt !== null && serverNow >= bout.fightAt;
 }
 
 /** A wizard in the bout who's yielded and not yet risen. */
@@ -74,6 +84,7 @@ export function takeBout(a: ArenaAssignment): void {
       fallen: {},
       feed: [],
       ended: null,
+      fightAt: null,
     },
   });
 }
@@ -95,6 +106,11 @@ netBus.on("arenaQueue", (q) =>
 // disconnects, and we come back as somebody new. Nobody's holding our place
 // at the obelisk any more.
 netBus.on("reconnected", () => useArena.setState({ queue: null, steppingBack: false }));
+
+netBus.on("arenaBegin", ({ fightAt, endsAt }) => {
+  const bout = useArena.getState().bout;
+  if (bout) useArena.setState({ bout: { ...bout, fightAt, endsAt } });
+});
 
 netBus.on("arenaScore", ({ board, fell }) => {
   const bout = useArena.getState().bout;

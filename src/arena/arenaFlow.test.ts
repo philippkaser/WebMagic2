@@ -131,7 +131,7 @@ describe("a bout dealt", () => {
 
   test("a bout we turned down can end on the relay without touching us", () => {
     const said = heard("message");
-    netBus.emit("arenaEnded", { board: [], winner: "foe", record: { bouts: 0, wins: 0, yields: 0 } });
+    netBus.emit("arenaEnded", { t: "arenaEnded", board: [], winner: "foe", record: { bouts: 0, wins: 0, yields: 0 } });
     expect(said).toEqual([]);
     expect(stashes).toHaveLength(0);
   });

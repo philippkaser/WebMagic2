@@ -143,7 +143,8 @@ corner — check it against the latest commit when testing.
 - **The Proving Ground.** North of the gate, Ysolde Varr's obelisk keeps a
   line for duels. Two to six wizards are dealt into the Founders' old trial
   hall — four-fold symmetric, so no stone is better than another — and
-  fight to the yield: first to ten, or the most when three minutes run out.
+  fight to the yield once Varr has counted it in: first to ten, or the most
+  when three minutes run out.
   In the hall nobody dies; you yield, rise at the stone farthest from every
   foe a breath later, and lose nothing. Your fellowship is fair game too.
   Varr keeps every bout in her ledger.

@@ -200,6 +200,7 @@ export class LocalTransport implements Transport {
         this.deliver({ t: "arenaQueue", position: 0, waiting: 0 });
         break;
       case "arenaFell":
+      case "arenaReady":
         break;
       case "ping":
         // Zero-offset clock: local time IS server time offline.

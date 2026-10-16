@@ -179,6 +179,11 @@ export class GameSession {
     this.transport?.send({ t: "arenaLeave" });
   }
 
+  /** In a bout: we've arrived in the hall (the sands wait for everyone). */
+  arenaReady(): void {
+    this.transport?.send({ t: "arenaReady" });
+  }
+
   /** In a bout: we fell, and `by` took the yield. */
   arenaFell(by: string | null): void {
     this.transport?.send({ t: "arenaFell", by });
@@ -404,6 +409,9 @@ export class GameSession {
         // already on the road down), so the hall's roster is arena/arenaFlow's
         // to install once the bout is taken.
         netBus.emit("arenaAssigned", msg.assignment);
+        break;
+      case "arenaBegin":
+        netBus.emit("arenaBegin", { fightAt: msg.fightAt, endsAt: msg.endsAt });
         break;
       case "arenaScore":
         netBus.emit("arenaScore", msg);

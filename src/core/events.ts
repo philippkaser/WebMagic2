@@ -87,6 +87,8 @@ export interface GameEvents extends Record<string, unknown> {
   pactSworn: { with: string };
   /** We took a yield in the Proving Ground (arena/arenaFlow.ts). */
   arenaYield: { victim: string; name: string };
+  /** Varr's count is done: the bout's fighting starts now. */
+  arenaFight: undefined;
   /** A room event changed phase (roomEvents/net.ts) — views flash, sounds play. */
   roomEvent: { id: string; kind: import("../world/types").RoomEventKind; phase: string; at: import("../world/types").Vec3 };
   /** A blast went off (weapons/explosions.ts#explode — on every client,
