@@ -80,6 +80,52 @@ describe("the obelisk", () => {
     relay.handle(c.id, { t: "arenaJoin" });
     expect(lastOf(b, "arenaQueue")).toMatchObject({ waiting: 1 });
   });
+
+  test("stepping back from a line you aren't in is still answered", () => {
+    // A client that lost its connection still thinks it's waiting; the
+    // relay let it go, and the answer gives it its button back.
+    relay.handle(a.id, { t: "arenaLeave" });
+    expect(lastOf(a, "arenaQueue")).toEqual({ t: "arenaQueue", position: 0, waiting: 0 });
+  });
+
+  test("a disconnect drops your place in line", () => {
+    relay.handle(a.id, { t: "arenaJoin" });
+    relay.handle(b.id, { t: "arenaJoin" });
+    relay.disconnect(a.id);
+    expect(lastOf(b, "arenaQueue")).toMatchObject({ position: 1, waiting: 1 });
+  });
+});
+
+describe("turning a bout down", () => {
+  test("dealt in on the road down: arenaLeave lets the bout go, and whoever's left hears it's over", () => {
+    const room = startDuel();
+    relay.handle(b.id, { t: "arenaLeave" });
+    expect(lastOf(b, "arenaQueue")).toMatchObject({ position: 0 });
+    expect(lastOf(b, "arenaEnded")).toBeUndefined();
+    expect(lastOf(a, "peerLeft")?.playerId).toBe(b.id);
+    expect(lastOf(a, "arenaEnded")?.winner).toBeNull();
+    // Bo's no longer in the hall: the floor takes him as anyone else.
+    relay.handle(b.id, { t: "enterFloor", floor: 1, fresh: true });
+    expect(lastOf(b, "floorAssigned")).toBeDefined();
+    relay.handle(a.id, { t: "msg", ch: "p:pose", data: 1 });
+    expect(lastOf(b, "msg")).toBeUndefined();
+    // And the hall is gone once Ann walks home.
+    relay.handle(a.id, { t: "enterCamp" });
+    relay.handle(a.id, { t: "arenaJoin" });
+    relay.handle(c.id, { t: "arenaJoin" });
+    now += ARENA.gatherMs;
+    relay.tick();
+    expect(lastOf(c, "arenaAssigned")!.assignment.instanceId).not.toBe(room);
+  });
+
+  test("the arena forgets a wizard who's gone for good", () => {
+    startDuel();
+    const arenas = (relay as unknown as { arenas: { soloStreak: Map<string, number> } }).arenas;
+    expect(arenas.soloStreak.has(a.id)).toBe(true);
+    relay.disconnect(a.id);
+    relay.disconnect(b.id);
+    expect(arenas.soloStreak.size).toBe(0);
+  });
 });
 
 describe("a bout", () => {

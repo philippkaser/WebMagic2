@@ -554,6 +554,13 @@ export const useGame = create<GameState>((set, get) => ({
         gameEvents.emit("message", "The feather only works in the dungeon");
         return;
       }
+      // The Proving Ground is the one "dungeon" with no run: nothing to bank,
+      // and the only road home is Varr's. Flown anyway, the hall would lose
+      // us while this client still thought it held us.
+      if (!state.run) {
+        gameEvents.emit("message", "The feather won't carry you out of the Proving Ground");
+        return;
+      }
       if (isTraveling()) return;
       set({ belt: takeOneAt(state.belt, index), phase: "loading", prompt: null, overlay: "none" });
       void travel("feather", () => escapeByFeather(set, get));

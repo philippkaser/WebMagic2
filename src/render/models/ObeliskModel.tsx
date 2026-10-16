@@ -2,7 +2,8 @@ import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import { BoxGeometry, ConeGeometry, CylinderGeometry, Group, MeshStandardMaterial, Object3D } from "three";
 import { useArena } from "../../arena/arenaStore";
-import { bake, glow, group, part, roughen, std } from "./modelKit";
+import { bake, glow, group, instance, part, roughen, std } from "./modelKit";
+import { shared } from "./shared";
 
 /** The obelisk to the Proving Ground, in the artpass model family: a tall
  * four-sided needle of dark runestone on a stepped plinth, its faces cut
@@ -65,9 +66,20 @@ function glyphs(material: MeshStandardMaterial): Group {
   return group(parts);
 }
 
+/** Built once: the Village remounts on every walk home, and nothing ever
+ * disposes a <primitive>, so a fresh obelisk per mount left the last one's
+ * buffers on the GPU for good. There's only ever the one obelisk, so its
+ * glyphs can own their glow outright. */
+const T = shared(() => {
+  const glyphMat = glow("#ff8a3c", 2.4).clone();
+  return { glyphMat, body: stone(), glyphs: glyphs(glyphMat) };
+});
+
 export function ObeliskModel() {
-  const glyphMat = useMemo(() => glow("#ff8a3c", 2.4).clone(), []);
-  const parts = useMemo(() => ({ body: stone(), glyphs: glyphs(glyphMat) }), [glyphMat]);
+  const { glyphMat } = T();
+  // A clone per mount shares the geometry and materials (cheap, and nothing
+  // left over from the last scene graph rides along).
+  const parts = useMemo(() => ({ body: instance(T().body), glyphs: instance(T().glyphs) }), []);
   const heat = useRef(0);
   useFrame(({ clock }, dt) => {
     const waiting = useArena.getState().queue !== null;

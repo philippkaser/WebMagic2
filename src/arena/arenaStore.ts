@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { netBus } from "../net/bus";
 import type { ArenaAssignment } from "../net/protocol";
+import type { Phase } from "../state/gameStore";
 import { ARENA, type ArenaRecord, type ArenaScore } from "./rules";
 
 /** The Proving Ground as this client sees it: our place at the obelisk, the
@@ -50,14 +51,18 @@ export function leaveBout(): void {
   useArena.setState({ bout: null });
 }
 
-const FEED_KEEP = 5;
-/** How long a fallen wizard stays down before rising (the server's rule). */
-const RISE_MS = ARENA.respawnMs;
-let feedId = 1;
+/** Can a wizard who stands where `phase` puts them take a bout just dealt?
+ * Only one who's home (in the camp, or reading the Weighing at its gate)
+ * and on no journey. One already on the road down (the gate's ENTER, an
+ * enterFloor that crossed the deal) turns it down, or they'd end up in the
+ * hall and on a floor at once. */
+export function canTakeBout(phase: Phase, traveling: boolean): boolean {
+  return !traveling && (phase === "village" || phase === "weighing");
+}
 
-netBus.on("arenaQueue", (q) => useArena.setState({ queue: q.position > 0 ? q : null }));
-
-netBus.on("arenaAssigned", (a) => {
+/** A bout dealt and taken (arenaFlow.ts decides): out of the line, a fresh
+ * board. */
+export function takeBout(a: ArenaAssignment): void {
   useArena.setState({
     queue: null,
     bout: {
@@ -68,7 +73,19 @@ netBus.on("arenaAssigned", (a) => {
       ended: null,
     },
   });
-});
+}
+
+const FEED_KEEP = 5;
+/** How long a fallen wizard stays down before rising (the server's rule). */
+const RISE_MS = ARENA.respawnMs;
+let feedId = 1;
+
+netBus.on("arenaQueue", (q) => useArena.setState({ queue: q.position > 0 ? q : null }));
+
+// The line went with the dropped connection: the relay lets go of whoever
+// disconnects, and we come back as somebody new. Nobody's holding our place
+// at the obelisk any more.
+netBus.on("reconnected", () => useArena.setState({ queue: null }));
 
 netBus.on("arenaScore", ({ board, fell }) => {
   const bout = useArena.getState().bout;

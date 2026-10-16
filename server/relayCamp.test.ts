@@ -56,6 +56,30 @@ describe("the camp", () => {
     expect(lastOf(b, "hostChanged")?.hostId).toBe(b.id);
   });
 
+  test("a disconnect leaves the camp like any going: campmates see it, the host passes on", () => {
+    relay.handle(a.id, { t: "enterCamp" });
+    relay.handle(b.id, { t: "enterCamp" });
+    relay.handle(c.id, { t: "enterCamp" });
+    const epoch = lastOf(c, "campAssigned")!.assignment.epoch;
+    relay.disconnect(a.id);
+    for (const p of [b, c]) expect(lastOf(p, "peerLeft")?.playerId).toBe(a.id);
+    expect(lastOf(b, "hostChanged")).toEqual({ t: "hostChanged", hostId: b.id, epoch: epoch + 1 });
+    expect(lastOf(c, "hostChanged")?.hostId).toBe(b.id);
+    // The camp's traffic follows the new host, and the gone are gone.
+    relay.handle(b.id, { t: "msg", ch: "a:world", data: 1 });
+    expect(lastOf(c, "msg")?.epoch).toBe(epoch + 1);
+    relay.handle(c.id, { t: "partyInvite", to: a.id });
+    expect(lastOf(c, "partyError")?.reason).toBe("no-invite");
+  });
+
+  test("a guest who isn't the host goes quietly: no new host", () => {
+    relay.handle(a.id, { t: "enterCamp" });
+    relay.handle(b.id, { t: "enterCamp" });
+    relay.disconnect(b.id);
+    expect(lastOf(a, "peerLeft")?.playerId).toBe(b.id);
+    expect(lastOf(a, "hostChanged")).toBeUndefined();
+  });
+
   test("a wizard mid-run can't sit in the camp", () => {
     relay.handle(a.id, { t: "enterFloor", floor: 1, fresh: true });
     relay.handle(a.id, { t: "enterCamp" });

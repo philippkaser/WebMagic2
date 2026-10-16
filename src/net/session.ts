@@ -399,14 +399,12 @@ export class GameSession {
       case "arenaQueue":
         netBus.emit("arenaQueue", { position: msg.position, waiting: msg.waiting });
         break;
-      case "arenaAssigned": {
-        const a = msg.assignment;
-        const roster: Record<string, string> = {};
-        for (const m of a.members) roster[m.id] = m.name;
-        useNet.setState({ hostId: a.hostId, epoch: a.epoch, roster });
-        netBus.emit("arenaAssigned", a);
+      case "arenaAssigned":
+        // Only a deal, not yet a room: the client may turn it down (it was
+        // already on the road down), so the hall's roster is arena/arenaFlow's
+        // to install once the bout is taken.
+        netBus.emit("arenaAssigned", msg.assignment);
         break;
-      }
       case "arenaScore":
         netBus.emit("arenaScore", msg);
         break;
