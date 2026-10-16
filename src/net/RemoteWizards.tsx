@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CanvasTexture, Group, LinearFilter, Sprite, SpriteMaterial, Vector3 } from "three";
 import { playPeerBrink } from "../audio/heartSounds";
 import { torchEmberFx } from "../fx/effects";
-import { kickBrink, newHeart, stepHeart } from "../game/heart";
+import { kickBrink, kickRelease, newHeart, releaseOf, stepHeart } from "../game/heart";
 import { playerPosition } from "../game/player-state";
 import { relationOf, type WizardRelation } from "../game/hostility";
 import { NAME_RANGE, robeColorOf, TAG_COLORS } from "../game/wizardLook";
@@ -99,7 +99,8 @@ function RemoteWizard({ playerId }: { playerId: string }) {
   // model's ember shell); when they last leaked an ember; their Brink.
   const heart = useMemo(newHeart, []);
   const dying = useRef(0);
-  const vital = useRef({ ember: 0, brink: false, relation: "" });
+  // `life`: their last life share read (−1 unknown), to catch a mending.
+  const vital = useRef({ ember: 0, brink: false, relation: "", life: -1 });
   useEffect(() => () => dropPeerMark(playerId), [playerId]);
   const staffColor = () => {
     try {
@@ -152,6 +153,10 @@ function RemoteWizard({ playerId }: { playerId: string }) {
       playPeerBrink([g.position.x, g.position.y + 0.4, g.position.z]);
     }
     v.brink = brink;
+    // Mended back over the line in one go (a draught, the fountain, a
+    // rising in the Proving Ground): their heart lets go as ours would.
+    if (life >= 0 && v.life >= 0) kickRelease(heart, releaseOf(v.life, life));
+    v.life = life;
     stepHeart(heart, dt, life < 0 ? 1 : life);
     dying.current = heart.low > 0 ? heart.low * (0.55 + 0.45 * heart.beat) : 0;
     if (heart.low > 0) {

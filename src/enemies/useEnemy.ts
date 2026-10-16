@@ -491,8 +491,13 @@ export function useEnemy(options: UseEnemyOptions): EnemyShell {
       seenFields.current = true;
       const t = body.current?.translation() ?? null;
       if (f.w === 1) aggro.current = true;
-      // Already awake when we first saw it: no startle.
-      if (first) wasAwake.current = wokeBefore.current = aggro.current;
+      // Already awake when we first saw it: no startle. And a fight already
+      // under way (it's been hurt) skips the wake scene; one that wakes as
+      // our first snapshot lands (its body slept until the wake) still plays.
+      if (first) {
+        wasAwake.current = aggro.current;
+        wokeBefore.current = aggro.current && typeof f.hp === "number" && f.hp < maxHp;
+      }
       if (typeof f.a === "number") actWire.current = f.a;
       // The tugs in this drop, read before anything else so the total
       // never falls behind.

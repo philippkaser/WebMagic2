@@ -32,9 +32,12 @@ export interface ArenaState {
   queue: { position: number; waiting: number } | null;
   bout: Bout | null;
   record: ArenaRecord | null;
+  /** We stepped back from the line and the relay hasn't answered yet: a bout
+   * dealt in that moment was dealt to somebody who'd already left it. */
+  steppingBack: boolean;
 }
 
-export const useArena = create<ArenaState>(() => ({ queue: null, bout: null, record: null }));
+export const useArena = create<ArenaState>(() => ({ queue: null, bout: null, record: null, steppingBack: false }));
 
 /** In a bout (from the moment it's dealt until we're home again). */
 export function inArena(): boolean {
@@ -80,12 +83,18 @@ const FEED_KEEP = 5;
 const RISE_MS = ARENA.respawnMs;
 let feedId = 1;
 
-netBus.on("arenaQueue", (q) => useArena.setState({ queue: q.position > 0 ? q : null }));
+netBus.on("arenaQueue", (q) =>
+  useArena.setState((s) => ({
+    queue: q.position > 0 ? q : null,
+    // The relay's answer to a step back is "position 0": the moment's over.
+    steppingBack: s.steppingBack && q.position > 0,
+  })),
+);
 
 // The line went with the dropped connection: the relay lets go of whoever
 // disconnects, and we come back as somebody new. Nobody's holding our place
 // at the obelisk any more.
-netBus.on("reconnected", () => useArena.setState({ queue: null }));
+netBus.on("reconnected", () => useArena.setState({ queue: null, steppingBack: false }));
 
 netBus.on("arenaScore", ({ board, fell }) => {
   const bout = useArena.getState().bout;

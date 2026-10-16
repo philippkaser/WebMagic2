@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { stepBack } from "../../../arena/arenaFlow";
 import { useArena, type Bout } from "../../../arena/arenaStore";
 import { ARENA, ranked } from "../../../arena/rules";
 import { gameEvents } from "../../../core/events";
@@ -127,7 +128,7 @@ function ProvingGroundPage() {
             px={PX}
             position={[0, -0.25, 0]}
           />
-          <RuneButton label="Step back" variant="ghost" onPress={() => session.arenaLeave()} px={PX} width={0.36} position={[0, -0.38, 0]} />
+          <RuneButton label="Step back" variant="ghost" onPress={stepBack} px={PX} width={0.36} position={[0, -0.38, 0]} />
         </>
       )}
       {online && !queue && <RuneButton label="Step into the line" onPress={() => session.arenaJoin()} px={PX} width={0.5} position={[0, -0.3, 0]} />}

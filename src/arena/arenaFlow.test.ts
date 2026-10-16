@@ -8,7 +8,7 @@ import { session } from "../net/session";
 import { getStats, useGame } from "../state/gameStore";
 import { isTraveling, markTravelFrame } from "../transition/travel";
 import { setCurrentLayout } from "../world/currentFloor";
-import "./arenaFlow";
+import { stepBack } from "./arenaFlow";
 import { canTakeBout, takeBout, useArena } from "./arenaStore";
 import { generateArena } from "./layout";
 import { ARENA } from "./rules";
@@ -55,7 +55,7 @@ beforeEach(() => {
   (session as unknown as Spied).arenaLeave = () => void leaves++;
   (session as unknown as Spied).sendStash = (inv: WireInventory) => void stashes.push(inv);
   useNet.setState({ playerId: "me", hostId: "camp_host", epoch: 3, roster: { me: "Me", camper: "Camper" } });
-  useArena.setState({ queue: null, bout: null, record: null });
+  useArena.setState({ queue: null, bout: null, record: null, steppingBack: false });
   useGame.setState({ phase: "village", run: null });
 });
 
@@ -112,6 +112,28 @@ describe("a bout dealt", () => {
     takeBout(deal);
     netBus.emit("assigned", { instanceId: "inst_9", floor: 3, seed: 9, hostId: "me", epoch: 1, members: [] });
     expect(useArena.getState().bout).toBeNull();
+  });
+
+  test("stepping back as Varr calls it: the bout dealt in that moment isn't ours to take", () => {
+    useArena.setState({ queue: { position: 1, waiting: 2 } });
+    stepBack();
+    expect(leaves).toBe(1);
+    // The relay dealt the bout before it read our step back…
+    netBus.emit("arenaAssigned", deal);
+    expect(useArena.getState().bout).toBeNull();
+    expect(useGame.getState().phase).toBe("village");
+    expect(isTraveling()).toBe(false);
+    // …then answers the step back, and the moment's over: the next bout we
+    // queue for is taken as usual.
+    netBus.emit("arenaQueue", { position: 0, waiting: 1 });
+    expect(useArena.getState().steppingBack).toBe(false);
+  });
+
+  test("a bout we turned down can end on the relay without touching us", () => {
+    const said = heard("message");
+    netBus.emit("arenaEnded", { board: [], winner: "foe", record: { bouts: 0, wins: 0, yields: 0 } });
+    expect(said).toEqual([]);
+    expect(stashes).toHaveLength(0);
   });
 
   test("a reconnect forgets our place in line (the relay already has)", () => {

@@ -145,6 +145,9 @@ export class LiveBody {
   private leakAcc = 0;
   private frameNo: number;
   private lastActCode: number = ACT.idle;
+  /** Posed at least once (a body mounted inside a hitstop still needs its
+   * first pose, or it draws at neutral scale until the hold lets go). */
+  private posed = false;
 
   constructor(
     readonly kind: EnemyId,
@@ -317,7 +320,10 @@ export class LiveBody {
     // Held by a hitstop: keep last frame's pose whole. Posing it again would
     // drop the breath (a dying thing's height snaps ~15%) and re-roll the
     // shiver, so a frozen body would twitch instead of hanging still.
-    if (pdt > 0) puppetPose(p, this.pose, w.breath);
+    if (pdt > 0 || !this.posed) {
+      puppetPose(p, this.pose, w.breath);
+      this.posed = true;
+    }
     if (view) {
       const o = this.pose;
       view.position.set(o.x, o.y, o.z);

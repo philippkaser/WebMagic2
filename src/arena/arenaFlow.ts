@@ -41,13 +41,21 @@ function clearTimers(): void {
 
 // ── In ───────────────────────────────────────────────────────────────────────
 
+/** Out of the obelisk's line (the tablet's Step back). */
+export function stepBack(): void {
+  useArena.setState({ steppingBack: true });
+  session.arenaLeave();
+}
+
 netBus.on("arenaAssigned", (a) => {
   // Dealt in while already on the road somewhere else (the gate's ENTER, a
   // message that crossed ours): turn it down, and tell the relay, so the
   // hall doesn't keep a seat nobody fills. Taken anyway, the floor's
   // assignment would land on top of it and leave us fighting a bout nobody
   // else is in, with the fellowship for strangers.
-  if (!canTakeBout(useGame.getState().phase, isTraveling())) {
+  // Stepped back from the line just as Varr called it: the relay took us
+  // out of this bout when it read our step back, so there's nothing to take.
+  if (useArena.getState().steppingBack || !canTakeBout(useGame.getState().phase, isTraveling())) {
     useArena.setState({ queue: null }); // the relay took us out of the line
     session.arenaLeave();
     return;
@@ -155,6 +163,8 @@ netBus.on("arenaScore", ({ fell }) => {
 // ── Out ──────────────────────────────────────────────────────────────────────
 
 netBus.on("arenaEnded", ({ winner }) => {
+  // A bout we turned down (or stepped back from) can still end on the relay.
+  if (!inArena()) return;
   const me = useNet.getState().playerId;
   const bout = useArena.getState().bout;
   const name = winner ? (bout?.members.find((m) => m.id === winner)?.name ?? "a wizard") : null;
