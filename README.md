@@ -38,6 +38,26 @@ worktrees), `backups/`, `server-data*.json` and `e2e-output/`, and seeds its
 dependency scan from `index.html` alone, so a worktree coming or going never
 reloads a running client.
 
+### On a server
+
+Players connect to the production server, which serves the built client and
+the game's websocket from one port (`bun run dev` is the development server:
+it only listens on localhost and isn't meant for players). On a Linux box,
+one command builds the client and installs the game as a systemd service —
+it keeps running after you log out, starts at boot and restarts if it ever
+crashes:
+
+```sh
+sudo sh scripts/install-service.sh            # port 80 (PORT=8080 … for another)
+journalctl -u webmagic -f                     # the live log
+```
+
+To update: `git pull && bun install && bun run build && sudo systemctl
+restart webmagic` (saves are flushed on every stop). Accounts live in
+`server-data.json` beside the repo, with rotating snapshots in `backups/`.
+Without systemd, `nohup bun run start > webmagic.log 2>&1 &` also survives a
+logout (but not a reboot or a crash).
+
 End-to-end smoke test (headless Chromium, two wizards: a full solo run, then
 PvP, a pact, a death, a grave and its plunder — including the server honoring
 the plunder — then the camp: chat, a fellowship sworn by its runes and

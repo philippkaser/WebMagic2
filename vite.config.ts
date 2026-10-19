@@ -40,15 +40,16 @@ export default defineConfig({
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
-        manualChunks: {
-          three: ["three"],
-          r3f: [
-            "@react-three/fiber",
-            "@react-three/drei",
-            "@react-three/postprocessing",
-            "postprocessing",
-          ],
-          physics: ["@react-three/rapier"],
+        // Only LEAF libraries get chunks of their own — ones that import
+        // nothing from the app or from React — so no chunk can sit in an
+        // import cycle with another. (A hand-split React/fiber/rapier set
+        // did: the physics chunk evaluated before the chunk holding React
+        // and read React.memo of undefined — a black screen in production
+        // builds only, as dev doesn't split.) Rollup splits the rest.
+        manualChunks(id: string) {
+          if (/[\\/]node_modules[\\/]three[\\/]/.test(id)) return "three";
+          if (/[\\/]node_modules[\\/]@dimforge[\\/]/.test(id)) return "rapier";
+          return undefined;
         },
       },
     },
