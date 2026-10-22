@@ -1,4 +1,4 @@
-import { audioCtx, ensureContext, masterBus, noiseBuf, whenAudio } from "./context";
+import { audible, audioCtx, ensureContext, masterBus, noiseBuf, whenAudio } from "./context";
 import { worldBus } from "./muffle";
 import { ambientAirOut, oneShotAt, selfOut, type At } from "./spatial";
 
@@ -35,7 +35,7 @@ function routed(out: AudioNode | null, fn: () => void): void {
  * voice is busy with something louder, a placed sound is dropped — never
  * moved into your head.) */
 export function atPoint(pos: At | undefined | null, life: number, fn: () => void, gain = 1, size = 0.3): void {
-  if (!audioCtx()) return;
+  if (!audible()) return;
   const out = pos ? oneShotAt(pos, life, gain, size) : selfOut();
   if (out) routed(out, fn);
 }
@@ -43,14 +43,22 @@ export function atPoint(pos: At | undefined | null, life: number, fn: () => void
 /** Play `fn`'s voices from where you stand: dry, and the room answering —
  * under your left (`foot` −1) or right (1) foot for a step. */
 export function self(fn: () => void, foot = 0): void {
-  if (!audioCtx()) return;
+  if (!audible()) return;
   routed(selfOut(foot), fn);
 }
 
 const out = (): AudioNode | null => dest ?? masterBus();
 
-/** Call once at app start: arms a one-time gesture listener. */
+/** Call once at app start. Every click, tap and key (for the whole
+ * session, not just the first) makes sure the sound is on: the first one
+ * creates the context (autoplay policy), any later one wakes it if the
+ * browser has stopped it since (context.ts) — one state check while it's
+ * running. Up and touch-end count too: they're what lets a touch-first
+ * start, or one whose first key was Escape, actually play. */
+let audioArmed = false;
 export function initAudio(): void {
+  if (audioArmed) return; // React's dev double-mount
+  audioArmed = true;
   const unlock = () => {
     ensureContext();
     if (pendingAmbient) {
@@ -58,11 +66,10 @@ export function initAudio(): void {
       pendingAmbient = null;
       startAmbient(kind, pendingMood);
     }
-    window.removeEventListener("pointerdown", unlock);
-    window.removeEventListener("keydown", unlock);
   };
-  window.addEventListener("pointerdown", unlock);
-  window.addEventListener("keydown", unlock);
+  for (const type of ["pointerdown", "pointerup", "touchend", "keydown"]) {
+    window.addEventListener(type, unlock, { capture: true, passive: true });
+  }
 }
 
 interface ToneOptions {
@@ -80,7 +87,7 @@ interface ToneOptions {
 function tone({ type = "sine", freq, freqEnd, dur, vol = 0.2, delay = 0, attack = 0.008 }: ToneOptions): void {
   const ctx = audioCtx();
   const dst = out();
-  if (!ctx || !dst) return;
+  if (!ctx || !dst || !audible()) return;
   const t0 = ctx.currentTime + delay;
   const osc = ctx.createOscillator();
   osc.type = type;
@@ -120,7 +127,7 @@ function noise({
   const ctx = audioCtx();
   const noiseBuffer = noiseBuf();
   const dst = out();
-  if (!ctx || !dst || !noiseBuffer) return;
+  if (!ctx || !dst || !noiseBuffer || !audible()) return;
   const t0 = ctx.currentTime + delay;
   const src = ctx.createBufferSource();
   src.buffer = noiseBuffer;
